@@ -1,0 +1,78 @@
+{
+  "version": 2,
+  "nodes": [
+    {
+      "type": "frame",
+      "id": "root",
+      "x": 0, "y": 0,
+      "width": 1200,
+      "height": "fit-content",
+      "layout": "dagre",
+      "padding": 40,
+      "fillColor": "#F8FAFC",
+      "borderColor": "#CBD5E1",
+      "borderWidth": 1,
+      "borderRadius": 16,
+      "layoutOptions": {
+        "rankdir": "LR",
+        "nodesep": 40,
+        "ranksep": 80,
+        "edges": [
+          ["user", "router", "用户请求"],
+          ["router", "classifier", "Session ID"],
+          ["classifier", "context_mgr", "new/active/stale"],
+          ["context_mgr", "agent_loop", "Messages[]"],
+          ["agent_loop", "llm", "API 调用"],
+          ["llm", "agent_loop", "Response"],
+          ["agent_loop", "validator", "Output"],
+          ["validator", "context_mgr", "校验通过"],
+          ["context_mgr", "user", "最终响应"]
+        ]
+      },
+      "children": [
+        {
+          "type": "ellipse", "id": "user", "text": "👤 用户",
+          "width": 100, "height": 60,
+          "fillColor": "#E2E8F0", "borderColor": "#64748B", "borderWidth": 2,
+          "fontSize": 14, "textColor": "#334155"
+        },
+        {
+          "type": "diamond", "id": "router", "text": "🎯\nRouter",
+          "width": 120, "height": 80,
+          "fillColor": "#DBEAFE", "borderColor": "#3B82F6", "borderWidth": 2,
+          "textColor": "#1E40AF"
+        },
+        {
+          "type": "rect", "id": "classifier", "text": "📊 Session\nClassifier",
+          "width": 120, "height": 60,
+          "fillColor": "#DBEAFE", "borderColor": "#3B82F6", "borderWidth": 2,
+          "borderRadius": 8, "textColor": "#1E40AF"
+        },
+        {
+          "type": "rect", "id": "context_mgr", "text": "📚 Context\nManager",
+          "width": 120, "height": 60,
+          "fillColor": "#E9D5FF", "borderColor": "#8B5CF6", "borderWidth": 2,
+          "borderRadius": 8, "textColor": "#581C87"
+        },
+        {
+          "type": "rect", "id": "agent_loop", "text": "🔄 Agent\nLoop",
+          "width": 120, "height": 60,
+          "fillColor": "#E9D5FF", "borderColor": "#8B5CF6", "borderWidth": 2,
+          "borderRadius": 8, "textColor": "#581C87"
+        },
+        {
+          "type": "rect", "id": "llm", "text": "⚡ vLLM\n推理引擎",
+          "width": 120, "height": 60,
+          "fillColor": "#A7F3D0", "borderColor": "#10B981", "borderWidth": 2,
+          "borderRadius": 8, "textColor": "#065F46"
+        },
+        {
+          "type": "diamond", "id": "validator", "text": "✅\nValidator",
+          "width": 120, "height": 80,
+          "fillColor": "#FDE68A", "borderColor": "#F59E0B", "borderWidth": 2,
+          "textColor": "#92400E"
+        }
+      ]
+    }
+  ]
+}

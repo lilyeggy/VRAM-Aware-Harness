@@ -1,0 +1,432 @@
+{
+  "version": 2,
+  "nodes": [
+    {
+      "type": "frame",
+      "id": "root",
+      "x": 0, "y": 0,
+      "width": 1200,
+      "height": "fit-content",
+      "layout": "vertical",
+      "gap": 20,
+      "padding": 24,
+      "fillColor": "#F8FAFC",
+      "borderColor": "#CBD5E1",
+      "borderWidth": 1,
+      "borderRadius": 16,
+      "children": [
+        {
+          "type": "text",
+          "id": "title",
+          "width": "fill-container",
+          "height": "fit-content",
+          "text": "Agent Harness 四层架构",
+          "fontSize": 24,
+          "textAlign": "center",
+          "verticalAlign": "middle",
+          "textColor": "#1E293B"
+        },
+        {
+          "type": "text",
+          "id": "subtitle",
+          "width": "fill-container",
+          "height": "fit-content",
+          "text": "DeepSeek-V4-Flash · 2×RTX Pro 6000 · 192GB VRAM",
+          "fontSize": 14,
+          "textAlign": "center",
+          "verticalAlign": "middle",
+          "textColor": "#64748B"
+        },
+        {
+          "type": "frame",
+          "id": "main-container",
+          "width": "fill-container",
+          "height": "fit-content",
+          "layout": "vertical",
+          "gap": 16,
+          "padding": 0,
+          "children": [
+            {
+              "type": "frame",
+              "id": "row-layer-1",
+              "width": "fill-container",
+              "height": "fit-content",
+              "layout": "horizontal",
+              "gap": 24,
+              "padding": 0,
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "text",
+                  "id": "label-1",
+                  "width": 100,
+                  "height": "fit-content",
+                  "text": "Layer 1",
+                  "fontSize": 16,
+                  "textAlign": "right",
+                  "textColor": "#3B82F6"
+                },
+                {
+                  "type": "frame",
+                  "id": "layer-1",
+                  "width": "fill-container",
+                  "height": "fit-content",
+                  "borderWidth": 2,
+                  "borderRadius": 12,
+                  "borderColor": "#3B82F6",
+                  "fillColor": "#EFF6FF",
+                  "layout": "horizontal",
+                  "gap": 16,
+                  "padding": 20,
+                  "alignItems": "stretch",
+                  "children": [
+                    {
+                      "type": "rect", "id": "router",
+                      "width": "fill-container",
+                      "height": "fit-content",
+                      "text": "🎯 Request Router\nSession 分类与路由",
+                      "borderRadius": 8,
+                      "borderWidth": 2,
+                      "borderColor": "#3B82F6",
+                      "fillColor": "#DBEAFE",
+                      "fontSize": 14,
+                      "textAlign": "center",
+                      "verticalAlign": "middle",
+                      "textColor": "#1E40AF"
+                    },
+                    {
+                      "type": "rect", "id": "classifier",
+                      "width": "fill-container",
+                      "height": "fit-content",
+                      "text": "📊 Session Classifier\nnew / active / stale",
+                      "borderRadius": 8,
+                      "borderWidth": 2,
+                      "borderColor": "#3B82F6",
+                      "fillColor": "#DBEAFE",
+                      "fontSize": 14,
+                      "textAlign": "center",
+                      "verticalAlign": "middle",
+                      "textColor": "#1E40AF"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "row-layer-2",
+              "width": "fill-container",
+              "height": "fit-content",
+              "layout": "horizontal",
+              "gap": 24,
+              "padding": 0,
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "text",
+                  "id": "label-2",
+                  "width": 100,
+                  "height": "fit-content",
+                  "text": "Layer 2",
+                  "fontSize": 16,
+                  "textAlign": "right",
+                  "textColor": "#8B5CF6"
+                },
+                {
+                  "type": "frame",
+                  "id": "layer-2",
+                  "width": "fill-container",
+                  "height": "fit-content",
+                  "borderWidth": 2,
+                  "borderRadius": 12,
+                  "borderColor": "#8B5CF6",
+                  "fillColor": "#FAF5FF",
+                  "layout": "vertical",
+                  "gap": 16,
+                  "padding": 20,
+                  "alignItems": "stretch",
+                  "children": [
+                    {
+                      "type": "text", "id": "layer-2-title",
+                      "width": "fill-container",
+                      "height": "fit-content",
+                      "text": "🧠 Core Harness（核心）",
+                      "fontSize": 16,
+                      "textAlign": "center",
+                      "verticalAlign": "middle",
+                      "textColor": "#6B21A8"
+                    },
+                    {
+                      "type": "frame",
+                      "id": "harness-modules",
+                      "width": "fill-container",
+                      "height": "fit-content",
+                      "layout": "horizontal",
+                      "alignItems": "stretch",
+                      "gap": 12,
+                      "padding": 0,
+                      "children": [
+                        {
+                          "type": "rect", "id": "system-prompt",
+                          "width": "fill-container",
+                          "height": "fit-content",
+                          "text": "📝 2a\nStatic Prompt",
+                          "borderRadius": 8,
+                          "borderWidth": 2,
+                          "borderColor": "#8B5CF6",
+                          "fillColor": "#E9D5FF",
+                          "fontSize": 12,
+                          "textAlign": "center",
+                          "verticalAlign": "middle",
+                          "textColor": "#581C87"
+                        },
+                        {
+                          "type": "rect", "id": "context-mgr",
+                          "width": "fill-container",
+                          "height": "fit-content",
+                          "text": "📚 2b\nContext Mgr",
+                          "borderRadius": 8,
+                          "borderWidth": 2,
+                          "borderColor": "#8B5CF6",
+                          "fillColor": "#E9D5FF",
+                          "fontSize": 12,
+                          "textAlign": "center",
+                          "verticalAlign": "middle",
+                          "textColor": "#581C87"
+                        },
+                        {
+                          "type": "rect", "id": "request-policy",
+                          "width": "fill-container",
+                          "height": "fit-content",
+                          "text": "🚦 2c\nRequest Policy",
+                          "borderRadius": 8,
+                          "borderWidth": 2,
+                          "borderColor": "#8B5CF6",
+                          "fillColor": "#E9D5FF",
+                          "fontSize": 12,
+                          "textAlign": "center",
+                          "verticalAlign": "middle",
+                          "textColor": "#581C87"
+                        },
+                        {
+                          "type": "rect", "id": "agent-loop",
+                          "width": "fill-container",
+                          "height": "fit-content",
+                          "text": "🔄 2d\nAgent Loop",
+                          "borderRadius": 8,
+                          "borderWidth": 2,
+                          "borderColor": "#8B5CF6",
+                          "fillColor": "#E9D5FF",
+                          "fontSize": 12,
+                          "textAlign": "center",
+                          "verticalAlign": "middle",
+                          "textColor": "#581C87"
+                        },
+                        {
+                          "type": "rect", "id": "validator",
+                          "width": "fill-container",
+                          "height": "fit-content",
+                          "text": "✅ 2e\nValidator",
+                          "borderRadius": 8,
+                          "borderWidth": 2,
+                          "borderColor": "#8B5CF6",
+                          "fillColor": "#E9D5FF",
+                          "fontSize": 12,
+                          "textAlign": "center",
+                          "verticalAlign": "middle",
+                          "textColor": "#581C87"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "row-layer-3",
+              "width": "fill-container",
+              "height": "fit-content",
+              "layout": "horizontal",
+              "gap": 24,
+              "padding": 0,
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "text",
+                  "id": "label-3",
+                  "width": 100,
+                  "height": "fit-content",
+                  "text": "Layer 3",
+                  "fontSize": 16,
+                  "textAlign": "right",
+                  "textColor": "#F59E0B"
+                },
+                {
+                  "type": "frame",
+                  "id": "layer-3",
+                  "width": "fill-container",
+                  "height": "fit-content",
+                  "borderWidth": 2,
+                  "borderRadius": 12,
+                  "borderColor": "#F59E0B",
+                  "fillColor": "#FFFBEB",
+                  "layout": "horizontal",
+                  "gap": 16,
+                  "padding": 20,
+                  "alignItems": "stretch",
+                  "children": [
+                    {
+                      "type": "rect", "id": "monitor",
+                      "width": "fill-container",
+                      "height": "fit-content",
+                      "text": "📈 KV Cache Monitor\n显存水位监控",
+                      "borderRadius": 8,
+                      "borderWidth": 2,
+                      "borderColor": "#F59E0B",
+                      "fillColor": "#FDE68A",
+                      "fontSize": 14,
+                      "textAlign": "center",
+                      "verticalAlign": "middle",
+                      "textColor": "#92400E"
+                    },
+                    {
+                      "type": "rect", "id": "kv-manager",
+                      "width": "fill-container",
+                      "height": "fit-content",
+                      "text": "🗂️ KV Lifecycle Manager\n热/温/冷分层管理",
+                      "borderRadius": 8,
+                      "borderWidth": 2,
+                      "borderColor": "#F59E0B",
+                      "fillColor": "#FDE68A",
+                      "fontSize": 14,
+                      "textAlign": "center",
+                      "verticalAlign": "middle",
+                      "textColor": "#92400E"
+                    },
+                    {
+                      "type": "rect", "id": "importance-eval",
+                      "width": "fill-container",
+                      "height": "fit-content",
+                      "text": "⚖️ Turn Importance\n四信号评估",
+                      "borderRadius": 8,
+                      "borderWidth": 2,
+                      "borderColor": "#F59E0B",
+                      "fillColor": "#FDE68A",
+                      "fontSize": 14,
+                      "textAlign": "center",
+                      "verticalAlign": "middle",
+                      "textColor": "#92400E"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "row-layer-4",
+              "width": "fill-container",
+              "height": "fit-content",
+              "layout": "horizontal",
+              "gap": 24,
+              "padding": 0,
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "text",
+                  "id": "label-4",
+                  "width": 100,
+                  "height": "fit-content",
+                  "text": "Layer 4",
+                  "fontSize": 16,
+                  "textAlign": "right",
+                  "textColor": "#10B981"
+                },
+                {
+                  "type": "frame",
+                  "id": "layer-4",
+                  "width": "fill-container",
+                  "height": "fit-content",
+                  "borderWidth": 2,
+                  "borderRadius": 12,
+                  "borderColor": "#10B981",
+                  "fillColor": "#ECFDF5",
+                  "layout": "horizontal",
+                  "gap": 16,
+                  "padding": 20,
+                  "alignItems": "stretch",
+                  "children": [
+                    {
+                      "type": "rect", "id": "vllm",
+                      "width": "fill-container",
+                      "height": "fit-content",
+                      "text": "⚡ vLLM 推理引擎\n自编译 SM120 补丁",
+                      "borderRadius": 8,
+                      "borderWidth": 2,
+                      "borderColor": "#10B981",
+                      "fillColor": "#A7F3D0",
+                      "fontSize": 14,
+                      "textAlign": "center",
+                      "verticalAlign": "middle",
+                      "textColor": "#065F46"
+                    },
+                    {
+                      "type": "rect", "id": "kv-api",
+                      "width": "fill-container",
+                      "height": "fit-content",
+                      "text": "🔌 KV Management API\nmark_turn / evict_turn",
+                      "borderRadius": 8,
+                      "borderWidth": 2,
+                      "borderColor": "#10B981",
+                      "fillColor": "#A7F3D0",
+                      "fontSize": 14,
+                      "textAlign": "center",
+                      "verticalAlign": "middle",
+                      "textColor": "#065F46"
+                    },
+                    {
+                      "type": "rect", "id": "prefix-cache",
+                      "width": "fill-container",
+                      "height": "fit-content",
+                      "text": "💾 Prefix Cache\n共享 system prompt",
+                      "borderRadius": 8,
+                      "borderWidth": 2,
+                      "borderColor": "#10B981",
+                      "fillColor": "#A7F3D0",
+                      "fontSize": 14,
+                      "textAlign": "center",
+                      "verticalAlign": "middle",
+                      "textColor": "#065F46"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "footer",
+          "width": "fill-container",
+          "height": "fit-content",
+          "layout": "horizontal",
+          "gap": 24,
+          "padding": 16,
+          "justifyContent": "center",
+          "children": [
+            {
+              "type": "text", "id": "footer-text",
+              "width": "fit-content",
+              "height": "fit-content",
+              "text": "Phase 0-1 ✅ | Phase 2 🔲 | Phase 3 🔲",
+              "fontSize": 14,
+              "textAlign": "center",
+              "verticalAlign": "middle",
+              "textColor": "#64748B"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

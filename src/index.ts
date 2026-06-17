@@ -3,7 +3,13 @@ export { STATIC_SYSTEM_PROMPT, PROMPT_VERSION, assertStaticPrompt } from "./harn
 export { ContextManager } from "./harness/context-manager.ts";
 export { AgentLoop } from "./harness/agent-loop.ts";
 export { OutputValidator } from "./harness/validator.ts";
+export { Harness } from "./harness/harness.ts";
+export { TurnImportanceEvaluator } from "./kv/turn-importance-evaluator.ts";
+export { KVLifecycleManager } from "./kv/kv-lifecycle-manager.ts";
 export type * from "./types/index.ts";
 export type { SessionContext, ContextManagerConfig } from "./harness/context-manager.ts";
 export type { ToolHandler, AgentLoopConfig } from "./harness/agent-loop.ts";
 export type { ValidatorFunction, ValidationResult, ValidatorConfig } from "./harness/validator.ts";
+export type { HarnessConfig, ProcessOptions } from "./harness/harness.ts";
+export type { TurnScore, TurnMetadata, IntentType, TurnImportanceConfig } from "./kv/turn-importance-evaluator.ts";
+export type { VLLMKVClient, MemoryMetrics, SessionKVState, TurnState, PressureLevel, KVLifecycleConfig } from "./kv/kv-lifecycle-manager.ts";

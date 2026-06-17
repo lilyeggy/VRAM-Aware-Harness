@@ -1,0 +1,63 @@
+{
+  "version": 2,
+  "nodes": [
+    {
+      "type": "frame",
+      "id": "root",
+      "x": 0, "y": 0,
+      "width": 1200,
+      "height": "fit-content",
+      "layout": "dagre",
+      "padding": 40,
+      "fillColor": "#F8FAFC",
+      "borderColor": "#CBD5E1",
+      "borderWidth": 1,
+      "borderRadius": 16,
+      "layoutOptions": {
+        "rankdir": "LR",
+        "nodesep": 40,
+        "ranksep": 100,
+        "edges": [
+          ["turn_new", "hot", "新 Turn"],
+          ["hot", "warm", "时间衰减"],
+          ["warm", "cold", "重要性低"],
+          ["cold", "evicted", "驱逐"],
+          ["warm", "hot", "重要性高"],
+          ["cold", "warm", "re-prefill"]
+        ]
+      },
+      "children": [
+        {
+          "type": "rect", "id": "turn_new", "text": "📝 新 Turn\n原始对话",
+          "width": 120, "height": 60,
+          "fillColor": "#E2E8F0", "borderColor": "#64748B", "borderWidth": 2,
+          "borderRadius": 8, "textColor": "#334155"
+        },
+        {
+          "type": "rect", "id": "hot", "text": "🔥 热层\nGPU 显存\n完整精度",
+          "width": 120, "height": 80,
+          "fillColor": "#FEE2E2", "borderColor": "#EF4444", "borderWidth": 2,
+          "borderRadius": 8, "textColor": "#991B1B"
+        },
+        {
+          "type": "rect", "id": "warm", "text": "🌡️ 温层\nGPU 显存\n压缩 KV",
+          "width": 120, "height": 80,
+          "fillColor": "#FEF3C7", "borderColor": "#F59E0B", "borderWidth": 2,
+          "borderRadius": 8, "textColor": "#92400E"
+        },
+        {
+          "type": "rect", "id": "cold", "text": "❄️ 冷层\nCPU/磁盘\n原文落盘",
+          "width": 120, "height": 80,
+          "fillColor": "#DBEAFE", "borderColor": "#3B82F6", "borderWidth": 2,
+          "borderRadius": 8, "textColor": "#1E40AF"
+        },
+        {
+          "type": "ellipse", "id": "evicted", "text": "🗑️ 驱逐\n释放显存",
+          "width": 100, "height": 60,
+          "fillColor": "#F3F4F6", "borderColor": "#9CA3AF", "borderWidth": 2,
+          "textColor": "#6B7280"
+        }
+      ]
+    }
+  ]
+}
