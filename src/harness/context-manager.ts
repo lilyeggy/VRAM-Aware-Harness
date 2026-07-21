@@ -2,6 +2,7 @@ import type { Message, CompletionResult } from "../types/index.ts";
 import { LLMClient } from "../client/llm-client.ts";
 import { STATIC_SYSTEM_PROMPT, assertStaticPrompt } from "./system-prompt.ts";
 
+// Session 的上下文
 export interface SessionContext {
   sessionId: string;
   projectContext: string;
@@ -12,6 +13,16 @@ export interface SessionContext {
   hasAttemptedRecovery: boolean;
 }
 
+/*
+
+管理上下文的配置：
+ 1. 多少轮是热层？ 我觉得还有改进空间，我们因为要区分热层、暖层和冷层，只有这个maxLiveTurns参数或许不太够
+ 2. 压缩上下文的门槛。   -- 这个值是谁的门槛？
+ 3. 最大的上下文 token 数   -- 这个和要压缩的上下文的门槛有什么区别？
+ 4. 到了要压缩上下文的时候，我们让模型进行压缩的 prompt
+
+*/
+
 export interface ContextManagerConfig {
   maxLiveTurns: number;
   compressionThreshold: number;
@@ -19,9 +30,10 @@ export interface ContextManagerConfig {
   summarizerPrompt: string;
 }
 
+// 默认的上下文管理配置
 const DEFAULT_CONFIG: ContextManagerConfig = {
   maxLiveTurns: 4,
-  compressionThreshold: 32_000,
+  compressionThreshold: 32_000, 
   maxContextTokens: 128_000,
   summarizerPrompt: `You are a conversation summarizer. Summarize the following conversation into a concise summary.
 

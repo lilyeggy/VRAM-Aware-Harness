@@ -32,3 +32,14 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 
 # Finder (MacOS) folder config
 .DS_Store
+
+# local agent/tooling state
+.claude/
+.pi/
+
+# build artifacts
+artifacts/
+
+# nested independent git repos (tracked separately)
+agentic-rl-lab/
+explainer-site/
