@@ -1,0 +1,21 @@
+[Unit]
+Description=VRAM-Aware Harness Agent Task Service
+After=network-online.target docker.service
+Wants=network-online.target
+Requires=docker.service
+
+[Service]
+Type=simple
+User=harness
+Group=docker
+WorkingDirectory=/srv/VRAM-Aware-Harness
+EnvironmentFile=/etc/vram-aware-harness/harness.env
+Environment=PATH=/home/harness/.bun/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=/home/harness/.bun/bin/bun run start
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

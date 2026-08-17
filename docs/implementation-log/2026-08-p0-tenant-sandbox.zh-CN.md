@@ -231,3 +231,13 @@ microVM Provider 的路由位置，不在本项目内自研 VMM。必须实现�
 `docs/sandbox-runtime-benchmark-runbook.zh-CN.md`。当前 runner 使用同一 Alpine 镜像、非 root UID、Workspace、CPU/内存/网络策略和每 Attempt 生命周期，分别测 runc baseline 与 runsc 的冷启动、`docker exec` 命令往返、文件/tmpfs I/O 和清理耗时，并保存每轮实际 inspect runtime。结果只输出描述性 P50/P95 和比值，不自动宣称哪个 runtime 更安全或更适合。
 
 Kata/Firecracker 尚无本项目 Provider，因此没有伪造 benchmark 结果；接入 strict Provider 后应直接复用同一结果 schema 和控制变量。当前环境缺少 Bun、Linux Docker 和 runsc，benchmark 尚未执行。
+
+### 2026-08-17：租赁服务器前的部署准备已补齐（已实现，真机待执行）
+
+新增：
+
+- `scripts/server-preflight.sh` / `bun run preflight:server`：检查 Linux/x86_64、CPU、内存、磁盘、Docker daemon、cgroups v2、runsc 注册、真实 `docker --runtime runsc` smoke、Bun 和可选 KVM；FAIL 不会被包装成可部署。
+- `docs/linux-server-deployment-runbook.zh-CN.md`：从 Ubuntu Server、非 root 服务用户、容器 UID/Workspace 权属、外部 Model API、环境文件、systemd 到首轮 Workspace/Sandbox 验收的完整步骤。
+- `deploy/harness.service.example`：以 `harness` 用户运行 Harness，容器 UID 建议与服务用户 UID 对齐，避免把 Workspace 放宽到 `777` 或让 Harness 以 root 运行。
+
+本次没有新增云端 Workspace 存储；当前 Workspace 仍是服务端受管目录，服务会按 `workspaceId + tenantId` 自动创建，不需要服务器管理员手工创建 Tenant 目录。对象存储、跨机器同步和长期 snapshot 仍不是本项目面试版的前置条件。当前环境只能通过 `bash -n` 和 `tsc --noEmit` 验证脚本/类型，Ubuntu Docker/runsc 真机 preflight 仍待租到服务器后执行。

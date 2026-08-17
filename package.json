@@ -13,7 +13,8 @@
     "smoke:http": "bun run scripts/day7-http-smoke.ts",
     "smoke:container": "bun run scripts/container-sandbox-smoke.ts",
     "smoke:container:attacks": "bun run scripts/container-sandbox-attack-smoke.ts",
-    "benchmark:sandbox": "bun run scripts/sandbox-runtime-benchmark.ts"
+    "benchmark:sandbox": "bun run scripts/sandbox-runtime-benchmark.ts",
+    "preflight:server": "bash scripts/server-preflight.sh"
   },
   "devDependencies": {
     "@types/bun": "latest"
