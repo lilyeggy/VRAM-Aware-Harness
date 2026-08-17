@@ -672,4 +672,19 @@ export const migrations: readonly SchemaMigration[] = [
             CREATE INDEX idx_run_artifacts_run ON run_artifacts(run_id, path);
         `,
     },
+    {
+        version: 13,
+        name: "add_sandbox_profile_runtime_evidence",
+        up: `
+            -- Existing rows are historical ManagedLocal records. They remain
+            -- readable, but new runtime evidence is required for P0.5 rows.
+            ALTER TABLE sandboxes ADD COLUMN profile TEXT NOT NULL DEFAULT 'development'
+                CHECK (profile IN ('development', 'default', 'restricted-egress', 'strict'));
+            ALTER TABLE sandboxes ADD COLUMN runtime TEXT NOT NULL DEFAULT 'managed-local';
+            ALTER TABLE sandboxes ADD COLUMN spec_json TEXT NOT NULL DEFAULT '{}'
+                CHECK (json_valid(spec_json));
+            ALTER TABLE sandboxes ADD COLUMN runtime_evidence_json TEXT NOT NULL DEFAULT '{}'
+                CHECK (json_valid(runtime_evidence_json));
+        `,
+    },
 ];

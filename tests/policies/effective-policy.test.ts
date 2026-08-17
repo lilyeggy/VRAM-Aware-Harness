@@ -56,6 +56,39 @@ test("五层策略对集合、布尔权限和资源上限取交集", () => {
     });
 });
 
+test("Sandbox profile 进入不可变快照，冲突时 fail closed", () => {
+    const snapshot = computeEffectivePolicy({
+        id: "profile-snapshot",
+        runId: "run-profile",
+        tenantId: "tenant-profile",
+        templateVersionId: "version-profile",
+        layers: [
+            createPolicyLayer("platform", "PLATFORM"),
+            createPolicyLayer("tenant", "TENANT", constraints({ sandboxProfile: "strict" })),
+            createPolicyLayer("template", "TEMPLATE"),
+            createPolicyLayer("workspace", "WORKSPACE"),
+            createPolicyLayer("run", "RUN"),
+        ],
+        createdAt: "2026-08-10T10:00:00.000Z",
+    });
+    expect(snapshot.sandboxProfile).toBe("strict");
+    expect(Object.isFrozen(snapshot)).toBe(true);
+    expect(() => computeEffectivePolicy({
+        id: "conflict",
+        runId: "run-conflict",
+        tenantId: "tenant-conflict",
+        templateVersionId: "version-conflict",
+        layers: [
+            createPolicyLayer("platform", "PLATFORM", constraints({ sandboxProfile: "default" })),
+            createPolicyLayer("tenant", "TENANT", constraints({ sandboxProfile: "strict" })),
+            createPolicyLayer("template", "TEMPLATE"),
+            createPolicyLayer("workspace", "WORKSPACE"),
+            createPolicyLayer("run", "RUN"),
+        ],
+        createdAt: "2026-08-10T10:00:00.000Z",
+    })).toThrow("Sandbox profile 策略冲突");
+});
+
 test("缺少任一规范策略层时拒绝生成有效快照", () => {
     expect(() => computeEffectivePolicy({
         id: "snapshot-1",

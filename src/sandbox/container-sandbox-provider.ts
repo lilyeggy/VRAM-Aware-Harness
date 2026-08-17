@@ -1,4 +1,16 @@
-import { isWithin, type EffectivePolicySnapshot } from "../policies/effective-policy.ts";
+import type { EffectivePolicySnapshot } from "../policies/effective-policy.ts";
+import {
+    DockerRuncRuntimeAdapter,
+    DockerRunscRuntimeAdapter,
+    type ContainerCommandRuntime,
+    type ContainerRuntimeAdapter,
+} from "./container-runtime-adapter.ts";
+import {
+    freezeRuntimeEvidence,
+    resolveSandboxProfile,
+    type SandboxProfile,
+} from "./sandbox-profile.ts";
+import { OciSandboxSpecCompiler } from "./oci-sandbox-spec.ts";
 import type { SandboxStore } from "./sandbox-store.ts";
 import type {
     SandboxCommandExecutor,
@@ -9,55 +21,74 @@ import type {
     SecretProvider,
 } from "./sandbox-provider.ts";
 
-export interface ContainerCommandRuntime {
-    run(args: readonly string[]): Promise<{
-        exitCode: number;
-        stdout: string;
-        stderr: string;
-    }>;
-}
+export type { ContainerCommandRuntime } from "./container-runtime-adapter.ts";
 
 export interface ContainerSandboxConfig {
     readonly image: string;
-    readonly runtime?: string;
+    /** Defaults to runsc; runc is only valid for development profile. */
+    readonly runtime?: "runsc" | "runc";
+    readonly profile?: SandboxProfile;
     readonly userId?: number;
 }
 
 /**
- * One detached container per Attempt. The provider deliberately compiles every
- * isolation guarantee into an inspectable docker command, rather than relying
- * on a host-side convention.
+ * OCI/Docker lifecycle provider. OCI policy compilation and the actual runtime
+ * adapter are intentionally separate: an OCI-compatible image does not prove
+ * which kernel/runtime executed it.
  */
 export class ContainerSandboxProvider implements SandboxProvider, SandboxCommandExecutor {
     private readonly handlers = new Set<(event: SandboxLifecycleEvent) => void>();
     private readonly containerBySandboxId = new Map<string, string>();
     private readonly secretValues = new Map<string, Readonly<Record<string, string>>>();
-    private readonly docker: string;
+    private readonly docker = "docker";
+    private readonly profile: SandboxProfile;
+    private readonly runtime: "runsc" | "runc";
+    private readonly adapter: ContainerRuntimeAdapter;
+    private readonly compiler: OciSandboxSpecCompiler;
 
     constructor(
         private readonly store: SandboxStore,
         private readonly secrets: SecretProvider,
         private readonly config: ContainerSandboxConfig,
         private readonly commands: ContainerCommandRuntime = new BunContainerCommandRuntime(),
+        adapter?: ContainerRuntimeAdapter,
     ) {
         if (config.userId !== undefined && (!Number.isInteger(config.userId) || config.userId <= 0)) {
             throw new Error("Container Sandbox userId 必须是正整数，不能使用 root");
         }
-        this.docker = config.runtime ?? "docker";
+        this.profile = config.profile ?? "default";
+        this.runtime = config.runtime ?? "runsc";
+        if (this.profile === "default" || this.profile === "restricted-egress") {
+            if (this.runtime !== "runsc") {
+                throw new Error(`${this.profile} profile 禁止使用 ${this.runtime}，不得回退到 runc`);
+            }
+        }
+        if (this.profile === "strict") {
+            throw new Error("strict profile 必须由 SandboxProviderRouter 路由到 microVM Provider");
+        }
+        this.adapter = adapter ?? (
+            this.runtime === "runsc"
+                ? new DockerRunscRuntimeAdapter()
+                : new DockerRuncRuntimeAdapter()
+        );
+        if (this.adapter.runtime !== this.runtime) {
+            throw new Error("runtime adapter 与配置 runtime 不一致");
+        }
+        this.compiler = new OciSandboxSpecCompiler({
+            image: config.image,
+            userId: config.userId ?? 65532,
+            profile: this.profile,
+            runtime: this.runtime,
+        });
     }
 
     async create(input: {
         id: string; runId: string; instanceId: string; workspacePath: string;
         policy: EffectivePolicySnapshot;
     }): Promise<SandboxHandle> {
-        if (input.policy.workspaceRoots !== null && !input.policy.workspaceRoots.some(
-            (root) => isWithin(input.workspacePath, root),
-        )) {
-            throw new Error(`Sandbox Workspace 超出策略范围：${input.workspacePath}`);
-        }
-        if (input.policy.resourceLimits.diskMiB !== null) {
-            // Docker bind mount cannot express a trustworthy per-directory quota.
-            throw new Error("Container bind mount 无法强制磁盘配额，拒绝执行");
+        const profile = resolveSandboxProfile(input.policy.sandboxProfile, this.profile);
+        if (profile !== this.profile) {
+            throw new Error(`Sandbox profile 未路由到匹配 Provider：${profile}`);
         }
         const environment: Record<string, string> = {};
         for (const name of input.policy.allowedSecrets ?? []) {
@@ -65,31 +96,74 @@ export class ContainerSandboxProvider implements SandboxProvider, SandboxCommand
             if (value === null) throw new Error(`授权 Secret 不存在：${name}`);
             environment[name] = value;
         }
+        const compiled = this.compiler.compile(
+            `agent-harness-${input.id}`,
+            input.workspacePath,
+            input.policy,
+            Object.keys(environment),
+        );
         const now = new Date().toISOString();
+        const evidence = freezeRuntimeEvidence({
+            adapter: this.adapter.name,
+            requestedRuntime: this.runtime,
+            observedRuntime: null,
+            verified: false,
+            verificationReason: "等待 Docker inspect runtime 证据",
+            verifiedAt: null,
+        });
         const record: SandboxRecord = {
             id: input.id, instanceId: input.instanceId, runId: input.runId,
             policySnapshotId: input.policy.id, provider: "CONTAINER",
+            profile: compiled.spec.profile, runtime: compiled.spec.runtime,
+            spec: compiled.spec, runtimeEvidence: evidence,
             status: "PROVISIONING", workspacePath: input.workspacePath,
             secretNames: Object.freeze(Object.keys(environment)),
             createdAt: now, updatedAt: now, failureReason: null,
         };
         this.store.create(record);
-        const containerName = `agent-harness-${input.id}`;
-        const result = await this.commands.run(this.createArgs(
-            containerName, input.workspacePath, input.policy, environment,
-        ));
+        const args = this.withSecretValues(
+            this.adapter.augmentCreateArgs(compiled.createArgs),
+            environment,
+        );
+        const result = await this.commands.run([this.docker, ...args]);
         if (result.exitCode !== 0) {
             const failed = {
                 ...record, status: "FAILED" as const, updatedAt: new Date().toISOString(),
                 failureReason: redact(result.stderr || result.stdout),
+                runtimeEvidence: freezeRuntimeEvidence({
+                    ...evidence,
+                    verificationReason: "容器创建失败，未取得实际 runtime 证据",
+                }),
             };
             this.store.update(failed, "PROVISIONING");
             this.emit(failed, "FAILED", failed.failureReason ?? "container create failed");
             throw new Error(`容器 Sandbox 创建失败：${failed.failureReason}`);
         }
-        this.containerBySandboxId.set(input.id, containerName);
+
+        const verifiedEvidence = await this.adapter.verify(
+            this.commands, this.docker, `agent-harness-${input.id}`,
+        );
+        if (!verifiedEvidence.verified) {
+            await this.commands.run([this.docker, "rm", "--force", `agent-harness-${input.id}`]);
+            const reason = verifiedEvidence.verificationReason
+                ?? `实际 runtime 不是 ${this.runtime}`;
+            const failed = {
+                ...record, status: "FAILED" as const, updatedAt: new Date().toISOString(),
+                failureReason: reason, runtimeEvidence: freezeRuntimeEvidence(verifiedEvidence),
+            };
+            this.store.update(failed, "PROVISIONING");
+            this.emit(failed, "FAILED", reason);
+            throw new Error(`Sandbox runtime 证据校验失败：${reason}`);
+        }
+
+        this.containerBySandboxId.set(input.id, `agent-harness-${input.id}`);
         this.secretValues.set(input.id, Object.freeze(environment));
-        this.store.update({ ...record, status: "ACTIVE", updatedAt: new Date().toISOString() }, "PROVISIONING");
+        this.store.update({
+            ...record,
+            status: "ACTIVE",
+            updatedAt: new Date().toISOString(),
+            runtimeEvidence: freezeRuntimeEvidence(verifiedEvidence),
+        }, "PROVISIONING");
         return Object.freeze({
             id: input.id, workspacePath: input.workspacePath, secretNames: record.secretNames,
             withSecrets: <T>(callback: (values: Readonly<Record<string, string>>) => T) =>
@@ -127,28 +201,10 @@ export class ContainerSandboxProvider implements SandboxProvider, SandboxCommand
         return () => this.handlers.delete(handler);
     }
 
-    private createArgs(
-        name: string, workspacePath: string, policy: EffectivePolicySnapshot,
-        environment: Readonly<Record<string, string>>,
-    ): string[] {
-        const args = [this.docker, "run", "--detach", "--rm", "--name", name,
-            "--user", `${this.config.userId ?? 65532}:${this.config.userId ?? 65532}`, "--read-only", "--cap-drop", "ALL",
-            "--security-opt", "no-new-privileges", "--pids-limit", "128",
-            "--workdir", "/workspace", "--mount",
-            `type=bind,src=${workspacePath},dst=/workspace`,
-            "--tmpfs", "/tmp:rw,noexec,nosuid,size=64m",
-            "--network", policy.allowNetwork ? "bridge" : "none"];
-        if (policy.resourceLimits.cpuCores !== null) {
-            args.push("--cpus", String(policy.resourceLimits.cpuCores));
-        }
-        if (policy.resourceLimits.memoryMiB !== null) {
-            args.push("--memory", `${policy.resourceLimits.memoryMiB}m`);
-        }
-        for (const [key, value] of Object.entries(environment)) {
-            args.push("--env", `${key}=${value}`);
-        }
-        args.push(this.config.image, "tail", "-f", "/dev/null");
-        return args;
+    private withSecretValues(args: readonly string[], environment: Readonly<Record<string, string>>): string[] {
+        return args.map((argument) => argument.replace(
+            /__HARNESS_SECRET_([A-Z][A-Z0-9_]*)__/, (_, name: string) => environment[name] ?? "",
+        ));
     }
 
     private emit(record: SandboxRecord, status: "LOST" | "FAILED", reason: string): void {

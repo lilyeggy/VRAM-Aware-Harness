@@ -16,6 +16,7 @@ class FakeDocker {
     nextExecResult: { exitCode: number; stdout: string; stderr: string } | null = null;
     async run(args: readonly string[]) {
         this.calls.push([...args]);
+        if (args[1] === "inspect") return { exitCode: 0, stdout: "runsc\n", stderr: "" };
         if (args[1] === "exec" && this.nextExecResult !== null) return this.nextExecResult;
         return { exitCode: 0, stdout: "container-id", stderr: "" };
     }
@@ -44,6 +45,8 @@ test("容器 Sandbox 将隔离策略编译为可审计 Docker 参数，并仅持
         workspacePath: "/srv/workspaces/tenant/workspace", policy: policy({ allowedSecrets: ["TOKEN"] }),
     });
     const create = docker.calls[0]!;
+    expect(create).toContain("--runtime");
+    expect(create).toContain("runsc");
     expect(create).toContain("--read-only");
     expect(create).toContain("--cap-drop");
     expect(create).toContain("ALL");
@@ -61,9 +64,17 @@ test("容器 Sandbox 将隔离策略编译为可审计 Docker 参数，并仅持
     expect(create).toContain("TOKEN=secret-value");
     expect(JSON.stringify(store.get(handle.id))).not.toContain("secret-value");
     expect(store.get(handle.id)?.secretNames).toEqual(["TOKEN"]);
+    expect(store.get(handle.id)?.profile).toBe("default");
+    expect(store.get(handle.id)?.runtime).toBe("runsc");
+    expect(store.get(handle.id)?.runtimeEvidence).toMatchObject({
+        adapter: "docker-runsc",
+        requestedRuntime: "runsc",
+        observedRuntime: "runsc",
+        verified: true,
+    });
 
     await provider.execute(handle.id, ["sh", "-lc", "id"]);
-    expect(docker.calls[1]).toEqual([
+    expect(docker.calls[2]).toEqual([
         "docker", "exec", "--workdir", "/workspace", "agent-harness-sandbox-1", "sh", "-lc", "id",
     ]);
     await provider.terminate(handle.id);

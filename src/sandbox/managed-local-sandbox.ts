@@ -1,5 +1,11 @@
 import { isWithin, type EffectivePolicySnapshot } from "../policies/effective-policy.ts";
 import type { SandboxStore } from "./sandbox-store.ts";
+import {
+    freezeRuntimeEvidence,
+    freezeSandboxSpec,
+    resolveSandboxProfile,
+    type SandboxProfile,
+} from "./sandbox-profile.ts";
 import type {
     SandboxHandle,
     SandboxLifecycleEvent,
@@ -9,17 +15,24 @@ import type {
 } from "./sandbox-provider.ts";
 
 /**
- * 首个 Provider 不假装提供容器级隔离：Workspace 与工具文件/进程/网络约束
- * 由控制面和 ToolGateway 强制；这里负责生命周期、资源预算证据与按需 Secret 租约。
+ * Development/test provider. It deliberately does not claim process or kernel
+ * isolation and rejects hard resource limits.
  */
 export class ManagedLocalSandboxProvider implements SandboxProvider {
     private readonly handlers = new Set<(event: SandboxLifecycleEvent) => void>();
     private readonly secretValues = new Map<string, Readonly<Record<string, string>>>();
+    private readonly profile: SandboxProfile;
 
     constructor(
         private readonly store: SandboxStore,
         private readonly secrets: SecretProvider,
-    ) {}
+        config: { readonly profile?: SandboxProfile } = {},
+    ) {
+        this.profile = config.profile ?? "development";
+        if (this.profile !== "development") {
+            throw new Error("ManagedLocal 只能使用 development profile，不能承载多租户执行");
+        }
+    }
 
     async create(input: {
         id: string;
@@ -28,34 +41,59 @@ export class ManagedLocalSandboxProvider implements SandboxProvider {
         workspacePath: string;
         policy: EffectivePolicySnapshot;
     }): Promise<SandboxHandle> {
+        const profile = resolveSandboxProfile(input.policy.sandboxProfile, this.profile);
+        if (profile !== this.profile) {
+            throw new Error(`ManagedLocal 拒绝 profile：${profile}`);
+        }
         if (Object.values(input.policy.resourceLimits).some((value) => value !== null)) {
-            throw new Error(
-                "MANAGED_LOCAL 无法落实 CPU/内存/磁盘硬限制，拒绝执行",
-            );
+            throw new Error("MANAGED_LOCAL 无法落实 CPU/内存/磁盘硬限制，拒绝执行");
         }
         if (
             input.policy.workspaceRoots !== null
-            && !input.policy.workspaceRoots.some((root) =>
-                isWithin(input.workspacePath, root))
+            && !input.policy.workspaceRoots.some((root) => isWithin(input.workspacePath, root))
         ) {
             throw new Error(`Sandbox Workspace 超出策略范围：${input.workspacePath}`);
         }
-        const now = new Date().toISOString();
         const secretNames = input.policy.allowedSecrets ?? [];
         const environment: Record<string, string> = {};
         for (const name of secretNames) {
             const value = this.secrets.get(input.policy.tenantId, name);
-            if (value === null) {
-                throw new Error(`授权 Secret 不存在：${name}`);
-            }
+            if (value === null) throw new Error(`授权 Secret 不存在：${name}`);
             environment[name] = value;
         }
+        const now = new Date().toISOString();
+        const spec = freezeSandboxSpec({
+            profile: "development",
+            runtime: "managed-local",
+            image: null,
+            userId: null,
+            workspaceMount: "/workspace",
+            workspacePath: input.workspacePath,
+            networkMode: input.policy.allowNetwork ? "bridge" : "none",
+            readOnlyRootfs: false,
+            droppedCapabilities: "NONE",
+            noNewPrivileges: false,
+            pidLimit: null,
+            resourceLimits: input.policy.resourceLimits,
+            secretNames,
+        });
         const provisioning: SandboxRecord = {
             id: input.id,
             instanceId: input.instanceId,
             runId: input.runId,
             policySnapshotId: input.policy.id,
             provider: "MANAGED_LOCAL",
+            profile: "development",
+            runtime: "managed-local",
+            spec,
+            runtimeEvidence: freezeRuntimeEvidence({
+                adapter: "managed-local",
+                requestedRuntime: "managed-local",
+                observedRuntime: "managed-local",
+                verified: true,
+                verificationReason: "仅开发/测试生命周期证据；不代表内核隔离",
+                verifiedAt: now,
+            }),
             status: "PROVISIONING",
             workspacePath: input.workspacePath,
             secretNames: Object.freeze([...secretNames]),
@@ -125,9 +163,6 @@ export class EnvironmentSecretProvider implements SecretProvider {
         if (!isEnvironmentSegment(name)) {
             throw new Error("Secret 名称只能包含大写字母、数字和下划线");
         }
-        // Do not fall back to a global NAME lookup: that would let two tenants
-        // with an allowed identical name observe the same value. Hex avoids
-        // collisions between legal IDs such as tenant-a and tenant_a.
         const tenantNamespace = Buffer.from(tenantId, "utf8").toString("hex").toUpperCase();
         return this.environment[`HARNESS_SECRET_${tenantNamespace}_${name}`] ?? null;
     }

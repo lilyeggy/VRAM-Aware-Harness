@@ -24,7 +24,7 @@ bun run demo:console
 | 0:00–0:25 | 创建 Workspace。客户端不提交宿主机路径，也不自报 Tenant。 | `src/http/harness-http-api.ts: submitRun()`；`src/workspaces/workspace-service.ts` | UI 只提交 `workspaceId`；目录由服务端生成。 |
 | 0:25–0:45 | 提交任务。API Key 解出 Principal，Tenant 不可伪造。 | `src/auth/api-credential-store.ts`；`HarnessHttpApi.requirePrincipal()` | `tests/http/tenant-boundary.test.ts`：伪造 `tenantId` 无效、跨 Tenant Run 返回 404。 |
 | 0:45–1:15 | 打开任务历史和输出。任务先进入 Queue，资源决策决定何时运行。 | `src/scheduling/run-queue-coordinator.ts`；`src/resources/resource-admission-service.ts`；`src/runs/run-output-store.ts` | Run 状态、输出、决策和队列位置均可查询。 |
-| 1:15–1:55 | 说明真实执行路径：Run → Attempt → Sandbox → Pi tools → `docker exec`。 | `src/runtime/managed-agent-runtime.ts`；`src/sandbox/container-sandbox-provider.ts`；`src/runtime/pi-tool-gateway.ts` | 容器参数、Sandbox ID 与 ToolGateway checkpoint 是可审计事实。 |
+| 1:15–1:55 | 说明真实执行路径：Run → Attempt → Sandbox → Pi tools → `docker exec`；default 还必须取得 `runsc` inspect 证据。 | `src/runtime/managed-agent-runtime.ts`；`src/sandbox/oci-sandbox-spec.ts`；`src/sandbox/container-runtime-adapter.ts`；`src/runtime/pi-tool-gateway.ts` | profile、runtime、Sandbox ID、OCI 限制与 ToolGateway checkpoint 是可审计事实；runtime 不匹配会 fail closed。 |
 | 1:55–2:25 | 展示终态输出、Diff 和 Artifact；说明 Artifact 为何不是当前 Workspace 的软链接。 | `src/workspaces/run-workspace-result.ts`；`src/workspaces/run-artifact-store.ts` | Artifact 复制前验证 hash，使用 `wx` 固化；随后 Workspace 改动不影响它。 |
 | 2:25–3:00 | 说明故障/安全恢复：容器消失不是普通 tool error，未知副作用不自动重放。 | `ContainerSandboxProvider.markLost()`；`src/checkpoints/recovery-service.ts`；`src/tools/tool-gateway.ts` | Stage 2 测试证明 LOST → Attempt/Run/Instance 收敛；Checkpoint 证明可恢复边界。 |
 
@@ -33,9 +33,10 @@ bun run demo:console
 ### 为什么不是进程隔离？
 
 同一宿主机普通进程默认仍共享宿主文件系统和网络命名空间，无法构成 Tenant 执行边界。这里每
-Attempt 使用独立容器，只挂载自己的 Workspace，并应用非 root、只读 RootFS、cap drop、
-no-new-privileges、PID/CPU/内存、默认无网络。入口是
-`ContainerSandboxProvider.createArgs()`。
+Attempt 使用独立 OCI 容器，只挂载自己的 Workspace，并应用非 root、只读 RootFS、cap drop、
+no-new-privileges、PID/CPU/内存、默认无网络；多租户 default 还必须由 `docker inspect` 证明
+实际 runtime 是 `runsc`。入口是 `OciSandboxSpecCompiler` 与
+`DockerRunscRuntimeAdapter`。这仍不等于独立 guest kernel 或生产级隔离。
 
 ### 容器 UID 如何访问 0700 Workspace？
 
@@ -57,8 +58,8 @@ Attempt/Run/Instance 并释放调度语义。恢复必须经过 Checkpoint 与 T
 
 ### 当前还不能声称什么？
 
-- 当前机器没有可连接 Docker daemon，未完成真实 Linux Docker/A6000 攻击、性能和 kill 演练；
-  单测中的 Docker command fake 不替代真机证据。
+- 当前机器没有可连接 Docker daemon/runsc 证据，未完成真实 Linux Docker/A6000 攻击、性能和
+  kill 演练；单测中的 Docker command fake 不替代真机证据。
 - Artifact、输出与 Diff 已实现；完整工具时间线 UI 和 `REVIEW_REQUIRED` 的人工操作页面仍是后续
   增强，不影响当前最小用户闭环。
 - 不声称对恶意宿主管理员、内核漏洞或容器逃逸提供防御。

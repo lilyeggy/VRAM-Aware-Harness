@@ -1,4 +1,9 @@
 import type { EffectivePolicySnapshot } from "../policies/effective-policy.ts";
+import type {
+    SandboxProfile,
+    SandboxRuntimeEvidence,
+    SandboxSpec,
+} from "./sandbox-profile.ts";
 
 export type SandboxStatus =
     | "PROVISIONING"
@@ -13,6 +18,10 @@ export interface SandboxRecord {
     readonly runId: string;
     readonly policySnapshotId: string;
     readonly provider: string;
+    readonly profile: SandboxProfile;
+    readonly runtime: string;
+    readonly spec: SandboxSpec;
+    readonly runtimeEvidence: SandboxRuntimeEvidence;
     readonly status: SandboxStatus;
     readonly workspacePath: string;
     readonly secretNames: readonly string[];

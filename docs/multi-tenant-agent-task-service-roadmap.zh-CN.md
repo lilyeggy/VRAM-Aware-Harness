@@ -172,7 +172,12 @@ Stage 2 集成测试验证，真实 daemon 失联与 kill 演练仍待真机。
 - Sandbox exit/lost/timeout 进入 Attempt、Run 和 slot 收敛链；
 - `ManagedLocal` 只保留为开发和测试 Provider。
 
-### P0.5：Sandbox 运行时分级（下一迭代的核心）
+### P0.5：Sandbox 运行时分级（当前迭代核心）
+
+当前状态（2026-08-17）：已完成第一步代码切片：`SandboxSpec` 固定 profile/runtime，OCI 参数编译
+与 Docker runtime adapter 分离，`default` 默认选择 runsc 并通过 `docker inspect` 保存实际 runtime
+证据；strict 仅路由到显式预留 Provider，gVisor 不匹配时 fail closed。Linux Docker/gVisor 真机
+smoke 与攻击式验证仍待执行，不能把 fake 测试当作真机隔离证据。
 
 决策：保留 OCI/Docker 作为镜像与生命周期接口，以 gVisor/runsc 作为多租户默认执行运行时；
 Kata/Firecracker/托管 microVM 仅作为 `strict` Provider 的可替换目标，不自研虚拟机控制面。

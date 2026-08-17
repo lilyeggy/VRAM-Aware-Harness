@@ -18,8 +18,9 @@ const root = mkdtempSync(join(tmpdir(), "harness-container-smoke-"));
 const workspace = join(root, "workspace");
 const uid = configuredUid();
 const sandboxId = crypto.randomUUID();
+const store = new MemorySandboxStore();
 const provider = new ContainerSandboxProvider(
-    new MemorySandboxStore() as unknown as SandboxStore,
+    store as unknown as SandboxStore,
     new EnvironmentSecretProvider({}),
     { image: process.env.HARNESS_CONTAINER_IMAGE ?? "alpine:3.20", userId: uid },
 );
@@ -33,6 +34,8 @@ try {
         workspacePath: workspace,
         policy: policy(workspace),
     });
+    const record = store.get(sandboxId);
+    assert(record?.runtime === "runsc" && record.runtimeEvidence.verified, "未取得 runsc 实际 runtime 证据");
     const identity = await provider.execute(handle.id, ["sh", "-lc", "id -u"]);
     assert(identity.exitCode === 0 && identity.stdout.trim() === String(uid), "容器 UID 不匹配");
     const write = await provider.execute(handle.id, ["sh", "-lc", "printf smoke > smoke.txt && cat smoke.txt"]);
@@ -42,7 +45,7 @@ try {
     assert(rootWrite.exitCode !== 0, "只读 RootFS 未阻止 /etc 写入");
     const network = await provider.execute(handle.id, ["sh", "-lc", "wget -T 2 -qO- http://1.1.1.1"]);
     assert(network.exitCode !== 0, "默认网络隔离未阻止外连");
-    console.log(JSON.stringify({ result: "PASS", sandboxId, uid, checks: ["non_root_uid", "workspace_write", "readonly_rootfs", "network_none"] }, null, 2));
+    console.log(JSON.stringify({ result: "PASS", sandboxId, uid, runtime: record.runtime, checks: ["runsc_runtime_evidence", "non_root_uid", "workspace_write", "readonly_rootfs", "network_none"] }, null, 2));
 } finally {
     await provider.terminate(sandboxId).catch(() => undefined);
     rmSync(root, { recursive: true, force: true });

@@ -3,6 +3,7 @@ import { resolve } from "node:path";
 import type {
     ResourceThresholds,
 } from "../resources/resource-classifier.ts";
+import type { SandboxProfile } from "../sandbox/sandbox-profile.ts";
 
 export interface HarnessConfig {
     databasePath:string;
@@ -11,6 +12,8 @@ export interface HarnessConfig {
     workspaceRoot:string;
     bootstrapApiKey:string | undefined;
     sandboxProvider:"managed-local" | "container";
+    sandboxProfile:SandboxProfile;
+    sandboxRuntime:"runsc" | "runc";
     containerImage:string;
     containerUserId:number;
 
@@ -58,6 +61,29 @@ export function loadHarnessConfig(
             "HARNESS_MAX_ACTIVE_RUNS_PER_TENANT 不能大于 HARNESS_MAX_ACTIVE_RUNS",
         );
     }
+    const sandboxProvider = environment.HARNESS_SANDBOX_PROVIDER === "container"
+        ? "container"
+        : "managed-local";
+    const sandboxProfile = loadSandboxProfile(
+        environment.HARNESS_SANDBOX_PROFILE,
+        sandboxProvider === "container" ? "default" : "development",
+    );
+    const sandboxRuntime = loadSandboxRuntime(
+        environment.HARNESS_SANDBOX_RUNTIME,
+        sandboxProvider === "container" ? "runsc" : "runc",
+    );
+    if (sandboxProvider === "managed-local" && sandboxProfile !== "development") {
+        throw new Error("MANAGED_LOCAL 只能使用 development sandbox profile");
+    }
+    if (sandboxProvider === "container" && sandboxProfile === "development") {
+        throw new Error("Container Provider 不能使用 development profile");
+    }
+    if (
+        (sandboxProfile === "default" || sandboxProfile === "restricted-egress")
+        && sandboxRuntime !== "runsc"
+    ) {
+        throw new Error(`${sandboxProfile} sandbox profile 禁止回退到 ${sandboxRuntime}`);
+    }
 
     return {
         databasePath:environment.HARNESS_DATABASE_PATH
@@ -72,6 +98,8 @@ export function loadHarnessConfig(
         sandboxProvider:environment.HARNESS_SANDBOX_PROVIDER === "container"
             ? "container"
             : "managed-local",
+        sandboxProfile,
+        sandboxRuntime,
         containerImage:environment.HARNESS_CONTAINER_IMAGE ?? "alpine:3.20",
         containerUserId:positiveInteger(
             environment,
@@ -247,6 +275,33 @@ function stringList(
     }
 
     return values;
+}
+
+function loadSandboxProfile(
+    value:string | undefined,
+    defaultValue:SandboxProfile,
+):SandboxProfile {
+    const profile = value ?? defaultValue;
+    if (
+        profile !== "development"
+        && profile !== "default"
+        && profile !== "restricted-egress"
+        && profile !== "strict"
+    ) {
+        throw new Error(`HARNESS_SANDBOX_PROFILE 不支持：${profile}`);
+    }
+    return profile;
+}
+
+function loadSandboxRuntime(
+    value:string | undefined,
+    defaultValue:"runsc" | "runc",
+):"runsc" | "runc" {
+    const runtime = value ?? defaultValue;
+    if (runtime !== "runsc" && runtime !== "runc") {
+        throw new Error(`HARNESS_SANDBOX_RUNTIME 不支持：${runtime}`);
+    }
+    return runtime;
 }
 
 function metricsUrlFromBaseUrl(baseUrl:string):string {

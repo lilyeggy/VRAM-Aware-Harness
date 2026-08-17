@@ -1,4 +1,5 @@
 import { resolve, sep } from "node:path";
+import type { SandboxProfile } from "../sandbox/sandbox-profile.ts";
 
 export type PolicyLayerKind =
     | "PLATFORM"
@@ -14,6 +15,8 @@ export interface ResourceLimits {
 }
 
 export interface PolicyConstraints {
+    /** Optional policy request; the managed runtime supplies the immutable default. */
+    readonly sandboxProfile?: SandboxProfile | null;
     readonly allowedTools: readonly string[] | null;
     readonly allowedSkills: readonly string[] | null;
     readonly allowedModels: readonly string[] | null;
@@ -39,6 +42,7 @@ export interface EffectivePolicySnapshot extends PolicyConstraints {
 }
 
 export const unrestrictedPolicy: PolicyConstraints = Object.freeze({
+    sandboxProfile: null,
     allowedTools: null,
     allowedSkills: null,
     allowedModels: null,
@@ -103,6 +107,10 @@ function intersectConstraints(
     right: PolicyConstraints,
 ): PolicyConstraints {
     return {
+        sandboxProfile: intersectSandboxProfiles(
+            left.sandboxProfile ?? null,
+            right.sandboxProfile ?? null,
+        ),
         allowedTools: intersectValues(left.allowedTools, right.allowedTools),
         allowedSkills: intersectValues(left.allowedSkills, right.allowedSkills),
         allowedModels: intersectValues(left.allowedModels, right.allowedModels),
@@ -144,11 +152,36 @@ function intersectRoots(
     return [...roots];
 }
 
+export function withSandboxProfile(
+    snapshot: EffectivePolicySnapshot,
+    profile: SandboxProfile,
+): EffectivePolicySnapshot {
+    // An explicit policy profile is already part of the immutable snapshot.
+    // The process configuration is only the fallback for legacy/default layers;
+    // the ProviderRouter will still reject an unavailable requested profile.
+    if (snapshot.sandboxProfile !== null && snapshot.sandboxProfile !== undefined) {
+        return snapshot;
+    }
+    return Object.freeze({
+        ...snapshot,
+        sandboxProfile: profile,
+    });
+}
+
 export function isWithin(path: string, root: string): boolean {
     const resolvedPath = resolve(path);
     const resolvedRoot = resolve(root);
     return resolvedPath === resolvedRoot
         || resolvedPath.startsWith(`${resolvedRoot}${sep}`);
+}
+
+function intersectSandboxProfiles(
+    left: SandboxProfile | null,
+    right: SandboxProfile | null,
+): SandboxProfile | null {
+    if (left === null) return right;
+    if (right === null || left === right) return left;
+    throw new Error(`Sandbox profile 策略冲突：${left} 与 ${right}`);
 }
 
 function minimum(left: number | null, right: number | null): number | null {
@@ -161,6 +194,7 @@ function freezeConstraints(value: PolicyConstraints): PolicyConstraints {
     const freezeList = (items: readonly string[] | null) =>
         items === null ? null : Object.freeze([...new Set(items)]);
     return {
+        sandboxProfile: value.sandboxProfile ?? null,
         allowedTools: freezeList(value.allowedTools),
         allowedSkills: freezeList(value.allowedSkills),
         allowedModels: freezeList(value.allowedModels),

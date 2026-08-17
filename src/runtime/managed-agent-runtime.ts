@@ -5,6 +5,7 @@ import type { HarnessInstanceStore } from "../instances/harness-instance-store.t
 import {
     computeEffectivePolicy,
     createPolicyLayer,
+    withSandboxProfile,
     unrestrictedPolicy,
     type PolicyConstraints,
 } from "../policies/effective-policy.ts";
@@ -32,6 +33,7 @@ import {
 } from "../sessions/harness-session.ts";
 import type { HarnessSessionStore } from "../sessions/harness-session-store.ts";
 import type { SandboxProvider, SandboxLifecycleEvent } from "../sandbox/sandbox-provider.ts";
+import type { SandboxProfile } from "../sandbox/sandbox-profile.ts";
 import type { HarnessTemplateStore } from "../templates/harness-template-store.ts";
 import type {
     AgentRuntime,
@@ -65,6 +67,7 @@ export class ManagedAgentRuntime implements AgentRuntime {
         private readonly policies: EffectivePolicyStore,
         private readonly policyRegistry: PolicyRegistry,
         private readonly sandbox: SandboxProvider,
+        private readonly sandboxProfile: SandboxProfile = "development",
     ) {
         this.sandbox.subscribe((event) => this.onSandboxFailure(event));
     }
@@ -129,7 +132,7 @@ export class ManagedAgentRuntime implements AgentRuntime {
         }
 
         const now = new Date().toISOString();
-        const snapshot = computeEffectivePolicy({
+        const computedSnapshot = computeEffectivePolicy({
             id: crypto.randomUUID(),
             runId: run.id,
             tenantId: run.tenantId,
@@ -137,6 +140,7 @@ export class ManagedAgentRuntime implements AgentRuntime {
             layers: this.policyLayers(run, template.spec),
             createdAt: now,
         });
+        const snapshot = withSandboxProfile(computedSnapshot, this.sandboxProfile);
         this.policies.saveSnapshot(snapshot);
 
         // Attempt 从创建时就绑定不可变策略快照。这样即使能力校验、策略编译或
@@ -306,8 +310,15 @@ export class ManagedAgentRuntime implements AgentRuntime {
             ...unrestrictedPolicy,
             workspaceRoots: [run.workspacePath],
         };
+        const platform = this.policyRegistry.getPlatformPolicy();
+        const platformForSandbox = this.sandboxProfile === "development"
+            ? platform
+            : createPolicyLayer(platform.id, platform.kind, {
+                ...platform,
+                allowNetwork: false,
+            });
         return [
-            this.policyRegistry.getPlatformPolicy(),
+            platformForSandbox,
             this.policyRegistry.getTenantPolicy(run.tenantId),
             createPolicyLayer(`template:${run.templateVersionId}`, "TEMPLATE", templatePolicy),
             createPolicyLayer(`workspace:${run.workspacePath}`, "WORKSPACE", workspacePolicy),

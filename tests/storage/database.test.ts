@@ -87,6 +87,7 @@ test("重复运行 migration 不会重复应用已有版本", () => {
             10,
             11,
             12,
+            13,
         ]);
     } finally {
         db.close();

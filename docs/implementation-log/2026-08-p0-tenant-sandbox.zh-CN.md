@@ -15,7 +15,7 @@
 | API Key → Principal | `src/auth/api-credential-store.ts` | 数据库存 SHA-256 摘要，不存明文；撤销后认证失败。 |
 | 受管 Workspace | `src/workspaces/workspace-service.ts` | 路径由服务端在 `HARNESS_WORKSPACE_ROOT/<tenant>/<uuid>` 生成。 |
 | Tenant HTTP 边界 | `src/http/harness-http-api.ts` | `/health` 公开；其余 Composition 路由需要 Key；IDOR 返回 404。 |
-| 容器策略编译 | `src/sandbox/container-sandbox-provider.ts` | Docker 参数是可检查的安全证据；磁盘 bind-mount 额度无法可信落实时 fail closed。 |
+| 容器策略编译 | `src/sandbox/oci-sandbox-spec.ts` / `src/sandbox/container-runtime-adapter.ts` | OCI 参数与 runtime adapter 分离；磁盘 bind-mount 额度无法可信落实时 fail closed，default 必须取得 runsc inspect 证据。 |
 | 持久化 | migration v8 | `api_credentials`、`workspaces` 在 SQLite 中可审计。 |
 
 ## 代码导航：从请求到隔离执行
@@ -58,7 +58,7 @@ HTTP Request + Bearer API Key
 | --- | --- | --- |
 | `src/sandbox/sandbox-provider.ts` | Provider 生命周期合同；`SandboxCommandExecutor` 表示“命令必须去哪个环境执行”。 | 生命周期与命令执行是两个不同但关联的合同。 |
 | `src/sandbox/container-sandbox-provider.ts: ContainerSandboxProvider.create()` | 创建 `PROVISIONING → ACTIVE` 记录后运行 Docker；失败保存 `FAILED` 理由。 | Attempt 没有 Sandbox 就不应进入运行态。 |
-| `src/sandbox/container-sandbox-provider.ts: createArgs()` | 编译 `--user 65532:65532`、`--read-only`、`--cap-drop ALL`、`no-new-privileges`、`--pids-limit`、`--cpus`、`--memory`、`--network none`、唯一 `/workspace` mount。 | 逐个说明这些参数防的是什么攻击。 |
+| `src/sandbox/oci-sandbox-spec.ts: OciSandboxSpecCompiler` | 编译 `--user 65532:65532`、`--read-only`、`--cap-drop ALL`、`no-new-privileges`、`--pids-limit`、`--cpus`、`--memory`、`--network none`、唯一 `/workspace` mount；不把 Secret 值放入 spec。 | 逐个说明这些参数防的是什么攻击；runtime adapter 另行证明实际 runtime。 |
 | `src/app/harness-config.ts: HARNESS_CONTAINER_USER_ID` | 将 Workspace provisioning UID 和 Docker `--user UID:UID` 固定为同一个正整数。 | 不允许 root UID；改变 UID 必须同时影响目录所有权与容器身份。 |
 | `src/sandbox/managed-local-sandbox.ts: EnvironmentSecretProvider` | `get(tenantId, name)` 只读 `HARNESS_SECRET_<TENANT_UTF8_HEX>_<NAME>`；没有全局同名回退。 | `tenant-a` 与 `tenant_a` 的 namespace 不碰撞；Secret 名称限制为大写环境变量段。 |
 | `src/sandbox/container-sandbox-provider.ts` / `managed-local-sandbox.ts` | 创建 Sandbox 时把 `policy.tenantId` 传入 SecretProvider。 | Policy 只决定“可否使用该名称”，Provider 决定“该 Tenant 的值是什么”，两层不能互相替代。 |
@@ -204,3 +204,19 @@ microVM Provider 的路由位置，不在本项目内自研 VMM。必须实现�
 外网、资源耗尽和 Sandbox 丢失攻击结果。
 
 下一迭代先补 Linux 上的 gVisor/runsc 真机 smoke、运行时不允许静默回退至 runc 的证明，以及容器意外消失后的恢复收敛测试；随后补基于真实 API Key 的端到端审计日志、工具时间线和人工恢复操作。当前所有默认 Pi 工具已接到容器；但在真机攻击与恢复证据完成前，仍不应把这称为“生产级隔离”。
+
+### 2026-08-17：P0.5 Sandbox 运行时分级第一步（已实现，真机待验证）
+
+本次没有重写控制面，而是在原有 `SandboxProvider` 生命周期和 Pi 命令边界上增加不可变运行时证据：
+
+| 文件 / 符号 | 本次变更 | 测试 / 边界 |
+| --- | --- | --- |
+| `src/sandbox/sandbox-profile.ts`：`SandboxProfile`、`SandboxSpec`、`SandboxRuntimeEvidence` | 定义 `development/default/restricted-egress/strict` profile、`managed-local/runsc/runc/...` runtime、每 Attempt 的只读 spec 和实际 runtime 证据。 | 类型检查通过；spec 不包含 Secret 值。尚未在真实 SQLite 旧库升级后做现场验证。 |
+| `src/policies/effective-policy.ts`：`sandboxProfile`、`withSandboxProfile()` | profile 进入策略快照；显式策略 profile 优先，进程配置仅作为默认；策略 profile 冲突仍 fail closed。default/restricted/strict 的平台编排默认关闭网络。 | `tests/policies/*` 回归由全量测试覆盖；未在 Bun 不可用的当前会话执行测试。 |
+| `src/sandbox/oci-sandbox-spec.ts`：`OciSandboxSpecCompiler` | 只编译 OCI 安全参数和无 Secret 的 `SandboxSpec`；磁盘配额、Workspace 越界、restricted 直连网络和 default 使用非 runsc 均拒绝。 | `tests/sandbox/container-sandbox-provider.test.ts`、`tests/sandbox/sandbox-runtime-profile.test.ts`；只证明确定性编译和 fail-closed。 |
+| `src/sandbox/container-runtime-adapter.ts`：`DockerRunscRuntimeAdapter` | OCI 参数编译与实际 runtime adapter 分离；启动参数显式加入 `--runtime runsc`，随后 `docker inspect` 必须观察到 `runsc`，否则清理并将 Sandbox 置为 `FAILED`，绝不回退 runc。 | 新增 runsc 证据、runc 拒绝和 inspect 返回 runc 的测试；没有 Linux Docker/runsc 真机证据。 |
+| `src/sandbox/container-sandbox-provider.ts`、`src/sandbox/sandbox-store.ts`、migration v13 | `SandboxRecord` 持久化 profile、runtime、spec 和 `runtimeEvidence`；Secret 仍只持久化名称；LOST/FAILED/TERMINATED 沿原生命周期合同收敛。 | 既有 LOST fake 测试保留；SQLite migration/typecheck 未替代真机清理与 kill 验证。 |
+| `src/sandbox/sandbox-provider-router.ts`、`src/app/create-harness-application.ts` | `strict` 路由到显式 `UnavailableStrictSandboxProvider`；Kata/Firecracker/托管 microVM 只保留 Provider 插槽，不自研 VMM。 | strict 无 Provider 时测试确认拒绝；尚未接入真实 microVM。 |
+| `src/app/harness-config.ts`、`.env.example` | 容器默认 profile/runtime 为 `default/runsc`；ManagedLocal 明确限制为 `development`，default/restricted 禁止配置 runc。 | `tsc --noEmit` 通过；当前环境缺少 `bun`，所以 `bun run test` 未能执行。 |
+
+当前能说的结论：源码会把 `runsc` 选择和 `docker inspect` 观察结果关联到每个 Sandbox 记录，且 runtime 不匹配会 fail closed。当前不能说的结论：没有 Linux Docker daemon + gVisor/runsc 真机输出，不能声称 default 实际运行在 gVisor，也不能声称跨 Tenant 文件/Secret、宿主路径、外网、fork bomb、资源耗尽或 Sandbox kill 攻击已通过。这些仍是 P0.5 的下一项真机验收。

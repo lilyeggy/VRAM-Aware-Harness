@@ -49,6 +49,10 @@ import { PolicyRegistry } from "../policies/policy-registry.ts";
 import { PersistentToolPolicyGuard } from "../policies/tool-policy-guard.ts";
 import type { SandboxProvider, SecretProvider } from "../sandbox/sandbox-provider.ts";
 import type { SandboxCommandExecutor } from "../sandbox/sandbox-provider.ts";
+import {
+    SandboxProviderRouter,
+    UnavailableStrictSandboxProvider,
+} from "../sandbox/sandbox-provider-router.ts";
 import { SandboxStore } from "../sandbox/sandbox-store.ts";
 import {
     EnvironmentSecretProvider,
@@ -183,11 +187,14 @@ export async function createHarnessApplication(
         ?? new EnvironmentSecretProvider(process.env);
     const sandboxProvider = dependencies.sandboxProvider
         ?? (config.sandboxProvider === "container"
-            ? new ContainerSandboxProvider(sandboxStore, secretProvider, {
-                image: config.containerImage,
-                userId: config.containerUserId,
-            })
-            : new ManagedLocalSandboxProvider(sandboxStore, secretProvider));
+            ? createContainerSandboxRouter(
+                sandboxStore,
+                secretProvider,
+                config,
+            )
+            : new ManagedLocalSandboxProvider(sandboxStore, secretProvider, {
+                profile: config.sandboxProfile,
+            }));
     const toolGateway = new ToolGateway(
         toolExecutionStore,
         new PersistentToolPolicyGuard(effectivePolicyStore),
@@ -212,6 +219,7 @@ export async function createHarnessApplication(
         effectivePolicyStore,
         policyRegistry,
         sandboxProvider,
+        config.sandboxProfile,
     );
     const resourceObserver = dependencies.resourceObserver
         ?? new VllmResourceObserver({
@@ -343,6 +351,28 @@ export async function createHarnessApplication(
             closed = true;
         },
     };
+}
+
+function createContainerSandboxRouter(
+    sandboxStore:SandboxStore,
+    secretProvider:SecretProvider,
+    config:HarnessConfig,
+):SandboxProvider {
+    const strict = new UnavailableStrictSandboxProvider();
+    if (config.sandboxProfile === "strict") {
+        return new SandboxProviderRouter({ strict }, "strict");
+    }
+    const container = new ContainerSandboxProvider(sandboxStore, secretProvider, {
+        image: config.containerImage,
+        profile: config.sandboxProfile,
+        runtime: config.sandboxRuntime,
+        userId: config.containerUserId,
+    });
+    return new SandboxProviderRouter({
+        default: container,
+        "restricted-egress": container,
+        strict,
+    }, config.sandboxProfile);
 }
 
 async function createPiRuntime(

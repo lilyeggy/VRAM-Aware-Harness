@@ -72,7 +72,7 @@ export class EffectivePolicyStore {
             layer.kind,
             layer,
         ));
-        const snapshot = computeEffectivePolicy({
+        const computedSnapshot = computeEffectivePolicy({
             id: row.id,
             runId: row.runId,
             tenantId: row.tenantId,
@@ -80,7 +80,16 @@ export class EffectivePolicyStore {
             layers,
             createdAt: row.createdAt,
         });
-        if (JSON.stringify(constraintsOnly(snapshot)) !== row.effectiveJson) {
+        const persistedEffective = JSON.parse(row.effectiveJson) as PolicyConstraints;
+        const snapshot = Object.freeze({
+            ...computedSnapshot,
+            sandboxProfile: persistedEffective.sandboxProfile ?? null,
+        });
+        const normalizedPersisted = {
+            ...persistedEffective,
+            sandboxProfile: persistedEffective.sandboxProfile ?? null,
+        };
+        if (JSON.stringify(constraintsOnly(snapshot)) !== JSON.stringify(normalizedPersisted)) {
             throw new Error(`EffectivePolicySnapshot 内容不一致：${id}`);
         }
         return snapshot;
@@ -175,6 +184,7 @@ export class EffectivePolicyStore {
 
 function constraintsOnly(value: PolicyConstraints): PolicyConstraints {
     return {
+        sandboxProfile: value.sandboxProfile ?? null,
         allowedTools: value.allowedTools,
         allowedSkills: value.allowedSkills,
         allowedModels: value.allowedModels,

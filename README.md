@@ -214,6 +214,7 @@ Agentic Policy 仅作为候选研究路线，见
 | A6000 + Pi/vLLM 对照实验 | 待服务器执行 | 本地执行入口与实验手册已就绪，不在没有真实数据时声明性能收益 |
 | Stage 1：Template / Instance / Capability | 已完成 | 新 Run 固定版本并贯穿 Instance、Session、Attempt；Pi 能力门已进入主路径 |
 | Stage 2：Effective Policy / Sandbox | 已完成（最小实现） | 五层交集进入 Pi、ToolGateway 与 ManagedLocal；不支持的硬隔离 fail closed |
+| P0.5：Sandbox 运行时分级 | 已完成第一步（真机待验证） | `default` 显式选择 runsc、保存 profile/runtime/inspect 证据；strict 只路由到预留 Provider，不回退 runc |
 | ADR 0009 与产品路线图 | 已完成 | 固定用户任务服务定位，并将③ Sandbox、④ Orchestration 作为内部重点 |
 | 可信身份与 Tenant-scoped API | 已完成 P0 切片 | API Key/Principal、服务端派生 Tenant、跨 Tenant Run 访问返回 404 |
 | 受管 Workspace | 已完成 P0 切片 | `workspaceId` 映射到服务端 Tenant Root；客户端不能提交宿主机路径 |
@@ -258,7 +259,7 @@ Workspace，再提交任务即可看到 Run 终态和持久化输出。该命令
 证明的是产品/API/控制面纵向链路，**不**证明 Docker 隔离、真实模型兼容性或性能；按
 `Ctrl+C` 会关闭服务并删除临时数据。
 
-## Docker Sandbox 真机 Smoke
+## Docker/gVisor Sandbox 真机 Smoke
 
 在已启动 Docker daemon 的非 root Linux/Mac 用户环境执行：
 
@@ -266,9 +267,10 @@ Workspace，再提交任务即可看到 Run 终态和持久化输出。该命令
 bun run smoke:container
 ```
 
-它会拉起一个真实容器并验证非 root UID、仅挂载 Workspace 的写入、只读 RootFS 和默认
-无网络；无论成功或失败都会清理容器和临时目录。当前开发机若没有 Docker daemon，该命令
-应失败而不是把 fake unit test 当作真机证据。
+它会通过当前 `HARNESS_SANDBOX_RUNTIME`（容器默认是 `runsc`）拉起一个真实容器，并验证
+非 root UID、仅挂载 Workspace 的写入、只读 RootFS 和默认无网络；Provider 还会通过
+`docker inspect` 记录实际 runtime。无论成功或失败都会清理容器和临时目录。当前开发机若
+没有 Docker daemon 或 gVisor/runsc，该命令应失败而不是把 fake unit test 当作真机证据。
 
 ## 启动完整 Harness
 

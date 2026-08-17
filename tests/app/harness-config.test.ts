@@ -63,6 +63,20 @@ test("loadHarnessConfig 解析显式环境变量", () => {
     });
 });
 
+test("Container default profile 默认选择 runsc，并拒绝 runc 降级", () => {
+    const config = loadHarnessConfig({
+        VLLM_MODEL_ID:"model",
+        HARNESS_SANDBOX_PROVIDER:"container",
+    });
+    expect(config.sandboxProfile).toBe("default");
+    expect(config.sandboxRuntime).toBe("runsc");
+    expect(() => loadHarnessConfig({
+        VLLM_MODEL_ID:"model",
+        HARNESS_SANDBOX_PROVIDER:"container",
+        HARNESS_SANDBOX_RUNTIME:"runc",
+    })).toThrow("禁止回退到 runc");
+});
+
 test("loadHarnessConfig 拒绝缺失模型和非法并发配置", () => {
     expect(() => loadHarnessConfig({})).toThrow(
         "必须设置环境变量 VLLM_MODEL_ID",

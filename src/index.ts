@@ -53,7 +53,12 @@ export * from "./runtime/pi-tool-gateway.ts";
 export * from "./runtime/runtime-capability.ts";
 export * from "./runtime/runtime-capability-store.ts";
 
+export * from "./sandbox/container-runtime-adapter.ts";
+export * from "./sandbox/container-sandbox-provider.ts";
 export * from "./sandbox/managed-local-sandbox.ts";
+export * from "./sandbox/oci-sandbox-spec.ts";
+export * from "./sandbox/sandbox-profile.ts";
+export * from "./sandbox/sandbox-provider-router.ts";
 export * from "./sandbox/sandbox-provider.ts";
 export * from "./sandbox/sandbox-store.ts";
 
