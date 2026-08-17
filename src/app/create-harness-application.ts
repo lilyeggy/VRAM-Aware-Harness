@@ -365,7 +365,7 @@ function createContainerSandboxRouter(
     const container = new ContainerSandboxProvider(sandboxStore, secretProvider, {
         image: config.containerImage,
         profile: config.sandboxProfile,
-        runtime: config.sandboxRuntime,
+        sandboxRuntime: config.sandboxRuntime,
         userId: config.containerUserId,
     });
     return new SandboxProviderRouter({

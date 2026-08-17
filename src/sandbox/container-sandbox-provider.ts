@@ -25,8 +25,14 @@ export type { ContainerCommandRuntime } from "./container-runtime-adapter.ts";
 
 export interface ContainerSandboxConfig {
     readonly image: string;
-    /** Defaults to runsc; runc is only valid for development profile. */
-    readonly runtime?: "runsc" | "runc";
+    /**
+     * `runtime` accepted a Docker executable path in the pre-P0.5 contract;
+     * known runsc/runc values are also accepted as the runtime selector.
+     */
+    readonly runtime?: string;
+    /** New explicit runtime selector; defaults to runsc. */
+    readonly sandboxRuntime?: "runsc" | "runc";
+    readonly dockerCommand?: string;
     readonly profile?: SandboxProfile;
     readonly userId?: number;
 }
@@ -40,7 +46,7 @@ export class ContainerSandboxProvider implements SandboxProvider, SandboxCommand
     private readonly handlers = new Set<(event: SandboxLifecycleEvent) => void>();
     private readonly containerBySandboxId = new Map<string, string>();
     private readonly secretValues = new Map<string, Readonly<Record<string, string>>>();
-    private readonly docker = "docker";
+    private readonly docker: string;
     private readonly profile: SandboxProfile;
     private readonly runtime: "runsc" | "runc";
     private readonly adapter: ContainerRuntimeAdapter;
@@ -57,7 +63,16 @@ export class ContainerSandboxProvider implements SandboxProvider, SandboxCommand
             throw new Error("Container Sandbox userId 必须是正整数，不能使用 root");
         }
         this.profile = config.profile ?? "default";
-        this.runtime = config.runtime ?? "runsc";
+        this.runtime = config.sandboxRuntime
+            ?? (config.runtime === "runc" || config.runtime === "runsc"
+                ? config.runtime
+                : "runsc");
+        this.docker = config.dockerCommand
+            ?? (config.runtime !== undefined
+                && config.runtime !== "runc"
+                && config.runtime !== "runsc"
+                ? config.runtime
+                : "docker");
         if (this.profile === "default" || this.profile === "restricted-egress") {
             if (this.runtime !== "runsc") {
                 throw new Error(`${this.profile} profile 禁止使用 ${this.runtime}，不得回退到 runc`);
