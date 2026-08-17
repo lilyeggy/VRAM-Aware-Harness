@@ -59,7 +59,8 @@ Attempt/Run/Instance 并释放调度语义。恢复必须经过 Checkpoint 与 T
 ### 当前还不能声称什么？
 
 - 当前机器没有可连接 Docker daemon/runsc 证据，未完成真实 Linux Docker/A6000 攻击、性能和
-  kill 演练；单测中的 Docker command fake 不替代真机证据。
+  kill 演练；单测中的 Docker command fake 不替代真机证据。真机攻击入口是
+  `bun run smoke:container:attacks`，其 PASS 输出才可作为跨 Tenant、网络、资源和 LOST 的证据。
 - Artifact、输出与 Diff 已实现；完整工具时间线 UI 和 `REVIEW_REQUIRED` 的人工操作页面仍是后续
   增强，不影响当前最小用户闭环。
 - 不声称对恶意宿主管理员、内核漏洞或容器逃逸提供防御。
