@@ -1,8 +1,18 @@
 {
   "name": "agent-harness",
-  "module": "index.ts",
+  "module": "src/index.ts",
   "type": "module",
   "private": true,
+  "scripts": {
+    "test": "bun test ./tests",
+    "typecheck": "tsc --noEmit",
+    "verify:stage0": "bun run test && bun run typecheck && bun run demo:day7",
+    "start": "bun run src/main.ts",
+    "demo:day7": "bun run src/demo/day7-fake-demo.ts",
+    "demo:console": "bun run src/demo/task-console-demo.ts",
+    "smoke:http": "bun run scripts/day7-http-smoke.ts",
+    "smoke:container": "bun run scripts/container-sandbox-smoke.ts"
+  },
   "devDependencies": {
     "@types/bun": "latest"
   },

@@ -1,0 +1,386 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>VRAM-Aware Harness 分层架构关系图</title>
+  <style>
+    :root {
+      --bg: #07111f;
+      --panel: #0c1a2b;
+      --panel-2: #10233a;
+      --line: #27415e;
+      --text: #eef6ff;
+      --muted: #9eb1c7;
+      --tenant: #4ecdc4;
+      --service: #60a5fa;
+      --domain: #c084fc;
+      --agent: #fbbf24;
+      --infra: #fb7185;
+      --active: #ffffff;
+      --shadow: 0 14px 40px rgba(0, 0, 0, .24);
+    }
+
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      background:
+        radial-gradient(circle at 50% -10%, rgba(56, 124, 196, .25), transparent 42rem),
+        var(--bg);
+      color: var(--text);
+      font-family: Inter, "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+      line-height: 1.5;
+    }
+
+    .shell { width: min(1480px, calc(100% - 28px)); margin: 0 auto; padding: 38px 0 70px; }
+    .topbar { display: flex; justify-content: space-between; align-items: flex-end; gap: 24px; margin-bottom: 24px; }
+    .title-kicker { color: #79b8ff; font-weight: 700; letter-spacing: .12em; font-size: 12px; text-transform: uppercase; }
+    h1 { margin: 8px 0 5px; font-size: clamp(28px, 4vw, 48px); line-height: 1.08; letter-spacing: -.035em; }
+    .subtitle { color: var(--muted); margin: 0; max-width: 820px; }
+
+    .legend { display: flex; flex-wrap: wrap; gap: 10px 18px; color: var(--muted); font-size: 13px; }
+    .legend span { display: inline-flex; align-items: center; gap: 7px; white-space: nowrap; }
+    .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--c); box-shadow: 0 0 14px var(--c); }
+
+    .scenario-bar {
+      display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+      padding: 12px; background: rgba(12, 26, 43, .84); border: 1px solid var(--line); border-radius: 14px 14px 0 0;
+    }
+    .scenario-bar strong { margin: 0 6px; font-size: 13px; color: var(--muted); }
+    button {
+      border: 1px solid #355271; color: #c3d4e8; background: #0a1727;
+      border-radius: 999px; padding: 8px 13px; cursor: pointer; font: inherit; font-size: 13px;
+    }
+    button:hover, button[aria-pressed="true"] { background: #eaf4ff; border-color: #eaf4ff; color: #09213b; }
+
+    .architecture {
+      position: relative;
+      border: 1px solid var(--line); border-top: 0; border-radius: 0 0 18px 18px;
+      background:
+        linear-gradient(rgba(39, 65, 94, .09) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(39, 65, 94, .09) 1px, transparent 1px),
+        rgba(7, 17, 31, .72);
+      background-size: 24px 24px;
+      overflow: hidden;
+      box-shadow: var(--shadow);
+    }
+
+    .layer {
+      position: relative; display: grid; grid-template-columns: 145px 1fr; min-height: 160px;
+      border-top: 1px solid var(--line); transition: opacity .2s ease;
+    }
+    .layer:first-child { border-top: 0; }
+    .layer-label {
+      border-right: 1px solid var(--line); padding: 24px 17px;
+      background: color-mix(in srgb, var(--layer-color) 8%, transparent);
+    }
+    .layer-index { display: block; color: var(--layer-color); font-size: 11px; font-weight: 800; letter-spacing: .13em; }
+    .layer-label h2 { font-size: 18px; margin: 5px 0 4px; }
+    .layer-label p { color: var(--muted); font-size: 12px; margin: 0; }
+    .layer-content { position: relative; padding: 20px 30px; display: grid; align-items: center; gap: 20px; }
+
+    .tenant-layer { --layer-color: var(--tenant); }
+    .service-layer { --layer-color: var(--service); }
+    .domain-layer { --layer-color: var(--domain); }
+    .agent-layer { --layer-color: var(--agent); }
+    .infra-layer { --layer-color: var(--infra); }
+
+    .tenant-grid { grid-template-columns: 170px 24px minmax(290px, 1.3fr) 24px minmax(190px, .8fr); }
+    .service-grid { grid-template-columns: repeat(5, minmax(135px, 1fr)); }
+    .domain-grid { grid-template-columns: minmax(210px, .8fr) 24px minmax(310px, 1.2fr) 24px minmax(250px, 1fr); }
+    .agent-grid { grid-template-columns: minmax(190px, .8fr) 24px minmax(210px, .9fr) 24px minmax(270px, 1.1fr) 24px minmax(190px, .8fr); }
+    .infra-grid { grid-template-columns: repeat(3, minmax(180px, 1fr)); }
+
+    .node {
+      position: relative; min-height: 86px; border: 1px solid #35506d; border-radius: 13px;
+      padding: 14px 15px; background: linear-gradient(150deg, rgba(19, 42, 68, .96), rgba(9, 25, 43, .96));
+      transition: opacity .2s, transform .2s, border-color .2s, box-shadow .2s;
+    }
+    .node::before { content: ""; display: block; width: 28px; height: 3px; border-radius: 5px; margin-bottom: 10px; background: var(--node-color, var(--service)); }
+    .node h3 { margin: 0 0 4px; font-size: 15px; }
+    .node p { margin: 0; font-size: 12px; color: var(--muted); }
+    .node .id { display: inline-block; margin-top: 8px; padding: 3px 7px; color: var(--node-color); background: color-mix(in srgb, var(--node-color) 12%, transparent); border-radius: 5px; font: 11px ui-monospace, monospace; }
+    .node[data-group="tenant"] { --node-color: var(--tenant); }
+    .node[data-group="service"] { --node-color: var(--service); }
+    .node[data-group="domain"] { --node-color: var(--domain); }
+    .node[data-group="agent"] { --node-color: var(--agent); }
+    .node[data-group="infra"] { --node-color: var(--infra); }
+
+    .node.active { border-color: var(--node-color); transform: translateY(-2px); box-shadow: 0 0 0 1px var(--node-color), 0 0 28px color-mix(in srgb, var(--node-color) 38%, transparent); }
+    .node.dim { opacity: .25; }
+
+    .arrow { position: relative; height: 2px; background: #48627e; align-self: center; transition: opacity .2s, background .2s; }
+    .arrow::after { content: ""; position: absolute; right: -1px; top: -4px; border-left: 8px solid #48627e; border-top: 5px solid transparent; border-bottom: 5px solid transparent; }
+    .arrow.active { background: #fff; box-shadow: 0 0 12px #75baff; }
+    .arrow.active::after { border-left-color: #fff; }
+    .arrow.dim { opacity: .12; }
+    .arrow.bidirectional::before { content: ""; position: absolute; left: -1px; top: -4px; border-right: 8px solid #48627e; border-top: 5px solid transparent; border-bottom: 5px solid transparent; }
+    .arrow.bidirectional.active::before { border-right-color: #fff; }
+
+    .service-link-row { position: absolute; left: 2%; right: 2%; bottom: 11px; height: 2px; background: #294663; opacity: .65; }
+    .service-link-row::before { content: "控制 AgentRun 的状态、准入、排队和恢复"; position: absolute; left: 50%; transform: translate(-50%, -55%); background: #081727; padding: 0 10px; color: #7195bb; font-size: 10px; white-space: nowrap; }
+
+    .run-stack { display: grid; grid-template-columns: repeat(2, minmax(130px, 1fr)); gap: 9px; }
+    .mini-run { border: 1px solid #5a4373; background: rgba(192, 132, 252, .08); border-radius: 9px; padding: 9px; }
+    .mini-run strong { display: block; font-size: 12px; color: #dec1ff; }
+    .mini-run span { color: var(--muted); font-size: 10px; }
+    .mini-run.current { border-color: var(--domain); box-shadow: 0 0 15px rgba(192, 132, 252, .2); }
+
+    .vertical-flow {
+      display: grid; grid-template-columns: repeat(5, 1fr); gap: 0;
+      margin-left: 145px; padding: 11px 30px; border-top: 1px dashed #2b4968; border-bottom: 1px dashed #2b4968;
+      color: #7189a3; font-size: 10px; text-align: center; background: rgba(5, 14, 25, .78);
+    }
+    .vertical-flow span::before { content: "↓"; display: block; font-size: 17px; color: #4e6d8c; }
+
+    .relationship-panel { margin-top: 22px; display: grid; grid-template-columns: 1.4fr .9fr; gap: 18px; }
+    .relationship-map, .detail-panel { border: 1px solid var(--line); border-radius: 16px; background: var(--panel); padding: 22px; }
+    .relationship-map h2, .detail-panel h2 { margin: 0 0 16px; font-size: 18px; }
+
+    .cardinality { display: grid; grid-template-columns: 1fr 52px 1fr 52px 1fr; align-items: center; gap: 8px; }
+    .entity { text-align: center; padding: 17px 8px; border: 1px solid #365270; background: var(--panel-2); border-radius: 11px; }
+    .entity b { display: block; font-size: 14px; }
+    .entity small { color: var(--muted); font-size: 11px; }
+    .relation { text-align: center; color: #9ab5d3; font-size: 11px; }
+    .relation b { display: block; color: #fff; font-size: 15px; }
+    .mapping-note { margin-top: 14px; padding-top: 13px; border-top: 1px solid var(--line); color: var(--muted); font-size: 12px; }
+
+    .detail-panel { border-left: 4px solid var(--service); }
+    .detail-panel .step { color: #79b8ff; font-size: 11px; font-weight: 800; letter-spacing: .1em; }
+    .detail-panel h3 { margin: 7px 0 8px; font-size: 20px; }
+    .detail-panel p { margin: 0; color: #c4d2e2; font-size: 13px; }
+    .owner { margin-top: 16px; display: flex; gap: 8px; flex-wrap: wrap; }
+    .badge { border: 1px solid #365270; color: var(--muted); border-radius: 999px; padding: 4px 8px; font-size: 10px; }
+
+    .bottom-note {
+      margin-top: 18px; padding: 18px 20px; border-radius: 14px;
+      color: #dbeaff; background: linear-gradient(90deg, rgba(39, 110, 241, .2), rgba(39, 110, 241, .06)); border: 1px solid #315d91;
+      font-size: 13px;
+    }
+    .bottom-note strong { color: #fff; }
+
+    @media (max-width: 1080px) {
+      .topbar { align-items: flex-start; flex-direction: column; }
+      .layer { grid-template-columns: 112px 1fr; }
+      .layer-content { overflow-x: auto; }
+      .tenant-grid, .service-grid, .domain-grid, .agent-grid, .infra-grid { min-width: 930px; }
+      .vertical-flow { margin-left: 112px; min-width: 930px; }
+      .relationship-panel { grid-template-columns: 1fr; }
+    }
+
+    @media (max-width: 650px) {
+      .shell { width: min(100% - 16px, 1480px); padding-top: 22px; }
+      .layer { display: block; }
+      .layer-label { border-right: 0; border-bottom: 1px solid var(--line); padding: 11px 14px; }
+      .layer-label p { display: none; }
+      .layer-content { padding: 14px; }
+      .vertical-flow { display: none; }
+      .cardinality { grid-template-columns: 1fr; }
+      .relation { padding: 2px; }
+      .relation b { display: inline; margin-right: 5px; }
+    }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <header class="topbar">
+      <div>
+        <div class="title-kicker">System Architecture Map</div>
+        <h1>VRAM-Aware Harness 分层关系图</h1>
+        <p class="subtitle">从租户与长期会话出发，经过服务编排、AgentRun 事实模型、Pi Runtime，最终抵达 vLLM、GPU 与工具。点击场景，只高亮该场景真正经过的对象。</p>
+      </div>
+      <div class="legend" aria-label="层级图例">
+        <span><i class="dot" style="--c:var(--tenant)"></i>租户/会话</span>
+        <span><i class="dot" style="--c:var(--service)"></i>服务编排</span>
+        <span><i class="dot" style="--c:var(--domain)"></i>运行事实</span>
+        <span><i class="dot" style="--c:var(--agent)"></i>Agent Runtime</span>
+        <span><i class="dot" style="--c:var(--infra)"></i>推理/工具</span>
+      </div>
+    </header>
+
+    <nav class="scenario-bar" aria-label="架构场景">
+      <strong>查看数据流</strong>
+      <button type="button" aria-pressed="true" data-scenario="new-run">首次任务</button>
+      <button type="button" aria-pressed="false" data-scenario="follow-up">同会话追问</button>
+      <button type="button" aria-pressed="false" data-scenario="critical">GPU 临界排队</button>
+      <button type="button" aria-pressed="false" data-scenario="recovery">崩溃后恢复</button>
+      <button type="button" aria-pressed="false" data-scenario="all">完整架构</button>
+    </nav>
+
+    <section class="architecture" aria-label="Harness 分层架构">
+      <div class="layer tenant-layer">
+        <aside class="layer-label"><span class="layer-index">LAYER 01</span><h2>租户层</h2><p>身份、长期工作上下文、任务来源</p></aside>
+        <div class="layer-content tenant-grid">
+          <article class="node" id="tenant" data-group="tenant"><h3>Tenant</h3><p>配额与公平性的主体</p><span class="id">tenant-a</span></article>
+          <div class="arrow" id="a-tenant-session"></div>
+          <article class="node" id="harness-session" data-group="tenant"><h3>HarnessSession</h3><p>稳定的业务会话身份；关联多次用户任务</p><span class="id">session-s100</span></article>
+          <div class="arrow" id="a-session-input"></div>
+          <article class="node" id="user-input" data-group="tenant"><h3>User Input</h3><p>一次新输入/追问</p><span class="id">“读取 README”</span></article>
+        </div>
+      </div>
+
+      <div class="vertical-flow"><span>身份与会话路由</span><span>创建执行</span><span>状态控制</span><span>运行时调用</span><span>资源反馈</span></div>
+
+      <div class="layer service-layer">
+        <aside class="layer-label"><span class="layer-index">LAYER 02</span><h2>服务层</h2><p>调度、策略、队列、恢复的真正负责人</p></aside>
+        <div class="layer-content service-grid">
+          <article class="node" id="run-service" data-group="service"><h3>RunService</h3><p>创建并推进 AgentRun 状态</p></article>
+          <article class="node" id="policy" data-group="service"><h3>ExecutionPolicy</h3><p>MVP 规则基线；未来 Guarded Agentic</p></article>
+          <article class="node" id="queue" data-group="service"><h3>RunQueue</h3><p>Tenant round-robin 公平排队</p></article>
+          <article class="node" id="resource-observer" data-group="service"><h3>ResourceObserver</h3><p>采集 GPU Snapshot</p></article>
+          <article class="node" id="checkpoint-service" data-group="service"><h3>CheckpointService</h3><p>寻找安全恢复边界</p></article>
+          <div class="service-link-row"></div>
+        </div>
+      </div>
+
+      <div class="vertical-flow"><span>创建/更新</span><span>策略决定</span><span>排队释放</span><span>事件归档</span><span>恢复指令</span></div>
+
+      <div class="layer domain-layer">
+        <aside class="layer-label"><span class="layer-index">LAYER 03</span><h2>运行事实层</h2><p>可查询、可审计、可恢复的数据</p></aside>
+        <div class="layer-content domain-grid">
+          <article class="node" id="agent-run" data-group="domain">
+            <h3>AgentRun</h3><p>一次输入从 QUEUED 到终态</p><span class="id">run-r001</span>
+          </article>
+          <div class="arrow" id="a-run-history"></div>
+          <article class="node" id="run-history" data-group="domain">
+            <h3>同一 Session 的 Run 序列</h3>
+            <div class="run-stack">
+              <div class="mini-run current"><strong>R-001</strong><span>读 README</span></div>
+              <div class="mini-run"><strong>R-002</strong><span>继续解释</span></div>
+            </div>
+          </article>
+          <div class="arrow" id="a-run-facts"></div>
+          <article class="node" id="run-facts" data-group="domain"><h3>RunEvent · ToolExecution · Checkpoint</h3><p>发生过什么、工具是否执行、安全点在哪里</p></article>
+        </div>
+      </div>
+
+      <div class="vertical-flow"><span>执行命令</span><span>事件回传</span><span>会话引用</span><span>工具治理</span><span>结果持久化</span></div>
+
+      <div class="layer agent-layer">
+        <aside class="layer-label"><span class="layer-index">LAYER 04</span><h2>Agent 层</h2><p>把 Harness 命令翻译为 Pi 的执行</p></aside>
+        <div class="layer-content agent-grid">
+          <article class="node" id="agent-runtime" data-group="agent"><h3>AgentRuntime</h3><p>start · resume · interrupt · subscribe</p><span class="id">Harness Port</span></article>
+          <div class="arrow" id="a-runtime-adapter"></div>
+          <article class="node" id="pi-adapter" data-group="agent"><h3>PiAdapter</h3><p>隔离 Pi 类型、路由活跃执行、翻译事件</p></article>
+          <div class="arrow" id="a-adapter-session"></div>
+          <article class="node" id="pi-session" data-group="agent"><h3>PiAgentSession</h3><p>保存多轮历史、上下文压缩与 Pi 内部状态</p><span class="id">piSessionRef</span></article>
+          <div class="arrow bidirectional" id="a-session-tool"></div>
+          <article class="node" id="tool-gateway" data-group="agent"><h3>ToolGateway</h3><p>副作用分类、幂等、执行记录</p></article>
+        </div>
+      </div>
+
+      <div class="vertical-flow"><span>模型请求</span><span>资源消耗</span><span>流式结果</span><span>工具动作</span><span>监控指标</span></div>
+
+      <div class="layer infra-layer">
+        <aside class="layer-label"><span class="layer-index">LAYER 05</span><h2>推理/基础设施层</h2><p>真正消耗 GPU 或改变外部世界</p></aside>
+        <div class="layer-content infra-grid">
+          <article class="node" id="vllm" data-group="infra"><h3>vLLM</h3><p>模型请求、batching、Prefill/Decode、KV Cache</p></article>
+          <article class="node" id="gpu" data-group="infra"><h3>GPU</h3><p>VRAM、利用率、活跃模型请求</p><span class="id">NORMAL / BUSY / CRITICAL</span></article>
+          <article class="node" id="workspace" data-group="infra"><h3>Workspace / 外部系统</h3><p>文件、命令、API；工具副作用实际发生处</p></article>
+        </div>
+      </div>
+    </section>
+
+    <section class="relationship-panel">
+      <div class="relationship-map">
+        <h2>核心基数关系</h2>
+        <div class="cardinality">
+          <div class="entity"><b>Tenant</b><small>公平性主体</small></div>
+          <div class="relation"><b>1 : N</b>拥有</div>
+          <div class="entity"><b>HarnessSession</b><small>长期业务会话</small></div>
+          <div class="relation"><b>1 : N</b>产生</div>
+          <div class="entity"><b>AgentRun</b><small>单次受控执行</small></div>
+        </div>
+        <div class="mapping-note"><strong>运行时映射：</strong>一个 HarnessSession 在同一时刻通常关联一个活跃的 <code>piSessionRef</code>；多个 AgentRun 按顺序使用该 PiAgentSession 的历史上下文。AgentRun 不保存整段消息历史，只保存自己的输入、状态、事件和恢复信息。</div>
+      </div>
+      <aside class="detail-panel">
+        <div class="step" id="detail-step">场景 01 · 首次任务</div>
+        <h3 id="detail-title">先创建 Run，再决定是否执行</h3>
+        <p id="detail-text">用户输入属于 HarnessSession；RunService 为这一次输入创建 AgentRun。ExecutionPolicy 基于 ResourceObserver 决定是否启动；MVP 使用确定性规则，未来允许 Scheduling Agent 在硬约束内提出建议。通过准入后，PiAdapter 创建或打开 PiAgentSession，再调用 prompt。</p>
+        <div class="owner" id="detail-owner"><span class="badge">业务身份：HarnessSession</span><span class="badge">执行单位：AgentRun</span><span class="badge">历史上下文：PiAgentSession</span></div>
+      </aside>
+    </section>
+
+    <div class="bottom-note"><strong>最重要的纠偏：</strong>HarnessSession 不负责观察 GPU、排队或恢复；它只是这些服务共同使用的稳定业务上下文。真正调度的是服务层，真正执行的是 Agent 层，真正消耗资源的是基础设施层。Scheduling Agent 即使以后加入，也只在服务层的 Hard Guardrails 内提供建议，不能绕过安全边界。</div>
+  </main>
+
+  <script>
+    const scenarios = {
+      "new-run": {
+        step: "场景 01 · 首次任务",
+        title: "先创建 Run，再决定是否执行",
+        text: "用户输入属于 HarnessSession；RunService 为这一次输入创建 AgentRun。ExecutionPolicy 基于 ResourceObserver 决定是否启动；MVP 使用确定性规则，未来允许 Scheduling Agent 在硬约束内提出建议。通过准入后，PiAdapter 创建或打开 PiAgentSession，再调用 prompt。",
+        owner: ["业务身份：HarnessSession", "执行单位：AgentRun", "历史上下文：PiAgentSession"],
+        nodes: ["tenant", "harness-session", "user-input", "run-service", "policy", "resource-observer", "agent-run", "agent-runtime", "pi-adapter", "pi-session", "vllm", "gpu"],
+        arrows: ["a-tenant-session", "a-session-input", "a-runtime-adapter", "a-adapter-session"]
+      },
+      "follow-up": {
+        step: "场景 02 · 同一会话追问",
+        title: "新 Run，复用同一段会话历史",
+        text: "第二次用户输入仍属于 S-100，但会创建新的 R-002。PiAdapter 根据 S-100 的 piSessionRef 打开同一个 Pi 会话历史，因此模型能理解“继续解释”指向上一轮内容。",
+        owner: ["Session 不变：S-100", "新执行：R-002", "复用历史：piSessionRef"],
+        nodes: ["tenant", "harness-session", "user-input", "run-service", "agent-run", "run-history", "agent-runtime", "pi-adapter", "pi-session", "vllm"],
+        arrows: ["a-tenant-session", "a-session-input", "a-run-history", "a-runtime-adapter", "a-adapter-session"]
+      },
+      "critical": {
+        step: "场景 03 · GPU 临界",
+        title: "Run 存在，但暂时不触发 Pi",
+        text: "ResourceObserver 返回 CRITICAL。Hard Guardrail 禁止启动，ExecutionPolicy 记录 QUEUE 决策，RunQueue 保存 R-001。未来 Scheduling Agent 可以解释趋势并提出建议，但不能突破绝对显存安全线；GPU 恢复后由服务层重新准入。",
+        owner: ["观测：ResourceObserver", "安全边界：Hard Guardrail", "决策：ExecutionPolicy", "等待：RunQueue"],
+        nodes: ["tenant", "harness-session", "user-input", "run-service", "policy", "queue", "resource-observer", "agent-run", "run-facts", "gpu"],
+        arrows: ["a-tenant-session", "a-session-input", "a-run-facts"]
+      },
+      "recovery": {
+        step: "场景 04 · 崩溃恢复",
+        title: "Checkpoint 决定能否安全继续",
+        text: "CheckpointService 读取 RunEvent、ToolExecution 和 Checkpoint。它确认安全边界后调用 AgentRuntime.resume；PiAdapter 根据 runtimeSessionRef 重新打开 PiAgentSession。不可确定副作用的工具不会自动重放。",
+        owner: ["事实：RunEvent", "安全边界：Checkpoint", "继续执行：AgentRuntime.resume"],
+        nodes: ["harness-session", "run-service", "checkpoint-service", "agent-run", "run-facts", "agent-runtime", "pi-adapter", "pi-session", "tool-gateway", "workspace"],
+        arrows: ["a-run-facts", "a-runtime-adapter", "a-adapter-session", "a-session-tool"]
+      },
+      "all": {
+        step: "完整架构",
+        title: "五层协作，但职责互不混用",
+        text: "租户层提供身份和长期上下文；服务层负责控制；运行事实层提供持久证据；Agent 层驱动 Pi；基础设施层真正推理或产生外部副作用。",
+        owner: ["控制面：Harness", "Agent Loop：Pi", "推理执行：vLLM"],
+        nodes: "all",
+        arrows: "all"
+      }
+    };
+
+    const nodeElements = [...document.querySelectorAll(".node")];
+    const arrowElements = [...document.querySelectorAll(".arrow")];
+    const buttons = [...document.querySelectorAll("[data-scenario]")];
+    const detailStep = document.getElementById("detail-step");
+    const detailTitle = document.getElementById("detail-title");
+    const detailText = document.getElementById("detail-text");
+    const detailOwner = document.getElementById("detail-owner");
+
+    function selectScenario(name) {
+      const scenario = scenarios[name];
+      const allNodes = scenario.nodes === "all";
+      const allArrows = scenario.arrows === "all";
+
+      nodeElements.forEach((node) => {
+        const selected = allNodes || scenario.nodes.includes(node.id);
+        node.classList.toggle("active", selected && !allNodes);
+        node.classList.toggle("dim", !selected);
+      });
+      arrowElements.forEach((arrow) => {
+        const selected = allArrows || scenario.arrows.includes(arrow.id);
+        arrow.classList.toggle("active", selected && !allArrows);
+        arrow.classList.toggle("dim", !selected);
+      });
+      buttons.forEach((button) => button.setAttribute("aria-pressed", String(button.dataset.scenario === name)));
+      detailStep.textContent = scenario.step;
+      detailTitle.textContent = scenario.title;
+      detailText.textContent = scenario.text;
+      detailOwner.innerHTML = scenario.owner.map((item) => `<span class="badge">${item}</span>`).join("");
+    }
+
+    buttons.forEach((button) => button.addEventListener("click", () => selectScenario(button.dataset.scenario)));
+    selectScenario("new-run");
+  </script>
+</body>
+</html>

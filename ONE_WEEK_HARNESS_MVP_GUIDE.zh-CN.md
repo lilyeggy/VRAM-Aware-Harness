@@ -1,9 +1,65 @@
 # Resource-Aware Agent Harness：一周 MVP 学习与实施手册
 
-> 文档版本：v1.0  
+> 文档版本：v1.3
 > 实施周期：7 天，每天约 6 小时  
 > 目标读者：理解 Agent 基础，但希望系统掌握 Harness、后端与资源感知的开发者  
 > 实施原则：你主写、我指导；每个阶段先理解边界，再实现，再用测试证明
+>
+> **状态更新（2026-08-12）**：Day 1–7 本地工程闭环已经完成。本文冻结为 MVP
+> 的学习、设计与验收记录，不再作为后续实现入口。当前统一按照
+> [`docs/multi-tenant-agent-task-service-roadmap.zh-CN.md`](docs/multi-tenant-agent-task-service-roadmap.zh-CN.md)
+> 推进，产品与技术边界见
+> [`ADR 0009`](docs/adr/0009-build-a-multi-tenant-agent-task-service.md)。
+>
+> 推理基线更新（2026-07-30）：当前使用单卡 RTX A6000 48 GB；
+> Qwen3.5-4B 用于日常开发，Qwen3.5-9B 用于主要集成验证。vLLM fork 可修改，
+> 但 MVP 不依赖深度重写 Scheduler。见
+> [`ADR 0005`](docs/adr/0005-use-replaceable-models-and-extensible-vllm.md)。
+
+## 0. MVP 阶段的历史定位
+
+本项目构建的是面向资源受限的自托管推理环境、兼具安全恢复与资源感知准入的
+Agent Harness，不是另一套 Prompt、Memory、Agent Loop 或多租户管理后台。
+
+Day 1–7 使用的阶段定义是：
+
+> **VRAM-Aware Agent Harness 是一个面向资源受限的自托管推理环境、围绕
+> 可替换 Agent Runtime 构建的可靠执行控制面：它持久化 Run 与工具副作用，
+> 在安全边界恢复失败任务，并依据实时资源事实控制新执行的准入与背压。**
+
+Pi 负责模型—工具循环、Session 历史和上下文压缩；Harness 负责模型能力不会
+自动解决的确定性边界：
+
+- Session、Run、ModelCall 与 ToolExecution 的身份和生命周期；
+- 状态机、事件、事务、幂等、Checkpoint 与失败恢复；
+- 工具副作用分类、结果复用和可自动重放边界；
+- 共享 GPU 上的准入、并发 slot、排队、背压与资源恢复后的自动推进；
+- usage、成本、资源快照、策略理由和执行结果的审计。
+
+`tenantId` 已经从 Day 2 起进入 AgentRun，后续 Store、Service、Queue 和 Policy
+继续保留 Tenant 上下文；但它是共享资源场景下的归属与公平性约束，不是本项目
+需要扩张的产品主线。Day 6 用两个 Tenant 证明 slot 不会被单一提交方持续抢占，
+不建设认证、计费或企业租户管理能力。
+
+第一周只承诺逻辑隔离与公平性语义，不承诺完整认证、RBAC、网络隔离或容器级
+Workspace 安全。多租户边界的完整决策见
+[`ADR 0004`](docs/adr/0004-multi-tenancy-as-first-class-boundary.md)。
+
+“不做 Agent 行为框架”不等于提示、上下文和长期行为可靠性已经解决，而是明确
+工程所有权：这些能力优先交给模型和可替换 Runtime；Harness 只持有执行控制所
+必需的上下文版本、权限、成本和恢复事实。
+
+这份手册的范围必须按三个层级理解：
+
+1. **MVP 的核心能力**：副作用感知的安全恢复、资源感知的准入/背压、可审计与可观测；这些能力在新方向中继续保留。
+2. **第一周 MVP**：单进程 + SQLite 的纵向切片，验证恢复边界、确定性准入、
+   slot 生命周期、自动续跑和最小公平性。
+3. **当前正式方向**：面向团队共享本地模型的多租户 Agent 任务服务；优先补齐
+   可信身份、Tenant Workspace、真实 Sandbox、编排恢复和用户结果闭环，A6000
+   实验与隔离攻击测试提供可信证据，异构 Runtime 与深度调度暂停。
+
+系统可以在本地只配置一个 Tenant；共享部署时保持 **tenant-aware by design**，
+不能让隐式“当前用户”进入领域模型、存储访问和 slot 计算。
 
 ## 1. 一周后要交付什么
 
@@ -27,15 +83,24 @@ RunEvent、ToolExecution 与 Checkpoint 持久化
 任务完成，或者在安全边界上恢复
 ```
 
-最终演示必须同时证明五件事：
+最终演示必须同时证明六件事：
 
 1. Pi 已经替代仓库里自研的 Agent Loop，Harness 不再重复维护模型—工具循环。
 2. 每次执行都有独立、可查询、可恢复的 `AgentRun`。
 3. 模型调用、工具调用和状态变化都可以通过事件还原。
 4. 进程重启后，至少能从一个安全 Checkpoint 继续任务。
-5. GPU 资源压力能够改变新 Run 的启动顺序，并留下可解释的策略记录。
+5. GPU 资源压力能够令新 Run 排队，压力解除后系统无需用户操作即可继续，并留下可解释的策略记录。
+6. 两个 Tenant 共享受限 slot 时不会因全局 FIFO 或单一大户而永久饥饿。
 
-如果这五点成立，我们得到的就不是聊天 API 包装器，也不是显存监控脚本，而是一个真正的 Resource-Aware Agent Harness 原型。
+如果这六点成立，我们得到的就不是聊天 API 包装器，也不是显存监控脚本，而是一个真正的 Resource-Aware Agent Harness 原型。
+
+本周所有实现都应服务于同一个验证问题：
+
+> 在不修改 Pi、且不依赖深度重写 vLLM Scheduler 的情况下，Harness 能否依据
+> Run 状态、工具副作用和真实资源事实，安全地控制新任务启动，并在故障或资源
+> 压力解除后自动、可解释地继续执行？
+
+无法帮助回答这个问题的功能不进入本周关键路径。
 
 ## 2. 本周如何学习，而不只是赶代码
 
@@ -50,13 +115,15 @@ RunEvent、ToolExecution 与 Checkpoint 持久化
 
 我们的协作约定：
 
-- 你先根据当天任务写第一版，我负责解释设计、审查代码、定位问题和给出下一步。
+- 每个检查点先讲清核心逻辑，再由你判断这一小步是你实现还是我实现；未经确认不跨到下一步。
 - 遇到问题时，先描述“期望状态、实际状态、事件序列”，不要只贴最后一条报错。
 - 我不会默认替你把整个模块写完；如果某个概念卡住，我会先用最小例子讲清楚。
 - 每天必须通过验收门槛后再进入下一天，避免在不稳定地基上堆功能。
 - 每天结束写一段 5～10 行的工程日志：做了什么、为什么这样设计、还有什么不确定。
 
 ## 3. 当前仓库的真实起点
+
+> 2026-07-22 更新：完成 Pi Spike 并确认新边界后，旧自研 Agent 原型及其测试已经删除。以下列表保留为项目迁移前的历史起点；当前源码以 `src/runtime/` 和 `src/spikes/` 为准。
 
 当前根项目已经有以下原型能力：
 
@@ -71,19 +138,19 @@ RunEvent、ToolExecution 与 Checkpoint 持久化
 
 | 当前情况 | 一周 MVP 的处理 |
 | --- | --- |
-| 自研 Agent Loop | 停止扩展，由 PiAdapter 取代 |
-| Session 存在内存 Map | 引入 SQLite 持久化 AgentRun 与事件 |
-| LLMClient 直接调用 vLLM | Agent 主路径交给 Pi；保留代码作为旧原型 |
-| ContextManager 自行压缩 | 本周交给 Pi，Harness 只记录 Context 元数据 |
-| `src/kv/*` 主动设计驱逐 | 保留为实验，不进入 MVP 主路径 |
+| 自研 Agent Loop | 已删除，由 PiAdapter 取代 |
+| Session 存在内存 Map | 已删除；已引入 SQLite 持久化 AgentRun 与事件 |
+| LLMClient 直接调用 vLLM | 已删除；Agent 主路径交给 Pi |
+| ContextManager 自行压缩 | 已删除；本周交给 Pi，Harness 只记录 Context 元数据 |
+| `src/kv/*` 主动设计驱逐 | 已删除，不进入 MVP 主路径 |
 | 没有 ToolExecution | 新增 ToolGateway 和独立执行记录 |
 | 没有 Checkpoint/Recovery | 新增安全边界与恢复规则 |
 | 没有资源观测 | 新增真实和 Fake ResourceObserver |
 | 没有多用户调度 | 新增单进程公平队列 |
 
-现有代码暂时不删除。新实现与旧原型并行存在，等 MVP 跑通后再决定哪些代码迁移、归档或移除。
+旧实现已从工作树删除，Git 历史继续保留其演进过程。后续不再维护两套 Agent Loop。
 
-根目录测试命令也需要收窄到 Harness 自己的 `tests/`，避免误扫描 `explainer-site` 和 `agentic-rl-lab` 的测试。
+根目录测试命令限定在 Harness 自己的 `tests/`，让测试范围保持明确。
 
 ## 4. 一周范围
 
@@ -145,9 +212,13 @@ RunEvent、ToolExecution 与 Checkpoint 持久化
 - 请求级推理调度；
 - Prefill、Decode 和 batching；
 - Prefix Cache 与 KV Cache；
-- GPU 内存分配和推理执行。
+- GPU 内存分配和推理执行；
+- 提供 Metrics，并承载必要的请求归因和观测扩展点。
 
-最重要的边界是：Harness 可以根据资源状态决定“何时提交模型请求”，但本周不接管 vLLM 内部的物理缓存管理。
+在资源控制这一层，Harness 可以根据资源状态决定“是否以及何时提交模型请求”，
+但本周不接管 vLLM 内部的 token 调度和物理缓存管理。我们可以修改 vLLM fork
+来增加 Tenant/Run/Trace 归因、Metrics 或实验性 hint；这些改动不能把 Run
+生命周期、工具副作用、权限和恢复语义下沉到推理层。
 
 ## 6. 第一版技术选择
 
@@ -155,14 +226,21 @@ RunEvent、ToolExecution 与 Checkpoint 持久化
 | --- | --- | --- |
 | 语言与运行时 | TypeScript + Bun | 与当前仓库一致，开发速度快 |
 | Agent Runtime | Pi Coding Agent SDK | 复用成熟 Agent Loop、Session 和工具机制 |
-| 模型服务 | 现有 vLLM OpenAI-compatible API | 不新增推理部署工作 |
+| 模型服务 | 可修改的 vLLM fork + OpenAI-compatible API | 保持标准调用面，同时允许增加观测和请求归因 |
+| 模型基线 | Qwen3.5-4B 开发，Qwen3.5-9B 主验证 | 缩短开发反馈，同时保留真实集成压力 |
+| 硬件基线 | 单卡 RTX A6000 48 GB | 与实验室当前可用设备一致 |
 | 持久化 | SQLite | 无额外服务，支持事务和进程重启 |
 | API | Bun HTTP 或轻量框架 | 第一周只需要少量接口 |
-| 资源观测 | `nvidia-smi` + Fake 实现 | 真实环境与本地测试都可运行 |
-| 调度 | 单进程内存队列 | 足以验证公平性和资源策略 |
+| 资源观测 | vLLM Metrics/事件 + `nvidia-smi` 回退 + Fake | 优先使用请求级事实，同时保留设备级读数和确定性测试 |
+| 调度 | 单进程内存队列 + 确定性策略基线 | 足以验证公平性、安全回退，并为后续 Agentic Policy 提供对照 |
 | 测试 | Bun Test + Fake Runtime | 快速、可重复、避免依赖真实 GPU |
 
 Pi 依赖必须固定精确版本，不能使用浮动的 `latest`。开始安装前需要再次确认当前官方包名、版本和 SDK 导出，记录到 ADR 中。
+
+模型相关配置同样必须与 Harness 业务逻辑分离。当前 Qwen3.5 集成使用兼容的
+vLLM 版本，并在部署配置中设置 `qwen3` reasoning parser、`qwen3_coder` tool
+call parser 和自动工具选择。真实模型先使用 16K `max-model-len`，确有需要时再
+提升到 32K。
 
 ## 7. 六个核心对象
 
@@ -385,7 +463,7 @@ subscribe(runId, handler)
 - 能连接真实 vLLM；
 - Pi 确实完成至少一次工具调用；
 - 可以看到结构化事件，而不只是终端文本；
-- 不修改当前自研 `AgentLoop` 来实现新功能；
+- 不重新引入自研 `AgentLoop`；
 - 有一个不依赖真实模型的 Fake Runtime 测试。
 
 ### 当天必须回答
@@ -431,29 +509,42 @@ subscribe(runId, handler)
 3. 哪些写入必须在同一事务中？
 4. Event payload 如何做版本兼容？
 
-## Day 3：把 Pi 事件转换成 Harness 事件
+## Day 3：把 Runtime 事件转换成可持久化 Harness 事件
+
+当前代码已经由 `PiAdapter` 完成 `Pi AgentSessionEvent -> RuntimeEvent` 的适配。
+因此 Day 3 不再新增一个直接依赖 Pi SDK 的持久化桥接层，而是实现
+`RuntimeEventBridge`，负责 `RuntimeEvent -> RunEvent` 的业务筛选和转换。
+这样未来替换 Agent Runtime 时，RunEvent、RunStore 和事件时间线仍然可以保留。
+
+Day 3 只在模型调用事件缺失时对 `PiAdapter` 做小范围增量扩展，不重写
+`PiAdapter`，也不让 `RunStore` 接触 Pi 原始事件。
 
 ### 今天真正要理解的概念
 
 - Anti-corruption Layer；
 - 外部事件与领域事件；
 - 流式事件、完成事件和持久事件的差别；
+- Runtime 生命周期事件与持久化业务事件的职责边界；
 - At-least-once 事件下的去重。
 
 ### 编码任务
 
-1. 实现 `PiEventBridge`。
-2. 建立 Pi 事件到 RunEvent 的显式映射表。
-3. 只持久化具有业务意义的边界事件。
-4. Token delta 可以流式展示，但不要逐 token 写数据库。
-5. 记录模型调用开始、完成、耗时和 usage。
+1. 实现 `RuntimeEventBridge`，输入可信的 `TenantRunContext + RuntimeEvent`，输出带 Tenant 归属的可持久化事件草稿或 `null`。
+2. 建立 `Pi AgentSessionEvent -> RuntimeEvent -> RunEvent` 的显式映射表。
+3. 将事件分成三类：RunService 已处理的生命周期事件、需要追加的业务事件、只用于流式展示的瞬时事件。
+4. Token delta 可以流式展示，但 `RuntimeEventBridge` 必须返回 `null`，不要逐 token 写数据库。
+5. 扩展模型调用开始/完成 RuntimeEvent，并记录模型、耗时、stop reason 和 usage。
+6. 为持久事件建立稳定的去重键，并用 migration v2 和唯一约束阻止重复业务事件；追加前必须校验事件所属 Run 归当前 Tenant。
+7. 将 Bridge 接入 RunService，但不得重复写入 `RUN_STARTED`、`RUN_COMPLETED`、`RUN_FAILED` 等生命周期事件。
 
 ### 验收门槛
 
 - 一次 Run 的事件能够按时间线打印；
 - 不会因为流式 token 产生数千条数据库事件；
-- 相同 Pi 事件重复到达时不会制造重复业务事件；
-- Pi 升级导致未知事件时，系统可以记录告警而不是崩溃。
+- 模型完成事件包含耗时和 usage；
+- 相同 Runtime/Pi 事件重复到达时不会制造重复业务事件；
+- RunService 与 Bridge 不会重复写入同一个生命周期事实；
+- Pi 或 Runtime 升级导致未知事件时，系统可以记录告警而不是崩溃。
 
 ### 当天必须回答
 
@@ -462,6 +553,12 @@ subscribe(runId, handler)
 3. 模型请求和 Agent Step 是不是同一个对象？
 
 ## Day 4：ToolGateway、Checkpoint 与恢复
+
+> **完成记录（2026-07-28）**：Day 4 编码与组件级故障测试已完成。
+> 当前 Harness 测试共 48 个通过。已实现 ToolExecution 持久化、Pi 工具统一
+> 接入 ToolGateway、结果与 Checkpoint 原子提交、启动恢复扫描、
+> RecoveryDecision、RecoveryExecutor 和 RunService.resume。真实进程终止后
+> 连接 Pi/vLLM 的端到端恢复演示留到 Day 7。
 
 ### 今天真正要理解的概念
 
@@ -513,7 +610,7 @@ subscribe(runId, handler)
 
 1. 定义 `ResourceObserver` 接口。
 2. 实现 Fake ResourceObserver。
-3. 实现 `nvidia-smi` 采集器。
+3. 实现 vLLM Metrics 观测器，并以 `nvidia-smi` 作为设备级回退。
 4. 将资源状态归一为 `NORMAL / BUSY / CRITICAL`。
 5. 实现只作用于“新模型执行是否启动”的 ExecutionPolicy。
 6. 保存 PolicyDecision。
@@ -527,6 +624,11 @@ NORMAL：在全局并发上限内启动
 ```
 
 阈值必须配置化。测试策略时使用 Fake Snapshot，不依赖机房 GPU 当前恰好处于某种状态。
+
+这套规则是 **Deterministic Baseline**。第一周先用它证明观测、决策、持久化、
+排队和恢复链路正确；完成真实基线后再由数据决定是否需要成本模型、SLO 或
+Scheduling Agent。当前完成标准不包含 LLM 调度器。边界见
+[`ADR 0006`](docs/adr/0006-narrow-mvp-to-recovery-and-resource-admission.md)。
 
 ### 验收门槛
 
@@ -543,23 +645,48 @@ NORMAL：在全局并发上限内启动
 3. 资源采集失败时应该 fail-open 还是 fail-closed？
 4. 为什么不能在 CRITICAL 时直接杀掉所有 Run？
 
-## Day 6：最小多租户公平队列
+## Day 6：资源队列、slot 生命周期与最小公平性
+
+Day 6 不需要连接服务器、真实 GPU 或真实 vLLM。队列、slot、资源状态切换和
+RunService 编排全部先用 Fake Runtime、Fake ResourceObserver 与临时 SQLite
+确定性验证；服务器只在 Day 7 的真实闭环与对照实验中使用。
+
+### 完成状态（2026-08-05）
+
+Day 6 已完成，并通过 55 项调度、准入和 RunService 相关确定性测试：
+
+- `TenantRunScheduler` 实现 Tenant 内 FIFO、Tenant 间 round-robin，以及全局和
+  单 Tenant 并发限制；
+- `claimNext` 将选择 Run 与登记 slot 合并为同一个同步调度动作；
+- `RunQueueCoordinator` 接通 Admission、RunService、slot 释放、single-flight
+  drain、pending drain 和单 Run 故障隔离；
+- `RunQueuePump` 定期重检等待队列，Fake 资源从 `CRITICAL` 切换到 `NORMAL`
+  后，Run 无需重新提交或手动 drain 即可自动启动；
+- `A1、A2、A3、B1` 在全局并发为 1 时的确定性顺序为
+  `A1 -> B1 -> A2 -> A3`；Runtime 启动失败不会泄漏 slot，也不会阻塞后续 Run。
+
+当前 MVP 将公平性主体定义为 Tenant，而不是 Session。slot 采用保守的 Run 级
+语义：从 Run 启动到进入终态始终占用，包括工具执行期间。若未来只计算模型执行
+阶段，则必须先增加运行阶段事件、slot 重新竞争和恢复预留机制，不能直接在工具
+调用时释放。
 
 ### 今天真正要理解的概念
 
-- Tenant 是资源与公平性主体；
-- 全局并发和单用户并发；
+- slot 是准入时必须原子占用、终态时必须释放的执行资源；
+- 全局并发和单 Tenant 并发；
 - FIFO 的饥饿问题；
-- Backpressure。
+- Backpressure 与资源恢复后的自动推进。
 
 ### 编码任务
 
-1. 所有 Run 必须携带 `tenantId`。
-2. 实现全局并发上限。
-3. 实现单 Tenant 并发上限。
-4. 实现简单 round-robin tenant queue。
-5. Run 完成、失败或中断时释放 slot。
-6. 增加查询队列位置和排队原因的接口。
+1. 保持所有 Run 携带 `tenantId`，但不新增租户管理功能。
+2. 实现全局并发上限和单 Tenant 并发上限。
+3. 实现简单 round-robin tenant queue。
+4. `claimNext` 必须在选中 Run 的同时登记 slot，防止计划与占用分离后被其他 Run 抢占。
+5. Run 完成、失败或中断时幂等释放 slot，并立即尝试推进下一项。
+6. ResourceSnapshot 从 `CRITICAL/BUSY` 恢复后触发 drain，使排队 Run 无需用户再次操作即可启动。
+7. 将队列和 `ExecutionPolicy` 接入 `RunService`，保存排队原因、准入决策和资源快照引用。
+8. 增加查询队列位置、排队原因、活跃 slot 的接口。
 
 ### 验收场景
 
@@ -569,16 +696,36 @@ Tenant B 提交 B1
 全局并发为 1
 ```
 
-期望 B1 不会永远排在 A 的所有任务之后。具体顺序由策略定义，但必须可解释、可测试。
+期望 B1 不会永远排在 A 的所有任务之后。具体顺序由策略定义，但必须可解释、
+可测试，并且 `claimNext` 返回 Run 时相应 slot 已经属于该 Run。
+
+还必须验证资源闭环：`CRITICAL` 时新 Run 入队，状态切回 `NORMAL` 后自动 claim
+并启动；若 Runtime 启动失败，slot 不得泄漏，队列仍可继续推进。
 
 ### 当天必须回答
 
-1. Session 和 Tenant 谁是公平性主体？
-2. 为什么仅使用全局 FIFO 可能不公平？
-3. Run 什么时候占用 slot，什么时候释放？
-4. 工具长时间执行时是否占用模型并发 slot？
+1. Tenant 是公平性主体；Session 继续作为恢复和 Runtime 关联边界。
+2. 全局 FIFO 会让单个 Tenant 的连续提交长期排在其他 Tenant 之前；Tenant
+   round-robin 在保留 Tenant 内 FIFO 的同时避免这种饥饿。
+3. 选中 Run 和占用 slot 必须是同一个调度动作，否则多个调度尝试可能同时看到
+   空闲容量并超额启动。
+4. 当前工具长时间执行仍占用 Run 级并发 slot；模型阶段 slot 拆分留待真实测量
+   证明有必要后再设计。
 
 ## Day 7：集成、演示和复盘
+
+> **本地完成记录（2026-08-05）**：Day 7 的确定性与本地进程闭环已完成。
+> 当前源码已包含应用 Composition Root、配置加载、进程入口、优雅关闭、8 个 HTTP
+> 端点、启动时队列重建、可恢复 Run 扫描、资源恢复自动续跑、Fake 固定演示和真实
+> loopback HTTP smoke。恢复任务不会绕过调度器：它与新任务一样重新经过
+> ExecutionPolicy 和 slot 占用，最终才调用 `Runtime.resume`。
+> Harness 自身 153 项测试与严格 TypeScript 检查已经通过。
+>
+> 执行 `bun run demo:day7` 可直接查看 `CRITICAL -> NORMAL`、`start/resume`
+> 分流、RunEvent 和 PolicyDecision 时间线；启动真实服务后执行
+> `bun run smoke:http` 可验证 HTTP 纵向切片。A6000 + Pi/vLLM 的固定任务对照仍是
+> 外部环境验收项，执行方法见
+> `docs/day7-a6000-baseline-runbook.zh-CN.md`；在获得真实数据前不声明性能收益。
 
 ### 固定演示脚本
 
@@ -590,16 +737,23 @@ Tenant B 提交 B1
 6. 系统读取 Checkpoint 并继续。
 7. 资源恢复 NORMAL，排队 Run 启动。
 8. 最后打印每个 Run 的事件时间线和 PolicyDecision。
+9. 用同一组固定任务对比直接调用 Pi 与经过 Harness，记录完成率、排队时间、
+   P50/P95 延迟、资源峰值以及重复工具执行次数。
+
+其中 1–8 已由本地 Fake Demo 和 HTTP 集成测试覆盖；第 9 项必须在同一台 A6000、
+同一个 vLLM 实例、同一模型和同一组任务上执行，不能用 Fake Runtime 数据替代。
 
 ### 必须完成的测试
 
 - Run 状态机测试；
 - RunStore 事务测试；
-- PiEventBridge 映射测试；
+- RuntimeEventBridge 映射与去重测试；
 - ToolGateway 幂等性测试；
 - Checkpoint 恢复测试；
 - ExecutionPolicy 三档压力测试；
 - 多 Tenant 公平队列测试；
+- slot 泄漏与重复释放测试；
+- `CRITICAL -> NORMAL` 自动推进测试；
 - 一条端到端集成测试。
 
 ### 最终复盘问题
@@ -678,6 +832,7 @@ workspacePath
 | Tool | 有独立执行记录和副作用状态 | 只把结果塞回 Prompt |
 | Recovery | 至少一个安全边界可恢复 | 失败后重新从头运行 |
 | Resource | Snapshot 改变 START/QUEUE | 只展示显存数字 |
+| Auto progress | 资源恢复后队列自动推进 | 需要用户再次点击或重新提交 |
 | Fairness | 两个 Tenant 的确定性测试 | 全局无界并发 |
 | Explainability | 决策有 reason 和输入快照 | 只有“资源不足”字符串 |
 
@@ -692,7 +847,7 @@ workspacePath
 5. Fake ResourceObserver + Policy；
 6. 一个安全恢复点；
 7. 真实 `nvidia-smi`；
-8. 多 Tenant round-robin；
+8. 多 Tenant round-robin（不能砍掉基本 slot 队列与自动推进）；
 9. HTTP API。
 
 宁可最终使用 CLI，也不能为了做网页牺牲 Run、Event、Tool 和 Recovery。
@@ -703,9 +858,11 @@ workspacePath
 
 先写最小 Spike，只验证 Session、Provider、Tool 和 Event。不要同时接数据库。若官方包迁移或 API 变化，固定一个已验证版本并写 ADR。
 
-### DeepSeek 工具调用不稳定
+### 特定模型的工具调用不稳定
 
-先用一个已知支持 tool calling 的模型证明 Harness 流程，再单独定位模型模板和 vLLM 参数。Harness 正确性与特定模型兼容性必须分开测试。
+先用 Fake Runtime 证明 Harness 流程，再用 Qwen3.5-4B 快速定位模型模板、
+reasoning parser、tool call parser 和 vLLM 版本问题，最后用 Qwen3.5-9B 做主要
+集成验证。Harness 正确性与特定模型兼容性必须分开测试。
 
 ### Recovery 太复杂
 
@@ -715,22 +872,52 @@ workspacePath
 
 所有策略先由 Fake ResourceObserver 测试，真实 GPU 只做最后集成。不要让机房环境成为每天开发的前置条件。
 
-### 当前旧代码产生干扰
+### 旧实现重新产生干扰
 
-新模块使用新目录和新接口，不在旧 AgentLoop 中打补丁。等纵向切片完成后再迁移入口。
+新模块使用新目录和新接口，不重新引入 Agent Loop、直接 LLM Client 或主动 KV 驱逐逻辑；需要回顾旧实现时使用 Git 历史，不把它们恢复到主路径。
 
-## 15. 第一阶段后的方向
+## 15. 第一阶段后的正式方向
 
-一周 MVP 完成后，下一阶段按证据选择，而不是按想象扩张：
+Stage 1–2 已完成 Template、Instance、Capability、Attempt、Effective Policy 和
+最小 Sandbox 的 Pi 主路径迁移。根据 ADR 0009，后续以真实用户任务闭环为目标，
+依次推进：
 
-- 如果主要问题是排队和公平性：完善持久队列、优先级、配额和 SLO。
-- 如果主要问题是进程可靠性：完善 Worker lease、heartbeat 和恢复协议。
-- 如果主要问题是长上下文成本：建设 Context Compiler 和 Context Epoch。
-- 如果主要问题是重复 Prefill：测量 Prefix Cache 命中，再研究上下文稳定性。
-- 如果 KV 容量确实成为瓶颈：再进入 vLLM KV Event、Residency 或 Offload 实验。
-- 如果要服务真实团队：增加认证、Workspace 隔离、权限和审计。
+1. 建立 API Key/Principal 认证，所有外部访问由服务端派生 Tenant；
+2. 建立受管 Workspace 与 ExecutionProfile，禁止客户端传任意宿主机路径；
+3. 实现每 Attempt 的容器 Sandbox，让文件、命令、网络、Secret 和资源策略在
+   真实执行点生效；
+4. 保留并强化公平队列、准入、kill/restart、Checkpoint 与危险副作用恢复；
+5. 交付任务列表/详情、实时输出、最终回答、Diff、Artifact 和人工处理入口；
+6. 用 A6000 对照、跨租户攻击测试、故障注入和固定 Benchmark 形成可复现证据。
 
-## 16. 现在就开始：Day 1 第一个检查点
+完整任务、退出条件和停止规则只以
+[`docs/multi-tenant-agent-task-service-roadmap.zh-CN.md`](docs/multi-tenant-agent-task-service-roadmap.zh-CN.md)
+为准。Claude、异构 ResourcePool、多 Worker 和深度 vLLM 修改不进入当前主线；若
+实测暴露特定瓶颈，再按证据选择后续方向。
+
+### 15.1 可选的 Guarded Agentic Scheduling 路线
+
+只有基线数据证明值得研究时，资源策略才按四阶段推进，不能跳过基线直接让 LLM 接管：
+
+```text
+Deterministic Baseline
+  → Agent Shadow Mode
+  → Offline Evaluation
+  → Guarded Agentic Control
+```
+
+Scheduling Agent 的输入是结构化 `AdmissionContext`，至少包含 GPU 当前状态与趋势、活跃/排队 Run、预计工作量、Tenant 配额/SLO 和历史结果。它输出 `START / QUEUE / DEFER`、理由、置信度和有效期。
+
+不可由 Agent 修改的 Hard Guardrails 至少包括：
+
+- 观测过期或失败时不得假设资源充足；
+- 绝对显存安全线、并发上限和 Tenant 硬配额不可突破；
+- Agent 超时、不可用、低置信度或输出不合法时回退到确定性策略；
+- Scheduling Agent 与工作负载共享 GPU 时，过载状态不能依赖 Agent 完成安全决策。
+
+Shadow Mode 必须保存规则决定、Agent 建议、最终真实结果和差异。只有在 OOM、吞吐、排队时间、公平性、SLO、决策延迟与成本等指标上获得证据后，才允许 Agent 建议影响真实调度。
+
+## 16. 历史记录：Day 1 第一个检查点
 
 第一项工作不是写完整 PiAdapter，而是完成一个不超过半天的 Pi Spike：
 

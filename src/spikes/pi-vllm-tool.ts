@@ -10,7 +10,7 @@ import {
 
 // 说明当前工作目录以及模型 ID
 const cwd = process.cwd();
-const modelsPath = resolve(cwd,".pi/spike.models.json")
+const modelsPath = resolve(cwd,".pi/spike/models.json")
 const modelId = process.env.VLLM_MODEL_ID
 // 不写死 model ID，根据 vllm 实际返回的 /v1/models为准
 
@@ -85,7 +85,6 @@ try {
     unsubsribe();   // 结束监听
     session.dispose();  // 释放 pi session 资源
 }
-
 
 
 

@@ -1,0 +1,1143 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Agent Harness 工程基础交互讲解</title>
+  <style>
+    :root {
+      --bg: #08111d;
+      --panel: #0e1b2c;
+      --panel-2: #13243a;
+      --panel-3: #172d49;
+      --text: #eef5ff;
+      --muted: #9fb1c7;
+      --line: #2d4867;
+      --active: #83c5ff;
+      --tenant: #59d4c6;
+      --service: #7ab6ff;
+      --data: #c9a4ff;
+      --runtime: #ffd166;
+      --infra: #fb7185;
+      --ok: #8ee99f;
+      --warn: #ffd166;
+      --bad: #fb7185;
+      --shadow: 0 18px 48px rgba(0, 0, 0, .28);
+    }
+
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      color: var(--text);
+      background:
+        radial-gradient(circle at 20% -10%, rgba(122, 182, 255, .22), transparent 36rem),
+        radial-gradient(circle at 82% 8%, rgba(201, 164, 255, .14), transparent 34rem),
+        var(--bg);
+      font-family: Inter, "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+      line-height: 1.55;
+    }
+
+    button, select {
+      font: inherit;
+    }
+
+    .shell {
+      width: min(1500px, calc(100% - 28px));
+      margin: 0 auto;
+      padding: 34px 0 72px;
+    }
+
+    .hero {
+      display: grid;
+      grid-template-columns: minmax(0, 1.1fr) minmax(330px, .72fr);
+      gap: 22px;
+      align-items: stretch;
+      margin-bottom: 22px;
+    }
+
+    .hero-copy,
+    .mental-model,
+    .board,
+    .detail-panel,
+    .timeline,
+    .interview-panel {
+      border: 1px solid var(--line);
+      background: rgba(14, 27, 44, .88);
+      box-shadow: var(--shadow);
+      border-radius: 16px;
+    }
+
+    .hero-copy {
+      padding: 28px;
+    }
+
+    .kicker {
+      color: var(--active);
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: .12em;
+      text-transform: uppercase;
+    }
+
+    h1 {
+      margin: 8px 0 10px;
+      font-size: clamp(28px, 4vw, 52px);
+      line-height: 1.08;
+      letter-spacing: -.035em;
+    }
+
+    .subtitle {
+      margin: 0;
+      max-width: 900px;
+      color: var(--muted);
+      font-size: 15px;
+    }
+
+    .mental-model {
+      padding: 20px;
+    }
+
+    .mental-model h2,
+    .board h2,
+    .detail-panel h2,
+    .timeline h2,
+    .interview-panel h2 {
+      margin: 0 0 12px;
+      font-size: 18px;
+    }
+
+    .formula {
+      display: grid;
+      grid-template-columns: 1fr auto 1fr auto 1fr;
+      align-items: center;
+      gap: 8px;
+      margin-top: 14px;
+    }
+
+    .formula-box {
+      min-height: 78px;
+      border: 1px solid #395777;
+      background: var(--panel-2);
+      border-radius: 10px;
+      padding: 12px;
+    }
+
+    .formula-box strong {
+      display: block;
+      margin-bottom: 4px;
+      color: var(--text);
+      font-size: 14px;
+    }
+
+    .formula-box span {
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .plus {
+      color: var(--active);
+      font-size: 22px;
+      font-weight: 500;
+    }
+
+    .controls {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      align-items: center;
+      margin: 22px 0;
+      padding: 12px;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: rgba(8, 17, 29, .72);
+    }
+
+    .controls strong {
+      color: var(--muted);
+      font-size: 13px;
+      margin-right: 2px;
+    }
+
+    .pill {
+      border: 1px solid #395777;
+      color: #c8d8ea;
+      background: #0b1828;
+      border-radius: 999px;
+      padding: 8px 12px;
+      cursor: pointer;
+      font-size: 13px;
+    }
+
+    .pill:hover,
+    .pill[aria-pressed="true"] {
+      border-color: #eaf5ff;
+      background: #eaf5ff;
+      color: #071525;
+    }
+
+    .workspace {
+      display: grid;
+      grid-template-columns: minmax(0, 1.45fr) minmax(360px, .72fr);
+      gap: 18px;
+      align-items: start;
+    }
+
+    .board {
+      padding: 18px;
+      overflow: hidden;
+    }
+
+    .board-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: center;
+      margin-bottom: 14px;
+    }
+
+    .board-head p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .legend {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 9px 14px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .legend span {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      white-space: nowrap;
+    }
+
+    .dot {
+      width: 9px;
+      height: 9px;
+      border-radius: 999px;
+      background: var(--c);
+      box-shadow: 0 0 16px color-mix(in srgb, var(--c) 70%, transparent);
+    }
+
+    .layers {
+      display: grid;
+      gap: 10px;
+    }
+
+    .layer {
+      display: grid;
+      grid-template-columns: 128px 1fr;
+      border: 1px solid var(--line);
+      border-radius: 13px;
+      overflow: hidden;
+      background: rgba(8, 17, 29, .6);
+    }
+
+    .layer-label {
+      padding: 16px 14px;
+      border-right: 1px solid var(--line);
+      background: color-mix(in srgb, var(--layer-color) 12%, transparent);
+    }
+
+    .layer-label small {
+      display: block;
+      color: var(--layer-color);
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: .1em;
+    }
+
+    .layer-label strong {
+      display: block;
+      margin-top: 4px;
+      font-size: 15px;
+    }
+
+    .layer-label span {
+      display: block;
+      margin-top: 3px;
+      color: var(--muted);
+      font-size: 11px;
+    }
+
+    .lane {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(130px, 1fr));
+      gap: 10px;
+      padding: 14px;
+      align-items: stretch;
+    }
+
+    .tenant-layer { --layer-color: var(--tenant); }
+    .service-layer { --layer-color: var(--service); }
+    .data-layer { --layer-color: var(--data); }
+    .runtime-layer { --layer-color: var(--runtime); }
+    .infra-layer { --layer-color: var(--infra); }
+
+    .node {
+      min-height: 92px;
+      text-align: left;
+      cursor: pointer;
+      border: 1px solid #395777;
+      border-radius: 11px;
+      color: var(--text);
+      background: linear-gradient(160deg, rgba(23, 45, 73, .96), rgba(13, 29, 49, .96));
+      padding: 12px;
+      transition: opacity .2s, transform .2s, border-color .2s, box-shadow .2s;
+    }
+
+    .node::before {
+      content: "";
+      display: block;
+      width: 28px;
+      height: 3px;
+      border-radius: 5px;
+      margin-bottom: 9px;
+      background: var(--node-color);
+    }
+
+    .node h3 {
+      margin: 0 0 4px;
+      font-size: 14px;
+      font-weight: 500;
+    }
+
+    .node p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .node code {
+      display: inline-block;
+      margin-top: 8px;
+      padding: 2px 6px;
+      border-radius: 5px;
+      color: var(--node-color);
+      background: color-mix(in srgb, var(--node-color) 12%, transparent);
+      font-size: 11px;
+    }
+
+    .node[data-group="tenant"] { --node-color: var(--tenant); }
+    .node[data-group="service"] { --node-color: var(--service); }
+    .node[data-group="data"] { --node-color: var(--data); }
+    .node[data-group="runtime"] { --node-color: var(--runtime); }
+    .node[data-group="infra"] { --node-color: var(--infra); }
+
+    .node.active {
+      border-color: var(--node-color);
+      box-shadow: 0 0 0 1px var(--node-color), 0 0 28px color-mix(in srgb, var(--node-color) 34%, transparent);
+      transform: translateY(-2px);
+    }
+
+    .node.dim {
+      opacity: .28;
+    }
+
+    .side {
+      display: grid;
+      gap: 18px;
+    }
+
+    .detail-panel {
+      padding: 20px;
+      border-left: 4px solid var(--active);
+    }
+
+    .detail-panel .type {
+      color: var(--active);
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+    }
+
+    .detail-panel h3 {
+      margin: 8px 0;
+      font-size: 24px;
+      line-height: 1.15;
+    }
+
+    .detail-grid {
+      display: grid;
+      gap: 12px;
+      margin-top: 14px;
+    }
+
+    .detail-item {
+      padding-top: 11px;
+      border-top: 1px solid var(--line);
+    }
+
+    .detail-item strong {
+      display: block;
+      margin-bottom: 4px;
+      font-size: 12px;
+      color: #dceaff;
+    }
+
+    .detail-item p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .tags {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 7px;
+      margin-top: 12px;
+    }
+
+    .tag {
+      border: 1px solid #3b5877;
+      border-radius: 999px;
+      padding: 4px 8px;
+      color: var(--muted);
+      font-size: 11px;
+    }
+
+    .timeline {
+      padding: 18px;
+    }
+
+    .timeline-list {
+      display: grid;
+      gap: 9px;
+      margin-top: 12px;
+    }
+
+    .step {
+      display: grid;
+      grid-template-columns: 30px 1fr;
+      gap: 10px;
+      align-items: start;
+      padding: 10px;
+      border: 1px solid #334f6d;
+      border-radius: 10px;
+      background: rgba(19, 36, 58, .75);
+    }
+
+    .step-num {
+      width: 24px;
+      height: 24px;
+      border-radius: 999px;
+      display: grid;
+      place-items: center;
+      background: var(--panel-3);
+      color: var(--active);
+      font-size: 12px;
+    }
+
+    .step strong {
+      display: block;
+      font-size: 13px;
+    }
+
+    .step span {
+      display: block;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .interview-panel {
+      margin-top: 18px;
+      padding: 20px;
+    }
+
+    .qa-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 12px;
+      margin-top: 12px;
+    }
+
+    .qa {
+      border: 1px solid #385472;
+      border-radius: 11px;
+      background: rgba(19, 36, 58, .7);
+      padding: 13px;
+    }
+
+    .qa strong {
+      display: block;
+      margin-bottom: 6px;
+      font-size: 13px;
+      color: #e9f3ff;
+    }
+
+    .qa p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .status-strip {
+      display: grid;
+      grid-template-columns: repeat(6, minmax(0, 1fr));
+      gap: 8px;
+      margin-top: 12px;
+    }
+
+    .status {
+      border: 1px solid #365270;
+      border-radius: 10px;
+      padding: 10px 8px;
+      text-align: center;
+      background: rgba(19, 36, 58, .76);
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .status.hot {
+      border-color: var(--warn);
+      color: var(--text);
+      box-shadow: 0 0 18px rgba(255, 209, 102, .16);
+    }
+
+    @media (max-width: 1180px) {
+      .hero,
+      .workspace {
+        grid-template-columns: 1fr;
+      }
+
+      .lane {
+        grid-template-columns: repeat(2, minmax(180px, 1fr));
+      }
+    }
+
+    @media (max-width: 720px) {
+      .shell {
+        width: min(100% - 16px, 1500px);
+        padding-top: 18px;
+      }
+
+      .hero-copy,
+      .mental-model,
+      .board,
+      .detail-panel,
+      .timeline,
+      .interview-panel {
+        border-radius: 12px;
+      }
+
+      .formula,
+      .qa-grid,
+      .status-strip {
+        grid-template-columns: 1fr;
+      }
+
+      .plus {
+        text-align: center;
+        line-height: 1;
+      }
+
+      .layer {
+        grid-template-columns: 1fr;
+      }
+
+      .layer-label {
+        border-right: 0;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .lane {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <section class="hero">
+      <div class="hero-copy">
+        <div class="kicker">Harness Foundations</div>
+        <h1>从最小 Agent 调用，推导出一个工程化 Harness</h1>
+        <p class="subtitle">
+          这页按“系统为什么会坏”来讲。先假设只有一次 `session.prompt()`，再逐步加入事件、状态、持久化、资源策略、队列、恢复和 Runtime Adapter。你要掌握的不是名词本身，而是每一层解决了哪个真实工程问题。
+        </p>
+      </div>
+
+      <aside class="mental-model">
+        <h2>一句话模型</h2>
+        <div class="formula" aria-label="Harness 心智模型">
+          <div class="formula-box"><strong>Command</strong><span>外部要求系统做什么，例如“启动一次 run”。</span></div>
+          <div class="plus">+</div>
+          <div class="formula-box"><strong>Fact</strong><span>已经发生了什么，例如“tool started”。</span></div>
+          <div class="plus">+</div>
+          <div class="formula-box"><strong>Policy</strong><span>在资源、租户、风险约束下，下一步能不能做。</span></div>
+        </div>
+      </aside>
+    </section>
+
+    <nav class="controls" aria-label="场景选择">
+      <strong>场景</strong>
+      <button class="pill" type="button" aria-pressed="true" data-scenario="submit">首次提交任务</button>
+      <button class="pill" type="button" aria-pressed="false" data-scenario="tool">工具调用</button>
+      <button class="pill" type="button" aria-pressed="false" data-scenario="pressure">GPU 压力排队</button>
+      <button class="pill" type="button" aria-pressed="false" data-scenario="crash">崩溃恢复</button>
+      <button class="pill" type="button" aria-pressed="false" data-scenario="fairness">多租户公平</button>
+      <button class="pill" type="button" aria-pressed="false" data-scenario="all">完整系统</button>
+    </nav>
+
+    <section class="workspace">
+      <section class="board" aria-label="Harness 分层地图">
+        <div class="board-head">
+          <div>
+            <h2>分层地图</h2>
+            <p>点击任意模块，看它的本质、为什么需要、落到哪些代码。</p>
+          </div>
+          <div class="legend" aria-label="图例">
+            <span><i class="dot" style="--c:var(--tenant)"></i>入口/租户</span>
+            <span><i class="dot" style="--c:var(--service)"></i>服务策略</span>
+            <span><i class="dot" style="--c:var(--data)"></i>事实数据</span>
+            <span><i class="dot" style="--c:var(--runtime)"></i>Agent 层</span>
+            <span><i class="dot" style="--c:var(--infra)"></i>基础设施</span>
+          </div>
+        </div>
+
+        <div class="layers">
+          <section class="layer tenant-layer">
+            <div class="layer-label"><small>LAYER 01</small><strong>入口与租户</strong><span>谁提交、属于哪个长期上下文</span></div>
+            <div class="lane">
+              <button class="node" data-node="tenant" data-group="tenant"><h3>Tenant</h3><p>配额、公平性、资源归属的主体</p><code>tenantId</code></button>
+              <button class="node" data-node="harnessSession" data-group="tenant"><h3>HarnessSession</h3><p>Harness 眼里的长期业务会话</p><code>harnessSessionId</code></button>
+              <button class="node" data-node="userInput" data-group="tenant"><h3>User Input</h3><p>一次用户输入或追问</p><code>input</code></button>
+              <button class="node" data-node="api" data-group="tenant"><h3>API / CLI</h3><p>系统入口，把请求变成命令</p><code>startRun()</code></button>
+            </div>
+          </section>
+
+          <section class="layer service-layer">
+            <div class="layer-label"><small>LAYER 02</small><strong>服务与策略</strong><span>决定何时开始、排队、恢复</span></div>
+            <div class="lane">
+              <button class="node" data-node="runService" data-group="service"><h3>RunService</h3><p>AgentRun 生命周期编排者</p><code>create/start/finish</code></button>
+              <button class="node" data-node="policy" data-group="service"><h3>ExecutionPolicy</h3><p>根据资源和规则做准入判断</p><code>START / QUEUE</code></button>
+              <button class="node" data-node="queue" data-group="service"><h3>RunQueue</h3><p>资源不够时保存等待顺序</p><code>fair scheduling</code></button>
+              <button class="node" data-node="resourceObserver" data-group="service"><h3>ResourceObserver</h3><p>采集 GPU / vLLM 运行状态</p><code>GpuSnapshot</code></button>
+              <button class="node" data-node="toolGateway" data-group="service"><h3>ToolGateway</h3><p>工具执行治理与审计入口</p><code>side effects</code></button>
+              <button class="node" data-node="checkpointService" data-group="service"><h3>CheckpointService</h3><p>记录可安全恢复的位置</p><code>checkpointId</code></button>
+              <button class="node" data-node="schedulerAgent" data-group="service"><h3>Scheduling Agent</h3><p>未来在硬约束内提出调度建议</p><code>shadow first</code></button>
+              <button class="node" data-node="guards" data-group="service"><h3>Guardrails</h3><p>不可绕过的确定性安全底线</p><code>validator</code></button>
+            </div>
+          </section>
+
+          <section class="layer data-layer">
+            <div class="layer-label"><small>LAYER 03</small><strong>事实与状态</strong><span>让系统可查询、可审计、可恢复</span></div>
+            <div class="lane">
+              <button class="node" data-node="agentRun" data-group="data"><h3>AgentRun</h3><p>一次任务执行的当前状态</p><code>src/runs</code></button>
+              <button class="node" data-node="runEvent" data-group="data"><h3>RunEvent</h3><p>发生过的事实，按序追加</p><code>sequence</code></button>
+              <button class="node" data-node="runStore" data-group="data"><h3>RunStore</h3><p>状态和事件的持久化边界</p><code>SQLite tx</code></button>
+              <button class="node" data-node="transition" data-group="data"><h3>State Transition</h3><p>阻止非法状态跳转</p><code>QUEUED -> RUNNING</code></button>
+            </div>
+          </section>
+
+          <section class="layer runtime-layer">
+            <div class="layer-label"><small>LAYER 04</small><strong>Agent Runtime</strong><span>把 Harness 命令翻译给 Pi</span></div>
+            <div class="lane">
+              <button class="node" data-node="agentRuntime" data-group="runtime"><h3>AgentRuntime</h3><p>Harness 依赖的稳定接口</p><code>start/resume/interrupt</code></button>
+              <button class="node" data-node="piAdapter" data-group="runtime"><h3>PiAdapter</h3><p>把 Pi 事件翻译成 Harness 事件</p><code>src/runtime</code></button>
+              <button class="node" data-node="fakeRuntime" data-group="runtime"><h3>FakeAgentRuntime</h3><p>测试 Harness 逻辑的可控替身</p><code>tests/fakes</code></button>
+              <button class="node" data-node="piSession" data-group="runtime"><h3>Pi AgentSession</h3><p>Pi 内部的历史消息和上下文</p><code>runtimeSessionRef</code></button>
+            </div>
+          </section>
+
+          <section class="layer infra-layer">
+            <div class="layer-label"><small>LAYER 05</small><strong>基础设施</strong><span>真实模型、GPU、文件和工具</span></div>
+            <div class="lane">
+              <button class="node" data-node="vllm" data-group="infra"><h3>vLLM</h3><p>OpenAI-compatible 模型服务</p><code>/v1/chat/completions</code></button>
+              <button class="node" data-node="gpu" data-group="infra"><h3>GPU / VRAM</h3><p>真实资源压力来源</p><code>memory / util</code></button>
+              <button class="node" data-node="filesystem" data-group="infra"><h3>Workspace</h3><p>工具读写文件的边界</p><code>workspacePath</code></button>
+              <button class="node" data-node="tools" data-group="infra"><h3>Tools</h3><p>Agent 能调用的外部能力</p><code>read / shell</code></button>
+            </div>
+          </section>
+        </div>
+      </section>
+
+      <aside class="side">
+        <section class="detail-panel" aria-live="polite">
+          <div class="type" id="detailType">运行事实层</div>
+          <h3 id="detailTitle">AgentRun</h3>
+          <p id="detailSummary">一次用户任务在 Harness 里的执行实体。它不是 Agent，也不负责调用模型；它负责记录“这次任务现在处于什么状态”。</p>
+          <div class="detail-grid">
+            <div class="detail-item"><strong>本质</strong><p id="detailEssence">业务执行记录，也就是可持久化的任务实例。</p></div>
+            <div class="detail-item"><strong>为什么需要</strong><p id="detailWhy">PiAdapter 只能让 Pi 跑起来；AgentRun 让 Harness 知道任务是否排队、运行、失败、完成或等待恢复。</p></div>
+            <div class="detail-item"><strong>没有它会怎样</strong><p id="detailMissing">进程重启后只剩下 Pi 的会话历史，但 Harness 不知道业务任务是否完成、属于哪个 Tenant、是否应该恢复。</p></div>
+            <div class="detail-item"><strong>代码落点</strong><p id="detailCode">`src/runs/agent-run.ts`，后续会有 `RunStore` 和 `RunService`。</p></div>
+            <div class="detail-item"><strong>面试一句话</strong><p id="detailInterview">AgentRun 是 Harness 对一次任务执行的事实建模，Runtime 只是它的执行后端。</p></div>
+          </div>
+          <div class="tags" id="detailTags"></div>
+        </section>
+
+        <section class="timeline">
+          <h2 id="timelineTitle">首次提交任务</h2>
+          <div class="status-strip" id="statusStrip"></div>
+          <div class="timeline-list" id="timelineList"></div>
+        </section>
+      </aside>
+    </section>
+
+    <section class="interview-panel">
+      <h2>最容易混淆的工程边界</h2>
+      <div class="qa-grid">
+        <article class="qa">
+          <strong>AgentRun 和 Pi AgentSession 有什么区别？</strong>
+          <p>AgentRun 是 Harness 的任务执行记录；Pi AgentSession 是 Pi 用来保存对话历史和内部上下文的运行时会话。</p>
+        </article>
+        <article class="qa">
+          <strong>为什么既保存状态，又保存事件？</strong>
+          <p>状态方便快速查询当前结果；事件解释状态为什么变成这样，并支持审计、恢复和调试。</p>
+        </article>
+        <article class="qa">
+          <strong>为什么 Fake Runtime 还有价值？</strong>
+          <p>它让 RunService、队列、恢复、事件持久化可以被稳定测试，不依赖真实模型、GPU 或 Pi 的不确定输出。</p>
+        </article>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    const nodeDetails = {
+      tenant: {
+        type: "入口与租户层",
+        title: "Tenant",
+        summary: "资源配额、公平性和审计归属的主体。系统不是只服务一个匿名用户，而是要知道每个任务属于谁。",
+        essence: "隔离和公平性的最小单位。",
+        why: "当 GPU 紧张时，不能让一个 Tenant 连续占满所有运行槽；后续策略要按 Tenant 做配额、优先级和统计。",
+        missing: "任务都混在一起，只能全局 FIFO，无法解释为什么某个用户一直被饿死或占用资源过多。",
+        code: "`RuntimeRunRef.tenantId`，后续会进入 `RunQueue`、`ExecutionPolicy` 和 API 层。",
+        interview: "Tenant 不是 Agent 概念，而是 Harness 做资源治理和公平调度的业务主体。",
+        tags: ["fairness", "quota", "audit"]
+      },
+      harnessSession: {
+        type: "入口与租户层",
+        title: "HarnessSession",
+        summary: "Harness 眼里的长期业务会话，用来串联同一上下文下的多次 AgentRun。",
+        essence: "业务会话身份，不等于 Pi 内部的 AgentSession。",
+        why: "用户可能连续追问多次，每次追问是新的 AgentRun，但它们属于同一个长期任务上下文。",
+        missing: "你只能看到一堆互不相关的 run，无法知道哪些 run 属于同一条用户工作流。",
+        code: "`RuntimeRunRef.harnessSessionId`，后续可映射到 Pi 的 `runtimeSessionRef`。",
+        interview: "HarnessSession 管业务上下文归属；Pi AgentSession 管 Agent Runtime 内部历史。",
+        tags: ["business session", "many runs", "mapping"]
+      },
+      userInput: {
+        type: "入口与租户层",
+        title: "User Input",
+        summary: "一次用户输入就是一次要被执行的命令来源。第一次提问和后续追问都可以产生新的 AgentRun。",
+        essence: "外部意图进入系统的原始材料。",
+        why: "Harness 必须把用户输入变成可追踪的任务，而不是直接丢给模型后失去控制。",
+        missing: "无法把模型输出、工具调用、失败原因和原始请求对应起来。",
+        code: "`RuntimeStartRequest.input` 或 `RuntimeResumeRequest.continuationInput`。",
+        interview: "输入不是 run 本身；输入会触发 Harness 创建或恢复一次 AgentRun。",
+        tags: ["command", "prompt"]
+      },
+      api: {
+        type: "入口与租户层",
+        title: "API / CLI",
+        summary: "外部系统调用 Harness 的入口，负责校验参数并向 RunService 发命令。",
+        essence: "把外部请求转成内部 Command 的边界。",
+        why: "入口层不应该直接操作 Pi 或 SQLite；它只负责把请求交给应用服务。",
+        missing: "调用路径会到处散落，权限、参数校验和错误处理无法统一。",
+        code: "Day 7 才会做 HTTP API；当前先用测试和本地脚本驱动。",
+        interview: "API 层只接请求，不拥有运行状态机和资源决策。",
+        tags: ["boundary", "command"]
+      },
+      runService: {
+        type: "服务与策略层",
+        title: "RunService",
+        summary: "AgentRun 生命周期的编排者。它把 Store、Policy、Queue、Runtime 串起来。",
+        essence: "应用服务：负责推进一个业务用例。",
+        why: "单独的 PiAdapter 不知道任务是否应该排队、是否允许启动、事件要不要入库。",
+        missing: "你会把状态更新、资源判断和 runtime 调用散落在各处，很难保证一致性。",
+        code: "Day2 之后新增 `src/runs/run-service.ts`。",
+        interview: "RunService 是 Harness 的业务编排层，PiAdapter 只是它调用的执行后端。",
+        tags: ["orchestration", "lifecycle"]
+      },
+      policy: {
+        type: "服务与策略层",
+        title: "ExecutionPolicy",
+        summary: "根据资源快照、并发配置、Tenant 情况决定一个 run 能不能开始。",
+        essence: "准入控制规则。",
+        why: "Harness 的核心价值之一就是不要在 GPU 已经紧张时盲目提交新 Agent 执行。",
+        missing: "所有任务都会直接打到 Pi/vLLM，资源抖动时更容易雪崩。",
+        code: "后续 `src/policy`；第一周先做确定性规则，后续再引入 Scheduling Agent。",
+        interview: "Policy 决定是否提交新的执行，不接管 vLLM 内部的 KV Cache 调度。",
+        tags: ["admission", "resource-aware"]
+      },
+      queue: {
+        type: "服务与策略层",
+        title: "RunQueue",
+        summary: "当 run 不能立刻开始时，它必须进入可解释的等待结构。",
+        essence: "等待执行的任务集合，带公平性规则。",
+        why: "资源不足不是失败；系统应该能记录排队原因，并在资源恢复时选择下一个 run。",
+        missing: "任务要么丢失，要么一直重试，要么被某个 Tenant 长期占用机会。",
+        code: "后续 `src/policy/run-queue.ts` 或 `src/scheduler`。",
+        interview: "Queue 把暂时不能运行的任务保存为可恢复、可审计的等待状态。",
+        tags: ["backpressure", "fairness"]
+      },
+      resourceObserver: {
+        type: "服务与策略层",
+        title: "ResourceObserver",
+        summary: "采集 GPU、VRAM、vLLM 等资源状态，提供给 ExecutionPolicy。",
+        essence: "把外部机器状态变成 Harness 可读的数据快照。",
+        why: "没有资源观测，所谓 VRAM-aware 就只能是配置项，不能反映真实运行压力。",
+        missing: "系统不知道 GPU 是否接近满载，也无法解释为什么某个任务被延迟。",
+        code: "后续 `src/resources`；测试中会有 FakeResourceObserver。",
+        interview: "Observer 只提供事实，不直接做调度决定；决定由 Policy 做。",
+        tags: ["gpu", "snapshot", "metrics"]
+      },
+      toolGateway: {
+        type: "服务与策略层",
+        title: "ToolGateway",
+        summary: "Agent 调工具时，Harness 在这里做权限、风险、审计和恢复边界判断。",
+        essence: "工具执行的治理入口。",
+        why: "模型发起的工具调用可能读写文件、执行命令、有副作用，不能完全透明地放行。",
+        missing: "工具出了问题只能看到 Pi 事件，无法按业务语义判断是否可重试或需要人工确认。",
+        code: "Day3-Day4 的 `src/tools`。",
+        interview: "ToolGateway 不是替代 Pi 的工具协议，而是在 Pi 外层治理工具执行。",
+        tags: ["tools", "side effects", "audit"]
+      },
+      checkpointService: {
+        type: "服务与策略层",
+        title: "CheckpointService",
+        summary: "记录恢复时可以从哪里继续，以及对应的 Pi Session 引用和事件序号。",
+        essence: "安全恢复边界管理。",
+        why: "中断或崩溃后，不能凭感觉继续；必须知道最后一个可靠事实在哪里。",
+        missing: "恢复可能重复执行有副作用的工具，或者跳过已经完成的关键步骤。",
+        code: "`RuntimeCheckpointRef` 已在接口中出现；后续实现 `src/checkpoints`。",
+        interview: "Checkpoint 连接 Harness 事件序列和 Pi Session 历史，是恢复语义的锚点。",
+        tags: ["resume", "safety"]
+      },
+      schedulerAgent: {
+        type: "服务与策略层",
+        title: "Scheduling Agent",
+        summary: "未来根据趋势、队列、SLO、历史结果提出调度建议，但不直接绕过硬规则。",
+        essence: "智能建议层，不是最终安全边界。",
+        why: "固定阈值容易保守或迟钝；Agent 可以综合更多上下文提出更灵活的 START/QUEUE/DEFER 建议。",
+        missing: "MVP 仍可工作，但策略会比较粗；复杂负载下资源利用率和体验可能不够好。",
+        code: "ADR 0003 规划；第一周先做 Shadow Mode 之前的确定性基线。",
+        interview: "我们可以靠近 SRE Agent，但必须用 Guardrails 把不可接受的动作挡住。",
+        tags: ["agentic policy", "shadow mode"]
+      },
+      guards: {
+        type: "服务与策略层",
+        title: "Guardrails",
+        summary: "无论 Scheduling Agent 怎么建议，都必须通过确定性校验。",
+        essence: "安全底线。",
+        why: "Agent 的建议可能过时、幻觉或违反资源上限；工程系统不能把安全交给自由文本判断。",
+        missing: "一旦 Agent 判断错误，可能把 GPU 打爆或破坏 Tenant 公平性。",
+        code: "ADR 0003；后续 `PolicyValidator`。",
+        interview: "Agentic 调度负责提出建议，Guardrails 负责保证建议可执行且安全。",
+        tags: ["safety", "validator"]
+      },
+      agentRun: {
+        type: "运行事实层",
+        title: "AgentRun",
+        summary: "一次用户任务在 Harness 里的执行实体。它不是 Agent，也不负责调用模型；它负责记录“这次任务现在处于什么状态”。",
+        essence: "业务执行记录，也就是可持久化的任务实例。",
+        why: "PiAdapter 只能让 Pi 跑起来；AgentRun 让 Harness 知道任务是否排队、运行、失败、完成或等待恢复。",
+        missing: "进程重启后只剩下 Pi 的会话历史，但 Harness 不知道业务任务是否完成、属于哪个 Tenant、是否应该恢复。",
+        code: "`src/runs/agent-run.ts`，后续会有 `RunStore` 和 `RunService`。",
+        interview: "AgentRun 是 Harness 对一次任务执行的事实建模，Runtime 只是它的执行后端。",
+        tags: ["state", "business entity"]
+      },
+      runEvent: {
+        type: "运行事实层",
+        title: "RunEvent",
+        summary: "已经发生的事实，按 run 内 sequence 递增追加。事件不是命令，不能被修改成另一件事。",
+        essence: "append-only 事实日志。",
+        why: "状态只告诉你现在是什么；事件告诉你为什么会变成现在这样。",
+        missing: "失败时只能看到最终 FAILED，不知道之前模型说了什么、哪个工具失败、是否保存过 checkpoint。",
+        code: "Day2 需要补上 `RunEvent` 类型和 `run_events` 表。",
+        interview: "Event 是审计和恢复的依据；State 是查询优化后的当前视图。",
+        tags: ["event log", "audit", "sequence"]
+      },
+      runStore: {
+        type: "运行事实层",
+        title: "RunStore",
+        summary: "把 AgentRun 当前状态和 RunEvent 历史写进 SQLite，并保证关键写入在同一个事务里完成。",
+        essence: "持久化边界。",
+        why: "状态更新和事件追加必须一致，否则会出现状态是 COMPLETED 但没有完成事件，或有失败事件但状态仍是 RUNNING。",
+        missing: "一旦进程崩溃，内存里的 run 会消失，调试和恢复都没有可靠依据。",
+        code: "Day2 的 `src/storage` 或 `src/runs/run-store.ts`，用 `bun:sqlite` 即可。",
+        interview: "RunStore 的关键职责不是 SQL 本身，而是保证状态和事件的一致性。",
+        tags: ["sqlite", "transaction"]
+      },
+      transition: {
+        type: "运行事实层",
+        title: "State Transition",
+        summary: "定义哪些状态跳转合法，例如 `QUEUED -> RUNNING` 合法，`COMPLETED -> RUNNING` 不合法。",
+        essence: "状态机约束。",
+        why: "没有状态机，代码任何地方都能把 run 改成任意状态，系统语义会失控。",
+        missing: "已完成任务可能被重新启动，失败任务可能被误标为运行中，恢复逻辑无法可信。",
+        code: "建议先写纯函数 `assertAgentRunTransition(from, to)`，再接 SQLite。",
+        interview: "状态机把业务生命周期变成可测试规则，防止非法状态污染持久化数据。",
+        tags: ["state machine", "invariant"]
+      },
+      agentRuntime: {
+        type: "Agent Runtime 层",
+        title: "AgentRuntime",
+        summary: "Harness 自己定义的稳定接口。上层只知道 start/resume/interrupt/subscribe，不知道 Pi 的具体类。",
+        essence: "运行时抽象边界。",
+        why: "RunService 不应该依赖 Pi 的事件名和 Session API，否则以后替换 Runtime 会影响整个 Harness。",
+        missing: "Pi 细节会蔓延到业务层，测试和替换成本都会变高。",
+        code: "`src/runtime/agent-runtime.ts`。",
+        interview: "AgentRuntime 是 Harness 和具体 Agent SDK 之间的防腐层。",
+        tags: ["interface", "adapter boundary"]
+      },
+      piAdapter: {
+        type: "Agent Runtime 层",
+        title: "PiAdapter",
+        summary: "生产环境里真正连接 Pi 的适配器。它启动 Pi AgentSession，并把 Pi 事件翻译成 RuntimeEvent。",
+        essence: "具体 SDK 适配实现。",
+        why: "Pi 有自己的事件和 Session 概念；Harness 需要把它们映射到自己的 runId、checkpointId 和事件类型。",
+        missing: "Harness 无法真正驱动 Pi，只能停留在接口和 Fake 测试。",
+        code: "`src/runtime/pi-adapter.ts`。",
+        interview: "PiAdapter 让 Pi 成为可替换的执行后端，而不是让 Pi 成为 Harness 的业务模型。",
+        tags: ["pi", "event translation"]
+      },
+      fakeRuntime: {
+        type: "Agent Runtime 层",
+        title: "FakeAgentRuntime",
+        summary: "测试用 Runtime，可以确定性地产生事件、模拟失败、中断和恢复。",
+        essence: "可控测试替身。",
+        why: "RunService 的正确性不能依赖真实 LLM 输出；LLM 非确定性会让单元测试不稳定。",
+        missing: "每次测试都要启动 vLLM 和 Pi，慢、不稳定，也很难覆盖异常路径。",
+        code: "`tests/fakes/fake-agent-runtime.ts`。",
+        interview: "Fake Runtime 不是生产方案，而是让 Harness 业务逻辑可测试的手段。",
+        tags: ["test double", "deterministic"]
+      },
+      piSession: {
+        type: "Agent Runtime 层",
+        title: "Pi AgentSession",
+        summary: "Pi 内部保存对话历史、工具上下文和压缩状态的对象。",
+        essence: "Agent Runtime 的上下文容器。",
+        why: "多轮对话需要历史；恢复时也需要打开旧的 Pi Session，继续给 Pi 一个输入。",
+        missing: "Pi 每次都像第一次对话，无法利用历史上下文。",
+        code: "`runtimeSessionRef` 是 Harness 持有的引用，不是完整 Pi 对象。",
+        interview: "Pi AgentSession 管模型上下文；AgentRun 管 Harness 任务生命周期。",
+        tags: ["context", "history"]
+      },
+      vllm: {
+        type: "基础设施层",
+        title: "vLLM",
+        summary: "自托管模型推理服务。Pi 通过 OpenAI-compatible API 调它。",
+        essence: "模型执行引擎。",
+        why: "我们把模型推理交给 vLLM，而不是在 Harness 里实现推理和 KV Cache 管理。",
+        missing: "没有模型服务，Pi Agent 无法产生回答或工具调用决策。",
+        code: "Spike 中通过 `.pi/spike/models.json` 和 `VLLM_MODEL_ID` 配置。",
+        interview: "Harness 调度的是任务提交时机，不是改写 vLLM 内部调度算法。",
+        tags: ["inference", "openai compatible"]
+      },
+      gpu: {
+        type: "基础设施层",
+        title: "GPU / VRAM",
+        summary: "真实资源瓶颈。多个 AgentRun 同时触发模型调用时，GPU 压力会影响稳定性和延迟。",
+        essence: "被观测和约束的底层资源。",
+        why: "Resource-aware 的核心就是用真实资源状态影响新任务的启动和排队。",
+        missing: "系统无法根据 VRAM 压力保护自身，只能等模型服务超时或崩溃。",
+        code: "后续 `ResourceObserver` 采集 `nvidia-smi`、vLLM metrics 或配置化模拟数据。",
+        interview: "GPU 状态进入 Policy，但 Harness 不直接管理物理显存分配。",
+        tags: ["vram", "pressure"]
+      },
+      filesystem: {
+        type: "基础设施层",
+        title: "Workspace",
+        summary: "Agent 工具实际读写的文件边界。每个 run 都要知道自己在哪个 workspace 内工作。",
+        essence: "副作用发生的范围。",
+        why: "工具治理必须知道读写发生在哪里，Tenant 隔离和审计也依赖这个边界。",
+        missing: "工具可能读错目录或写到不该写的位置，恢复时也无法解释文件变化来源。",
+        code: "`RuntimeRunRef.workspacePath`。",
+        interview: "workspacePath 是工具副作用治理的基础，不是随便传给 Pi 的字符串。",
+        tags: ["workspace", "side effects"]
+      },
+      tools: {
+        type: "基础设施层",
+        title: "Tools",
+        summary: "Agent 能调用的外部能力，例如读取文件、执行命令、修改代码。",
+        essence: "模型影响现实世界的动作出口。",
+        why: "Agent 的价值来自工具调用，但风险也来自工具调用，所以必须记录和治理。",
+        missing: "你只能看到最终回答，无法知道 Agent 具体做过什么动作。",
+        code: "Spike 已验证 read 工具；后续通过 ToolGateway 纳入 Harness 事件和 checkpoint。",
+        interview: "工具调用是恢复和审计的关键，因为它可能产生副作用。",
+        tags: ["tool call", "effect"]
+      }
+    };
+
+    const scenarios = {
+      submit: {
+        title: "首次提交任务",
+        nodes: ["tenant", "harnessSession", "userInput", "api", "runService", "policy", "resourceObserver", "agentRun", "runEvent", "runStore", "agentRuntime", "piAdapter", "piSession", "vllm", "gpu"],
+        statuses: ["QUEUED", "RUNNING", "COMPLETED"],
+        steps: [
+          ["请求进入", "API/CLI 收到 tenantId、harnessSessionId、input、workspacePath。"],
+          ["创建事实", "RunService 创建 AgentRun，并追加 RUN_CREATED / RUN_QUEUED 事件。"],
+          ["准入判断", "ExecutionPolicy 读取 ResourceObserver 的资源快照，决定是否可以启动。"],
+          ["调用 Runtime", "RunService 调用 AgentRuntime.start；PiAdapter 创建或打开 Pi AgentSession。"],
+          ["事件回流", "Pi 产生模型、工具、结束事件；Adapter 翻译成 Harness RuntimeEvent。"],
+          ["落库完成", "RunStore 更新 AgentRun 状态，并追加对应 RunEvent。"]
+        ]
+      },
+      tool: {
+        title: "工具调用",
+        nodes: ["agentRun", "runEvent", "runStore", "toolGateway", "checkpointService", "agentRuntime", "piAdapter", "piSession", "tools", "filesystem"],
+        statuses: ["RUNNING", "WAITING_TOOL", "RUNNING"],
+        steps: [
+          ["模型提出工具调用", "Pi 产生 tool start 相关事件，Adapter 翻译给 Harness。"],
+          ["进入治理", "ToolGateway 判断工具权限、副作用类型和是否需要 checkpoint。"],
+          ["执行工具", "工具在 workspacePath 边界内读写或返回结果。"],
+          ["记录事实", "RunEvent 记录 TOOL_STARTED / TOOL_COMPLETED / TOOL_FAILED。"],
+          ["保存恢复点", "如果到达安全边界，CheckpointService 记录 checkpointId 和 runtimeSessionRef。"]
+        ]
+      },
+      pressure: {
+        title: "GPU 压力排队",
+        nodes: ["tenant", "userInput", "api", "runService", "policy", "queue", "resourceObserver", "agentRun", "runEvent", "runStore", "vllm", "gpu", "guards"],
+        statuses: ["QUEUED", "QUEUED", "RUNNING"],
+        steps: [
+          ["新任务到达", "RunService 先创建 AgentRun，而不是直接调用 Pi。"],
+          ["资源快照", "ResourceObserver 报告 VRAM 或并发压力较高。"],
+          ["策略拒绝立即启动", "ExecutionPolicy 返回 QUEUE，Guardrails 保证不越过硬上限。"],
+          ["进入队列", "RunQueue 按 Tenant 公平性保存等待顺序。"],
+          ["资源恢复", "下一次调度 tick 选择可运行的 run，再调用 Runtime.start。"]
+        ]
+      },
+      crash: {
+        title: "崩溃恢复",
+        nodes: ["runService", "checkpointService", "agentRun", "runEvent", "runStore", "transition", "agentRuntime", "piAdapter", "piSession", "tools", "filesystem"],
+        statuses: ["RUNNING", "INTERRUPTED", "QUEUED", "RUNNING"],
+        steps: [
+          ["进程中断", "内存里的 PiAdapter active session map 消失，但 SQLite 里的 AgentRun 和 RunEvent 仍在。"],
+          ["扫描未完成 run", "RunService 启动后查询 RUNNING / WAITING_TOOL / INTERRUPTED 的 run。"],
+          ["定位恢复点", "CheckpointService 找到最后一个安全 checkpoint。"],
+          ["状态转移", "状态机阻止从 COMPLETED 重新运行，只允许可恢复状态进入恢复流程。"],
+          ["调用 resume", "PiAdapter 打开 runtimeSessionRef，并用 continuationInput 继续推进。"]
+        ]
+      },
+      fairness: {
+        title: "多租户公平",
+        nodes: ["tenant", "harnessSession", "api", "runService", "policy", "queue", "resourceObserver", "agentRun", "runEvent", "runStore", "schedulerAgent", "guards", "gpu"],
+        statuses: ["QUEUED", "RUNNING", "QUEUED", "RUNNING"],
+        steps: [
+          ["多个 Tenant 同时提交", "每个请求都会生成独立 AgentRun，并带上 tenantId。"],
+          ["进入统一队列", "RunQueue 不只是全局 FIFO，而要考虑每个 Tenant 的等待时间和配额。"],
+          ["资源和公平性一起判断", "Policy 同时看 GPU 压力、当前并发、Tenant 历史占用。"],
+          ["可解释选择", "系统能说清楚为什么这次启动 A，而不是继续启动 B。"],
+          ["未来智能策略", "Scheduling Agent 可以提出建议，但必须通过 Guardrails。"]
+        ]
+      },
+      all: {
+        title: "完整系统",
+        nodes: Object.keys(nodeDetails),
+        statuses: ["QUEUED", "RUNNING", "WAITING_TOOL", "INTERRUPTED", "COMPLETED", "FAILED"],
+        steps: [
+          ["入口层接收命令", "Tenant、HarnessSession、User Input 定义业务归属和输入来源。"],
+          ["服务层编排", "RunService 结合 Policy、Queue、Observer、Checkpoint 和 ToolGateway 推进生命周期。"],
+          ["事实层持久化", "AgentRun 保存当前状态，RunEvent 保存历史事实，RunStore 保证一致性。"],
+          ["Runtime 层转接", "AgentRuntime 抽象上层依赖，PiAdapter 连接真实 Pi，FakeRuntime 服务测试。"],
+          ["基础设施执行", "Pi 调 vLLM，工具影响 workspace，GPU 状态反过来影响下一次调度。"]
+        ]
+      }
+    };
+
+    const groupNames = {
+      tenant: "入口与租户",
+      service: "服务与策略",
+      data: "事实与状态",
+      runtime: "Agent Runtime",
+      infra: "基础设施"
+    };
+
+    const root = document;
+    const nodes = Array.from(root.querySelectorAll(".node"));
+    const scenarioButtons = Array.from(root.querySelectorAll("[data-scenario]"));
+    const detailType = root.getElementById("detailType");
+    const detailTitle = root.getElementById("detailTitle");
+    const detailSummary = root.getElementById("detailSummary");
+    const detailEssence = root.getElementById("detailEssence");
+    const detailWhy = root.getElementById("detailWhy");
+    const detailMissing = root.getElementById("detailMissing");
+    const detailCode = root.getElementById("detailCode");
+    const detailInterview = root.getElementById("detailInterview");
+    const detailTags = root.getElementById("detailTags");
+    const timelineTitle = root.getElementById("timelineTitle");
+    const timelineList = root.getElementById("timelineList");
+    const statusStrip = root.getElementById("statusStrip");
+
+    function renderDetail(nodeId) {
+      const data = nodeDetails[nodeId];
+      if (!data) return;
+      detailType.textContent = data.type;
+      detailTitle.textContent = data.title;
+      detailSummary.textContent = data.summary;
+      detailEssence.textContent = data.essence;
+      detailWhy.textContent = data.why;
+      detailMissing.textContent = data.missing;
+      detailCode.textContent = data.code;
+      detailInterview.textContent = data.interview;
+      detailTags.innerHTML = "";
+      data.tags.forEach((tag) => {
+        const span = document.createElement("span");
+        span.className = "tag";
+        span.textContent = tag;
+        detailTags.appendChild(span);
+      });
+    }
+
+    function renderTimeline(scenarioId) {
+      const scenario = scenarios[scenarioId];
+      timelineTitle.textContent = scenario.title;
+      statusStrip.innerHTML = "";
+      scenario.statuses.forEach((status, index) => {
+        const div = document.createElement("div");
+        div.className = "status" + (index === scenario.statuses.length - 1 ? " hot" : "");
+        div.textContent = status;
+        statusStrip.appendChild(div);
+      });
+      timelineList.innerHTML = "";
+      scenario.steps.forEach((step, index) => {
+        const item = document.createElement("article");
+        item.className = "step";
+        item.innerHTML = `<div class="step-num">${index + 1}</div><div><strong>${step[0]}</strong><span>${step[1]}</span></div>`;
+        timelineList.appendChild(item);
+      });
+    }
+
+    function applyScenario(scenarioId) {
+      const scenario = scenarios[scenarioId];
+      const active = new Set(scenario.nodes);
+      scenarioButtons.forEach((button) => {
+        button.setAttribute("aria-pressed", String(button.dataset.scenario === scenarioId));
+      });
+      nodes.forEach((node) => {
+        const isActive = active.has(node.dataset.node);
+        node.classList.toggle("active", isActive);
+        node.classList.toggle("dim", scenarioId !== "all" && !isActive);
+      });
+      renderTimeline(scenarioId);
+      const firstNode = scenario.nodes.find((nodeId) => nodeDetails[nodeId]);
+      renderDetail(firstNode || "agentRun");
+    }
+
+    scenarioButtons.forEach((button) => {
+      button.addEventListener("click", () => applyScenario(button.dataset.scenario));
+    });
+
+    nodes.forEach((node) => {
+      node.addEventListener("click", () => {
+        nodes.forEach((item) => item.classList.remove("active"));
+        node.classList.remove("dim");
+        node.classList.add("active");
+        renderDetail(node.dataset.node);
+      });
+    });
+
+    applyScenario("submit");
+  </script>
+</body>
+</html>

@@ -1,0 +1,2769 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="color-scheme" content="dark" />
+  <meta name="description" content="VRAM-Aware 多租户 Agent 任务服务的现有执行内核、产品边界、Sandbox、编排恢复与技术审视。" />
+  <title>VRAM-Aware Agent 任务服务｜系统剖面与产品深化</title>
+  <style>
+    :root {
+      --bg: #07101a;
+      --bg-deep: #040a11;
+      --surface: #0b1724;
+      --surface-2: #102033;
+      --surface-3: #13283e;
+      --ink: #edf6ff;
+      --muted: #9aacc0;
+      --faint: #657991;
+      --line: rgba(154, 190, 224, 0.16);
+      --line-strong: rgba(154, 190, 224, 0.32);
+      --cyan: #5ce1e6;
+      --cyan-soft: rgba(92, 225, 230, 0.12);
+      --blue: #66a6ff;
+      --blue-soft: rgba(102, 166, 255, 0.12);
+      --green: #75e6ad;
+      --green-soft: rgba(117, 230, 173, 0.12);
+      --amber: #ffc66d;
+      --amber-soft: rgba(255, 198, 109, 0.12);
+      --red: #ff8e9f;
+      --red-soft: rgba(255, 142, 159, 0.12);
+      --violet: #b7a1ff;
+      --violet-soft: rgba(183, 161, 255, 0.12);
+      --radius: 18px;
+      --shadow: 0 24px 74px rgba(0, 0, 0, 0.34);
+      --sans: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI",
+        "PingFang SC", "Microsoft YaHei", sans-serif;
+      --mono: "SFMono-Regular", "Cascadia Code", Consolas, monospace;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html {
+      scroll-behavior: smooth;
+    }
+
+    body {
+      margin: 0;
+      min-width: 320px;
+      color: var(--ink);
+      background:
+        radial-gradient(circle at 10% 0%, rgba(92, 225, 230, 0.10), transparent 28rem),
+        radial-gradient(circle at 92% 14%, rgba(183, 161, 255, 0.10), transparent 30rem),
+        linear-gradient(180deg, #091522 0%, var(--bg) 34%, var(--bg-deep) 100%);
+      font-family: var(--sans);
+      line-height: 1.65;
+    }
+
+    body::before {
+      position: fixed;
+      inset: 0;
+      z-index: -1;
+      pointer-events: none;
+      content: "";
+      opacity: 0.38;
+      background-image:
+        linear-gradient(var(--line) 1px, transparent 1px),
+        linear-gradient(90deg, var(--line) 1px, transparent 1px);
+      background-size: 48px 48px;
+      mask-image: linear-gradient(to bottom, black, transparent 82%);
+    }
+
+    a {
+      color: inherit;
+    }
+
+    button,
+    input {
+      font: inherit;
+    }
+
+    button {
+      color: inherit;
+    }
+
+    button:focus-visible,
+    a:focus-visible,
+    input:focus-visible {
+      outline: 3px solid rgba(92, 225, 230, 0.5);
+      outline-offset: 3px;
+    }
+
+    .skip-link {
+      position: fixed;
+      top: 12px;
+      left: 12px;
+      z-index: 100;
+      padding: 9px 14px;
+      color: #041016;
+      background: var(--cyan);
+      border-radius: 9px;
+      transform: translateY(-160%);
+    }
+
+    .skip-link:focus {
+      transform: translateY(0);
+    }
+
+    .shell {
+      width: min(1240px, calc(100% - 40px));
+      margin: 0 auto;
+    }
+
+    .topbar {
+      position: sticky;
+      top: 0;
+      z-index: 30;
+      border-bottom: 1px solid var(--line);
+      background: rgba(4, 10, 17, 0.82);
+      backdrop-filter: blur(18px);
+    }
+
+    .topbar-inner {
+      min-height: 58px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 22px;
+    }
+
+    .brand {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      font-weight: 760;
+      text-decoration: none;
+      white-space: nowrap;
+    }
+
+    .brand-mark {
+      width: 27px;
+      height: 27px;
+      display: grid;
+      place-items: center;
+      border: 1px solid rgba(92, 225, 230, 0.5);
+      border-radius: 8px;
+      color: var(--cyan);
+      background: var(--cyan-soft);
+      font-family: var(--mono);
+      font-size: 11px;
+      box-shadow: inset 0 0 18px rgba(92, 225, 230, 0.08);
+    }
+
+    .nav {
+      display: flex;
+      align-items: center;
+      gap: 18px;
+      overflow-x: auto;
+      scrollbar-width: none;
+    }
+
+    .nav::-webkit-scrollbar {
+      display: none;
+    }
+
+    .nav a {
+      color: var(--muted);
+      font-size: 13px;
+      text-decoration: none;
+      white-space: nowrap;
+    }
+
+    .nav a:hover {
+      color: var(--cyan);
+    }
+
+    .hero {
+      min-height: 700px;
+      display: grid;
+      grid-template-columns: 1.08fr 0.92fr;
+      align-items: center;
+      gap: 58px;
+      padding: 88px 0 74px;
+    }
+
+    .eyebrow,
+    .section-index {
+      color: var(--cyan);
+      font-family: var(--mono);
+      font-size: 12px;
+      font-weight: 750;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+    }
+
+    .hero h1 {
+      max-width: 780px;
+      margin: 18px 0 20px;
+      font-size: clamp(44px, 6vw, 78px);
+      line-height: 1.04;
+      letter-spacing: -0.055em;
+    }
+
+    .hero h1 span {
+      color: transparent;
+      background: linear-gradient(100deg, var(--cyan), #a7f0ff 46%, var(--violet));
+      background-clip: text;
+      -webkit-background-clip: text;
+    }
+
+    .hero-lead {
+      max-width: 720px;
+      margin: 0;
+      color: #c4d1df;
+      font-size: 18px;
+    }
+
+    .hero-claim {
+      margin-top: 28px;
+      padding: 18px 20px;
+      border-left: 3px solid var(--cyan);
+      color: #d5e7f4;
+      background: linear-gradient(90deg, var(--cyan-soft), transparent);
+      font-size: 15px;
+    }
+
+    .hero-claim strong {
+      color: var(--cyan);
+    }
+
+    .hero-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      margin-top: 28px;
+    }
+
+    .action-link {
+      padding: 10px 14px;
+      border: 1px solid var(--line-strong);
+      border-radius: 10px;
+      color: var(--muted);
+      background: rgba(10, 24, 38, 0.66);
+      font-size: 13px;
+      text-decoration: none;
+    }
+
+    .action-link.primary {
+      color: #041114;
+      border-color: var(--cyan);
+      background: var(--cyan);
+      font-weight: 760;
+    }
+
+    .hero-console {
+      position: relative;
+      overflow: hidden;
+      border: 1px solid var(--line-strong);
+      border-radius: 22px;
+      background: rgba(7, 17, 28, 0.88);
+      box-shadow: var(--shadow);
+    }
+
+    .console-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 14px 16px;
+      border-bottom: 1px solid var(--line);
+      color: var(--faint);
+      font-family: var(--mono);
+      font-size: 11px;
+    }
+
+    .console-dots {
+      display: flex;
+      gap: 6px;
+    }
+
+    .console-dots span {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--faint);
+    }
+
+    .console-body {
+      display: grid;
+      gap: 0;
+      padding: 10px 0;
+    }
+
+    .console-line {
+      display: grid;
+      grid-template-columns: 32px 1fr auto;
+      gap: 10px;
+      align-items: center;
+      padding: 10px 17px;
+      border-bottom: 1px solid rgba(154, 190, 224, 0.07);
+      font-family: var(--mono);
+      font-size: 12px;
+    }
+
+    .console-line:last-child {
+      border-bottom: 0;
+    }
+
+    .console-line .n {
+      color: var(--faint);
+    }
+
+    .console-line .path {
+      color: #d9e9f6;
+    }
+
+    .console-line .result {
+      color: var(--green);
+    }
+
+    .console-line.warn .result {
+      color: var(--amber);
+    }
+
+    .console-foot {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      border-top: 1px solid var(--line);
+      background: rgba(14, 31, 49, 0.62);
+    }
+
+    .console-metric {
+      padding: 15px;
+      border-right: 1px solid var(--line);
+    }
+
+    .console-metric:last-child {
+      border-right: 0;
+    }
+
+    .console-metric strong {
+      display: block;
+      color: var(--ink);
+      font-family: var(--mono);
+      font-size: 20px;
+      line-height: 1.2;
+    }
+
+    .console-metric span {
+      color: var(--faint);
+      font-size: 11px;
+    }
+
+    section {
+      padding: 88px 0;
+      border-top: 1px solid var(--line);
+    }
+
+    .section-head {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(280px, 0.58fr);
+      gap: 44px;
+      align-items: end;
+      margin-bottom: 42px;
+    }
+
+    .section-head h2 {
+      max-width: 850px;
+      margin: 10px 0 0;
+      font-size: clamp(34px, 4.5vw, 56px);
+      line-height: 1.08;
+      letter-spacing: -0.045em;
+    }
+
+    .section-head p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 15px;
+    }
+
+    .boundary-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 16px;
+    }
+
+    .boundary-card {
+      min-height: 258px;
+      padding: 24px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: rgba(11, 23, 36, 0.76);
+    }
+
+    .boundary-card.featured {
+      border-color: rgba(92, 225, 230, 0.38);
+      background:
+        linear-gradient(140deg, rgba(92, 225, 230, 0.11), transparent 55%),
+        rgba(11, 23, 36, 0.84);
+    }
+
+    .boundary-card .owner {
+      color: var(--faint);
+      font-family: var(--mono);
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+    }
+
+    .boundary-card h3 {
+      margin: 13px 0 8px;
+      font-size: 22px;
+    }
+
+    .boundary-card p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .boundary-card ul {
+      display: grid;
+      gap: 8px;
+      margin: 18px 0 0;
+      padding: 0;
+      list-style: none;
+    }
+
+    .boundary-card li {
+      color: #c7d5e1;
+      font-size: 13px;
+    }
+
+    .boundary-card li::before {
+      margin-right: 8px;
+      color: var(--cyan);
+      content: "→";
+    }
+
+    .boundary-note {
+      margin-top: 18px;
+      padding: 16px 18px;
+      border: 1px dashed var(--line-strong);
+      border-radius: 12px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .topology {
+      display: grid;
+      gap: 12px;
+    }
+
+    .topology-layer {
+      position: relative;
+      display: grid;
+      grid-template-columns: 154px minmax(0, 1fr);
+      gap: 16px;
+      align-items: stretch;
+    }
+
+    .layer-label {
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      padding: 17px;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: rgba(8, 19, 31, 0.74);
+    }
+
+    .layer-label strong {
+      font-size: 14px;
+    }
+
+    .layer-label span {
+      margin-top: 4px;
+      color: var(--faint);
+      font-family: var(--mono);
+      font-size: 10px;
+    }
+
+    .layer-nodes {
+      display: grid;
+      grid-template-columns: repeat(var(--cols, 4), minmax(0, 1fr));
+      gap: 10px;
+      padding: 11px;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: rgba(11, 24, 38, 0.66);
+    }
+
+    .layer-node {
+      min-height: 86px;
+      padding: 14px;
+      border: 1px solid rgba(154, 190, 224, 0.13);
+      border-radius: 10px;
+      background: rgba(15, 33, 52, 0.82);
+    }
+
+    .layer-node code {
+      color: var(--cyan);
+      font-family: var(--mono);
+      font-size: 12px;
+    }
+
+    .layer-node p {
+      margin: 7px 0 0;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.5;
+    }
+
+    .topology-arrow {
+      display: grid;
+      grid-template-columns: 154px 1fr;
+      gap: 16px;
+      height: 24px;
+      color: var(--faint);
+      text-align: center;
+    }
+
+    .topology-arrow span:last-child {
+      font-family: var(--mono);
+      font-size: 14px;
+    }
+
+    .module-workbench {
+      display: grid;
+      grid-template-columns: 0.92fr 1.08fr;
+      gap: 18px;
+      align-items: start;
+    }
+
+    .module-list {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 9px;
+    }
+
+    .module-button {
+      min-height: 78px;
+      padding: 13px;
+      border: 1px solid var(--line);
+      border-radius: 11px;
+      background: rgba(11, 24, 38, 0.68);
+      text-align: left;
+      cursor: pointer;
+    }
+
+    .module-button:hover,
+    .module-button[aria-selected="true"] {
+      border-color: rgba(92, 225, 230, 0.45);
+      background: var(--cyan-soft);
+    }
+
+    .module-button span {
+      display: block;
+      color: var(--faint);
+      font-family: var(--mono);
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+
+    .module-button strong {
+      display: block;
+      margin-top: 6px;
+      font-family: var(--mono);
+      font-size: 13px;
+    }
+
+    .module-detail {
+      position: sticky;
+      top: 78px;
+      min-height: 430px;
+      padding: 26px;
+      border: 1px solid var(--line-strong);
+      border-radius: var(--radius);
+      background:
+        radial-gradient(circle at 90% 0%, rgba(92, 225, 230, 0.10), transparent 16rem),
+        rgba(9, 21, 34, 0.92);
+      box-shadow: var(--shadow);
+    }
+
+    .module-detail-top {
+      display: flex;
+      justify-content: space-between;
+      gap: 18px;
+      align-items: flex-start;
+    }
+
+    .module-detail h3 {
+      margin: 8px 0 4px;
+      font-family: var(--mono);
+      font-size: 24px;
+    }
+
+    .module-file {
+      padding: 6px 8px;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      color: var(--faint);
+      font-family: var(--mono);
+      font-size: 10px;
+    }
+
+    .module-summary {
+      margin: 14px 0 22px;
+      color: #c8d7e4;
+    }
+
+    .detail-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 12px;
+    }
+
+    .detail-cell {
+      padding: 14px;
+      border: 1px solid var(--line);
+      border-radius: 11px;
+      background: rgba(16, 32, 50, 0.64);
+    }
+
+    .detail-cell span {
+      color: var(--faint);
+      font-family: var(--mono);
+      font-size: 10px;
+      text-transform: uppercase;
+    }
+
+    .detail-cell p {
+      margin: 7px 0 0;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .detail-boundary {
+      margin-top: 14px;
+      padding: 14px;
+      border-left: 3px solid var(--amber);
+      color: #e4d4bb;
+      background: var(--amber-soft);
+      font-size: 13px;
+    }
+
+    .workflow-tabs {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 18px;
+      overflow-x: auto;
+      scrollbar-width: none;
+    }
+
+    .workflow-tab {
+      padding: 9px 13px;
+      border: 1px solid var(--line);
+      border-radius: 9px;
+      color: var(--muted);
+      background: transparent;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+
+    .workflow-tab[aria-selected="true"] {
+      color: #041114;
+      border-color: var(--cyan);
+      background: var(--cyan);
+      font-weight: 760;
+    }
+
+    .workflow-board {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 340px;
+      gap: 18px;
+      align-items: stretch;
+    }
+
+    .workflow-track {
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: rgba(10, 23, 37, 0.76);
+    }
+
+    .track-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 20px;
+      padding: 18px 20px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .track-head h3 {
+      margin: 0;
+      font-size: 18px;
+    }
+
+    .track-progress {
+      color: var(--cyan);
+      font-family: var(--mono);
+      font-size: 12px;
+    }
+
+    .step-rail {
+      display: flex;
+      gap: 7px;
+      padding: 16px 20px;
+      overflow-x: auto;
+      border-bottom: 1px solid var(--line);
+      scrollbar-width: thin;
+    }
+
+    .step-dot {
+      width: 34px;
+      height: 34px;
+      flex: 0 0 34px;
+      border: 1px solid var(--line);
+      border-radius: 50%;
+      color: var(--faint);
+      background: var(--surface);
+      font-family: var(--mono);
+      font-size: 11px;
+      cursor: pointer;
+    }
+
+    .step-dot.done {
+      color: var(--green);
+      border-color: rgba(117, 230, 173, 0.38);
+      background: var(--green-soft);
+    }
+
+    .step-dot.current {
+      color: #041114;
+      border-color: var(--cyan);
+      background: var(--cyan);
+    }
+
+    .step-stage {
+      min-height: 330px;
+      padding: 28px;
+    }
+
+    .step-module {
+      color: var(--cyan);
+      font-family: var(--mono);
+      font-size: 12px;
+    }
+
+    .step-stage h4 {
+      margin: 11px 0 10px;
+      font-size: 28px;
+      line-height: 1.18;
+    }
+
+    .step-stage > p {
+      max-width: 740px;
+      margin: 0;
+      color: var(--muted);
+    }
+
+    .step-evidence {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+      margin-top: 24px;
+    }
+
+    .evidence-chip {
+      padding: 12px;
+      border: 1px solid var(--line);
+      border-radius: 9px;
+      background: rgba(16, 33, 51, 0.66);
+    }
+
+    .evidence-chip span {
+      display: block;
+      color: var(--faint);
+      font-family: var(--mono);
+      font-size: 9px;
+      text-transform: uppercase;
+    }
+
+    .evidence-chip code {
+      display: block;
+      margin-top: 5px;
+      color: #cfdeea;
+      font-family: var(--mono);
+      font-size: 11px;
+      overflow-wrap: anywhere;
+    }
+
+    .step-controls {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 15px 20px;
+      border-top: 1px solid var(--line);
+    }
+
+    .step-controls button {
+      padding: 8px 13px;
+      border: 1px solid var(--line-strong);
+      border-radius: 8px;
+      background: var(--surface-2);
+      cursor: pointer;
+    }
+
+    .step-controls button:disabled {
+      opacity: 0.35;
+      cursor: not-allowed;
+    }
+
+    .workflow-aside {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .aside-card {
+      padding: 18px;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: rgba(11, 24, 38, 0.74);
+    }
+
+    .aside-card strong {
+      display: block;
+      font-size: 14px;
+    }
+
+    .aside-card p {
+      margin: 7px 0 0;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .aside-card.fact {
+      border-color: rgba(117, 230, 173, 0.3);
+      background: var(--green-soft);
+    }
+
+    .aside-card.warning {
+      border-color: rgba(255, 198, 109, 0.3);
+      background: var(--amber-soft);
+    }
+
+    .mechanics-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 18px;
+    }
+
+    .mechanic {
+      padding: 24px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: rgba(11, 24, 38, 0.73);
+    }
+
+    .mechanic h3 {
+      margin: 8px 0 8px;
+      font-size: 23px;
+    }
+
+    .mechanic > p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .state-flow {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      margin-top: 22px;
+      overflow-x: auto;
+      padding-bottom: 6px;
+    }
+
+    .state {
+      min-width: 82px;
+      padding: 9px 11px;
+      border: 1px solid var(--line-strong);
+      border-radius: 9px;
+      color: #d7e5f0;
+      background: var(--surface-2);
+      font-family: var(--mono);
+      font-size: 10px;
+      text-align: center;
+    }
+
+    .state.terminal {
+      border-color: rgba(117, 230, 173, 0.36);
+      color: var(--green);
+      background: var(--green-soft);
+    }
+
+    .state.manual {
+      border-color: rgba(255, 198, 109, 0.36);
+      color: var(--amber);
+      background: var(--amber-soft);
+    }
+
+    .arrow {
+      color: var(--faint);
+      font-family: var(--mono);
+    }
+
+    .recovery-gates {
+      display: grid;
+      gap: 9px;
+      margin-top: 20px;
+    }
+
+    .gate-row {
+      display: grid;
+      grid-template-columns: 118px 1fr auto;
+      gap: 12px;
+      align-items: center;
+      padding: 11px 12px;
+      border: 1px solid var(--line);
+      border-radius: 9px;
+      background: rgba(15, 31, 49, 0.62);
+    }
+
+    .gate-row code {
+      color: var(--cyan);
+      font-family: var(--mono);
+      font-size: 10px;
+    }
+
+    .gate-row span {
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .gate-row b {
+      color: var(--green);
+      font-family: var(--mono);
+      font-size: 10px;
+    }
+
+    .gate-row b.stop {
+      color: var(--amber);
+    }
+
+    .simulator {
+      margin-top: 20px;
+      padding: 18px;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: rgba(8, 19, 31, 0.7);
+    }
+
+    .pressure-buttons {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 7px;
+    }
+
+    .pressure-button {
+      padding: 8px 5px;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      color: var(--muted);
+      background: transparent;
+      font-family: var(--mono);
+      font-size: 10px;
+      cursor: pointer;
+    }
+
+    .pressure-button[aria-pressed="true"] {
+      color: #041114;
+      border-color: var(--cyan);
+      background: var(--cyan);
+    }
+
+    .sim-control {
+      margin-top: 14px;
+    }
+
+    .sim-control label {
+      display: flex;
+      justify-content: space-between;
+      color: var(--muted);
+      font-size: 11px;
+    }
+
+    .sim-control output {
+      color: var(--cyan);
+      font-family: var(--mono);
+    }
+
+    .sim-control input {
+      width: 100%;
+      margin-top: 6px;
+      accent-color: var(--cyan);
+    }
+
+    .decision-box {
+      display: grid;
+      grid-template-columns: auto 1fr;
+      gap: 12px;
+      align-items: center;
+      margin-top: 16px;
+      padding: 13px;
+      border: 1px solid rgba(117, 230, 173, 0.34);
+      border-radius: 9px;
+      background: var(--green-soft);
+    }
+
+    .decision-box.queue {
+      border-color: rgba(255, 198, 109, 0.34);
+      background: var(--amber-soft);
+    }
+
+    .decision-action {
+      color: var(--green);
+      font-family: var(--mono);
+      font-size: 16px;
+      font-weight: 800;
+    }
+
+    .decision-box.queue .decision-action {
+      color: var(--amber);
+    }
+
+    .decision-reason {
+      color: #ccdae6;
+      font-family: var(--mono);
+      font-size: 10px;
+    }
+
+    .scheduler-visual {
+      display: grid;
+      gap: 9px;
+      margin-top: 20px;
+    }
+
+    .tenant-lane {
+      display: grid;
+      grid-template-columns: 76px 1fr;
+      gap: 9px;
+      align-items: center;
+    }
+
+    .tenant-lane > span {
+      color: var(--faint);
+      font-family: var(--mono);
+      font-size: 10px;
+    }
+
+    .run-queue {
+      display: flex;
+      gap: 7px;
+    }
+
+    .run-block {
+      padding: 8px 10px;
+      border: 1px solid var(--line-strong);
+      border-radius: 7px;
+      color: #d7e6f1;
+      background: var(--surface-2);
+      font-family: var(--mono);
+      font-size: 10px;
+    }
+
+    .run-block.claimed {
+      color: #041114;
+      border-color: var(--cyan);
+      background: var(--cyan);
+    }
+
+    .scheduler-rule {
+      margin-top: 14px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .scheduler-rule strong {
+      color: var(--cyan);
+    }
+
+    .data-layout {
+      display: grid;
+      grid-template-columns: 1.08fr 0.92fr;
+      gap: 18px;
+    }
+
+    .schema-panel,
+    .api-panel {
+      padding: 23px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: rgba(11, 24, 38, 0.73);
+    }
+
+    .schema-panel h3,
+    .api-panel h3 {
+      margin: 8px 0 18px;
+      font-size: 22px;
+    }
+
+    .schema-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 9px;
+    }
+
+    .table-card {
+      padding: 13px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: rgba(15, 32, 50, 0.66);
+    }
+
+    .table-card code {
+      color: var(--cyan);
+      font-family: var(--mono);
+      font-size: 11px;
+    }
+
+    .table-card p {
+      margin: 6px 0 0;
+      color: var(--muted);
+      font-size: 11px;
+    }
+
+    .schema-note {
+      margin-top: 14px;
+      color: var(--faint);
+      font-size: 11px;
+    }
+
+    .api-list {
+      display: grid;
+      gap: 8px;
+    }
+
+    .api-row {
+      display: grid;
+      grid-template-columns: 52px minmax(0, 1fr);
+      gap: 10px;
+      align-items: center;
+      padding: 10px 11px;
+      border: 1px solid var(--line);
+      border-radius: 9px;
+      background: rgba(15, 32, 50, 0.66);
+    }
+
+    .api-method {
+      color: var(--green);
+      font-family: var(--mono);
+      font-size: 10px;
+      font-weight: 800;
+    }
+
+    .api-method.post {
+      color: var(--amber);
+    }
+
+    .api-row code {
+      color: #d8e6f0;
+      font-family: var(--mono);
+      font-size: 11px;
+    }
+
+    .audit-strip {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 10px;
+      margin-top: 18px;
+    }
+
+    .audit-item {
+      padding: 14px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: rgba(14, 30, 47, 0.64);
+    }
+
+    .audit-item span {
+      color: var(--faint);
+      font-family: var(--mono);
+      font-size: 9px;
+      text-transform: uppercase;
+    }
+
+    .audit-item strong {
+      display: block;
+      margin-top: 5px;
+      font-size: 13px;
+    }
+
+    .review-intro {
+      display: grid;
+      grid-template-columns: 0.85fr 1.15fr;
+      gap: 18px;
+      margin-bottom: 18px;
+    }
+
+    .verdict {
+      padding: 25px;
+      border: 1px solid rgba(92, 225, 230, 0.34);
+      border-radius: var(--radius);
+      background:
+        linear-gradient(140deg, rgba(92, 225, 230, 0.11), transparent 58%),
+        rgba(10, 23, 37, 0.82);
+    }
+
+    .verdict h3 {
+      margin: 10px 0 8px;
+      font-size: 25px;
+    }
+
+    .verdict p {
+      margin: 0;
+      color: #c9d8e4;
+      font-size: 14px;
+    }
+
+    .verdict strong {
+      color: var(--cyan);
+    }
+
+    .strengths {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 10px;
+    }
+
+    .strength {
+      padding: 16px;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: rgba(11, 24, 38, 0.74);
+    }
+
+    .strength b {
+      display: block;
+      color: var(--green);
+      font-size: 13px;
+    }
+
+    .strength p {
+      margin: 6px 0 0;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .review-list {
+      display: grid;
+      gap: 10px;
+    }
+
+    .review-item {
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: 13px;
+      background: rgba(11, 24, 38, 0.72);
+    }
+
+    .review-trigger {
+      width: 100%;
+      display: grid;
+      grid-template-columns: 56px minmax(0, 1fr) auto;
+      gap: 14px;
+      align-items: center;
+      padding: 16px 18px;
+      border: 0;
+      background: transparent;
+      text-align: left;
+      cursor: pointer;
+    }
+
+    .review-priority {
+      padding: 5px 7px;
+      border: 1px solid rgba(255, 142, 159, 0.28);
+      border-radius: 7px;
+      color: var(--red);
+      background: var(--red-soft);
+      font-family: var(--mono);
+      font-size: 10px;
+      text-align: center;
+    }
+
+    .review-priority.p1 {
+      color: var(--amber);
+      border-color: rgba(255, 198, 109, 0.28);
+      background: var(--amber-soft);
+    }
+
+    .review-priority.p2 {
+      color: var(--blue);
+      border-color: rgba(102, 166, 255, 0.28);
+      background: var(--blue-soft);
+    }
+
+    .review-title strong {
+      display: block;
+      font-size: 14px;
+    }
+
+    .review-title span {
+      display: block;
+      margin-top: 3px;
+      color: var(--faint);
+      font-size: 11px;
+    }
+
+    .review-plus {
+      color: var(--cyan);
+      font-family: var(--mono);
+    }
+
+    .review-body {
+      display: none;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 10px;
+      padding: 0 18px 18px 88px;
+    }
+
+    .review-item.open .review-body {
+      display: grid;
+    }
+
+    .review-cell {
+      padding: 13px;
+      border: 1px solid var(--line);
+      border-radius: 9px;
+      background: rgba(15, 31, 49, 0.62);
+    }
+
+    .review-cell span {
+      color: var(--faint);
+      font-family: var(--mono);
+      font-size: 9px;
+      text-transform: uppercase;
+    }
+
+    .review-cell p {
+      margin: 6px 0 0;
+      color: var(--muted);
+      font-size: 11px;
+    }
+
+    .roadmap {
+      position: relative;
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 12px;
+    }
+
+    .roadmap::before {
+      position: absolute;
+      top: 25px;
+      left: 7%;
+      right: 7%;
+      height: 1px;
+      content: "";
+      background: linear-gradient(90deg, var(--cyan), var(--blue), var(--violet), var(--amber));
+    }
+
+    .roadmap-card {
+      position: relative;
+      padding: 54px 19px 20px;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: rgba(11, 24, 38, 0.82);
+    }
+
+    .roadmap-dot {
+      position: absolute;
+      top: 18px;
+      left: 20px;
+      width: 15px;
+      height: 15px;
+      border: 3px solid var(--bg);
+      border-radius: 50%;
+      background: var(--cyan);
+      box-shadow: 0 0 0 1px var(--cyan);
+    }
+
+    .roadmap-card:nth-child(2) .roadmap-dot {
+      background: var(--blue);
+      box-shadow: 0 0 0 1px var(--blue);
+    }
+
+    .roadmap-card:nth-child(3) .roadmap-dot {
+      background: var(--violet);
+      box-shadow: 0 0 0 1px var(--violet);
+    }
+
+    .roadmap-card:nth-child(4) .roadmap-dot {
+      background: var(--amber);
+      box-shadow: 0 0 0 1px var(--amber);
+    }
+
+    .roadmap-card .phase {
+      color: var(--faint);
+      font-family: var(--mono);
+      font-size: 10px;
+      text-transform: uppercase;
+    }
+
+    .roadmap-card h3 {
+      margin: 9px 0 7px;
+      font-size: 17px;
+    }
+
+    .roadmap-card p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .roadmap-card ul {
+      display: grid;
+      gap: 7px;
+      margin: 14px 0 0;
+      padding: 0;
+      list-style: none;
+    }
+
+    .roadmap-card li {
+      color: #cbd9e4;
+      font-size: 11px;
+    }
+
+    .roadmap-card li::before {
+      margin-right: 7px;
+      color: var(--cyan);
+      content: "·";
+    }
+
+    .north-star {
+      display: grid;
+      grid-template-columns: 170px 1fr;
+      gap: 22px;
+      align-items: center;
+      margin-top: 18px;
+      padding: 23px;
+      border: 1px solid rgba(183, 161, 255, 0.32);
+      border-radius: 14px;
+      background: var(--violet-soft);
+    }
+
+    .north-star span {
+      color: var(--violet);
+      font-family: var(--mono);
+      font-size: 11px;
+      text-transform: uppercase;
+    }
+
+    .north-star p {
+      margin: 0;
+      color: #ddd7f4;
+      font-size: 14px;
+    }
+
+    .scope-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 16px;
+    }
+
+    .scope-card {
+      padding: 24px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: rgba(11, 24, 38, 0.72);
+    }
+
+    .scope-card.done {
+      border-color: rgba(117, 230, 173, 0.28);
+    }
+
+    .scope-card.not-yet {
+      border-color: rgba(255, 198, 109, 0.28);
+    }
+
+    .scope-card h3 {
+      margin: 8px 0 14px;
+      font-size: 20px;
+    }
+
+    .scope-card ul {
+      display: grid;
+      gap: 9px;
+      margin: 0;
+      padding: 0;
+      list-style: none;
+    }
+
+    .scope-card li {
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .scope-card.done li::before {
+      margin-right: 8px;
+      color: var(--green);
+      content: "✓";
+    }
+
+    .scope-card.not-yet li::before {
+      margin-right: 8px;
+      color: var(--amber);
+      content: "○";
+    }
+
+    footer {
+      padding: 34px 0 52px;
+      border-top: 1px solid var(--line);
+    }
+
+    .footer-inner {
+      display: flex;
+      justify-content: space-between;
+      gap: 20px;
+      color: var(--faint);
+      font-size: 12px;
+    }
+
+    .footer-inner strong {
+      color: var(--cyan);
+    }
+
+    .reveal {
+      opacity: 0;
+      transform: translateY(14px);
+      transition: opacity 0.55s ease, transform 0.55s ease;
+    }
+
+    .reveal.visible {
+      opacity: 1;
+      transform: translateY(0);
+    }
+
+    @media (max-width: 980px) {
+      .hero,
+      .section-head,
+      .module-workbench,
+      .workflow-board,
+      .data-layout,
+      .review-intro {
+        grid-template-columns: 1fr;
+      }
+
+      .hero {
+        min-height: 0;
+        padding-top: 66px;
+      }
+
+      .module-detail {
+        position: static;
+      }
+
+      .boundary-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .topology-layer {
+        grid-template-columns: 120px 1fr;
+      }
+
+      .layer-nodes {
+        grid-template-columns: repeat(2, 1fr);
+      }
+
+      .workflow-aside {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+      }
+
+      .roadmap {
+        grid-template-columns: repeat(2, 1fr);
+      }
+
+      .roadmap::before {
+        display: none;
+      }
+    }
+
+    @media (max-width: 700px) {
+      .shell {
+        width: min(100% - 24px, 1240px);
+      }
+
+      .nav {
+        max-width: 62vw;
+      }
+
+      .hero {
+        padding: 56px 0;
+      }
+
+      .hero h1 {
+        font-size: 43px;
+      }
+
+      .console-foot,
+      .mechanics-grid,
+      .detail-grid,
+      .step-evidence,
+      .schema-grid,
+      .audit-strip,
+      .strengths,
+      .scope-grid,
+      .roadmap,
+      .review-body,
+      .workflow-aside {
+        grid-template-columns: 1fr;
+      }
+
+      .console-metric {
+        border-right: 0;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .console-metric:last-child {
+        border-bottom: 0;
+      }
+
+      .topology-layer {
+        grid-template-columns: 1fr;
+      }
+
+      .topology-arrow {
+        grid-template-columns: 1fr;
+      }
+
+      .topology-arrow span:first-child {
+        display: none;
+      }
+
+      .layer-nodes,
+      .module-list {
+        grid-template-columns: 1fr;
+      }
+
+      .review-trigger {
+        grid-template-columns: 48px minmax(0, 1fr) auto;
+      }
+
+      .review-body {
+        padding-left: 18px;
+      }
+
+      .north-star {
+        grid-template-columns: 1fr;
+      }
+
+      .footer-inner {
+        flex-direction: column;
+      }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      html {
+        scroll-behavior: auto;
+      }
+
+      .reveal {
+        opacity: 1;
+        transform: none;
+        transition: none;
+      }
+    }
+
+    @media print {
+      .topbar,
+      .hero-actions,
+      .step-controls {
+        display: none;
+      }
+
+      body {
+        color: #111;
+        background: white;
+      }
+
+      section {
+        break-inside: avoid;
+      }
+    }
+  </style>
+</head>
+<body>
+  <a class="skip-link" href="#main">跳到正文</a>
+
+  <header class="topbar">
+    <div class="shell topbar-inner">
+      <a class="brand" href="#top">
+        <span class="brand-mark">VH</span>
+        <span>VRAM-Aware Harness</span>
+      </a>
+      <nav class="nav" aria-label="章节导航">
+        <a href="#boundary">边界</a>
+        <a href="#topology">拓扑</a>
+        <a href="#modules">模块</a>
+        <a href="#workflow">流程</a>
+        <a href="#mechanics">机制</a>
+        <a href="#evidence">证据</a>
+        <a href="#review">审视</a>
+        <a href="#roadmap">深化</a>
+      </nav>
+    </div>
+  </header>
+
+  <main id="main">
+    <div id="top" class="shell hero">
+      <div>
+        <div class="eyebrow">Agent task service / tenant isolation / shared GPU / 2026-08-12</div>
+        <h1>让团队安全地把项目<br /><span>交给 Agent 执行</span></h1>
+        <p class="hero-lead">
+          这是一个支持团队共享本地模型的多租户 Agent 任务服务。用户在独立
+          Workspace 中提交任务、查看过程并取得回答、文件 Diff 和 Artifact；现有
+          可靠执行内核负责 Run、副作用、资源准入与恢复，下一步重点补齐可信身份、
+          真实 Sandbox 和用户端到端任务体验。
+        </p>
+        <div class="hero-claim">
+          <strong>系统承诺：</strong>
+          Tenant 之间不能互读代码与 Secret；资源不足时不盲目启动；进程失败后
+          不盲目重做；用户最终获得可使用的修改结果，而不只是内部终态。
+        </div>
+        <div class="hero-actions">
+          <a class="action-link primary" href="#workflow">从一次 Run 开始</a>
+          <a class="action-link" href="#review">直接看技术审视</a>
+        </div>
+      </div>
+
+      <aside class="hero-console" aria-label="当前 MVP 工程证据">
+        <div class="console-head">
+          <div class="console-dots"><span></span><span></span><span></span></div>
+          <span>day7 / local deterministic closure</span>
+        </div>
+        <div class="console-body">
+          <div class="console-line">
+            <span class="n">01</span>
+            <span class="path">submit → queue → admission</span>
+            <span class="result">PASS</span>
+          </div>
+          <div class="console-line">
+            <span class="n">02</span>
+            <span class="path">CRITICAL → NORMAL → auto progress</span>
+            <span class="result">PASS</span>
+          </div>
+          <div class="console-line">
+            <span class="n">03</span>
+            <span class="path">restart → checkpoint → resume</span>
+            <span class="result">PASS</span>
+          </div>
+          <div class="console-line">
+            <span class="n">04</span>
+            <span class="path">unknown side effect → manual review</span>
+            <span class="result">SAFE</span>
+          </div>
+          <div class="console-line warn">
+            <span class="n">05</span>
+            <span class="path">A6000 direct Pi vs Harness</span>
+            <span class="result">PENDING</span>
+          </div>
+        </div>
+        <div class="console-foot">
+          <div class="console-metric"><strong>40</strong><span>src TypeScript files</span></div>
+          <div class="console-metric"><strong>6</strong><span>SQLite fact tables</span></div>
+          <div class="console-metric"><strong>8</strong><span>HTTP endpoints</span></div>
+          <div class="console-metric"><strong>153</strong><span>passing tests</span></div>
+        </div>
+      </aside>
+    </div>
+
+    <section id="boundary">
+      <div class="shell">
+        <div class="section-head reveal">
+          <div>
+            <div class="section-index">01 / responsibility boundary</div>
+            <h2>先把责任边界钉死，系统才不会越做越散</h2>
+          </div>
+          <p>
+            Pi 决定 Agent 如何工作，vLLM 决定推理如何执行；Harness
+            管理跨 Run 的可靠性、资源准入与审计。这个边界是当前设计最正确的部分之一。
+          </p>
+        </div>
+
+        <div class="boundary-grid reveal">
+          <article class="boundary-card">
+            <span class="owner">Behavior plane</span>
+            <h3>Pi Agent Runtime</h3>
+            <p>拥有模型—工具循环、Pi Session、上下文压缩与内置工具协议。</p>
+            <ul>
+              <li>接收 start / resume / interrupt</li>
+              <li>产生即时 RuntimeEvent</li>
+              <li>维护 Agent 如何完成任务</li>
+            </ul>
+          </article>
+
+          <article class="boundary-card featured">
+            <span class="owner">Control plane</span>
+            <h3>VRAM-Aware Harness</h3>
+            <p>拥有持久 Run、恢复安全边界、资源策略、逻辑并发 slot 与追加式审计事实。</p>
+            <ul>
+              <li>决定任务何时可以启动</li>
+              <li>决定失败后能否自动恢复</li>
+              <li>解释为什么启动或排队</li>
+            </ul>
+          </article>
+
+          <article class="boundary-card">
+            <span class="owner">Inference plane</span>
+            <h3>vLLM + NVIDIA GPU</h3>
+            <p>拥有 batching、Prefill/Decode、KV Cache、显存分配与真实推理执行。</p>
+            <ul>
+              <li>暴露 Metrics 与设备状态</li>
+              <li>执行模型请求</li>
+              <li>不理解 Run 和工具副作用</li>
+            </ul>
+          </article>
+        </div>
+
+        <div class="boundary-note reveal">
+          当前资源感知发生在 <strong>Run 准入层</strong>：它控制一个新 Run 或恢复 Run
+          是否提交给 Runtime；它不接管 vLLM 的 token scheduler，也不物理管理 KV block。
+        </div>
+      </div>
+    </section>
+
+    <section id="topology">
+      <div class="shell">
+        <div class="section-head reveal">
+          <div>
+            <div class="section-index">02 / system topology</div>
+            <h2>五层结构，把协议、策略、执行与事实分开</h2>
+          </div>
+          <p>
+            纵向看是一次请求的控制流，横向看是审计事实不断落入 SQLite。
+            恢复并不是旁路，而是重新回到同一条调度链。
+          </p>
+        </div>
+
+        <div class="topology reveal">
+          <div class="topology-layer">
+            <div class="layer-label"><strong>接入层</strong><span>PROTOCOL</span></div>
+            <div class="layer-nodes" style="--cols: 3">
+              <div class="layer-node"><code>HarnessHttpApi</code><p>8 个最小端点，做输入校验与协议转换。</p></div>
+              <div class="layer-node"><code>HarnessHttpServer</code><p>Bun HTTP 监听，不承载领域逻辑。</p></div>
+              <div class="layer-node"><code>main.ts</code><p>启动顺序、信号处理、优雅关闭。</p></div>
+            </div>
+          </div>
+          <div class="topology-arrow"><span></span><span>↓ command / query</span></div>
+
+          <div class="topology-layer">
+            <div class="layer-label"><strong>应用层</strong><span>ORCHESTRATION</span></div>
+            <div class="layer-nodes" style="--cols: 3">
+              <div class="layer-node"><code>HarnessApplication</code><p>生命周期、提交、恢复、中断与统一查询门面。</p></div>
+              <div class="layer-node"><code>Composition Root</code><p>唯一组装点，连接真实依赖与可替换边界。</p></div>
+              <div class="layer-node"><code>HarnessConfig</code><p>模型、数据库、资源阈值与并发配置。</p></div>
+            </div>
+          </div>
+          <div class="topology-arrow"><span></span><span>↓ enqueue / tick / observe</span></div>
+
+          <div class="topology-layer">
+            <div class="layer-label"><strong>控制层</strong><span>SCHEDULING</span></div>
+            <div class="layer-nodes" style="--cols: 4">
+              <div class="layer-node"><code>RunQueueCoordinator</code><p>连接队列、Admission 与 RunService。</p></div>
+              <div class="layer-node"><code>TenantRunScheduler</code><p>round-robin、公平选择与原子占 slot。</p></div>
+              <div class="layer-node"><code>ResourceAdmission</code><p>观测、分类、决策与证据落库。</p></div>
+              <div class="layer-node"><code>RunQueuePump</code><p>周期推进与 single-flight drain。</p></div>
+            </div>
+          </div>
+          <div class="topology-arrow"><span></span><span>↓ execute / resume / interrupt</span></div>
+
+          <div class="topology-layer">
+            <div class="layer-label"><strong>可靠执行层</strong><span>EXECUTION</span></div>
+            <div class="layer-nodes" style="--cols: 4">
+              <div class="layer-node"><code>RunService</code><p>持久 Run 与即时 Runtime 之间的生命周期编排。</p></div>
+              <div class="layer-node"><code>RuntimeEventBridge</code><p>把 SDK 事件转换为稳定 RunEvent。</p></div>
+              <div class="layer-node"><code>ToolGateway</code><p>工具意图、结果复用、副作用与 Checkpoint。</p></div>
+              <div class="layer-node"><code>RecoveryService</code><p>扫描遗留执行并生成安全恢复计划。</p></div>
+            </div>
+          </div>
+          <div class="topology-arrow"><span></span><span>↓ adapter / metrics / durable facts</span></div>
+
+          <div class="topology-layer">
+            <div class="layer-label"><strong>基础设施层</strong><span>RUNTIME + DATA</span></div>
+            <div class="layer-nodes" style="--cols: 4">
+              <div class="layer-node"><code>PiAdapter</code><p>Pi SDK 的 start/resume/interrupt/subscribe 适配。</p></div>
+              <div class="layer-node"><code>VllmResourceObserver</code><p>聚合 vLLM Metrics 与 nvidia-smi。</p></div>
+              <div class="layer-node"><code>SQLite Stores</code><p>Run、Event、Tool、Checkpoint、Snapshot、Decision。</p></div>
+              <div class="layer-node"><code>Pi + vLLM</code><p>真实 Agent 行为与推理执行。</p></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="modules">
+      <div class="shell">
+        <div class="section-head reveal">
+          <div>
+            <div class="section-index">03 / module atlas</div>
+            <h2>点击模块，看它真正负责什么，也看它刻意不负责什么</h2>
+          </div>
+          <p>
+            好的模块边界不是“功能很多”，而是输入、输出、证据和非目标都清晰。
+            右侧内容直接对应当前源码职责。
+          </p>
+        </div>
+
+        <div class="module-workbench reveal">
+          <div id="module-list" class="module-list" role="tablist" aria-label="Harness 模块"></div>
+          <article id="module-detail" class="module-detail" aria-live="polite">
+            <div class="module-detail-top">
+              <div>
+                <div id="module-layer" class="section-index"></div>
+                <h3 id="module-name"></h3>
+              </div>
+              <span id="module-file" class="module-file"></span>
+            </div>
+            <p id="module-summary" class="module-summary"></p>
+            <div class="detail-grid">
+              <div class="detail-cell"><span>输入</span><p id="module-input"></p></div>
+              <div class="detail-cell"><span>输出</span><p id="module-output"></p></div>
+              <div class="detail-cell"><span>持久证据</span><p id="module-proof"></p></div>
+              <div class="detail-cell"><span>关键不变量</span><p id="module-invariant"></p></div>
+            </div>
+            <div id="module-boundary" class="detail-boundary"></div>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section id="workflow">
+      <div class="shell">
+        <div class="section-head reveal">
+          <div>
+            <div class="section-index">04 / end-to-end workflow</div>
+            <h2>四条流程，覆盖正常、资源阻塞、重启与危险副作用</h2>
+          </div>
+          <p>
+            切换场景并逐步推进。每一步同时显示当前模块、写入的事实，以及系统为什么
+            选择继续或停止。
+          </p>
+        </div>
+
+        <div id="workflow-tabs" class="workflow-tabs reveal" role="tablist" aria-label="执行场景"></div>
+        <div class="workflow-board reveal">
+          <div class="workflow-track">
+            <div class="track-head">
+              <h3 id="workflow-title"></h3>
+              <span id="workflow-progress" class="track-progress"></span>
+            </div>
+            <div id="step-rail" class="step-rail" aria-label="流程步骤"></div>
+            <div class="step-stage">
+              <span id="step-module" class="step-module"></span>
+              <h4 id="step-title"></h4>
+              <p id="step-description"></p>
+              <div class="step-evidence">
+                <div class="evidence-chip"><span>写入 / 读取事实</span><code id="step-fact"></code></div>
+                <div class="evidence-chip"><span>控制结果</span><code id="step-result"></code></div>
+              </div>
+            </div>
+            <div class="step-controls">
+              <button id="step-prev" type="button">← 上一步</button>
+              <button id="step-next" type="button">下一步 →</button>
+            </div>
+          </div>
+
+          <aside class="workflow-aside">
+            <div class="aside-card fact">
+              <strong>命令与事实分离</strong>
+              <p>start/resume 是命令；RunEvent、ToolExecution 和 PolicyDecision 才是可恢复、可审计的历史事实。</p>
+            </div>
+            <div class="aside-card">
+              <strong>恢复重新入队</strong>
+              <p>恢复任务不会直接调用 Runtime.resume，而是重新竞争公平队列、资源准入和 slot。</p>
+            </div>
+            <div class="aside-card warning">
+              <strong>安全优先</strong>
+              <p>没有 Checkpoint 或存在 UNKNOWN_EFFECT 的 PREPARED 工具时，系统进入 MANUAL_REVIEW。</p>
+            </div>
+          </aside>
+        </div>
+      </div>
+    </section>
+
+    <section id="mechanics">
+      <div class="shell">
+        <div class="section-head reveal">
+          <div>
+            <div class="section-index">05 / core mechanics</div>
+            <h2>四个机制，构成当前 Harness 的真正内核</h2>
+          </div>
+          <p>
+            状态机约束合法生命周期；恢复门判断能不能自动继续；资源策略决定现在能不能开始；
+            Scheduler 保证选中与占 slot 是一个动作。
+          </p>
+        </div>
+
+        <div class="mechanics-grid">
+          <article class="mechanic reveal">
+            <div class="section-index">run state machine</div>
+            <h3>Run 是持久任务，不等于一次模型调用</h3>
+            <p>一个 Run 可以经历多个模型调用与工具阶段。终态不可逆，恢复只能从 INTERRUPTED 重新进入 QUEUED。</p>
+            <div class="state-flow" aria-label="AgentRun 状态机主路径">
+              <span class="state">QUEUED</span><span class="arrow">→</span>
+              <span class="state">RUNNING</span><span class="arrow">↔</span>
+              <span class="state">WAITING_TOOL</span><span class="arrow">→</span>
+              <span class="state terminal">COMPLETED</span>
+            </div>
+            <div class="state-flow" aria-label="AgentRun 恢复路径">
+              <span class="state">RUNNING</span><span class="arrow">→</span>
+              <span class="state manual">INTERRUPTED</span><span class="arrow">→</span>
+              <span class="state">QUEUED</span><span class="arrow">→</span>
+              <span class="state">RUNNING</span>
+            </div>
+          </article>
+
+          <article class="mechanic reveal">
+            <div class="section-index">recovery safety gate</div>
+            <h3>恢复判断的是“能否继续”，不是“重试几次”</h3>
+            <p>Checkpoint 提供恢复位置；PREPARED 工具提供崩溃窗口内的副作用事实。二者共同决定自动恢复边界。</p>
+            <div class="recovery-gates">
+              <div class="gate-row"><code>checkpoint?</code><span>不存在可靠恢复位置</span><b class="stop">MANUAL</b></div>
+              <div class="gate-row"><code>READ_ONLY</code><span>未完成调用可以安全重放</span><b>AUTO</b></div>
+              <div class="gate-row"><code>IDEMPOTENT</code><span>明确具备幂等语义才可重放</span><b>AUTO</b></div>
+              <div class="gate-row"><code>UNKNOWN</code><span>可能已经产生外部副作用</span><b class="stop">MANUAL</b></div>
+            </div>
+          </article>
+
+          <article class="mechanic reveal">
+            <div class="section-index">resource admission simulator</div>
+            <h3>资源状态如何改变 START / QUEUE</h3>
+            <p>这是当前 DeterministicExecutionPolicy 的真实规则。修改压力与并发，观察 reasonCode。</p>
+            <div class="simulator">
+              <div id="pressure-buttons" class="pressure-buttons" aria-label="资源压力">
+                <button class="pressure-button" type="button" data-pressure="NORMAL" aria-pressed="true">NORMAL</button>
+                <button class="pressure-button" type="button" data-pressure="BUSY" aria-pressed="false">BUSY</button>
+                <button class="pressure-button" type="button" data-pressure="CRITICAL" aria-pressed="false">CRITICAL</button>
+                <button class="pressure-button" type="button" data-pressure="UNKNOWN" aria-pressed="false">UNKNOWN</button>
+              </div>
+              <div class="sim-control">
+                <label for="active-global">全局活跃 Run <output id="active-global-value">0</output></label>
+                <input id="active-global" type="range" min="0" max="2" value="0" />
+              </div>
+              <div class="sim-control">
+                <label for="active-tenant">当前 Tenant 活跃 Run <output id="active-tenant-value">0</output></label>
+                <input id="active-tenant" type="range" min="0" max="1" value="0" />
+              </div>
+              <div id="decision-box" class="decision-box">
+                <span id="decision-action" class="decision-action">START</span>
+                <span id="decision-reason" class="decision-reason">RESOURCE_NORMAL</span>
+              </div>
+            </div>
+          </article>
+
+          <article class="mechanic reveal">
+            <div class="section-index">fair queue + logical slots</div>
+            <h3>claimNext 同时完成选择与占位</h3>
+            <p>Tenant 内 FIFO、Tenant 间轮转。返回 Run 时，它已经离开等待队列并占有一个 Run 级逻辑 slot。</p>
+            <div class="scheduler-visual">
+              <div class="tenant-lane"><span>TENANT A</span><div class="run-queue"><span class="run-block claimed">A1</span><span class="run-block">A2</span><span class="run-block">A3</span></div></div>
+              <div class="tenant-lane"><span>TENANT B</span><div class="run-queue"><span class="run-block claimed">B1</span><span class="run-block">B2</span></div></div>
+              <div class="tenant-lane"><span>SLOTS 2</span><div class="run-queue"><span class="run-block claimed">A1</span><span class="run-block claimed">B1</span></div></div>
+            </div>
+            <p class="scheduler-rule"><strong>不变量：</strong>任何 Run 只有获得 slot 后才进入 Admission；失败、完成或 Runtime 抛错都必须在 finally 中释放。</p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section id="evidence">
+      <div class="shell">
+        <div class="section-head reveal">
+          <div>
+            <div class="section-index">06 / data & audit evidence</div>
+            <h2>SQLite 不只是数据库，而是恢复与解释的事实底座</h2>
+          </div>
+          <p>
+            当前单机 MVP 用六张表保存当前快照和追加式历史。队列本身在内存中，
+            但可以根据持久 Run 状态在启动时重建。
+          </p>
+        </div>
+
+        <div class="data-layout reveal">
+          <article class="schema-panel">
+            <div class="section-index">durable schema</div>
+            <h3>六类事实</h3>
+            <div class="schema-grid">
+              <div class="table-card"><code>agent_runs</code><p>任务当前快照、Tenant、Session、状态与 Checkpoint 引用。</p></div>
+              <div class="table-card"><code>run_events</code><p>按 sequence 排列的生命周期、模型和工具事件。</p></div>
+              <div class="table-card"><code>tool_executions</code><p>PREPARED/SUCCEEDED/FAILED、副作用类型、参数与结果。</p></div>
+              <div class="table-card"><code>checkpoints</code><p>Runtime Session 引用与最后安全事件位置。</p></div>
+              <div class="table-card"><code>resource_snapshots</code><p>vLLM/GPU 观测事实及来源。</p></div>
+              <div class="table-card"><code>policy_decisions</code><p>START/QUEUE、reason、pressure 与 Snapshot 关联。</p></div>
+            </div>
+            <p class="schema-note">关键事务：Run 状态 + RunEvent；工具成功结果 + Checkpoint + Run 引用；ResourceSnapshot + PolicyDecision。</p>
+          </article>
+
+          <article class="api-panel">
+            <div class="section-index">minimal http surface</div>
+            <h3>八个端点</h3>
+            <div class="api-list">
+              <div class="api-row"><span class="api-method post">POST</span><code>/runs</code></div>
+              <div class="api-row"><span class="api-method">GET</span><code>/runs/:runId</code></div>
+              <div class="api-row"><span class="api-method">GET</span><code>/runs/:runId/events</code></div>
+              <div class="api-row"><span class="api-method post">POST</span><code>/runs/:runId/interrupt</code></div>
+              <div class="api-row"><span class="api-method post">POST</span><code>/runs/:runId/resume</code></div>
+              <div class="api-row"><span class="api-method">GET</span><code>/queue</code></div>
+              <div class="api-row"><span class="api-method">GET</span><code>/resources</code></div>
+              <div class="api-row"><span class="api-method">GET</span><code>/health</code></div>
+            </div>
+          </article>
+        </div>
+
+        <div class="audit-strip reveal">
+          <div class="audit-item"><span>What happened</span><strong>RunEvent 时间线</strong></div>
+          <div class="audit-item"><span>Why it waited</span><strong>PolicyDecision</strong></div>
+          <div class="audit-item"><span>What changed outside</span><strong>ToolExecution</strong></div>
+          <div class="audit-item"><span>Where to continue</span><strong>Checkpoint</strong></div>
+        </div>
+      </div>
+    </section>
+
+    <section id="review">
+      <div class="shell">
+        <div class="section-head reveal">
+          <div>
+            <div class="section-index">07 / principal engineer review</div>
+            <h2>从技术大牛视角看：主干是对的，下一步要从“语义闭环”走向“系统承诺”</h2>
+          </div>
+          <p>
+            当前设计最有价值的不是模块数量，而是已经形成可靠执行内核。
+            但它仍是单进程 MVP：生产化的难点会集中在 lease、隔离、幂等边界和真实资源数据。
+          </p>
+        </div>
+
+        <div class="review-intro reveal">
+          <article class="verdict">
+            <div class="section-index">overall verdict</div>
+            <h3>这是一个可信的 Harness MVP，不是生产级云平台</h3>
+            <p>
+              <strong>架构方向正确：</strong>Runtime 可替换、事实优先、恢复保守、资源决策可解释。
+              真正的下一关不是再加几个 CRUD，而是让这些承诺在并发进程、网络重试、
+              Workspace 隔离和真实 A6000 压力下仍然成立。
+            </p>
+          </article>
+
+          <div class="strengths">
+            <article class="strength"><b>边界清晰</b><p>没有重写 Pi Agent Loop，也没有假装控制 vLLM token scheduler。</p></article>
+            <article class="strength"><b>证据驱动</b><p>Run、事件、工具、Checkpoint、资源和决策均有持久事实。</p></article>
+            <article class="strength"><b>恢复保守</b><p>不确定副作用进入人工处理，避免“自动恢复”变成重复破坏。</p></article>
+            <article class="strength"><b>确定性基线</b><p>153 项测试让策略和故障分支先可证明，再谈智能调度。</p></article>
+          </div>
+        </div>
+
+        <div id="review-list" class="review-list reveal">
+          <article class="review-item open">
+            <button class="review-trigger" type="button" aria-expanded="true">
+              <span class="review-priority">P0</span>
+              <span class="review-title"><strong>缺少跨进程 lease 与 fencing token</strong><span>当前 slot 和公平队列属于单进程内存状态</span></span>
+              <span class="review-plus">−</span>
+            </button>
+            <div class="review-body">
+              <div class="review-cell"><span>风险</span><p>两个 Harness 实例共享 SQLite 时，可能同时认为同一个 Run 可执行；进程失联也没有可过期的执行所有权。</p></div>
+              <div class="review-cell"><span>深挖</span><p>引入 RunAttempt、owner_id、lease_expires_at、fencing_token，并让 claim 成为数据库条件更新。</p></div>
+              <div class="review-cell"><span>证明</span><p>双进程竞争、旧 worker 迟到写入、lease 过期接管与重复完成事件的故障注入。</p></div>
+            </div>
+          </article>
+
+          <article class="review-item">
+            <button class="review-trigger" type="button" aria-expanded="false">
+              <span class="review-priority">P0</span>
+              <span class="review-title"><strong>HTTP 重试与工具幂等边界还不够强</strong><span>POST /runs 没有客户端幂等键，工具调用依赖 toolCallId 稳定性</span></span>
+              <span class="review-plus">+</span>
+            </button>
+            <div class="review-body">
+              <div class="review-cell"><span>风险</span><p>客户端超时重试可能创建两个 Run；Runtime 恢复后若 toolCallId 变化，历史成功结果无法自动命中。</p></div>
+              <div class="review-cell"><span>深挖</span><p>增加 tenant-scoped idempotency key、RunAttempt 和业务幂等键；明确每类工具的 dedupe contract。</p></div>
+              <div class="review-cell"><span>证明</span><p>网络响应丢失、相同提交重复十次、恢复后 toolCallId 改变、外部 API 超时但实际成功。</p></div>
+            </div>
+          </article>
+
+          <article class="review-item">
+            <button class="review-trigger" type="button" aria-expanded="false">
+              <span class="review-priority">P0</span>
+              <span class="review-title"><strong>Workspace 与 Tool 权限尚未形成安全边界</strong><span>workspacePath 来自请求，Pi 工具可以包含 bash/write/edit</span></span>
+              <span class="review-plus">+</span>
+            </button>
+            <div class="review-body">
+              <div class="review-cell"><span>风险</span><p>云端部署后，逻辑 Tenant 字段不能阻止路径越界、进程逃逸或访问其他租户文件。</p></div>
+              <div class="review-cell"><span>深挖</span><p>Workspace sandbox、路径根校验、Tenant Capability Policy、Tool/Skill allowlist、密钥作用域和网络 egress policy。</p></div>
+              <div class="review-cell"><span>证明</span><p>符号链接穿越、绝对路径、bash fork bomb、跨 Tenant 文件读取和未经授权工具调用测试。</p></div>
+            </div>
+          </article>
+
+          <article class="review-item">
+            <button class="review-trigger" type="button" aria-expanded="false">
+              <span class="review-priority p1">P1</span>
+              <span class="review-title"><strong>资源快照缺少稳定性、归因与版本</strong><span>阈值是确定性的，但压力抖动和历史可复现性仍有限</span></span>
+              <span class="review-plus">+</span>
+            </button>
+            <div class="review-body">
+              <div class="review-cell"><span>风险</span><p>临界阈值附近会反复 START/QUEUE；Decision 没有完整保存 policy version 和阈值配置哈希。</p></div>
+              <div class="review-cell"><span>深挖</span><p>观测 TTL、EWMA、hysteresis、采样批次复用、Run/Request 归因、policy_version 与 config_hash。</p></div>
+              <div class="review-cell"><span>证明</span><p>压力锯齿、Metrics 延迟、nvidia-smi 超时、同一 Snapshot 批量准入与历史决策重放。</p></div>
+            </div>
+          </article>
+
+          <article class="review-item">
+            <button class="review-trigger" type="button" aria-expanded="false">
+              <span class="review-priority p1">P1</span>
+              <span class="review-title"><strong>Run 级 slot 太粗，工具等待期间也占容量</strong><span>简单正确，但可能低估真实可用推理并发</span></span>
+              <span class="review-plus">+</span>
+            </button>
+            <div class="review-body">
+              <div class="review-cell"><span>风险</span><p>长时间 bash、测试或外部 API 等待会占据 Run slot，导致 GPU 空闲而队列不推进。</p></div>
+              <div class="review-cell"><span>深挖</span><p>先测量 MODEL / TOOL / IDLE 阶段，再考虑 Run lease 与 inference permit 分离、阶段感知容量。</p></div>
+              <div class="review-cell"><span>证明</span><p>工具等待占比、GPU idle 时间、切换 permit 前后吞吐、公平性与恢复复杂度对照。</p></div>
+            </div>
+          </article>
+
+          <article class="review-item">
+            <button class="review-trigger" type="button" aria-expanded="false">
+              <span class="review-priority p1">P1</span>
+              <span class="review-title"><strong>drain 会为多个候选并行重复观测资源</strong><span>slot 不会超卖，但 Metrics/nvidia-smi 可能形成采样风暴</span></span>
+              <span class="review-plus">+</span>
+            </button>
+            <div class="review-body">
+              <div class="review-cell"><span>风险</span><p>一个 drain pass 中多个 attemptNext 各自 observe，既增加开销，也可能基于不一致快照作出并发决策。</p></div>
+              <div class="review-cell"><span>深挖</span><p>单轮共享 Snapshot、Admission batch、有限并发观测、快照有效期和一次决策分配多个 permit。</p></div>
+              <div class="review-cell"><span>证明</span><p>100 个等待 Run 下的 nvidia-smi 调用次数、drain 延迟、决策一致性和故障隔离。</p></div>
+            </div>
+          </article>
+
+          <article class="review-item">
+            <button class="review-trigger" type="button" aria-expanded="false">
+              <span class="review-priority p2">P2</span>
+              <span class="review-title"><strong>公平性只有 round-robin，还没有成本与 SLO 语义</strong><span>能防 Tenant 饥饿，但长短任务和优先级尚未建模</span></span>
+              <span class="review-plus">+</span>
+            </button>
+            <div class="review-body">
+              <div class="review-cell"><span>风险</span><p>一个超长 Run 与一个短交互 Run 消耗同一个 slot；VIP、deadline、token plan 都无法表达。</p></div>
+              <div class="review-cell"><span>深挖</span><p>Weighted DRR、cost estimate、deadline/SLO class、最大输出 token budget 与 aging。</p></div>
+              <div class="review-cell"><span>证明</span><p>长短任务混合、Tenant 权重、尾延迟、有效吞吐与估算误差校准。</p></div>
+            </div>
+          </article>
+
+          <article class="review-item">
+            <button class="review-trigger" type="button" aria-expanded="false">
+              <span class="review-priority p2">P2</span>
+              <span class="review-title"><strong>审计已有事实，但还不是完整可观测系统</strong><span>缺少跨服务 Trace、运行指标、告警和长期证据完整性</span></span>
+              <span class="review-plus">+</span>
+            </button>
+            <div class="review-body">
+              <div class="review-cell"><span>风险</span><p>真实 Pi/vLLM 故障时，RunEvent 只能解释领域事实，无法快速关联网络、模型请求和 GPU 指标。</p></div>
+              <div class="review-cell"><span>深挖</span><p>OpenTelemetry trace_id/span_id、结构化日志、RED/USE 指标、事件归档和防篡改哈希链。</p></div>
+              <div class="review-cell"><span>证明</span><p>从 HTTP submit 一键定位到 Pi 模型请求、工具执行、vLLM 指标与最终 RunEvent。</p></div>
+            </div>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section id="roadmap">
+      <div class="shell">
+        <div class="section-head reveal">
+          <div>
+            <div class="section-index">08 / depth roadmap</div>
+            <h2>正式深化方向：把可靠执行内核变成可供团队使用的任务服务</h2>
+          </div>
+          <p>
+            后续主线由 ADR 0009 固定：不再扩张异构 Runtime 和大型控制面，围绕
+            用户任务闭环建设可信身份、Tenant Workspace、真实 Sandbox、编排恢复
+            和结果交付。第③④层是内部技术重点，不是产品名称。
+          </p>
+        </div>
+
+        <div class="roadmap reveal">
+          <article class="roadmap-card">
+            <span class="roadmap-dot"></span>
+            <span class="phase">Existing / reliable core</span>
+            <h3>保留现有执行内核</h3>
+            <p>冻结 Run/Attempt、副作用、Checkpoint、资源准入、公平队列和 Pi 主路径。</p>
+            <ul><li>State machine</li><li>Side-effect recovery</li><li>GPU admission</li><li>Tenant fairness</li></ul>
+          </article>
+          <article class="roadmap-card">
+            <span class="roadmap-dot"></span>
+            <span class="phase">P0 / trusted boundary</span>
+            <h3>身份、Workspace 与策略</h3>
+            <p>从认证 Principal 派生 Tenant，并把项目目录和环境配置变成受管对象。</p>
+            <ul><li>API key</li><li>Tenant-scoped API</li><li>Workspace root</li><li>ExecutionProfile</li></ul>
+          </article>
+          <article class="roadmap-card">
+            <span class="roadmap-dot"></span>
+            <span class="phase">P0 / layer ③ + ④</span>
+            <h3>真实 Sandbox 与任务编排</h3>
+            <p>每个 Attempt 进入独立容器，文件、命令、网络、Secret 和资源限制在执行点生效。</p>
+            <ul><li>Non-root container</li><li>Tool in sandbox</li><li>Fair scheduling</li><li>Safe recovery</li></ul>
+          </article>
+          <article class="roadmap-card">
+            <span class="roadmap-dot"></span>
+            <span class="phase">P1 / user loop + evidence</span>
+            <h3>任务结果与真实验收</h3>
+            <p>交付实时过程、最终回答、Diff 和 Artifact，并用 A6000 与攻击测试证明边界。</p>
+            <ul><li>Task UI</li><li>Diff + Artifact</li><li>A6000 baseline</li><li>Isolation attacks</li></ul>
+          </article>
+        </div>
+
+        <div class="north-star reveal">
+          <span>North-star evidence</span>
+          <p>
+            Tenant A 与 B 在同一台机器上创建同名 Workspace 并提交任务：身份、文件、
+            进程、Secret 和结果互不可见；GPU 压力触发公平排队；Sandbox 被 kill 后
+            slot 与状态安全收敛，恢复不重复危险副作用；用户最终获得可审查的 Diff。
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <section id="scope">
+      <div class="shell">
+        <div class="section-head reveal">
+          <div>
+            <div class="section-index">09 / honest scope</div>
+            <h2>当前完成了什么，以及绝对不能提前宣称什么</h2>
+          </div>
+          <p>一个成熟的技术项目，不靠扩大叙事显得厉害，而靠边界可信。</p>
+        </div>
+
+        <div class="scope-grid reveal">
+          <article class="scope-card done">
+            <div class="section-index">proven locally</div>
+            <h3>已经由代码和测试证明</h3>
+            <ul>
+              <li>Run 状态、事件、工具与决策持久化</li>
+              <li>资源压力改变 START / QUEUE</li>
+              <li>CRITICAL → NORMAL 自动推进</li>
+              <li>安全 Checkpoint 重启恢复</li>
+              <li>未知副作用阻止自动重放</li>
+              <li>Tenant 公平、slot 不泄漏与 HTTP 纵向切片</li>
+            </ul>
+          </article>
+
+          <article class="scope-card not-yet">
+            <div class="section-index">not yet proven</div>
+            <h3>还不能对外宣称</h3>
+            <ul>
+              <li>生产级多租户安全与物理隔离</li>
+              <li>多节点高可用或 exactly-once 执行</li>
+              <li>比 direct Pi 延迟更低或吞吐更高</li>
+              <li>token 级 GPU/KV Cache 调度能力</li>
+              <li>真实 A6000 压力下的稳定性收益</li>
+              <li>Tenant 级 Tool/Skill 权限治理已经完成</li>
+            </ul>
+          </article>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <div class="shell footer-inner">
+      <span><strong>VRAM-Aware Harness</strong> / current MVP system review</span>
+      <span>基于当前源码、153 项测试与 Day 7 本地闭环整理 · 2026-08-05</span>
+    </div>
+  </footer>
+
+  <script>
+    const modules = [
+      {
+        id: "application",
+        layer: "Application",
+        name: "HarnessApplication",
+        file: "src/app/harness-application.ts",
+        summary: "对外提供唯一应用门面：先完成启动恢复，再开放提交、恢复、中断、资源和审计查询。",
+        input: "StartRunInput、ResumeRunInput、runId 与生命周期命令。",
+        output: "AgentRun、事件/决策/队列查询，以及 QueuePump 推进请求。",
+        proof: "不直接写新表；通过 RunStore、DecisionStore 和 Scheduler 读取事实。",
+        invariant: "应用未启动时拒绝提交；恢复完成后才启动 QueuePump。",
+        boundary: "它不包含 HTTP 细节，不决定资源策略，也不直接调用 Pi。"
+      },
+      {
+        id: "coordinator",
+        layer: "Scheduling",
+        name: "RunQueueCoordinator",
+        file: "src/scheduling/run-queue-coordinator.ts",
+        summary: "把公平选择、资源准入与真正执行串成一个推进动作，是当前控制流的核心枢纽。",
+        input: "新 Run、恢复 Run，以及 drain/tick 推进请求。",
+        output: "EMPTY、DEFERRED 或 EXECUTED；必要时重新入队。",
+        proof: "PolicyDecision 由 Admission 保存；RunService 保存 RunEvent。",
+        invariant: "先 claim 占 slot，再 Admission；所有执行路径 finally release。",
+        boundary: "它不实现公平算法、不解析 GPU 指标、不管理 Runtime 事件。"
+      },
+      {
+        id: "scheduler",
+        layer: "Scheduling",
+        name: "TenantRunScheduler",
+        file: "src/scheduling/tenant-run-scheduler.ts",
+        summary: "维护 Tenant 内 FIFO、Tenant 间 round-robin 和 Run 级逻辑并发 slot。",
+        input: "QueuedRun、全局并发和单 Tenant 并发配置。",
+        output: "已经占有 slot 的 QueuedRun，或当前不可调度的 null。",
+        proof: "本身是内存结构；队列由持久 Run 状态在重启时重建。",
+        invariant: "一个 runId 不能同时排队和活跃；claimNext 的返回与占位原子发生。",
+        boundary: "它不判断 GPU 压力，也不等于 vLLM token scheduler。"
+      },
+      {
+        id: "admission",
+        layer: "Resource Control",
+        name: "ResourceAdmissionService",
+        file: "src/resources/resource-admission-service.ts",
+        summary: "一次准入完成 observe → classify → decide → persist，观测失败时 fail-closed。",
+        input: "runId、tenantId、当前全局和 Tenant 活跃数量。",
+        output: "PolicyDecision 与对应 ResourceSnapshot/Observation Failure。",
+        proof: "resource_snapshots + policy_decisions 原子保存。",
+        invariant: "决策必须能关联其资源事实；观测失败不能伪造 Snapshot。",
+        boundary: "它决定是否提交新的执行，不抢占已经运行的 token。"
+      },
+      {
+        id: "observer",
+        layer: "Infrastructure",
+        name: "VllmResourceObserver",
+        file: "src/resources/vllm-resource-observer.ts",
+        summary: "聚合 vLLM Prometheus Metrics 和 nvidia-smi 设备读数，允许单一来源降级。",
+        input: "Metrics URL、GPU IDs、超时以及前一次 Counter 样本。",
+        output: "带来源、GPU、KV、running/waiting 和 token 速率的 ResourceObservation。",
+        proof: "成功观测在 Admission 阶段保存为 resource_snapshots。",
+        invariant: "两个来源都失败才返回稳定失败；部分来源失败仍保留可用事实。",
+        boundary: "当前缺少每个 Run 的推理请求归因和压力平滑。"
+      },
+      {
+        id: "run-service",
+        layer: "Reliable Execution",
+        name: "RunService",
+        file: "src/runs/run-service.ts",
+        summary: "把持久 AgentRun 与即时 AgentRuntime 连接起来，处理 start/resume/interrupt 和事件终态。",
+        input: "持久化 QUEUED Run、Start/Resume 参数和 RuntimeEvent。",
+        output: "RUNNING/INTERRUPTED/COMPLETED/FAILED Run 及追加式 RunEvent。",
+        proof: "agent_runs 与 run_events 在 Store 事务中同步更新。",
+        invariant: "终态不可重新执行；Runtime 启动抛错会留下 INTERRUPTED 事实。",
+        boundary: "它不选择下一个 Run，也不决定是否具备资源资格。"
+      },
+      {
+        id: "event-bridge",
+        layer: "Reliable Execution",
+        name: "RuntimeEventBridge",
+        file: "src/events/runtime-event-bridge.ts",
+        summary: "把 Pi/Runtime 的即时事件翻译为 Harness 长期理解的稳定业务事实。",
+        input: "model_started/completed、tool_started/completed 等 RuntimeEvent。",
+        output: "MODEL_*、TOOL_* RunEvent，包含 usage、耗时和稳定 dedupeKey。",
+        proof: "run_events，重复投递通过 dedupe key 去重。",
+        invariant: "即时 text_delta 不进入长期事实；未知事件显式告警而不臆造映射。",
+        boundary: "它只翻译事实，不推进 Run 状态机或执行工具。"
+      },
+      {
+        id: "tool-gateway",
+        layer: "Side-effect Safety",
+        name: "ToolGateway",
+        file: "src/tools/tool-gateway.ts",
+        summary: "在真实工具调用前保存 PREPARED 意图，成功结果可复用，并在成功边界保存 Checkpoint。",
+        input: "runId、toolCallId、工具参数、副作用分类和真实 invokeTool。",
+        output: "复用历史结果，或执行后保存 SUCCEEDED/FAILED。",
+        proof: "tool_executions + checkpoints + agent_runs.checkpoint_id。",
+        invariant: "先保存意图再产生副作用；成功结果、Checkpoint 和 Run 引用同事务提交。",
+        boundary: "当前只做保守分类，还没有 Tenant 级 Tool/Skill 授权与 sandbox。"
+      },
+      {
+        id: "recovery",
+        layer: "Recovery",
+        name: "RecoveryService",
+        file: "src/checkpoints/recovery-service.ts",
+        summary: "启动时扫描遗留活跃 Run，先修正为 INTERRUPTED，再依据 Checkpoint 和 PREPARED 工具生成恢复计划。",
+        input: "active AgentRun、Checkpoint 和未决 ToolExecution。",
+        output: "AUTO_RESUME 或 MANUAL_REVIEW 的 RunRecoveryPlan。",
+        proof: "RUN_INTERRUPTED 事件记录 PROCESS_RESTART、reason 与阻塞工具。",
+        invariant: "Checkpoint 必须存在且属于该 Run；不安全副作用不能自动重放。",
+        boundary: "恢复执行器只负责重新入队，最终 resume 仍经过资源和 slot。"
+      },
+      {
+        id: "pi-adapter",
+        layer: "Runtime Adapter",
+        name: "PiAdapter",
+        file: "src/runtime/pi-adapter.ts",
+        summary: "把 Harness 的稳定 AgentRuntime 命令转换为 Pi SDK Session 操作，并隔离 SDK 变化。",
+        input: "StartRunRequest、ResumeRunRequest、interrupt 和事件订阅。",
+        output: "RuntimeEvent 流、Pi Session 引用与 Agent 执行终态。",
+        proof: "自身不持久化；所有可审计事实由外层 Bridge、RunService 和 Gateway 保存。",
+        invariant: "不同 runId 的事件不能串线；unsubscribe 后不再投递。",
+        boundary: "它不拥有 Tenant 公平性、恢复业务语义和资源准入。"
+      },
+      {
+        id: "stores",
+        layer: "Persistence",
+        name: "SQLite Stores",
+        file: "src/storage + domain stores",
+        summary: "为单进程 MVP 提供 migration、事务和六类可恢复事实，是系统的事实来源。",
+        input: "AgentRun、RunEvent、ToolExecution、Checkpoint、Snapshot、Decision。",
+        output: "当前快照、按序时间线、恢复扫描和审计查询。",
+        proof: "六张表、唯一约束、状态 CHECK 与递增 migration。",
+        invariant: "当前状态与历史事件同步提交；重复迁移和重复事件必须幂等。",
+        boundary: "SQLite 不是分布式队列，也没有跨进程 lease/fencing。"
+      },
+      {
+        id: "http",
+        layer: "Protocol",
+        name: "HarnessHttpApi",
+        file: "src/http/harness-http-api.ts",
+        summary: "把 HTTP 请求翻译为应用命令，并返回稳定 JSON 和错误状态。",
+        input: "8 条路由、tenantId、sessionId、userInput、workspacePath。",
+        output: "Run、events、decisions、queue、resources 与 health JSON。",
+        proof: "不持久化协议状态；所有结果来自 HarnessApplication。",
+        invariant: "无效输入 400、不存在 404、领域冲突 409。",
+        boundary: "当前没有认证、授权、请求幂等键与流式事件端点。"
+      }
+    ];
+
+    const workflows = [
+      {
+        id: "normal",
+        label: "正常执行",
+        title: "NORMAL：一个新任务完成完整 Run",
+        steps: [
+          ["HTTP API", "接收提交请求", "校验 tenantId、userInput 与 workspacePath，把协议对象转为 StartRunInput。", "无", "HarnessApplication.submitRun"],
+          ["RunService", "创建持久 Run", "先创建 QUEUED AgentRun，并同时追加 RUN_CREATED。", "agent_runs + RUN_CREATED", "run.status = QUEUED"],
+          ["Scheduler", "进入 Tenant 队列", "Run 进入 Tenant 内 FIFO，默认 reason 为 AWAITING_SCHEDULING。", "内存 QueueEntry", "等待 tick/drain"],
+          ["QueuePump", "立即请求推进", "提交不等待任务完成，但会立刻 tick，不必等待下一个轮询周期。", "无", "RunQueueCoordinator.drain"],
+          ["TenantRunScheduler", "选择并占用 slot", "claimNext 在 Tenant 间轮转；返回 Run 时 slot 已属于它。", "activeTenantByRunId", "claimed + slot held"],
+          ["ResourceAdmission", "资源准入", "观测 vLLM/GPU，分类为 NORMAL，检查全局并发后作出 START。", "ResourceSnapshot + PolicyDecision", "START / RESOURCE_NORMAL"],
+          ["RunService", "启动 Runtime", "Run 转 RUNNING，订阅 RuntimeEvent，并调用 PiAdapter.start。", "RUN_STARTED", "Runtime active"],
+          ["RuntimeEventBridge", "记录模型与工具边界", "模型 usage、工具开始和完成被映射为稳定、可去重 RunEvent。", "MODEL_* + TOOL_*", "auditable timeline"],
+          ["ToolGateway", "保存副作用与 Checkpoint", "真实工具前写 PREPARED；成功后原子写结果、Checkpoint 与 Run 引用。", "ToolExecution + Checkpoint", "safe resume point"],
+          ["RunService", "完成 Run", "Runtime 结束后将 Run 和 RUN_COMPLETED 同事务落库，Coordinator finally 释放 slot。", "agent_runs + RUN_COMPLETED", "COMPLETED + slot released"]
+        ]
+      },
+      {
+        id: "resource",
+        label: "资源阻塞",
+        title: "CRITICAL → NORMAL：无需用户介入的自动推进",
+        steps: [
+          ["Scheduler", "Run 已在等待队列", "claimNext 暂时取出候选并占用逻辑 slot，以避免并发选择超卖。", "QueueEntry", "candidate claimed"],
+          ["ResourceObserver", "采集真实资源", "vLLM Metrics 与 nvidia-smi 表明压力达到 CRITICAL。", "ResourceObservation", "pressure = CRITICAL"],
+          ["ExecutionPolicy", "拒绝本次启动", "CRITICAL 对任何新执行都返回 QUEUE，不允许用 Tenant 空闲绕过。", "PolicyDecision", "QUEUE / RESOURCE_CRITICAL"],
+          ["Coordinator", "释放并重新入队", "先 release slot，再用原 enqueuedAt 和 RESOURCE_CRITICAL reason 入队。", "QueueEntry reason", "DEFERRED"],
+          ["QueuePump", "周期继续检查", "single-flight drain 防止多个 tick 形成互相重叠的推进循环。", "无", "wait for state change"],
+          ["ResourceObserver", "资源恢复 NORMAL", "后续 tick 得到新的 Snapshot，历史 CRITICAL 决策不会被改写。", "new ResourceSnapshot", "pressure = NORMAL"],
+          ["ExecutionPolicy", "产生新的 START", "同一个 Run 获得追加式 START / RESOURCE_NORMAL 决策。", "new PolicyDecision", "START"],
+          ["RunService", "自动开始或恢复", "普通任务调用 start；恢复任务调用 resume。用户无需再次提交。", "RUN_STARTED 或 RUN_RESUMED", "automatic progress"]
+        ]
+      },
+      {
+        id: "restart",
+        label: "进程重启",
+        title: "PROCESS_RESTART：从安全 Checkpoint 恢复",
+        steps: [
+          ["SQLite", "发现遗留活跃 Run", "新进程启动时读取 RUNNING/WAITING_TOOL 等旧进程活跃状态。", "agent_runs", "recovery candidate"],
+          ["RecoveryService", "修正中断事实", "先把旧 Run 更新为 INTERRUPTED，并追加 PROCESS_RESTART 事件。", "RUN_INTERRUPTED", "status = INTERRUPTED"],
+          ["CheckpointStore", "校验恢复位置", "Checkpoint 必须真实存在且 runId 与当前 Run 一致。", "checkpoints", "valid checkpoint"],
+          ["ToolExecutionStore", "检查崩溃窗口", "读取所有 PREPARED 工具，确认没有无法自动重放的 UNKNOWN_EFFECT。", "tool_executions", "all replay-safe"],
+          ["RecoveryDecision", "生成 AUTO_RESUME", "有有效 Checkpoint 且未决工具均可重放，恢复计划标记 SAFE_CHECKPOINT。", "RecoveryPlan", "AUTO_RESUME"],
+          ["RecoveryExecutor", "重新提交恢复任务", "恢复参数进入 pendingResumeByRunId，并把 INTERRUPTED Run 转回 QUEUED。", "RUN_QUEUED", "resume intent retained"],
+          ["Scheduler", "重新参与公平竞争", "它和新任务一样等待 Tenant round-robin 与逻辑 slot。", "QueueEntry", "no recovery bypass"],
+          ["Admission", "重新检查当前资源", "旧进程的资源事实不能直接复用；恢复时产生新的 Snapshot 与 Decision。", "Snapshot + Decision", "START or QUEUE"],
+          ["RunService", "调用 executeQueuedResume", "获得 START 后使用 Checkpoint 和 Runtime Session 引用调用 PiAdapter.resume。", "RUN_RESUMED", "runtime resumed"],
+          ["ToolGateway", "复用已成功结果", "若 Runtime 再次请求同一 toolCallId，Gateway 返回历史 SUCCEEDED 结果。", "ToolExecution lookup", "no duplicate success effect"]
+        ]
+      },
+      {
+        id: "unsafe",
+        label: "危险副作用",
+        title: "UNKNOWN_EFFECT：系统为什么选择停下",
+        steps: [
+          ["ToolGateway", "先记录工具意图", "bash/edit/write 被保守分类为 UNKNOWN_EFFECT，调用前写 PREPARED。", "ToolExecution PREPARED", "side-effect intent durable"],
+          ["External World", "进程在结果确认前崩溃", "工具可能尚未执行，也可能已经执行但成功结果没来得及提交。", "外部状态不确定", "ambiguous outcome"],
+          ["RecoveryService", "启动扫描发现 PREPARED", "恢复阶段无法从数据库证明该副作用到底发生没有。", "preparedExecutions", "unsafe candidate"],
+          ["RecoveryDecision", "拒绝自动重放", "UNKNOWN_EFFECT 不满足 canAutomaticallyReplay。", "UNSAFE_TOOL_EFFECT", "MANUAL_REVIEW"],
+          ["RecoveryExecutor", "不调用 Runtime.resume", "系统保留 Run、工具和阻塞 executionId，等待外部确认。", "blockingToolExecutionId", "stopped safely"],
+          ["Operator / Future Workflow", "核对外部事实", "人工或专用 reconciler 判断副作用是否已经发生，再选择补偿、确认或重新执行。", "待扩展人工处置记录", "explicit resolution"],
+          ["Harness", "安全大于自动化率", "这里没有做到“自动恢复一切”，却守住了不会重复破坏外部世界的边界。", "完整审计链", "correct conservative behavior"]
+        ]
+      }
+    ];
+
+    const moduleList = document.getElementById("module-list");
+    const workflowTabs = document.getElementById("workflow-tabs");
+    let selectedModuleId = modules[0].id;
+    let selectedWorkflowId = workflows[0].id;
+    let selectedStep = 0;
+
+    function renderModules() {
+      moduleList.innerHTML = modules.map(function (item) {
+        return '<button class="module-button" type="button" role="tab" data-module="' + item.id +
+          '" aria-selected="' + String(item.id === selectedModuleId) + '">' +
+          '<span>' + item.layer + '</span><strong>' + item.name + '</strong></button>';
+      }).join("");
+      renderModuleDetail();
+    }
+
+    function renderModuleDetail() {
+      const item = modules.find(function (entry) { return entry.id === selectedModuleId; }) || modules[0];
+      document.getElementById("module-layer").textContent = item.layer;
+      document.getElementById("module-name").textContent = item.name;
+      document.getElementById("module-file").textContent = item.file;
+      document.getElementById("module-summary").textContent = item.summary;
+      document.getElementById("module-input").textContent = item.input;
+      document.getElementById("module-output").textContent = item.output;
+      document.getElementById("module-proof").textContent = item.proof;
+      document.getElementById("module-invariant").textContent = item.invariant;
+      document.getElementById("module-boundary").textContent = "边界：" + item.boundary;
+      moduleList.querySelectorAll(".module-button").forEach(function (button) {
+        button.setAttribute("aria-selected", String(button.dataset.module === selectedModuleId));
+      });
+    }
+
+    moduleList.addEventListener("click", function (event) {
+      const button = event.target.closest(".module-button");
+      if (!button) return;
+      selectedModuleId = button.dataset.module;
+      renderModuleDetail();
+    });
+
+    function renderWorkflowTabs() {
+      workflowTabs.innerHTML = workflows.map(function (flow) {
+        return '<button class="workflow-tab" type="button" role="tab" data-workflow="' + flow.id +
+          '" aria-selected="' + String(flow.id === selectedWorkflowId) + '">' + flow.label + '</button>';
+      }).join("");
+      renderWorkflow();
+    }
+
+    function renderWorkflow() {
+      const flow = workflows.find(function (item) { return item.id === selectedWorkflowId; }) || workflows[0];
+      selectedStep = Math.max(0, Math.min(selectedStep, flow.steps.length - 1));
+      const step = flow.steps[selectedStep];
+      document.getElementById("workflow-title").textContent = flow.title;
+      document.getElementById("workflow-progress").textContent = String(selectedStep + 1).padStart(2, "0") + " / " + String(flow.steps.length).padStart(2, "0");
+      document.getElementById("step-module").textContent = step[0];
+      document.getElementById("step-title").textContent = step[1];
+      document.getElementById("step-description").textContent = step[2];
+      document.getElementById("step-fact").textContent = step[3];
+      document.getElementById("step-result").textContent = step[4];
+      document.getElementById("step-prev").disabled = selectedStep === 0;
+      document.getElementById("step-next").disabled = selectedStep === flow.steps.length - 1;
+      document.getElementById("step-rail").innerHTML = flow.steps.map(function (_, index) {
+        let className = "step-dot";
+        if (index < selectedStep) className += " done";
+        if (index === selectedStep) className += " current";
+        return '<button class="' + className + '" type="button" data-step="' + index +
+          '" aria-label="第 ' + (index + 1) + ' 步">' + String(index + 1).padStart(2, "0") + '</button>';
+      }).join("");
+      workflowTabs.querySelectorAll(".workflow-tab").forEach(function (button) {
+        button.setAttribute("aria-selected", String(button.dataset.workflow === selectedWorkflowId));
+      });
+      const currentDot = document.querySelector(".step-dot.current");
+      if (currentDot) currentDot.scrollIntoView({ block: "nearest", inline: "center" });
+    }
+
+    workflowTabs.addEventListener("click", function (event) {
+      const button = event.target.closest(".workflow-tab");
+      if (!button) return;
+      selectedWorkflowId = button.dataset.workflow;
+      selectedStep = 0;
+      renderWorkflow();
+    });
+
+    document.getElementById("step-rail").addEventListener("click", function (event) {
+      const button = event.target.closest(".step-dot");
+      if (!button) return;
+      selectedStep = Number(button.dataset.step);
+      renderWorkflow();
+    });
+
+    document.getElementById("step-prev").addEventListener("click", function () {
+      selectedStep -= 1;
+      renderWorkflow();
+    });
+
+    document.getElementById("step-next").addEventListener("click", function () {
+      selectedStep += 1;
+      renderWorkflow();
+    });
+
+    let selectedPressure = "NORMAL";
+    const activeGlobal = document.getElementById("active-global");
+    const activeTenant = document.getElementById("active-tenant");
+
+    function renderDecision() {
+      const globalCount = Number(activeGlobal.value);
+      const tenantCount = Number(activeTenant.value);
+      let action = "START";
+      let reason = "RESOURCE_NORMAL";
+
+      if (selectedPressure === "CRITICAL") {
+        action = "QUEUE";
+        reason = "RESOURCE_CRITICAL";
+      } else if (selectedPressure === "UNKNOWN") {
+        action = "QUEUE";
+        reason = "RESOURCE_UNKNOWN";
+      } else if (selectedPressure === "BUSY") {
+        if (globalCount >= 2) {
+          action = "QUEUE";
+          reason = "GLOBAL_CONCURRENCY_LIMIT";
+        } else if (tenantCount > 0) {
+          action = "QUEUE";
+          reason = "RESOURCE_BUSY_TENANT_LIMIT";
+        } else {
+          action = "START";
+          reason = "RESOURCE_BUSY_TENANT_AVAILABLE";
+        }
+      } else if (globalCount >= 2) {
+        action = "QUEUE";
+        reason = "GLOBAL_CONCURRENCY_LIMIT";
+      }
+
+      document.getElementById("active-global-value").textContent = globalCount;
+      document.getElementById("active-tenant-value").textContent = tenantCount;
+      document.getElementById("decision-action").textContent = action;
+      document.getElementById("decision-reason").textContent = reason;
+      document.getElementById("decision-box").classList.toggle("queue", action === "QUEUE");
+    }
+
+    document.getElementById("pressure-buttons").addEventListener("click", function (event) {
+      const button = event.target.closest(".pressure-button");
+      if (!button) return;
+      selectedPressure = button.dataset.pressure;
+      document.querySelectorAll(".pressure-button").forEach(function (entry) {
+        entry.setAttribute("aria-pressed", String(entry === button));
+      });
+      renderDecision();
+    });
+
+    activeGlobal.addEventListener("input", renderDecision);
+    activeTenant.addEventListener("input", renderDecision);
+
+    document.getElementById("review-list").addEventListener("click", function (event) {
+      const trigger = event.target.closest(".review-trigger");
+      if (!trigger) return;
+      const item = trigger.closest(".review-item");
+      const open = !item.classList.contains("open");
+      item.classList.toggle("open", open);
+      trigger.setAttribute("aria-expanded", String(open));
+      trigger.querySelector(".review-plus").textContent = open ? "−" : "+";
+    });
+
+    function enableReveals() {
+      const items = document.querySelectorAll(".reveal");
+      if (!("IntersectionObserver" in window)) {
+        items.forEach(function (item) { item.classList.add("visible"); });
+        return;
+      }
+      const observer = new IntersectionObserver(function (entries) {
+        entries.forEach(function (entry) {
+          if (entry.isIntersecting) {
+            entry.target.classList.add("visible");
+            observer.unobserve(entry.target);
+          }
+        });
+      }, { threshold: 0.08 });
+      items.forEach(function (item) { observer.observe(item); });
+    }
+
+    renderModules();
+    renderWorkflowTabs();
+    renderDecision();
+    enableReveals();
+  </script>
+</body>
+</html>

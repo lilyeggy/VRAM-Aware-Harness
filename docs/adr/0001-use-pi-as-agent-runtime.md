@@ -33,6 +33,8 @@ Pi 负责：
 - Pi Session 历史；
 - 上下文压缩。
 
+Day 1 的 Pi Session 仅用于 Spike 验证。后续 Harness 使用 SQLite 持久化自己的 `AgentRun`；Pi Session 只会作为运行时会话引用或 Checkpoint 的一部分，而不是替代 `AgentRun`。
+
 ## 不选择的方案
 
 ### 继续扩展现有 AgentLoop
@@ -54,4 +56,4 @@ Fork 会带来版本同步和维护负担。
 
 限制：
 - 需要适配 Pi 的事件和 Session 概念；
-- 需要固定并维护 Pi SDK 版本0.80.10。
+- 需要固定并维护 Pi SDK 版本 `0.80.10`。

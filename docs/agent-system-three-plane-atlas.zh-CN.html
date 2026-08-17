@@ -1,0 +1,2009 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="color-scheme" content="dark" />
+  <meta
+    name="description"
+    content="从 Behavior、Control、Learning 三个层面理解完整 Agent 系统、技术栈、评测与跨层契约。"
+  />
+  <title>Agent 系统三层全景：行为、控制与学习</title>
+  <style>
+    :root {
+      --bg: #0a0c0f;
+      --surface: #111419;
+      --surface-2: #171b21;
+      --surface-3: #1d2229;
+      --line: #2b323c;
+      --line-strong: #45505e;
+      --text: #f2f5f7;
+      --muted: #9ba6b2;
+      --faint: #6f7a86;
+      --behavior: #ff8b72;
+      --behavior-soft: rgba(255, 139, 114, 0.12);
+      --control: #62c7de;
+      --control-soft: rgba(98, 199, 222, 0.12);
+      --learning: #a8d56a;
+      --learning-soft: rgba(168, 213, 106, 0.12);
+      --serving: #b59af4;
+      --serving-soft: rgba(181, 154, 244, 0.12);
+      --eval: #f2c45e;
+      --eval-soft: rgba(242, 196, 94, 0.12);
+      --danger: #f47788;
+      --mono: "SFMono-Regular", "Cascadia Code", "Roboto Mono", Consolas, monospace;
+      --sans: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI",
+        "PingFang SC", "Microsoft YaHei", sans-serif;
+      --shadow: 0 18px 60px rgba(0, 0, 0, 0.28);
+    }
+
+    * {
+      box-sizing: border-box;
+      letter-spacing: 0;
+    }
+
+    html {
+      scroll-behavior: smooth;
+    }
+
+    body {
+      margin: 0;
+      min-width: 320px;
+      color: var(--text);
+      background-color: var(--bg);
+      background-image:
+        linear-gradient(rgba(255, 255, 255, 0.025) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255, 255, 255, 0.025) 1px, transparent 1px);
+      background-size: 48px 48px;
+      font-family: var(--sans);
+      font-size: 16px;
+      line-height: 1.65;
+    }
+
+    button,
+    input {
+      font: inherit;
+    }
+
+    button {
+      color: inherit;
+    }
+
+    a {
+      color: inherit;
+    }
+
+    button:focus-visible,
+    a:focus-visible,
+    input:focus-visible {
+      outline: 3px solid rgba(98, 199, 222, 0.55);
+      outline-offset: 3px;
+    }
+
+    .skip-link {
+      position: fixed;
+      top: 10px;
+      left: 10px;
+      z-index: 100;
+      padding: 8px 12px;
+      color: #071014;
+      background: var(--control);
+      border-radius: 6px;
+      transform: translateY(-160%);
+    }
+
+    .skip-link:focus {
+      transform: translateY(0);
+    }
+
+    .shell {
+      width: min(1320px, calc(100% - 40px));
+      margin: 0 auto;
+    }
+
+    .topbar {
+      position: sticky;
+      top: 0;
+      z-index: 40;
+      border-bottom: 1px solid var(--line);
+      background: rgba(10, 12, 15, 0.92);
+      backdrop-filter: blur(16px);
+    }
+
+    .topbar-inner {
+      min-height: 58px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 24px;
+    }
+
+    .brand {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 14px;
+      font-weight: 760;
+      text-decoration: none;
+      white-space: nowrap;
+    }
+
+    .brand-mark {
+      width: 30px;
+      height: 30px;
+      display: grid;
+      grid-template-rows: repeat(3, 1fr);
+      gap: 2px;
+      padding: 5px;
+      border: 1px solid var(--line-strong);
+      border-radius: 6px;
+      background: var(--surface);
+    }
+
+    .brand-mark span:nth-child(1) { background: var(--behavior); }
+    .brand-mark span:nth-child(2) { background: var(--control); }
+    .brand-mark span:nth-child(3) { background: var(--learning); }
+
+    .nav {
+      display: flex;
+      align-items: center;
+      gap: 18px;
+      overflow-x: auto;
+      scrollbar-width: none;
+    }
+
+    .nav::-webkit-scrollbar {
+      display: none;
+    }
+
+    .nav a {
+      color: var(--muted);
+      font-size: 13px;
+      text-decoration: none;
+      white-space: nowrap;
+    }
+
+    .nav a:hover,
+    .nav a.active {
+      color: var(--text);
+    }
+
+    .hero {
+      min-height: 690px;
+      display: grid;
+      grid-template-columns: 0.78fr 1.22fr;
+      align-items: center;
+      gap: 52px;
+      padding: 76px 0 54px;
+    }
+
+    .eyebrow,
+    .section-kicker,
+    .micro-label {
+      color: var(--control);
+      font-family: var(--mono);
+      font-size: 12px;
+      font-weight: 700;
+      text-transform: uppercase;
+    }
+
+    h1,
+    h2,
+    h3,
+    h4,
+    p {
+      margin-top: 0;
+    }
+
+    h1 {
+      max-width: 720px;
+      margin-bottom: 22px;
+      font-size: 58px;
+      line-height: 1.08;
+      font-weight: 780;
+    }
+
+    .hero-copy {
+      max-width: 650px;
+      color: var(--muted);
+      font-size: 18px;
+    }
+
+    .hero-thesis {
+      margin-top: 28px;
+      padding-left: 16px;
+      border-left: 3px solid var(--eval);
+      color: var(--text);
+      font-size: 16px;
+    }
+
+    .hero-links {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 30px;
+    }
+
+    .hero-links a {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      min-height: 40px;
+      padding: 7px 12px;
+      border: 1px solid var(--line-strong);
+      border-radius: 6px;
+      background: var(--surface);
+      font-size: 13px;
+      text-decoration: none;
+    }
+
+    .hero-links a:first-child {
+      color: #071014;
+      border-color: var(--control);
+      background: var(--control);
+      font-weight: 750;
+    }
+
+    .system-scene {
+      position: relative;
+      min-width: 0;
+      min-height: 560px;
+      padding: 26px;
+      border: 1px solid var(--line);
+      background: rgba(17, 20, 25, 0.82);
+      box-shadow: var(--shadow);
+    }
+
+    .scene-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      padding-bottom: 18px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .scene-head strong {
+      font-size: 14px;
+    }
+
+    .live-indicator {
+      min-width: 0;
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      color: var(--muted);
+      font-family: var(--mono);
+      font-size: 11px;
+    }
+
+    .live-indicator::before {
+      width: 7px;
+      height: 7px;
+      content: "";
+      border-radius: 50%;
+      background: var(--learning);
+      box-shadow: 0 0 0 4px rgba(168, 213, 106, 0.1);
+    }
+
+    .scene-grid {
+      min-width: 0;
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 12px;
+      margin-top: 22px;
+    }
+
+    .scene-layer {
+      position: relative;
+      min-width: 0;
+      min-height: 328px;
+      padding: 18px;
+      border: 1px solid var(--line);
+      border-top: 4px solid var(--tone);
+      border-radius: 6px;
+      background: var(--surface-2);
+      cursor: pointer;
+      transition: border-color 160ms ease, transform 160ms ease, background 160ms ease;
+    }
+
+    .scene-layer:hover,
+    .scene-layer.active {
+      border-color: var(--tone);
+      background: var(--tone-soft);
+      transform: translateY(-3px);
+    }
+
+    .scene-layer.behavior {
+      --tone: var(--behavior);
+      --tone-soft: var(--behavior-soft);
+    }
+
+    .scene-layer.control {
+      --tone: var(--control);
+      --tone-soft: var(--control-soft);
+    }
+
+    .scene-layer.learning {
+      --tone: var(--learning);
+      --tone-soft: var(--learning-soft);
+    }
+
+    .scene-layer:not(:last-child)::after {
+      position: absolute;
+      top: 48%;
+      right: -18px;
+      z-index: 5;
+      width: 22px;
+      color: var(--faint);
+      content: "→";
+      font-family: var(--mono);
+      font-size: 19px;
+      text-align: center;
+    }
+
+    .layer-no {
+      color: var(--tone);
+      font-family: var(--mono);
+      font-size: 11px;
+    }
+
+    .scene-layer h3 {
+      margin: 13px 0 5px;
+      font-size: 19px;
+    }
+
+    .scene-layer > p {
+      min-height: 52px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .mini-stack {
+      display: grid;
+      gap: 7px;
+      margin-top: 18px;
+    }
+
+    .mini-stack span {
+      min-width: 0;
+      display: block;
+      padding: 7px 9px;
+      border: 1px solid var(--line);
+      border-radius: 4px;
+      color: var(--muted);
+      background: rgba(10, 12, 15, 0.46);
+      font-family: var(--mono);
+      font-size: 10px;
+      overflow-wrap: anywhere;
+    }
+
+    .scene-footer {
+      display: grid;
+      grid-template-columns: 1fr auto 1fr;
+      align-items: center;
+      gap: 12px;
+      margin-top: 16px;
+      color: var(--muted);
+      font-size: 11px;
+    }
+
+    .scene-footer span:first-child,
+    .scene-footer span:last-child {
+      height: 1px;
+      background: var(--line);
+    }
+
+    .section {
+      padding: 84px 0;
+      border-top: 1px solid var(--line);
+    }
+
+    .section-head {
+      display: grid;
+      grid-template-columns: 0.72fr 1.28fr;
+      gap: 48px;
+      margin-bottom: 42px;
+    }
+
+    .section h2 {
+      margin-bottom: 12px;
+      font-size: 38px;
+      line-height: 1.18;
+    }
+
+    .section-lead {
+      max-width: 780px;
+      color: var(--muted);
+      font-size: 17px;
+    }
+
+    .loop-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 18px;
+    }
+
+    .flow-band {
+      padding: 22px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: var(--surface);
+    }
+
+    .flow-band h3 {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 18px;
+      font-size: 18px;
+    }
+
+    .flow-band h3 span {
+      color: var(--muted);
+      font-family: var(--mono);
+      font-size: 10px;
+      font-weight: 500;
+    }
+
+    .flow-track {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      gap: 20px;
+    }
+
+    .flow-step {
+      position: relative;
+      min-height: 118px;
+      padding: 13px;
+      border: 1px solid var(--line);
+      border-radius: 4px;
+      background: var(--surface-2);
+    }
+
+    .flow-step:not(:last-child)::after {
+      position: absolute;
+      top: 43px;
+      right: -17px;
+      width: 14px;
+      color: var(--faint);
+      content: "→";
+      font-family: var(--mono);
+      text-align: center;
+    }
+
+    .flow-step b {
+      display: block;
+      margin-bottom: 8px;
+      font-size: 13px;
+    }
+
+    .flow-step span {
+      color: var(--muted);
+      font-size: 11px;
+      line-height: 1.45;
+    }
+
+    .layer-workbench {
+      display: grid;
+      grid-template-columns: 260px minmax(0, 1fr);
+      gap: 24px;
+      align-items: start;
+    }
+
+    .layer-tabs {
+      position: sticky;
+      top: 82px;
+      display: grid;
+      gap: 8px;
+    }
+
+    .layer-tab {
+      display: grid;
+      grid-template-columns: 34px 1fr;
+      gap: 10px;
+      width: 100%;
+      padding: 13px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      color: var(--muted);
+      background: var(--surface);
+      text-align: left;
+      cursor: pointer;
+    }
+
+    .layer-tab .tab-no {
+      display: grid;
+      place-items: center;
+      width: 30px;
+      height: 30px;
+      border: 1px solid currentColor;
+      border-radius: 4px;
+      font-family: var(--mono);
+      font-size: 11px;
+    }
+
+    .layer-tab b {
+      display: block;
+      color: var(--text);
+      font-size: 13px;
+    }
+
+    .layer-tab small {
+      font-size: 10px;
+    }
+
+    .layer-tab[data-layer="behavior"][aria-selected="true"] {
+      color: var(--behavior);
+      border-color: var(--behavior);
+      background: var(--behavior-soft);
+    }
+
+    .layer-tab[data-layer="control"][aria-selected="true"] {
+      color: var(--control);
+      border-color: var(--control);
+      background: var(--control-soft);
+    }
+
+    .layer-tab[data-layer="learning"][aria-selected="true"] {
+      color: var(--learning);
+      border-color: var(--learning);
+      background: var(--learning-soft);
+    }
+
+    .workbench-panel {
+      min-width: 0;
+      border: 1px solid var(--line);
+      background: var(--surface);
+      box-shadow: var(--shadow);
+    }
+
+    .workbench-head {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 30px;
+      padding: 28px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .workbench-head h3 {
+      margin: 6px 0 9px;
+      font-size: 27px;
+    }
+
+    .workbench-head p {
+      max-width: 780px;
+      margin-bottom: 0;
+      color: var(--muted);
+    }
+
+    .plane-badge {
+      align-self: start;
+      padding: 7px 10px;
+      border: 1px solid currentColor;
+      border-radius: 4px;
+      font-family: var(--mono);
+      font-size: 10px;
+      white-space: nowrap;
+    }
+
+    .workbench-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .workbench-cell {
+      min-width: 0;
+      padding: 24px 28px;
+      border-right: 1px solid var(--line);
+      border-bottom: 1px solid var(--line);
+    }
+
+    .workbench-cell:nth-child(2n) {
+      border-right: 0;
+    }
+
+    .workbench-cell h4 {
+      margin-bottom: 14px;
+      font-size: 14px;
+    }
+
+    .plain-list,
+    .metric-list,
+    .contract-list {
+      display: grid;
+      gap: 9px;
+      margin: 0;
+      padding: 0;
+      list-style: none;
+    }
+
+    .plain-list li {
+      position: relative;
+      padding-left: 17px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .plain-list li::before {
+      position: absolute;
+      top: 9px;
+      left: 0;
+      width: 6px;
+      height: 6px;
+      content: "";
+      border-radius: 50%;
+      background: var(--line-strong);
+    }
+
+    .tech-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 12px;
+    }
+
+    .tech-table th,
+    .tech-table td {
+      padding: 10px 8px;
+      border-bottom: 1px solid var(--line);
+      text-align: left;
+      vertical-align: top;
+    }
+
+    .tech-table th {
+      color: var(--faint);
+      font-family: var(--mono);
+      font-size: 10px;
+      font-weight: 600;
+    }
+
+    .tech-table td:first-child {
+      width: 28%;
+      color: var(--text);
+      font-weight: 650;
+    }
+
+    .tech-table td:last-child {
+      color: var(--muted);
+    }
+
+    .metric-list {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .metric-list li {
+      padding: 11px;
+      border: 1px solid var(--line);
+      border-radius: 4px;
+      background: var(--surface-2);
+    }
+
+    .metric-list b,
+    .metric-list span {
+      display: block;
+    }
+
+    .metric-list b {
+      margin-bottom: 4px;
+      font-size: 12px;
+    }
+
+    .metric-list span {
+      color: var(--muted);
+      font-size: 10px;
+    }
+
+    .boundary-note {
+      padding: 18px 28px 22px;
+      border-left: 4px solid var(--danger);
+      background: rgba(244, 119, 136, 0.06);
+    }
+
+    .boundary-note b {
+      display: block;
+      margin-bottom: 6px;
+      color: var(--danger);
+      font-size: 13px;
+    }
+
+    .boundary-note p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .contract-layout {
+      display: grid;
+      grid-template-columns: 0.82fr 1.18fr;
+      gap: 18px;
+    }
+
+    .contract-index {
+      display: grid;
+      gap: 8px;
+    }
+
+    .contract-button {
+      display: grid;
+      grid-template-columns: 42px 1fr auto;
+      align-items: center;
+      gap: 12px;
+      min-height: 68px;
+      padding: 10px 13px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      color: var(--muted);
+      background: var(--surface);
+      text-align: left;
+      cursor: pointer;
+    }
+
+    .contract-button[aria-selected="true"] {
+      color: var(--text);
+      border-color: var(--eval);
+      background: var(--eval-soft);
+    }
+
+    .contract-code {
+      display: grid;
+      place-items: center;
+      width: 38px;
+      height: 38px;
+      border: 1px solid var(--line-strong);
+      border-radius: 4px;
+      font-family: var(--mono);
+      font-size: 10px;
+    }
+
+    .contract-button b,
+    .contract-button small {
+      display: block;
+    }
+
+    .contract-button b {
+      font-size: 13px;
+    }
+
+    .contract-button small {
+      font-size: 10px;
+    }
+
+    .contract-arrow {
+      color: var(--faint);
+      font-family: var(--mono);
+    }
+
+    .contract-board {
+      min-width: 0;
+      padding: 28px;
+      border: 1px solid var(--line);
+      background: var(--surface);
+    }
+
+    .contract-route {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin: 18px 0 22px;
+      overflow-x: auto;
+    }
+
+    .route-node {
+      flex: 1 0 130px;
+      min-height: 62px;
+      display: grid;
+      place-items: center;
+      padding: 10px;
+      border: 1px solid var(--line);
+      border-radius: 4px;
+      color: var(--muted);
+      background: var(--surface-2);
+      font-size: 11px;
+      text-align: center;
+    }
+
+    .contract-schema {
+      margin: 0;
+      padding: 18px;
+      overflow-x: auto;
+      border: 1px solid var(--line);
+      border-radius: 4px;
+      color: #c9e7ee;
+      background: #090c10;
+      font-family: var(--mono);
+      font-size: 11px;
+      line-height: 1.7;
+    }
+
+    .contract-rule {
+      margin: 18px 0 0;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .eval-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+    }
+
+    .eval-column {
+      min-height: 340px;
+      padding: 18px;
+      border: 1px solid var(--line);
+      border-top: 4px solid var(--tone);
+      border-radius: 6px;
+      background: var(--surface);
+    }
+
+    .eval-column h3 {
+      margin: 8px 0 14px;
+      font-size: 17px;
+    }
+
+    .eval-column p {
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .eval-column ul {
+      margin: 0;
+      padding-left: 17px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .eval-column li + li {
+      margin-top: 7px;
+    }
+
+    .eval-column.behavior { --tone: var(--behavior); }
+    .eval-column.control { --tone: var(--control); }
+    .eval-column.learning { --tone: var(--learning); }
+    .eval-column.system { --tone: var(--eval); }
+
+    .vllm-board {
+      display: grid;
+      grid-template-columns: 300px minmax(0, 1fr);
+      gap: 18px;
+    }
+
+    .depth-scale {
+      display: grid;
+      gap: 6px;
+    }
+
+    .depth-button {
+      display: grid;
+      grid-template-columns: 40px 1fr;
+      align-items: center;
+      gap: 10px;
+      min-height: 58px;
+      padding: 9px 12px;
+      border: 1px solid var(--line);
+      border-radius: 4px;
+      color: var(--muted);
+      background: var(--surface);
+      text-align: left;
+      cursor: pointer;
+    }
+
+    .depth-button[aria-selected="true"] {
+      color: var(--serving);
+      border-color: var(--serving);
+      background: var(--serving-soft);
+    }
+
+    .depth-button b {
+      display: block;
+      color: var(--text);
+      font-size: 12px;
+    }
+
+    .depth-button small {
+      font-size: 10px;
+    }
+
+    .depth-detail {
+      min-height: 314px;
+      padding: 28px;
+      border: 1px solid var(--line);
+      background: var(--surface);
+    }
+
+    .depth-detail h3 {
+      margin: 6px 0 10px;
+      font-size: 24px;
+    }
+
+    .depth-detail > p {
+      color: var(--muted);
+    }
+
+    .depth-columns {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+      margin-top: 20px;
+    }
+
+    .depth-columns > div {
+      padding: 16px;
+      border: 1px solid var(--line);
+      border-radius: 4px;
+      background: var(--surface-2);
+    }
+
+    .depth-columns h4 {
+      margin-bottom: 10px;
+      font-size: 12px;
+    }
+
+    .principles {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 12px;
+    }
+
+    .principle {
+      padding: 19px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: var(--surface);
+    }
+
+    .principle span {
+      color: var(--control);
+      font-family: var(--mono);
+      font-size: 10px;
+    }
+
+    .principle h3 {
+      margin: 9px 0;
+      font-size: 16px;
+    }
+
+    .principle p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .closing {
+      padding: 84px 0 100px;
+      border-top: 1px solid var(--line);
+      background: #0d1014;
+    }
+
+    .closing-grid {
+      display: grid;
+      grid-template-columns: 1.1fr 0.9fr;
+      gap: 50px;
+      align-items: start;
+    }
+
+    .closing h2 {
+      max-width: 760px;
+      font-size: 38px;
+      line-height: 1.2;
+    }
+
+    .closing p {
+      color: var(--muted);
+    }
+
+    .closing-stack {
+      display: grid;
+      gap: 8px;
+    }
+
+    .closing-stack div {
+      display: grid;
+      grid-template-columns: 120px 1fr;
+      gap: 14px;
+      padding: 12px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .closing-stack b {
+      font-size: 12px;
+    }
+
+    .closing-stack span {
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    footer {
+      padding: 22px 0;
+      border-top: 1px solid var(--line);
+      color: var(--faint);
+      font-family: var(--mono);
+      font-size: 10px;
+    }
+
+    .reveal {
+      opacity: 0;
+      transform: translateY(14px);
+      transition: opacity 420ms ease, transform 420ms ease;
+    }
+
+    .reveal.visible {
+      opacity: 1;
+      transform: none;
+    }
+
+    @media (max-width: 1100px) {
+      .hero {
+        grid-template-columns: 1fr;
+      }
+
+      .hero-copy-wrap {
+        max-width: 880px;
+      }
+
+      .section-head,
+      .contract-layout,
+      .closing-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .flow-track {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+      }
+
+      .flow-step:not(:last-child)::after {
+        display: none;
+      }
+
+      .eval-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+    }
+
+    @media (max-width: 820px) {
+      .shell {
+        width: min(100% - 24px, 1320px);
+      }
+
+      .topbar-inner {
+        min-height: 54px;
+      }
+
+      .nav {
+        gap: 12px;
+      }
+
+      .hero {
+        min-height: auto;
+        padding-top: 58px;
+      }
+
+      h1 {
+        font-size: 42px;
+      }
+
+      .scene-grid,
+      .loop-grid,
+      .layer-workbench,
+      .vllm-board {
+        grid-template-columns: 1fr;
+      }
+
+      .scene-layer {
+        min-height: 0;
+      }
+
+      .scene-layer:not(:last-child)::after {
+        top: auto;
+        right: 50%;
+        bottom: -21px;
+        transform: rotate(90deg);
+      }
+
+      .layer-tabs {
+        position: static;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+      }
+
+      .layer-tab {
+        grid-template-columns: 1fr;
+      }
+
+      .layer-tab .tab-no {
+        width: 26px;
+        height: 26px;
+      }
+
+      .workbench-grid,
+      .depth-columns {
+        grid-template-columns: 1fr;
+      }
+
+      .workbench-cell,
+      .workbench-cell:nth-child(2n) {
+        border-right: 0;
+      }
+
+      .depth-scale {
+        grid-template-columns: repeat(5, minmax(0, 1fr));
+      }
+
+      .depth-button {
+        grid-template-columns: 1fr;
+      }
+
+      .depth-button small {
+        display: none;
+      }
+
+      .principles {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    @media (max-width: 560px) {
+      body {
+        font-size: 15px;
+      }
+
+      .brand span:last-child,
+      .nav a:nth-child(n + 4) {
+        display: none;
+      }
+
+      h1 {
+        font-size: 34px;
+      }
+
+      .section {
+        padding: 62px 0;
+      }
+
+      .section h2,
+      .closing h2 {
+        font-size: 29px;
+      }
+
+      .system-scene {
+        padding: 16px;
+        overflow: hidden;
+      }
+
+      .live-indicator {
+        display: none;
+      }
+
+      .flow-track,
+      .eval-grid,
+      .metric-list {
+        grid-template-columns: 1fr;
+      }
+
+      .layer-tabs {
+        grid-template-columns: 1fr;
+      }
+
+      .layer-tab {
+        grid-template-columns: 32px 1fr;
+      }
+
+      .workbench-head {
+        grid-template-columns: 1fr;
+        padding: 22px;
+      }
+
+      .workbench-cell,
+      .contract-board,
+      .depth-detail {
+        padding: 20px;
+      }
+
+      .depth-scale {
+        grid-template-columns: 1fr;
+      }
+
+      .depth-button {
+        grid-template-columns: 36px 1fr;
+      }
+
+      .depth-button small {
+        display: block;
+      }
+
+      .closing-stack div {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      html {
+        scroll-behavior: auto;
+      }
+
+      *,
+      *::before,
+      *::after {
+        transition-duration: 0.01ms !important;
+      }
+    }
+  </style>
+</head>
+<body>
+  <a class="skip-link" href="#main">跳到正文</a>
+
+  <header class="topbar">
+    <div class="shell topbar-inner">
+      <a class="brand" href="#overview" aria-label="返回全景">
+        <span class="brand-mark" aria-hidden="true"><span></span><span></span><span></span></span>
+        <span>AGENT SYSTEMS / THREE PLANES</span>
+      </a>
+      <nav class="nav" aria-label="页面导航">
+        <a href="#overview">全景</a>
+        <a href="#layers">三层技术</a>
+        <a href="#contracts">连接契约</a>
+        <a href="#evaluation">评测</a>
+        <a href="#vllm">vLLM 深度</a>
+        <a href="#principles">边界原则</a>
+      </nav>
+    </div>
+  </header>
+
+  <main id="main">
+    <section class="shell hero" id="overview">
+      <div class="hero-copy-wrap">
+        <p class="eyebrow">Agent Systems Architecture Atlas</p>
+        <h1>Agent 系统三层全景</h1>
+        <p class="hero-copy">
+          从单 Agent 的行为质量，到多个 Agent 的可靠运行，再到模型从交互轨迹中持续学习。
+          三个项目不是重复造轮子，而是在同一条 Agent 生命周期上分别拥有不同的工程责任。
+        </p>
+        <p class="hero-thesis">
+          DeepResearch 决定 Agent 怎样完成任务；Agent 任务服务让团队安全地提交、运行并取得结果；
+          Polar RL Infra 决定模型怎样从执行结果中变得更好。
+        </p>
+        <div class="hero-links">
+          <a href="#layers">进入三层技术图谱 ↓</a>
+          <a href="#contracts">查看跨层接口</a>
+        </div>
+      </div>
+
+      <div class="system-scene" aria-label="三层 Agent 系统交互图">
+        <div class="scene-head">
+          <strong>完整 Agent 生命周期</strong>
+          <span class="live-indicator">behavior → execution → learning</span>
+        </div>
+        <div class="scene-grid">
+          <article class="scene-layer behavior active" data-scene-layer="behavior" tabindex="0">
+            <span class="layer-no">01 / BEHAVIOR</span>
+            <h3>DeepResearch Agent</h3>
+            <p>优化一个任务内部的规划、检索、工具使用、证据组织与答案质量。</p>
+            <div class="mini-stack">
+              <span>Planner / Executor / Critic</span>
+              <span>Context / Memory / Citation</span>
+              <span>Search / Browser / RAG Tools</span>
+              <span>Task-quality Evaluation</span>
+            </div>
+          </article>
+          <article class="scene-layer control" data-scene-layer="control" tabindex="0">
+            <span class="layer-no">02 / PRODUCT + EXECUTION</span>
+            <h3>Multi-tenant Agent Task Service</h3>
+            <p>向用户交付 Workspace 与任务结果，内部重点管理 Sandbox、生命周期、恢复、多租户与资源准入。</p>
+            <div class="mini-stack">
+              <span>Identity / Workspace / Result</span>
+              <span>Sandbox / ToolGateway</span>
+              <span>Run / Queue / Recovery</span>
+              <span>Tenant / GPU-aware Admission</span>
+            </div>
+          </article>
+          <article class="scene-layer learning" data-scene-layer="learning" tabindex="0">
+            <span class="layer-no">03 / LEARNING</span>
+            <h3>Polar RL Infra</h3>
+            <p>把多步交互建模为 trajectory，通过 reward、rollout 和优化更新模型策略。</p>
+            <div class="mini-stack">
+              <span>Episode / Step / Trajectory</span>
+              <span>Environment / Verifier</span>
+              <span>GRPO / Reward / KL</span>
+              <span>Checkpoint / Model Registry</span>
+            </div>
+          </article>
+        </div>
+        <div class="scene-footer">
+          <span></span>
+          <b id="scene-caption">当前焦点：一个 Agent 怎样更准确地完成任务</b>
+          <span></span>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" id="loop">
+      <div class="shell">
+        <div class="section-head reveal">
+          <div>
+            <p class="section-kicker">Two Connected Loops</p>
+            <h2>一条在线链，一条学习链</h2>
+          </div>
+          <p class="section-lead">
+            在线链必须低延迟、可恢复、可审计；学习链必须可复现、可归因、能比较。
+            它们通过版本化轨迹连接，但不共享内部实现。
+          </p>
+        </div>
+        <div class="loop-grid reveal">
+          <article class="flow-band">
+            <h3>在线执行链 <span>request path</span></h3>
+            <div class="flow-track">
+              <div class="flow-step"><b>用户任务</b><span>目标、Tenant、Workspace、约束</span></div>
+              <div class="flow-step"><b>Agent Task Service</b><span>身份、Workspace、Sandbox、准入、排队与恢复</span></div>
+              <div class="flow-step"><b>DeepResearch</b><span>规划、调用工具、组织证据</span></div>
+              <div class="flow-step"><b>vLLM</b><span>Prefill、Decode、Batching、KV</span></div>
+              <div class="flow-step"><b>结果与事件</b><span>答案、usage、轨迹、审计事实</span></div>
+            </div>
+          </article>
+          <article class="flow-band">
+            <h3>离线学习链 <span>improvement path</span></h3>
+            <div class="flow-track">
+              <div class="flow-step"><b>Trajectory</b><span>状态、动作、观察、成本、结果</span></div>
+              <div class="flow-step"><b>Evaluation</b><span>Verifier、reward、失败分类</span></div>
+              <div class="flow-step"><b>Polar Rollout</b><span>同任务多轨迹采样与对照</span></div>
+              <div class="flow-step"><b>RL Update</b><span>GRPO、KL、LoRA、checkpoint</span></div>
+              <div class="flow-step"><b>模型发布</b><span>Registry、版本、回归、灰度验证</span></div>
+            </div>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" id="layers">
+      <div class="shell">
+        <div class="section-head reveal">
+          <div>
+            <p class="section-kicker">Deep Dive</p>
+            <h2>三层分别要懂什么</h2>
+          </div>
+          <p class="section-lead">
+            选择任意一层，查看它拥有的核心对象、技术栈、工程难点、评测指标和不能越过的边界。
+            “理解完整链条”不等于把所有代码写在一个项目里。
+          </p>
+        </div>
+
+        <div class="layer-workbench reveal">
+          <div class="layer-tabs" role="tablist" aria-label="三层技术切换">
+            <button class="layer-tab" data-layer="behavior" role="tab" aria-selected="true">
+              <span class="tab-no">01</span>
+              <span><b>Behavior Plane</b><small>DeepResearch Agent</small></span>
+            </button>
+            <button class="layer-tab" data-layer="control" role="tab" aria-selected="false">
+              <span class="tab-no">02</span>
+              <span><b>Product + Execution</b><small>VRAM-Aware Agent Task Service</small></span>
+            </button>
+            <button class="layer-tab" data-layer="learning" role="tab" aria-selected="false">
+              <span class="tab-no">03</span>
+              <span><b>Learning Plane</b><small>Polar RL Infra</small></span>
+            </button>
+          </div>
+
+          <article class="workbench-panel" role="tabpanel" aria-live="polite">
+            <div class="workbench-head">
+              <div>
+                <span class="micro-label" id="layer-kicker">01 / Agent Behavior Engineering</span>
+                <h3 id="layer-title">DeepResearch Agent：任务内部的智能执行系统</h3>
+                <p id="layer-summary"></p>
+              </div>
+              <span class="plane-badge" id="layer-badge">OPTIMIZE TASK QUALITY</span>
+            </div>
+            <div class="workbench-grid">
+              <section class="workbench-cell">
+                <h4>核心对象与问题</h4>
+                <ul class="plain-list" id="layer-objects"></ul>
+              </section>
+              <section class="workbench-cell">
+                <h4>一次执行怎样流动</h4>
+                <ul class="plain-list" id="layer-flow"></ul>
+              </section>
+              <section class="workbench-cell">
+                <h4>详细技术栈</h4>
+                <div style="overflow-x:auto">
+                  <table class="tech-table">
+                    <thead><tr><th>能力域</th><th>推荐技术与工程重点</th></tr></thead>
+                    <tbody id="layer-tech"></tbody>
+                  </table>
+                </div>
+              </section>
+              <section class="workbench-cell">
+                <h4>这一层怎样评测</h4>
+                <ul class="metric-list" id="layer-metrics"></ul>
+              </section>
+            </div>
+            <div class="boundary-note">
+              <b>明确不负责</b>
+              <p id="layer-boundary"></p>
+            </div>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" id="contracts">
+      <div class="shell">
+        <div class="section-head reveal">
+          <div>
+            <p class="section-kicker">Versioned Contracts</p>
+            <h2>层与层之间怎样连接</h2>
+          </div>
+          <p class="section-lead">
+            三个项目不应该互相导入内部 Service。真正稳定的连接方式是小而清晰的版本化契约：
+            命令、事件、轨迹、评测结果和模型制品。
+          </p>
+        </div>
+
+        <div class="contract-layout reveal">
+          <div class="contract-index" role="tablist" aria-label="跨层契约">
+            <button class="contract-button" data-contract="runtime" role="tab" aria-selected="true">
+              <span class="contract-code">C1</span>
+              <span><b>AgentRuntime Contract</b><small>Control ↔ Behavior</small></span>
+              <span class="contract-arrow">→</span>
+            </button>
+            <button class="contract-button" data-contract="inference" role="tab" aria-selected="false">
+              <span class="contract-code">C2</span>
+              <span><b>Inference Contract</b><small>Runtime ↔ vLLM</small></span>
+              <span class="contract-arrow">→</span>
+            </button>
+            <button class="contract-button" data-contract="trajectory" role="tab" aria-selected="false">
+              <span class="contract-code">C3</span>
+              <span><b>Trajectory Contract</b><small>Execution → Learning</small></span>
+              <span class="contract-arrow">→</span>
+            </button>
+            <button class="contract-button" data-contract="model" role="tab" aria-selected="false">
+              <span class="contract-code">C4</span>
+              <span><b>Model Release Contract</b><small>Learning → Serving</small></span>
+              <span class="contract-arrow">→</span>
+            </button>
+          </div>
+
+          <article class="contract-board" role="tabpanel" aria-live="polite">
+            <span class="micro-label" id="contract-kicker">C1 / ONLINE CONTROL</span>
+            <h3 id="contract-title">AgentRuntime：外层控制面不依赖内层 Agent 实现</h3>
+            <p class="section-lead" id="contract-summary"></p>
+            <div class="contract-route" id="contract-route"></div>
+            <pre class="contract-schema"><code id="contract-schema"></code></pre>
+            <p class="contract-rule" id="contract-rule"></p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" id="evaluation">
+      <div class="shell">
+        <div class="section-head reveal">
+          <div>
+            <p class="section-kicker">Evaluation Everywhere</p>
+            <h2>每一层都评测，但回答不同问题</h2>
+          </div>
+          <p class="section-lead">
+            分层评测负责定位问题，端到端评测负责证明整体收益。只看一个总分，会让模型问题、
+            Agent 策略问题和基础设施问题混在一起。
+          </p>
+        </div>
+        <div class="eval-grid reveal">
+          <article class="eval-column behavior">
+            <span class="micro-label">E1 / BEHAVIOR</span>
+            <h3>DeepResearch 质量评测</h3>
+            <p>回答“Agent 是否真正更会完成任务”。</p>
+            <ul>
+              <li>任务完成率与答案正确性</li>
+              <li>引用准确率、覆盖率与可追溯性</li>
+              <li>检索召回、证据利用与幻觉率</li>
+              <li>规划质量、重复工具调用和失败恢复</li>
+              <li>相同模型下的 Agent 策略消融</li>
+            </ul>
+          </article>
+          <article class="eval-column control">
+            <span class="micro-label">E2 / CONTROL</span>
+            <h3>Agent 任务服务评测</h3>
+            <p>回答“用户能否安全获得结果，多个任务是否被可靠、公平地运行”。</p>
+            <ul>
+              <li>Run 成功率、恢复率和事件完整性</li>
+              <li>队列等待、Tenant 公平性与饥饿</li>
+              <li>工具幂等、未知副作用和 Checkpoint</li>
+              <li>吞吐、TTFT、P95 延迟和资源利用率</li>
+              <li>故障注入与资源过载回退</li>
+            </ul>
+          </article>
+          <article class="eval-column learning">
+            <span class="micro-label">E3 / LEARNING</span>
+            <h3>Polar 训练评测</h3>
+            <p>回答“训练是否让策略稳定且可复现地变好”。</p>
+            <ul>
+              <li>Success rate 与多个随机种子</li>
+              <li>平均步数、工具数、Token 与延迟</li>
+              <li>Invalid / Repeat / Loop rate</li>
+              <li>Reward、KL、Loss 与训练稳定性</li>
+              <li>WebShop → ALFWorld 泛化证据</li>
+            </ul>
+          </article>
+          <article class="eval-column system">
+            <span class="micro-label">E4 / END TO END</span>
+            <h3>跨层回归评测</h3>
+            <p>回答“新模型进入真实 Agent 系统后是否整体更好”。</p>
+            <ul>
+              <li>固定任务集与固定执行预算</li>
+              <li>旧模型 / 新模型 A/B 对照</li>
+              <li>质量、成本、延迟的 Pareto 改善</li>
+              <li>工具协议与安全边界回归</li>
+              <li>模型版本到轨迹结果的完整归因</li>
+            </ul>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" id="vllm">
+      <div class="shell">
+        <div class="section-head reveal">
+          <div>
+            <p class="section-kicker">Inference Literacy</p>
+            <h2>做 Agent，需要懂多深的 vLLM</h2>
+          </div>
+          <p class="section-lead">
+            目标是解释、观测和控制 Agent 请求的推理成本，而不是转向重写通用推理引擎。
+            点击不同深度，查看哪些是主线、哪些按证据进入。
+          </p>
+        </div>
+        <div class="vllm-board reveal">
+          <div class="depth-scale" role="tablist" aria-label="vLLM 理解深度">
+            <button class="depth-button" data-depth="0" role="tab" aria-selected="false">
+              <span class="contract-code">L1</span><span><b>调用接口</b><small>必须掌握</small></span>
+            </button>
+            <button class="depth-button" data-depth="1" role="tab" aria-selected="true">
+              <span class="contract-code">L2</span><span><b>观测与调优</b><small>核心深度</small></span>
+            </button>
+            <button class="depth-button" data-depth="2" role="tab" aria-selected="false">
+              <span class="contract-code">L3</span><span><b>受控扩展</b><small>项目需要</small></span>
+            </button>
+            <button class="depth-button" data-depth="3" role="tab" aria-selected="false">
+              <span class="contract-code">L4</span><span><b>调度与 KV 研究</b><small>按证据进入</small></span>
+            </button>
+            <button class="depth-button" data-depth="4" role="tab" aria-selected="false">
+              <span class="contract-code">L5</span><span><b>Kernel 优化</b><small>不作为主线</small></span>
+            </button>
+          </div>
+          <article class="depth-detail" role="tabpanel" aria-live="polite">
+            <span class="micro-label" id="depth-kicker">L2 / CORE FOR AGENT INFRA</span>
+            <h3 id="depth-title"></h3>
+            <p id="depth-summary"></p>
+            <div class="depth-columns">
+              <div><h4>需要理解</h4><ul class="plain-list" id="depth-know"></ul></div>
+              <div><h4>形成的工程能力</h4><ul class="plain-list" id="depth-output"></ul></div>
+            </div>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" id="principles">
+      <div class="shell">
+        <div class="section-head reveal">
+          <div>
+            <p class="section-kicker">Architecture Rules</p>
+            <h2>三个项目长期保持独立的原则</h2>
+          </div>
+          <p class="section-lead">
+            真正的系统性来自清楚的边界和可复现的数据闭环，不来自建立一个包含所有功能的巨型仓库。
+          </p>
+        </div>
+        <div class="principles reveal">
+          <article class="principle"><span>RULE 01</span><h3>共享 Schema，不共享 Service</h3><p>共享 RuntimeEvent、AgentTrajectory、EvaluationResult 和 ModelVersion；不要跨仓库调用内部 Store 或 Service。</p></article>
+          <article class="principle"><span>RULE 02</span><h3>每层有自己的真相来源</h3><p>Behavior 的真相是任务状态；Control 的真相是 Run 事实；Learning 的真相是版本化 trajectory、配置和 checkpoint。</p></article>
+          <article class="principle"><span>RULE 03</span><h3>评测必须能定位责任</h3><p>模型变差、Agent 策略变差和基础设施过载必须能被不同指标区分，不能只保留一个端到端总分。</p></article>
+          <article class="principle"><span>RULE 04</span><h3>模型配置不进入业务逻辑</h3><p>模型 ID、Template、Parser、量化和上下文长度属于部署配置，三个项目通过 ModelVersion 追踪它们。</p></article>
+          <article class="principle"><span>RULE 05</span><h3>训练与生产执行解耦</h3><p>Polar 可以消费脱敏、版本化轨迹，但不依赖生产 RunService；生产 Control Plane 也不等待训练系统在线。</p></article>
+          <article class="principle"><span>RULE 06</span><h3>先基线，再跨层优化</h3><p>先分别证明 Behavior、Control、Learning 正确，再研究 Agent 语义参与推理调度或真实轨迹驱动模型改进。</p></article>
+        </div>
+      </div>
+    </section>
+
+    <section class="closing">
+      <div class="shell closing-grid reveal">
+        <div>
+          <p class="section-kicker">The Complete Agent Discipline</p>
+          <h2>资深 Agent 专家不必重写所有 Infra，但要理解整个反馈闭环。</h2>
+          <p>
+            你的主线不是成为 Prompt、分布式系统、RL 和 CUDA 的全能实现者，而是能够判断一个问题属于哪一层、
+            它需要什么事实、应该由什么契约连接，以及怎样通过评测证明整体真的改善。
+          </p>
+        </div>
+        <div class="closing-stack">
+          <div><b>行为层</b><span>理解模型怎样通过规划、上下文与工具形成可用 Agent。</span></div>
+          <div><b>控制层</b><span>理解多个 Agent 怎样在真实资源、故障和多租户环境中可靠运行。</span></div>
+          <div><b>学习层</b><span>理解 trajectory、reward 和 rollout 怎样转化为模型策略更新。</span></div>
+          <div><b>推理底座</b><span>理解 vLLM 对延迟、吞吐、缓存和并发的影响，但不把 Kernel 作为主线。</span></div>
+          <div><b>共同语言</b><span>用版本、事件、轨迹、评测与模型制品连接三个独立项目。</span></div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <div class="shell">VRAM-Aware Agent Harness / Agent Systems Three-Plane Atlas / 2026-07-30</div>
+  </footer>
+
+  <script>
+    const layers = {
+      behavior: {
+        color: "var(--behavior)",
+        kicker: "01 / Agent Behavior Engineering",
+        title: "DeepResearch Agent：任务内部的智能执行系统",
+        badge: "OPTIMIZE TASK QUALITY",
+        summary: "这一层研究一个 Agent 如何理解目标、分解任务、选择工具、组织上下文、校验证据并给出高质量结果。内部可以是单 Agent，也可以是 Planner、Researcher、Writer、Critic 等语义角色协作。",
+        objects: [
+          "Task / Subtask：用户目标与可验证的子目标",
+          "Agent State：当前计划、观察、证据、未解决问题",
+          "Tool Action / Observation：改变外部状态的行动与返回",
+          "Context / Memory：进入模型的短期历史与长期知识",
+          "Artifact：报告、引用、代码或结构化结论"
+        ],
+        flow: [
+          "理解用户目标，生成计划和完成标准",
+          "根据当前状态选择搜索、浏览、RAG 或其他工具",
+          "把观察转成证据，更新计划与上下文",
+          "进行反思、交叉验证、冲突检测和停止判断",
+          "生成带来源、可解释、满足格式约束的最终结果"
+        ],
+        tech: [
+          ["Agent Runtime", "Pi Agent SDK 或内部 runtime；事件流、Session、工具协议、Compaction"],
+          ["Orchestration", "Planner–Executor、状态图、子任务 DAG、Critic/Verifier、停止策略"],
+          ["Context", "Context Builder、短期历史、摘要、证据池、引用映射、Token Budget"],
+          ["Tools", "Search、Browser、RAG、文件、代码执行；Schema 校验、超时与结果标准化"],
+          ["Knowledge", "Embedding / Vector Store、检索重排、来源可信度、时间有效性"],
+          ["Observability", "Step trace、prompt/model version、tool latency、failure taxonomy"]
+        ],
+        metrics: [
+          ["Task Success", "是否完成真实任务"],
+          ["Answer Quality", "正确、完整、结构清晰"],
+          ["Citation Quality", "来源准确且覆盖结论"],
+          ["Tool Efficiency", "减少无效搜索与重复调用"],
+          ["Robustness", "工具失败后仍能修正"],
+          ["Cost", "Token、调用次数与时延"]
+        ],
+        boundary: "不负责多个 Tenant 的资源公平、生产级 Run 恢复、全局 GPU 准入，也不负责通过 RL 更新模型权重。它只优化一个任务内部的智能行为。"
+      },
+      control: {
+        color: "var(--control)",
+        kicker: "02 / Agent Task Product + Execution",
+        title: "VRAM-Aware：多租户 Agent 任务服务",
+        badge: "DELIVER ISOLATED TASKS",
+        summary: "这是一个向团队交付 Workspace、任务过程和结果的用户产品；内部围绕 Pi 管理 Sandbox、Run、副作用、Checkpoint、Tenant、公平队列与共享推理资源。",
+        objects: [
+          "Principal / Tenant / Workspace：可信身份、所有权与项目空间",
+          "Task / Session / AgentRun：用户目标、连续交互与一次执行",
+          "SandboxInstance / ExecutionProfile：每次执行的隔离环境与策略",
+          "RunEvent：状态变化、模型调用、工具边界的追加事实",
+          "ToolExecution：幂等键、副作用分类与结果",
+          "Checkpoint / RecoveryDecision：安全恢复边界与恢复动作",
+          "ResourceSnapshot / PolicyDecision：资源事实与准入理由"
+        ],
+        flow: [
+          "认证用户，在 Tenant Workspace 中创建任务与 AgentRun",
+          "读取队列、Tenant 配额和 GPU Snapshot 作准入决定",
+          "创建 Sandbox，并通过 AgentRuntime 启动或恢复 Pi Session",
+          "将工具调用送入 Sandbox 内执行，原子保存结果和 Checkpoint",
+          "持久化 RuntimeEvent，并向用户交付回答、Diff 与 Artifact"
+        ],
+        tech: [
+          ["语言运行时", "TypeScript + Bun；领域对象、Service、Adapter 与确定性测试"],
+          ["Agent 接入", "AgentRuntime 接口、PiAdapter、Fake Runtime、RuntimeEventBridge"],
+          ["可靠执行", "状态机、SQLite transaction、append-only events、idempotency、checkpoint"],
+          ["工具治理", "ToolGateway、permission、timeout、side-effect class、replay decision"],
+          ["资源策略", "vLLM Metrics、nvidia-smi fallback、NORMAL/BUSY/CRITICAL、admission queue"],
+          ["产品边界", "API Key、Tenant-scoped Store、Workspace、任务结果与最小 UI"],
+          ["执行隔离", "每 Attempt Sandbox、文件/进程/网络/Secret/资源限制与攻击测试"],
+          ["多租户编排", "公平队列、并发上限、资源准入、恢复、审计与成本归因"]
+        ],
+        metrics: [
+          ["Reliability", "Run 成功率与恢复率"],
+          ["Fairness", "Tenant 等待与非饥饿"],
+          ["Latency", "排队、TTFT、P95 E2E"],
+          ["Utilization", "GPU 吞吐与空闲率"],
+          ["Safety", "副作用与越权事件"],
+          ["Explainability", "每个决定可追溯"]
+        ],
+        boundary: "不实现 DeepResearch 的规划、Prompt 和内部多 Agent 协作，不训练模型，也不接管 vLLM 的 token 级正确性。它向用户提供任务服务，并在内部专注第③ Sandbox 与第④ Orchestration。"
+      },
+      learning: {
+        color: "var(--learning)",
+        kicker: "03 / Agent Learning Infrastructure",
+        title: "Polar RL Infra：从多步交互轨迹改进模型策略",
+        badge: "IMPROVE MODEL POLICY",
+        summary: "这一层把 Agent 的状态、行动、环境观察和奖励建模为多步 MDP，通过可复现 rollout、reward 与 GRPO 优化模型，使模型学会更有效地探索、调用工具、修正和停止。",
+        objects: [
+          "Task / Environment：训练任务、初始状态与动作空间",
+          "Episode / Step：一次完整交互与单步 transition",
+          "Trajectory：state、action、observation、reward、done",
+          "Reward Components：任务成功、步数、非法与重复行动",
+          "Policy / Reference / Checkpoint：训练模型、KL 约束与版本制品"
+        ],
+        flow: [
+          "从固定 train split 采样任务和随机种子",
+          "当前 policy 对同一任务生成多条多步 rollout",
+          "环境执行 action，Verifier 生成终局和逐步 reward",
+          "在 rollout group 内计算相对优势并执行 GRPO 更新",
+          "固定 validation 选 checkpoint，test 与跨环境验证后发布"
+        ],
+        tech: [
+          ["训练底座", "Polar 工程层；Agent-R1-compatible recipe、veRL / GRPO、PyTorch"],
+          ["环境", "WebShop 主环境；ALFWorld 泛化；Adapter 隔离 action/observation"],
+          ["模型", "1B–1.5B 跑通闭环，3B 主实验；LoRA/QLoRA 优先"],
+          ["Rollout", "Policy sampling、group size、temperature、max steps、trajectory store"],
+          ["Reward", "Terminal verifier、interaction budget、invalid/repeat penalty、KL"],
+          ["Reproducibility", "Dataset split、seed、config hash、git commit、raw JSONL trace"]
+        ],
+        metrics: [
+          ["Success Rate", "固定任务上的完成率"],
+          ["Avg. Steps", "完成任务的交互成本"],
+          ["Invalid Rate", "动作协议可靠性"],
+          ["Loop Rate", "重复探索与循环"],
+          ["Stability", "Reward、KL、Loss 曲线"],
+          ["Generalization", "跨环境一致趋势"]
+        ],
+        boundary: "不依赖生产 RunService、ToolGateway 或 PiAdapter，不负责线上多租户调度，也不重写分布式训练框架。它消费版本化 trajectory，产出版本化 model artifact。"
+      }
+    };
+
+    const contracts = {
+      runtime: {
+        kicker: "C1 / ONLINE CONTROL",
+        title: "AgentRuntime：外层控制面不依赖内层 Agent 实现",
+        summary: "Control Plane 只发送标准命令并接收标准事件。Pi、DeepResearch 或未来 Runtime 的内部循环由 Adapter 隔离。",
+        route: ["RunService", "AgentRuntime", "DeepResearch Adapter", "Inner Agent Harness"],
+        schema: `type RuntimeCommand = {
+  tenantId: string;
+  runId: string;
+  sessionId: string;
+  task: string;
+  workspaceRef: string;
+};
+
+interface AgentRuntime {
+  start(command: RuntimeCommand): Promise<void>;
+  resume(command: ResumeCommand): Promise<void>;
+  cancel(runId: string): Promise<void>;
+  subscribe(handler: (event: RuntimeEvent) => void): Unsubscribe;
+}`,
+        rule: "边界规则：Control Plane 可以管理生命周期，但不能读取并修改 DeepResearch 内部 Planner 的私有状态。"
+      },
+      inference: {
+        kicker: "C2 / INFERENCE EXECUTION",
+        title: "Inference Contract：标准调用面加请求归因",
+        summary: "Agent Runtime 使用 OpenAI-compatible API 调用 vLLM；Control Plane 通过 request metadata 和 Metrics 关联 Tenant、Run、模型版本与资源成本。",
+        route: ["Agent Runtime", "Model Request", "vLLM Scheduler", "Model / GPU"],
+        schema: `type InferenceRequestMeta = {
+  tenantId: string;
+  runId: string;
+  modelCallId: string;
+  traceId: string;
+  modelVersion: string;
+  requestClass: "INTERACTIVE" | "BACKGROUND";
+};
+
+type InferenceObservation = {
+  running: number;
+  waiting: number;
+  kvCacheUsage: number;
+  ttftMs: number;
+  inputTokens: number;
+  outputTokens: number;
+};`,
+        rule: "边界规则：Harness 可以决定何时提交请求和附加 hint，但 vLLM 仍负责 batching、Prefill、Decode 与物理 KV 的正确执行。"
+      },
+      trajectory: {
+        kicker: "C3 / DATA FLYWHEEL",
+        title: "AgentTrajectory：生产执行与训练系统的数据桥梁",
+        summary: "Behavior 和 Control 产生的事件经过脱敏、版本化和步骤重建后进入 Learning Plane。Polar 不直接读取生产数据库内部表。",
+        route: ["RunEvent + ToolExecution", "Trajectory Builder", "Evaluation / Reward", "Polar Dataset"],
+        schema: `type AgentTrajectory = {
+  schemaVersion: 1;
+  episodeId: string;
+  taskId: string;
+  modelVersion: string;
+  agentVersion: string;
+  environmentVersion: string;
+  steps: Array<{
+    stateRef: string;
+    action: ParsedAction;
+    observation: SanitizedObservation;
+    rewardComponents: Record<string, number>;
+    latencyMs: number;
+    tokenUsage: TokenUsage;
+  }>;
+  terminal: { success: boolean; reason: string };
+};`,
+        rule: "边界规则：轨迹必须可追溯、可脱敏、不可泄漏 Secret；生产 trace 不是天然正确的训练样本，必须经过 Evaluation 和数据筛选。"
+      },
+      model: {
+        kicker: "C4 / MODEL RELEASE",
+        title: "ModelVersion：训练结果通过制品契约回到推理层",
+        summary: "Polar 产出 checkpoint 和评测报告；发布流程登记版本、模板、Parser、量化和兼容性，再由 vLLM 加载。业务代码不绑定具体模型名。",
+        route: ["Polar Checkpoint", "Evaluation Gate", "Model Registry", "vLLM Deployment"],
+        schema: `type ModelRelease = {
+  modelVersion: string;
+  baseModelRevision: string;
+  checkpointUri: string;
+  trainingConfigHash: string;
+  evaluationReportUri: string;
+  chatTemplateVersion: string;
+  toolParser: string;
+  quantization?: string;
+  compatibility: {
+    agentRuntime: string[];
+    maxContextTokens: number;
+  };
+};`,
+        rule: "边界规则：新 checkpoint 不能因为训练完成就直接替换线上模型；必须经过固定基准、Agent 回归、工具协议和资源曲线四类门禁。"
+      }
+    };
+
+    const depths = [
+      {
+        kicker: "L1 / REQUIRED BASICS",
+        title: "会正确调用模型服务",
+        summary: "这是所有 Agent 开发的基本线：模型、模板、工具协议和流式事件必须匹配。",
+        know: ["OpenAI-compatible API 与 Streaming", "Chat Template、Tool Schema 与 stop reason", "Reasoning Parser / Tool Call Parser", "模型 ID、上下文长度和采样参数"],
+        output: ["完成模型 → 工具 → 模型 Smoke Test", "区分 Agent 错误与 Parser 配置错误", "保存 model call usage 与完成原因", "建立可复现的启动配置"]
+      },
+      {
+        kicker: "L2 / CORE FOR AGENT INFRA",
+        title: "会解释资源行为并完成观测调优",
+        summary: "这是 Agent 任务服务内部编排层必须掌握的核心深度，否则无法解释用户任务为什么排队、变慢、抢占或 OOM。",
+        know: ["Prefill、Decode 与 Continuous Batching", "running / waiting / preempted requests", "KV Cache、Prefix Cache 与命中行为", "max-model-len、max-num-seqs、batched tokens", "TTFT、ITL、E2E、吞吐和显存水位"],
+        output: ["建立 NORMAL / BUSY / CRITICAL 观测", "校准并发、上下文与显存安全线", "区分算力、KV、队列和工具等待瓶颈", "生成可解释的 AdmissionContext"]
+      },
+      {
+        kicker: "L3 / CONTROLLED EXTENSION",
+        title: "会在 vLLM fork 中增加受控扩展点",
+        summary: "源码可修改的价值在于补齐请求身份和资源事实，而不是立即重写整个 Scheduler。",
+        know: ["请求生命周期与 Scheduler 主要代码路径", "tenantId / runId / traceId 传播", "Prometheus Metrics 与事件扩展", "priority、request class 与 scheduling hint", "fork commit、patch 与上游兼容管理"],
+        output: ["按 Run 归因延迟、Token 和缓存行为", "提供稳定 Metrics/Event contract", "最小 patch、可测试、可回滚", "为跨层调度研究建立数据基础"]
+      },
+      {
+        kicker: "L4 / EVIDENCE-DRIVEN RESEARCH",
+        title: "按测量结果进入调度与 KV 研究",
+        summary: "只有 Level 0–3 的数据证明存在明确瓶颈和收益空间时，才进入这一层。",
+        know: ["KV Events 与 Prefix Cache 归因", "Per-request priority 与 fairness", "Offload / restore 与重算成本", "Agent phase、context epoch 和 retention hint", "Co-scheduling 的基线与消融"],
+        output: ["形成可检验研究假设", "与默认 vLLM Scheduler 公平对照", "报告质量、成本、延迟和吞吐 Pareto", "证明收益来自策略而不是额外资源"]
+      },
+      {
+        kicker: "L5 / SPECIALIZED AI INFRA",
+        title: "Kernel 和通信优化不作为 Agent 主线",
+        summary: "理解它们如何影响性能即可；除非项目问题明确落到算子，否则不投入主要研发时间。",
+        know: ["CUDA / Triton Kernel 的基本性能语义", "Flash Attention 与 Paged Attention 原理", "NCCL、Tensor Parallel 和拓扑影响", "量化 Kernel 与硬件架构适配"],
+        output: ["能与 AI Infra 工程师准确沟通", "能判断瓶颈是否已经超出 Agent 系统层", "提供可复现 workload 与指标", "不在无证据时自行重写底层算子"]
+      }
+    ];
+
+    const layerTabs = [...document.querySelectorAll(".layer-tab")];
+    const sceneLayers = [...document.querySelectorAll(".scene-layer")];
+    const sceneCaptions = {
+      behavior: "当前焦点：一个 Agent 怎样更准确地完成任务",
+      control: "当前焦点：多个 Agent 怎样可靠、公平、可恢复地运行",
+      learning: "当前焦点：怎样从多步执行轨迹持续改进模型"
+    };
+
+    function listHTML(items) {
+      return items.map((item) => `<li>${item}</li>`).join("");
+    }
+
+    function selectLayer(id, shouldScroll = false) {
+      const layer = layers[id] || layers.behavior;
+      layerTabs.forEach((tab) => tab.setAttribute("aria-selected", String(tab.dataset.layer === id)));
+      sceneLayers.forEach((item) => item.classList.toggle("active", item.dataset.sceneLayer === id));
+      document.getElementById("scene-caption").textContent = sceneCaptions[id];
+      document.getElementById("layer-kicker").textContent = layer.kicker;
+      document.getElementById("layer-kicker").style.color = layer.color;
+      document.getElementById("layer-title").textContent = layer.title;
+      document.getElementById("layer-summary").textContent = layer.summary;
+      const badge = document.getElementById("layer-badge");
+      badge.textContent = layer.badge;
+      badge.style.color = layer.color;
+      document.getElementById("layer-objects").innerHTML = listHTML(layer.objects);
+      document.getElementById("layer-flow").innerHTML = listHTML(layer.flow);
+      document.getElementById("layer-tech").innerHTML = layer.tech
+        .map(([name, detail]) => `<tr><td>${name}</td><td>${detail}</td></tr>`)
+        .join("");
+      document.getElementById("layer-metrics").innerHTML = layer.metrics
+        .map(([name, detail]) => `<li><b>${name}</b><span>${detail}</span></li>`)
+        .join("");
+      document.getElementById("layer-boundary").textContent = layer.boundary;
+      if (shouldScroll) document.getElementById("layers").scrollIntoView({ behavior: "smooth" });
+    }
+
+    layerTabs.forEach((tab) => tab.addEventListener("click", () => selectLayer(tab.dataset.layer)));
+    sceneLayers.forEach((item) => {
+      item.addEventListener("click", () => selectLayer(item.dataset.sceneLayer, true));
+      item.addEventListener("keydown", (event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          selectLayer(item.dataset.sceneLayer, true);
+        }
+      });
+    });
+
+    const contractButtons = [...document.querySelectorAll(".contract-button")];
+    function selectContract(id) {
+      const data = contracts[id] || contracts.runtime;
+      contractButtons.forEach((button) => button.setAttribute("aria-selected", String(button.dataset.contract === id)));
+      document.getElementById("contract-kicker").textContent = data.kicker;
+      document.getElementById("contract-title").textContent = data.title;
+      document.getElementById("contract-summary").textContent = data.summary;
+      document.getElementById("contract-route").innerHTML = data.route
+        .map((node, index) => `${index ? '<span class="contract-arrow">→</span>' : ""}<span class="route-node">${node}</span>`)
+        .join("");
+      document.getElementById("contract-schema").textContent = data.schema;
+      document.getElementById("contract-rule").textContent = data.rule;
+    }
+    contractButtons.forEach((button) => button.addEventListener("click", () => selectContract(button.dataset.contract)));
+
+    const depthButtons = [...document.querySelectorAll(".depth-button")];
+    function selectDepth(index) {
+      const data = depths[index] || depths[0];
+      depthButtons.forEach((button, buttonIndex) => button.setAttribute("aria-selected", String(buttonIndex === index)));
+      document.getElementById("depth-kicker").textContent = data.kicker;
+      document.getElementById("depth-title").textContent = data.title;
+      document.getElementById("depth-summary").textContent = data.summary;
+      document.getElementById("depth-know").innerHTML = listHTML(data.know);
+      document.getElementById("depth-output").innerHTML = listHTML(data.output);
+    }
+    depthButtons.forEach((button) => button.addEventListener("click", () => selectDepth(Number(button.dataset.depth))));
+
+    function enableKeyboardTabs(buttons, select) {
+      buttons.forEach((button, index) => {
+        button.addEventListener("keydown", (event) => {
+          if (!["ArrowDown", "ArrowRight", "ArrowUp", "ArrowLeft", "Home", "End"].includes(event.key)) return;
+          event.preventDefault();
+          let next = index;
+          if (event.key === "ArrowDown" || event.key === "ArrowRight") next = (index + 1) % buttons.length;
+          if (event.key === "ArrowUp" || event.key === "ArrowLeft") next = (index - 1 + buttons.length) % buttons.length;
+          if (event.key === "Home") next = 0;
+          if (event.key === "End") next = buttons.length - 1;
+          buttons[next].focus();
+          select(next, buttons[next]);
+        });
+      });
+    }
+
+    enableKeyboardTabs(layerTabs, (_, button) => selectLayer(button.dataset.layer));
+    enableKeyboardTabs(contractButtons, (_, button) => selectContract(button.dataset.contract));
+    enableKeyboardTabs(depthButtons, (index) => selectDepth(index));
+
+    const revealItems = document.querySelectorAll(".reveal");
+    if ("IntersectionObserver" in window) {
+      const revealObserver = new IntersectionObserver((entries) => {
+        entries.forEach((entry) => {
+          if (entry.isIntersecting) {
+            entry.target.classList.add("visible");
+            revealObserver.unobserve(entry.target);
+          }
+        });
+      }, { threshold: 0.08 });
+      revealItems.forEach((item) => revealObserver.observe(item));
+    } else {
+      revealItems.forEach((item) => item.classList.add("visible"));
+    }
+
+    const sections = [...document.querySelectorAll("main section[id]")];
+    const navLinks = [...document.querySelectorAll(".nav a")];
+    if ("IntersectionObserver" in window) {
+      const navObserver = new IntersectionObserver((entries) => {
+        const visible = entries.filter((entry) => entry.isIntersecting).sort((a, b) => b.intersectionRatio - a.intersectionRatio)[0];
+        if (!visible) return;
+        navLinks.forEach((link) => link.classList.toggle("active", link.getAttribute("href") === `#${visible.target.id}`));
+      }, { rootMargin: "-20% 0px -65% 0px", threshold: [0, 0.2, 0.6] });
+      sections.forEach((section) => navObserver.observe(section));
+    }
+
+    selectLayer("behavior");
+    selectContract("runtime");
+    selectDepth(1);
+  </script>
+</body>
+</html>

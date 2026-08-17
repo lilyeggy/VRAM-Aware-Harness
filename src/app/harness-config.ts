@@ -1,0 +1,258 @@
+import { resolve } from "node:path";
+
+import type {
+    ResourceThresholds,
+} from "../resources/resource-classifier.ts";
+
+export interface HarnessConfig {
+    databasePath:string;
+    httpHost:string;
+    httpPort:number;
+    workspaceRoot:string;
+    bootstrapApiKey:string | undefined;
+    sandboxProvider:"managed-local" | "container";
+    containerImage:string;
+    containerUserId:number;
+
+    piProvider:string;
+    piModelId:string;
+    piTools:string[];
+    piModelsPath:string;
+    piAuthPath:string | undefined;
+
+    vllmMetricsUrl:string;
+    resourceObservationTimeoutMs:number;
+    gpuIds:string[];
+    resourceThresholds:ResourceThresholds;
+
+    maxActiveRuns:number;
+    maxActiveRunsPerTenant:number;
+    pumpIntervalMs:number;
+}
+
+export type HarnessEnvironment = Record<string,string | undefined>;
+
+export function loadHarnessConfig(
+    environment:HarnessEnvironment = process.env,
+    cwd = process.cwd(),
+):HarnessConfig {
+    const piModelId = requiredString(
+        environment,
+        "VLLM_MODEL_ID",
+    );
+    const vllmBaseUrl = environment.VLLM_BASE_URL
+        ?? "http://127.0.0.1:8000/v1";
+    const maxActiveRuns = positiveInteger(
+        environment,
+        "HARNESS_MAX_ACTIVE_RUNS",
+        2,
+    );
+    const maxActiveRunsPerTenant = positiveInteger(
+        environment,
+        "HARNESS_MAX_ACTIVE_RUNS_PER_TENANT",
+        1,
+    );
+
+    if (maxActiveRunsPerTenant > maxActiveRuns) {
+        throw new Error(
+            "HARNESS_MAX_ACTIVE_RUNS_PER_TENANT 不能大于 HARNESS_MAX_ACTIVE_RUNS",
+        );
+    }
+
+    return {
+        databasePath:environment.HARNESS_DATABASE_PATH
+            ?? resolve(cwd, "data/harness.sqlite"),
+        httpHost:environment.HARNESS_HOST ?? "127.0.0.1",
+        httpPort:port(environment, "HARNESS_PORT", 3000),
+        workspaceRoot:resolve(
+            cwd,
+            environment.HARNESS_WORKSPACE_ROOT ?? "data/workspaces",
+        ),
+        bootstrapApiKey:environment.HARNESS_BOOTSTRAP_API_KEY,
+        sandboxProvider:environment.HARNESS_SANDBOX_PROVIDER === "container"
+            ? "container"
+            : "managed-local",
+        containerImage:environment.HARNESS_CONTAINER_IMAGE ?? "alpine:3.20",
+        containerUserId:positiveInteger(
+            environment,
+            "HARNESS_CONTAINER_USER_ID",
+            65532,
+        ),
+
+        piProvider:environment.PI_PROVIDER ?? "local-vllm",
+        piModelId,
+        piTools:stringList(
+            environment.PI_TOOLS,
+            ["read", "bash", "edit", "write", "grep", "find", "ls"],
+        ),
+        piModelsPath:resolve(
+            cwd,
+            environment.PI_MODELS_PATH ?? ".pi/spike/models.json",
+        ),
+        piAuthPath:environment.PI_AUTH_PATH === undefined
+            ? undefined
+            : resolve(cwd, environment.PI_AUTH_PATH),
+
+        vllmMetricsUrl:environment.VLLM_METRICS_URL
+            ?? metricsUrlFromBaseUrl(vllmBaseUrl),
+        resourceObservationTimeoutMs:positiveInteger(
+            environment,
+            "HARNESS_RESOURCE_TIMEOUT_MS",
+            3_000,
+        ),
+        gpuIds:stringList(environment.HARNESS_GPU_IDS, ["0"]),
+        resourceThresholds:{
+            busyGpuMemoryPercent:numberValue(
+                environment,
+                "HARNESS_BUSY_GPU_MEMORY_PERCENT",
+                70,
+            ),
+            criticalGpuMemoryPercent:numberValue(
+                environment,
+                "HARNESS_CRITICAL_GPU_MEMORY_PERCENT",
+                90,
+            ),
+            busyKvCachePercent:numberValue(
+                environment,
+                "HARNESS_BUSY_KV_CACHE_PERCENT",
+                60,
+            ),
+            criticalKvCachePercent:numberValue(
+                environment,
+                "HARNESS_CRITICAL_KV_CACHE_PERCENT",
+                85,
+            ),
+            busyRunningRequests:nonNegativeInteger(
+                environment,
+                "HARNESS_BUSY_RUNNING_REQUESTS",
+                4,
+            ),
+            criticalRunningRequests:nonNegativeInteger(
+                environment,
+                "HARNESS_CRITICAL_RUNNING_REQUESTS",
+                8,
+            ),
+            busyWaitingRequests:nonNegativeInteger(
+                environment,
+                "HARNESS_BUSY_WAITING_REQUESTS",
+                1,
+            ),
+            criticalWaitingRequests:nonNegativeInteger(
+                environment,
+                "HARNESS_CRITICAL_WAITING_REQUESTS",
+                4,
+            ),
+        },
+
+        maxActiveRuns,
+        maxActiveRunsPerTenant,
+        pumpIntervalMs:positiveInteger(
+            environment,
+            "HARNESS_PUMP_INTERVAL_MS",
+            1_000,
+        ),
+    };
+}
+
+function requiredString(
+    environment:HarnessEnvironment,
+    name:string,
+):string {
+    const value = environment[name]?.trim();
+
+    if (value === undefined || value.length === 0) {
+        throw new Error(`必须设置环境变量 ${name}`);
+    }
+
+    return value;
+}
+
+function positiveInteger(
+    environment:HarnessEnvironment,
+    name:string,
+    defaultValue:number,
+):number {
+    const value = numberValue(environment, name, defaultValue);
+
+    if (!Number.isInteger(value) || value <= 0) {
+        throw new Error(`${name} 必须是正整数`);
+    }
+
+    return value;
+}
+
+function nonNegativeInteger(
+    environment:HarnessEnvironment,
+    name:string,
+    defaultValue:number,
+):number {
+    const value = numberValue(environment, name, defaultValue);
+
+    if (!Number.isInteger(value) || value < 0) {
+        throw new Error(`${name} 必须是非负整数`);
+    }
+
+    return value;
+}
+
+function numberValue(
+    environment:HarnessEnvironment,
+    name:string,
+    defaultValue:number,
+):number {
+    const rawValue = environment[name];
+
+    if (rawValue === undefined) {
+        return defaultValue;
+    }
+
+    const value = Number(rawValue);
+
+    if (!Number.isFinite(value)) {
+        throw new Error(`${name} 必须是有限数字`);
+    }
+
+    return value;
+}
+
+function port(
+    environment:HarnessEnvironment,
+    name:string,
+    defaultValue:number,
+):number {
+    const value = positiveInteger(environment, name, defaultValue);
+
+    if (value > 65_535) {
+        throw new Error(`${name} 必须小于或等于 65535`);
+    }
+
+    return value;
+}
+
+function stringList(
+    value:string | undefined,
+    defaultValue:string[],
+):string[] {
+    if (value === undefined) {
+        return [...defaultValue];
+    }
+
+    const values = value
+        .split(",")
+        .map((item) => item.trim())
+        .filter(Boolean);
+
+    if (values.length === 0) {
+        throw new Error("逗号分隔配置至少需要一个值");
+    }
+
+    return values;
+}
+
+function metricsUrlFromBaseUrl(baseUrl:string):string {
+    const url = new URL(baseUrl);
+    url.pathname = url.pathname.replace(/\/?v1\/?$/, "/metrics");
+    url.search = "";
+    url.hash = "";
+    return url.toString().replace(/\/$/, "");
+}

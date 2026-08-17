@@ -1,26 +1,77 @@
-# VRAM-Aware Agent Harness：深度分析与实施规划
+# VRAM-Aware Agent Harness：深度分析与长期实施规划
 
-> 文档版本：v4.0  
-> 文档性质：架构决策、Idea 可行性分析与开工规划  
-> 核心定位：基于 Pi Coding Agent，面向自托管 vLLM 的 Agent–Inference Co-scheduler
+> 文档版本：v4.4
+>
+> 文档性质：架构背景、Idea 可行性分析与条件式 Agent–Inference 研究材料
+>
+> 当前核心定位：支持团队共享本地模型的多租户 Agent 任务服务
+>
+> 研究方向：Agent–Inference Co-scheduling 保留为实测触发的候选支线，不是当前实施主线
 
-> **实施入口说明（2026-07-19）**：本文保留早期 Agent–Inference 联合调度的完整分析，用于理解项目背景和后续研究方向；第一周不以改造 vLLM 或管理物理 KV Cache 为目标。当前 Harness-first MVP 的实际开工手册见 [`ONE_WEEK_HARNESS_MVP_GUIDE.zh-CN.md`](../ONE_WEEK_HARNESS_MVP_GUIDE.zh-CN.md)。
+> **当前实施入口（2026-08-12）**：Day 1–7、Stage 1–2 本地语义已经完成。项目
+> 通过 [`ADR 0009`](adr/0009-build-a-multi-tenant-agent-task-service.md)
+> 定位为面向真实用户的多租户 Agent 任务服务；当前唯一实施顺序见
+> [`multi-tenant-agent-task-service-roadmap.zh-CN.md`](multi-tenant-agent-task-service-roadmap.zh-CN.md)。
+> 本文第 2 节起的大量 vLLM、Prefix/KV 和 Co-scheduling 内容继续作为历史分析和
+> 条件式研究材料；Claude、异构 ResourcePool 和大型控制面内容也只保留为秋招后
+> 参考，不能覆盖新路线图的优先级。
+
+> **历史实施入口（2026-07-19）**：本文保留早期 Agent–Inference 联合调度的完整分析，用于理解项目背景和后续研究方向；第一周不依赖深度重写 vLLM Scheduler 或管理物理 KV Cache。当时的 Harness-first MVP 实现顺序和验收标准见 [`ONE_WEEK_HARNESS_MVP_GUIDE.zh-CN.md`](../ONE_WEEK_HARNESS_MVP_GUIDE.zh-CN.md)，该手册现已完成并冻结。
+>
+> **源码状态（2026-07-22）**：自研 Agent Loop、内存 ContextManager、直接 vLLM Client 与 `src/kv/*` 实验已经移除，避免与 Pi 主路径形成双重实现。新源码从 `runtime/` 的稳定接口和 `spikes/` 的 Pi 验证开始，随后进入 `runs/`、`events/`、`tools/`、`checkpoints/`、`policy/`、`resources/` 与 `storage/`。删除决策见 [`ADR 0002`](adr/0002-remove-legacy-agent-prototype.md)。
+>
+> **策略方向（2026-07-23）**：固定阈值只作为第一阶段的安全基线和故障回退。后续使用 Scheduling Agent 综合资源趋势、任务、队列、Tenant/SLO 和历史结果，先运行 Shadow Mode，再在 Hard Guardrails 内参与真实调度。见 [`ADR 0003`](adr/0003-guarded-agentic-resource-scheduling.md)。
+>
+> **多租户定位（2026-07-26）**：Tenant 不是后加的数据库字段，而是身份、权限、Workspace、Secret、配额、公平性、成本和审计的共同主体。第一阶段先证明逻辑隔离和确定性公平，后续再增加生产级认证与运行环境隔离。见 [`ADR 0004`](adr/0004-multi-tenancy-as-first-class-boundary.md)。
+>
+> **模型与推理基线（2026-07-30）**：Harness 不绑定特定模型。当前以单卡 RTX A6000 48 GB 为硬件基线，Qwen3.5-4B 用于高频开发，Qwen3.5-9B 用于主要集成验证；vLLM fork 可以增加观测、请求归因和后续调度扩展，但模型配置不能进入 Harness 业务逻辑。见 [`ADR 0005`](adr/0005-use-replaceable-models-and-extensible-vllm.md)。
+>
+> **范围收紧（2026-08-03）**：MVP 的双核心固定为“副作用感知的安全恢复”和
+> “基于真实资源事实的准入/背压”。多租户只保留为归属、公平性和非饥饿的验证
+> 场景；Scheduling Agent 与深度 vLLM 调度均为数据驱动的候选研究方向，不是
+> 当前交付承诺。见 [`ADR 0006`](adr/0006-narrow-mvp-to-recovery-and-resource-admission.md)。
 
 ## 1. 结论先行
 
-本项目应该基于 Pi Coding Agent 开发，但不应该继续自行实现另一套 Agent Loop。
+本项目当前的规范定义是：
 
-Pi 提供成熟的 Agent Runtime，包括会话持久化、工具调用、事件流、分支、compaction、模型接入和 SDK。我们的研发资源应集中在 Pi 不解决、云端黑盒模型也无法解决的部分：
+> **支持团队共享本地模型的多租户 Agent 任务服务：用户在独立 Workspace 中提交
+> 任务、观察执行并取得回答、Diff 和 Artifact；系统使用 Pi 驱动自托管 vLLM，
+> 为每个 Attempt 分配受策略约束的 Sandbox，公平调度共享 GPU，并通过副作用记录、
+> Checkpoint 和审计时间线保证故障后的安全恢复。**
 
-> 利用 Agent 对 Tenant、Session、Turn、工具等待、任务阶段和上下文版本的语义认知，联合调度自托管 vLLM 的请求、Prefill、Decode、Prefix Cache、KV Cache 与显存预算。
+项目已经基于 Pi Coding Agent 完成可靠执行纵向切片，并让 HarnessTemplate、
+HarnessInstance、RuntimeCapabilityProfile、EffectivePolicySnapshot 与最小
+Sandbox 进入真实 Pi 路径。这些实现继续保留，但秋招前不再接入 Claude 或扩张
+异构 ResourcePool。Tenant 是用户、Workspace、策略、Secret、资源、结果和审计的
+共同边界，不是普通 CRUD 字段。产品只实现支撑任务闭环所需的身份与管理能力，
+不扩张为通用企业 SaaS 平台。
 
-项目不应被狭义定义为“Turn 级 KV 驱逐器”。更准确的定义是：
+第一周 MVP 要回答的是一个受约束的工程问题：
 
-> 面向稀缺本地推理资源的 Agent–Inference Co-scheduler。
+> 在不修改 Pi、且不依赖深度重写 vLLM Scheduler 的情况下，Harness 能否依据
+> Run 状态、工具副作用和真实资源事实，安全地控制新任务启动，并在故障或资源
+> 压力解除后自动、可解释地继续执行？
 
-KV Cache 是它管理的重要资源，但不是预先假定的唯一瓶颈，也不一定是第一阶段最值得优化的资源。
+这条问题已经形成可靠的本地语义基线。后续主线不是立即进入 Agent–Inference
+Co-scheduling 或双 Runtime，而是补齐可信身份、受管 Workspace、真实容器 Sandbox、
+用户结果与操作界面，并以 A6000、多租户攻击测试、资源竞争、kill/restart 和副作用
+恢复实验提供证据。完成产品闭环后，才根据目标岗位和实测结果决定是否研究优先级、
+Prefill/Decode 成本、缓存复用或第二 Runtime。
+
+项目不应被狭义定义为“Turn 级 KV 驱逐器”。KV Cache 是未来可能观测和优化的
+重要资源，但不是预先假定的唯一瓶颈，也不一定是第一阶段最值得优化的资源。
+
+多租户既是用户产品的使用边界，也是共享单机 GPU 的资源竞争场景：Tenant 必须
+贯穿身份、Workspace、策略、Sandbox、Secret、资源、结果和审计。第一版需要可信
+认证和最小任务 UI，但不优先做计费、复杂组织管理或通用低代码后台；隔离能否落实、
+故障能否安全恢复、资源能否真实影响执行，仍然决定项目的工程深度。
 
 ## 2. 为什么必须先修正问题定义
+
+> 本节记录早期 DeepSeek-V4-Flash 大模型部署假设及其推导，作为未来大模型和 KV
+> 研究的历史材料。它不再代表当前 MVP 的模型与硬件基线；当前执行基线以
+> A6000 + Qwen3.5-4B/9B 为准。
 
 早期设计建立在以下推理上：
 
@@ -90,13 +141,13 @@ vLLM 不知道某个请求为何重要、是否来自实时交互、是否正在
 
 ### 3.4 我们增加什么
 
-我们的 Harness 负责把两类信息连接起来：
+长期看，Harness 可以把两类信息连接起来：
 
 ```mermaid
 flowchart LR
-    A["Pi Agent 语义"] --> P["资源策略与联合调度"]
+    A["Pi Agent 语义"] --> P["资源策略与联合调度（MVP 后）"]
     I["vLLM 资源状态"] --> P
-    P --> C["准入、优先级、预算、Compaction、Residency"]
+    P --> C["准入、优先级、预算；未来再研究 Compaction、Residency"]
     C --> A
     C --> I
 ```
@@ -104,6 +155,25 @@ flowchart LR
 核心差异不是拥有更多启发式规则，而是形成闭环：
 
 > Agent 语义 → 资源价值判断 → 推理动作 → 真实资源反馈 → 更新 Agent 调度。
+
+第一周只实现这个闭环的最小前半段：持久化 Agent 事实、采集粗粒度 GPU 状态，
+并用确定性策略决定新 Run 的启动或排队。更细的推理动作必须由后续测量证明其
+必要性，不能从研究设想反推当前接口。
+
+### 3.5 为什么多租户是核心变量
+
+单租户 Agent 可以把当前用户、当前 Workspace、当前 Session 和当前资源预算
+都藏在进程全局状态中；多租户 Harness 不允许这些隐式假设存在。
+
+Tenant 必须贯穿：
+
+- Session、Run、Event、ToolExecution 和 Checkpoint 的所有权；
+- Workspace、Secret、工具策略和外部数据访问；
+- 并发、Token、费用、显存预算、队列权重和 SLO；
+- 日志、指标、恢复操作和策略决策的审计归属。
+
+因此，多租户带来的价值不只是“支持更多用户”，而是迫使系统形成清晰、可测试、
+可扩展的控制面边界。具体约束见 [`ADR 0004`](adr/0004-multi-tenancy-as-first-class-boundary.md)。
 
 ## 4. 为什么选择 Pi，而不是继续当前自研 Agent Loop
 
@@ -480,7 +550,7 @@ flowchart LR
 
 ### Level 0：标准接口与 Metrics
 
-不修改 vLLM：
+不要求修改 vLLM 核心调度：
 
 - OpenAI/Anthropic 兼容推理；
 - 请求 usage；
@@ -490,7 +560,8 @@ flowchart LR
 - TTFT、ITL、E2E latency；
 - Harness 外部 Admission Queue。
 
-这一层足以建立真实基线和第一版公平调度。
+这一层足以建立真实基线和第一版公平调度。若当前 fork 缺少稳定的请求标识或
+观测字段，可以做局部扩展，但不需要改变 Scheduler 行为。
 
 ### Level 1：请求元数据与 Priority
 
@@ -504,7 +575,8 @@ flowchart LR
 - trace id；
 - cache security salt。
 
-这一层是 MVP 最关键的 vLLM 集成。
+这一层是 MVP 形成可靠 Level 0 基线后，Co-scheduler 研究最先考虑的 vLLM
+增强，不属于第一周交付。
 
 ### Level 2：KV Events 与 Offload Policy
 
@@ -549,14 +621,19 @@ Harness 在这一层建立 Session/Epoch 与 KV 的可信归因。
 | protected CoT Block | 修正 | 使用 request priority 和重算成本保护 |
 | 跨 Session rebuild cost | 核心保留 | Co-scheduler 的关键差异化 |
 | 动态显存水位 | 核心保留 | 扩展为 Prefill/Decode/KV/临时显存联合状态 |
-| 固定 70/85/95 阈值 | 仅作为起始实验 | 由实际 OOM 余量和 latency 曲线校准 |
+| 固定 70/85/95 阈值 | 仅作为起始实验 | 先由实际 OOM 余量和 latency 曲线校准为确定性基线，再作为 Agentic Policy 的回退与对照 |
 | Attention score 驱逐 | 放弃主线 | fused kernel 与语义错位，收益不确定 |
 
-## 12. 当前仓库代码评估
+## 12. 历史代码评估（已结束）
 
-### 12.1 当前性质
+> 本节记录 2026-07-22 以前旧原型的评估依据。相关自研 Agent Loop、直接
+> LLM Client、ContextManager 和 KV 实验已经移出当前主路径，不能再用本节
+> 判断现在的源码进度。
 
-当前代码是一个验证早期设计的最小 Spike，不是 Pi 二次开发，也不是可继续直接演进的生产骨架。
+### 12.1 当时的性质
+
+当时的代码是一个验证早期设计的最小 Spike，不是 Pi 二次开发，也不是可继续
+直接演进的生产骨架。
 
 它自行实现了：
 
@@ -567,7 +644,7 @@ Harness 在这一层建立 Session/Epoch 与 KV 的可信归因。
 - Turn Importance Evaluator；
 - 模拟的 KV Lifecycle Manager。
 
-### 12.2 主要结构性问题
+### 12.2 当时的主要结构性问题
 
 - `package.json` 没有 Pi 依赖；
 - Harness 没有实例化或调用 KV Lifecycle Manager；
@@ -583,21 +660,27 @@ Harness 在这一层建立 Session/Epoch 与 KV 的可信归因。
 - `<refs>` 指令已进入 System Prompt，但没有完整接入主流程；
 - 测试以构造器和 Mock 为主，没有真实 Harness → vLLM 端到端验证。
 
-现有 52 个测试通过，只能说明这些局部 API 在 Mock 条件下符合当前断言，不能证明系统已经具备 Agent 或 KV 管理能力。
+当时的 52 个测试通过，只能说明这些局部 API 在 Mock 条件下符合断言，不能证明
+系统已经具备 Agent 或 KV 管理能力。
 
-### 12.3 处理建议
+### 12.3 已执行的处理决定
 
-不建议在现有 Agent Loop 上修补后继续扩展。
+决定不在旧 Agent Loop 上修补后继续扩展。
 
-建议：
+- 旧实现已作为 legacy prototype 从工作树删除，Git 历史继续保留；
+- 新主线已经从 Pi SDK Adapter 和稳定 Runtime 接口开始；
+- Turn Importance 与 KVLifecycleManager 不进入 MVP 主路径；
+- 后续只有在真实测量证明必要时，才重新设计相应策略模块。
 
-- 把当前实现标记为 legacy prototype；
-- 保留其中的实验和测试思路作为对照；
-- 新主线从 Pi SDK Adapter、Session Orchestrator 和 Observability 开始；
-- Turn Importance 与 KVLifecycleManager 暂不进入生产主路径；
-- 等基线建立后再决定哪些策略模块值得重写。
+## 13. 历史 Agent–Inference 研究阶段
 
-## 13. 真正可开工的实施阶段
+> **状态说明（2026-08-12）**：下列 Phase 0–5 是 ADR 0007 之前形成的
+> Agent–Inference 深化方案，保留用于解释 A6000、Prefix/KV 与 vLLM 研究脉络，
+> 不再是当前产品实施顺序。其中 Pi Runtime、基础资源准入和最小多租户编排已经
+> 在 Day 1–7 以较小范围完成；未完成部分只有在产品任务闭环完成且真实数据证明必要时
+> 才重新进入。当前主线只以
+> [`multi-tenant-agent-task-service-roadmap.zh-CN.md`](multi-tenant-agent-task-service-roadmap.zh-CN.md)
+> 为准。
 
 ### Phase 0：建立事实基线
 
@@ -606,7 +689,7 @@ Harness 在这一层建立 Session/Epoch 与 KV 的可信归因。
 必须获得：
 
 - 当前 vLLM fork 的准确 commit；
-- SM120、DeepSeek-V4 和量化相关 patch；
+- Qwen3.5 兼容 patch、依赖版本和量化配置；
 - 完整启动参数；
 - Tensor Parallel、KV dtype、block size、Prefix Cache 与 max model len；
 - 模型加载后的显存分解；
@@ -634,7 +717,7 @@ Harness 在这一层建立 Session/Epoch 与 KV 的可信归因。
 产出：
 
 - Pi SDK Adapter；
-- 自托管 DeepSeek-V4 Provider；
+- 可配置的自托管 vLLM Provider，当前用 Qwen3.5-4B/9B 验证；
 - Pi AgentSession 生命周期；
 - Tool/Turn/Compaction 事件订阅；
 - Session 持久化；
@@ -804,7 +887,7 @@ Harness 在这一层建立 Session/Epoch 与 KV 的可信归因。
 - 调整 CUDA Graph 和 engine 配置；
 - 不应首先做 Turn 驱逐。
 
-## 16. 项目最终研究问题
+## 16. MVP 后的核心研究问题
 
 这个项目最有价值的研究问题不是：
 
@@ -822,37 +905,41 @@ Harness 在这一层建立 Session/Epoch 与 KV 的可信归因。
 - 可量化实验；
 - 可扩展到其他自托管模型的通用性。
 
-## 17. 开工前必须补齐的外部信息
+## 17. 进入 vLLM 深度研究前必须补齐的外部信息
 
-当前 Workspace 中没有 vLLM fork，因此还无法对具体源码改造点做最终确认。
+实验室拥有可修改的 vLLM fork，但它尚未作为本 Workspace 的源码依赖接入，
+因此还不能在本文中固定具体改造文件和函数。
 
-进入 Phase 0 前需要接入：
+进入 vLLM 资源闭环和 KV 实验前需要接入：
 
 - vLLM fork 仓库或准确 commit；
 - 当前服务启动命令和配置；
-- DeepSeek-V4/SM120 patch 列表；
+- Qwen3.5 兼容 patch、依赖和量化配置列表；
 - 当前 `/metrics` 样本；
 - 一组代表性请求日志，至少包含 Prompt/输出 token 与延迟；
 - 服务器 CPU 内存和 PCIe/NVLink 拓扑；
 - 可用于压测的非生产时段。
 
-在这些信息到位前，可以开始 Pi 集成和负载生成器，但不应承诺具体 KV 驱逐接口。
+这些信息不阻塞当前控制面 MVP，但在它们到位前不应承诺具体 KV 驱逐接口。
 
-## 18. 最终定义
+## 18. Agent–Inference 候选研究边界
 
-本项目基于 Pi Coding Agent，但核心 Idea 属于我们自己的跨层资源控制：
+本项目的规范定义以第 1 节和 ADR 0009 为准。完成当前产品闭环后，可以由真实数据
+触发跨层资源研究：
 
-> Pi 管理 Agent 如何工作；Harness 管理多个 Agent 何时、以什么成本和优先级使用本地模型；vLLM 管理推理和物理 KV 的正确执行。
+> Runtime 管理 Agent 如何工作；Harness Control Plane 管理不同 Agent 何时、以
+> 什么策略和预算使用某个 ResourcePool；vLLM 或远程模型 Provider 管理推理资源
+> 的物理正确执行。
 
-三者的边界是：
+在 Pi + 本地 vLLM 场景中，三者的候选研究边界是：
 
 - Pi：Session、工具、Turn、compaction 和 Agent 体验；
-- Harness：Tenant、跨 Session 调度、Context Epoch、成本模型、资源策略和评估；
+- Harness：Tenant、Template/Instance、跨 Session 调度、成本模型、资源策略和评估；
 - vLLM：Scheduler、Prefill/Decode、Prefix Cache、KV Block、Offload 和物理正确性。
 
-项目的核心区别可以浓缩为一句话：
-
-> 它不是给 Coding Agent 增加一个 GPU 仪表盘，而是让 Agent 的语义状态成为自托管推理调度器可以利用的资源信号。
+研究假设仍然有价值：Agent 语义状态可能成为自托管推理调度器可以利用的资源
+信号。但它必须作为候选深度优化接受对照实验，不能重新覆盖多租户公平、策略落实、
+安全恢复和审计这条当前主线。
 
 ## 19. 参考资料
 
@@ -861,6 +948,9 @@ Harness 在这一层建立 Session/Epoch 与 KV 的可信归因。
 - [Pi Compaction](https://pi.dev/docs/latest/compaction)
 - [Pi Extensions](https://pi.dev/docs/latest/extensions)
 - [Pi Session Format](https://pi.dev/docs/latest/session-format)
+- [Qwen3.5-4B Model Card](https://huggingface.co/Qwen/Qwen3.5-4B)
+- [Qwen3.5-9B Model Card](https://huggingface.co/Qwen/Qwen3.5-9B)
+- [NVIDIA RTX A6000](https://www.nvidia.com/en-us/products/workstations/rtx-a6000/)
 - [DeepSeek-V4-Flash Model Card](https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash)
 - [vLLM DeepSeek-V4 Implementation Notes](https://github.com/vllm-project/vllm-project.github.io/blob/main/_posts/2026-04-24-deepseek-v4.md)
 - [vLLM Automatic Prefix Caching](https://docs.vllm.ai/en/latest/design/prefix_caching/)

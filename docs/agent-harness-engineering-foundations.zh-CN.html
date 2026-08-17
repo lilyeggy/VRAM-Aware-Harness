@@ -1,0 +1,3754 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Agent Harness 工程地图：从系统思维到底层机制</title>
+  <style>
+    :root {
+      --bg: #071018;
+      --bg-soft: #0a1622;
+      --panel: #0d1b29;
+      --panel-2: #122436;
+      --panel-3: #172d42;
+      --line: #29455d;
+      --line-strong: #3f6686;
+      --text: #edf7ff;
+      --muted: #9ab1c5;
+      --blue: #72c8ff;
+      --cyan: #5ee6d2;
+      --green: #7ee2a8;
+      --yellow: #ffd166;
+      --orange: #ffad66;
+      --pink: #ff88b7;
+      --purple: #bd9bff;
+      --red: #ff7f8f;
+      --shadow: 0 22px 70px rgba(0, 0, 0, .3);
+      --radius: 16px;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html {
+      scroll-behavior: smooth;
+    }
+
+    body {
+      margin: 0;
+      color: var(--text);
+      background:
+        radial-gradient(circle at 8% -4%, rgba(94, 230, 210, .14), transparent 36rem),
+        radial-gradient(circle at 94% 12%, rgba(189, 155, 255, .13), transparent 34rem),
+        linear-gradient(180deg, #08131d, var(--bg) 28rem);
+      font-family: Inter, "SF Pro Display", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+      line-height: 1.6;
+    }
+
+    button,
+    input {
+      font: inherit;
+    }
+
+    button:focus-visible,
+    input:focus-visible,
+    a:focus-visible {
+      outline: 3px solid rgba(114, 200, 255, .45);
+      outline-offset: 3px;
+    }
+
+    a {
+      color: inherit;
+    }
+
+    code {
+      color: #d9f4ff;
+      background: rgba(114, 200, 255, .1);
+      border: 1px solid rgba(114, 200, 255, .18);
+      border-radius: 6px;
+      padding: 1px 5px;
+      font-family: "SFMono-Regular", Consolas, monospace;
+      font-size: .92em;
+    }
+
+    .page {
+      width: min(1480px, calc(100% - 28px));
+      margin: 0 auto;
+      padding: 18px 0 84px;
+    }
+
+    .topbar {
+      position: sticky;
+      top: 10px;
+      z-index: 30;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 16px;
+      padding: 10px 14px;
+      margin-bottom: 16px;
+      border: 1px solid rgba(63, 102, 134, .72);
+      border-radius: 999px;
+      background: rgba(7, 16, 24, .84);
+      backdrop-filter: blur(16px);
+      box-shadow: 0 10px 35px rgba(0, 0, 0, .24);
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      white-space: nowrap;
+      font-size: 13px;
+      font-weight: 700;
+    }
+
+    .brand-mark {
+      width: 24px;
+      height: 24px;
+      border: 1px solid var(--cyan);
+      border-radius: 50%;
+      position: relative;
+      box-shadow: 0 0 20px rgba(94, 230, 210, .24);
+    }
+
+    .brand-mark::before,
+    .brand-mark::after {
+      content: "";
+      position: absolute;
+      border-radius: 50%;
+      border: 1px solid var(--blue);
+    }
+
+    .brand-mark::before {
+      inset: 4px;
+    }
+
+    .brand-mark::after {
+      inset: 8px;
+      background: var(--blue);
+    }
+
+    .nav {
+      display: flex;
+      gap: 5px;
+      overflow-x: auto;
+      scrollbar-width: none;
+    }
+
+    .nav::-webkit-scrollbar {
+      display: none;
+    }
+
+    .nav a {
+      text-decoration: none;
+      color: var(--muted);
+      padding: 6px 9px;
+      border-radius: 999px;
+      font-size: 12px;
+      white-space: nowrap;
+    }
+
+    .nav a:hover {
+      color: var(--text);
+      background: var(--panel-2);
+    }
+
+    .hero,
+    .section,
+    .panel {
+      border: 1px solid var(--line);
+      background: rgba(13, 27, 41, .88);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+    }
+
+    .hero {
+      min-height: 620px;
+      padding: 30px;
+      display: grid;
+      grid-template-columns: minmax(0, .9fr) minmax(570px, 1.1fr);
+      gap: 28px;
+      align-items: center;
+      overflow: hidden;
+      position: relative;
+    }
+
+    .hero::before {
+      content: "";
+      position: absolute;
+      width: 520px;
+      height: 520px;
+      right: -180px;
+      top: -240px;
+      border: 1px solid rgba(114, 200, 255, .16);
+      border-radius: 50%;
+      box-shadow:
+        0 0 0 70px rgba(114, 200, 255, .025),
+        0 0 0 140px rgba(189, 155, 255, .018);
+      pointer-events: none;
+    }
+
+    .kicker,
+    .eyebrow {
+      color: var(--cyan);
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: .13em;
+      text-transform: uppercase;
+    }
+
+    h1 {
+      margin: 10px 0 16px;
+      max-width: 720px;
+      font-size: clamp(35px, 5.3vw, 70px);
+      line-height: 1.04;
+      letter-spacing: -.05em;
+    }
+
+    h2 {
+      margin: 0;
+      font-size: clamp(23px, 3vw, 36px);
+      line-height: 1.18;
+      letter-spacing: -.025em;
+    }
+
+    h3 {
+      margin: 0;
+      font-size: 17px;
+    }
+
+    p {
+      margin: 0;
+    }
+
+    .lead {
+      max-width: 750px;
+      color: var(--muted);
+      font-size: 16px;
+    }
+
+    .hero-thesis {
+      margin-top: 26px;
+      padding-left: 15px;
+      border-left: 3px solid var(--yellow);
+      max-width: 720px;
+    }
+
+    .hero-thesis strong {
+      display: block;
+      margin-bottom: 4px;
+      color: var(--yellow);
+      font-size: 13px;
+    }
+
+    .hero-thesis span {
+      color: var(--text);
+      font-size: 14px;
+    }
+
+    .hero-meta {
+      margin-top: 25px;
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .tag,
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      border: 1px solid var(--line-strong);
+      border-radius: 999px;
+      color: var(--muted);
+      background: rgba(10, 22, 34, .75);
+      padding: 5px 9px;
+      font-size: 11px;
+    }
+
+    .hero-atlas {
+      min-height: 500px;
+      display: grid;
+      place-items: center;
+      position: relative;
+    }
+
+    .atlas-rings {
+      position: relative;
+      width: min(500px, 92vw);
+      aspect-ratio: 1;
+      display: grid;
+      place-items: center;
+    }
+
+    .atlas-ring {
+      position: absolute;
+      border-radius: 50%;
+      border: 1px solid rgba(114, 200, 255, .28);
+      display: grid;
+      place-items: start center;
+      padding-top: 9px;
+      color: var(--muted);
+      font-size: 11px;
+      transition: .32s ease;
+    }
+
+    .atlas-ring span {
+      background: var(--panel);
+      border-radius: 999px;
+      padding: 1px 8px;
+    }
+
+    .atlas-ring.r1 { width: 100%; height: 100%; border-color: rgba(255, 209, 102, .26); }
+    .atlas-ring.r2 { width: 79%; height: 79%; border-color: rgba(126, 226, 168, .28); }
+    .atlas-ring.r3 { width: 59%; height: 59%; border-color: rgba(114, 200, 255, .34); }
+    .atlas-ring.r4 { width: 39%; height: 39%; border-color: rgba(189, 155, 255, .38); }
+
+    .atlas-ring.active {
+      border-width: 2px;
+      box-shadow: 0 0 34px rgba(114, 200, 255, .14);
+      color: var(--text);
+      transform: scale(1.025);
+    }
+
+    .atlas-core {
+      width: 20%;
+      height: 20%;
+      min-width: 88px;
+      min-height: 88px;
+      display: grid;
+      place-items: center;
+      text-align: center;
+      border-radius: 50%;
+      border: 1px solid var(--cyan);
+      background: radial-gradient(circle, rgba(94, 230, 210, .22), rgba(13, 27, 41, .94));
+      box-shadow: 0 0 42px rgba(94, 230, 210, .22);
+      z-index: 4;
+    }
+
+    .atlas-core strong {
+      display: block;
+      font-size: 13px;
+    }
+
+    .atlas-core span {
+      display: block;
+      color: var(--muted);
+      font-size: 10px;
+    }
+
+    .orbit-dot {
+      position: absolute;
+      width: 9px;
+      height: 9px;
+      border-radius: 50%;
+      background: var(--blue);
+      box-shadow: 0 0 15px rgba(114, 200, 255, .7);
+      animation: orbit 13s linear infinite;
+    }
+
+    @keyframes orbit {
+      from { transform: rotate(0deg) translateX(205px) rotate(0deg); }
+      to { transform: rotate(360deg) translateX(205px) rotate(-360deg); }
+    }
+
+    .zoom-controls {
+      position: absolute;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      display: flex;
+      justify-content: center;
+      flex-wrap: wrap;
+      gap: 6px;
+      z-index: 8;
+    }
+
+    .control,
+    .tab,
+    .step-button,
+    .plane-button,
+    .mechanism-button,
+    .pattern-button {
+      cursor: pointer;
+      border: 1px solid var(--line-strong);
+      color: var(--muted);
+      background: #0a1723;
+      border-radius: 10px;
+      padding: 8px 11px;
+      transition: .2s ease;
+    }
+
+    .control:hover,
+    .tab:hover,
+    .step-button:hover,
+    .plane-button:hover,
+    .mechanism-button:hover,
+    .pattern-button:hover {
+      color: var(--text);
+      border-color: var(--blue);
+    }
+
+    .control[aria-pressed="true"],
+    .tab[aria-selected="true"],
+    .step-button.active,
+    .plane-button.active,
+    .mechanism-button.active,
+    .pattern-button.active {
+      color: #06131b;
+      background: var(--text);
+      border-color: var(--text);
+    }
+
+    .zoom-explain {
+      position: absolute;
+      right: 0;
+      top: 0;
+      max-width: 220px;
+      padding: 11px;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: rgba(7, 16, 24, .84);
+      backdrop-filter: blur(8px);
+      font-size: 11px;
+    }
+
+    .zoom-explain strong {
+      color: var(--yellow);
+      display: block;
+      margin-bottom: 4px;
+    }
+
+    .zoom-explain span {
+      color: var(--muted);
+    }
+
+    .section {
+      margin-top: 18px;
+      padding: 26px;
+    }
+
+    .section-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: end;
+      gap: 20px;
+      margin-bottom: 20px;
+    }
+
+    .section-head > div:first-child {
+      max-width: 880px;
+    }
+
+    .section-number {
+      color: var(--yellow);
+      font-family: "SFMono-Regular", Consolas, monospace;
+      font-size: 12px;
+      margin-bottom: 6px;
+    }
+
+    .section-subtitle {
+      margin-top: 8px;
+      color: var(--muted);
+      max-width: 950px;
+      font-size: 14px;
+    }
+
+    .truth-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 10px;
+    }
+
+    .truth {
+      min-height: 180px;
+      padding: 17px;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: rgba(10, 22, 34, .7);
+      position: relative;
+      overflow: hidden;
+    }
+
+    .truth::after {
+      content: attr(data-index);
+      position: absolute;
+      right: 10px;
+      bottom: -18px;
+      color: rgba(114, 200, 255, .07);
+      font-size: 82px;
+      font-weight: 800;
+      line-height: 1;
+    }
+
+    .truth .icon {
+      color: var(--cyan);
+      font-size: 22px;
+      margin-bottom: 16px;
+    }
+
+    .truth strong {
+      display: block;
+      font-size: 14px;
+      margin-bottom: 8px;
+    }
+
+    .truth span {
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .equation {
+      margin-top: 14px;
+      display: grid;
+      grid-template-columns: 1fr 40px 1fr 40px 1.2fr;
+      gap: 10px;
+      align-items: center;
+    }
+
+    .equation-box {
+      min-height: 115px;
+      padding: 14px;
+      border: 1px solid var(--line);
+      border-radius: 13px;
+      background: var(--panel-2);
+    }
+
+    .equation-box strong {
+      display: block;
+      font-size: 13px;
+      margin-bottom: 6px;
+    }
+
+    .equation-box span {
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .equation-box.result {
+      border-color: var(--cyan);
+      background: linear-gradient(135deg, rgba(94, 230, 210, .12), rgba(18, 36, 54, .9));
+    }
+
+    .operator {
+      color: var(--yellow);
+      text-align: center;
+      font-size: 23px;
+    }
+
+    .planes-layout {
+      display: grid;
+      grid-template-columns: minmax(570px, 1.35fr) minmax(320px, .65fr);
+      gap: 16px;
+    }
+
+    .planes {
+      min-height: 600px;
+      display: grid;
+      grid-template-rows: repeat(6, 1fr);
+      gap: 8px;
+      position: relative;
+    }
+
+    .plane-button {
+      text-align: left;
+      display: grid;
+      grid-template-columns: 58px 180px 1fr;
+      align-items: center;
+      gap: 12px;
+      min-height: 82px;
+      padding: 13px;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .plane-button::before {
+      content: "";
+      position: absolute;
+      left: 0;
+      top: 0;
+      bottom: 0;
+      width: 4px;
+      background: var(--plane-color, var(--blue));
+    }
+
+    .plane-button.active {
+      color: var(--text);
+      background: var(--panel-3);
+      border-color: var(--plane-color, var(--blue));
+    }
+
+    .plane-button .plane-no {
+      font-family: "SFMono-Regular", Consolas, monospace;
+      color: var(--plane-color, var(--blue));
+      font-size: 20px;
+    }
+
+    .plane-button strong {
+      display: block;
+      font-size: 13px;
+    }
+
+    .plane-button span {
+      color: var(--muted);
+      font-size: 11px;
+    }
+
+    .plane-button .examples {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 5px;
+    }
+
+    .plane-button .examples i {
+      font-style: normal;
+      color: var(--muted);
+      background: rgba(7, 16, 24, .48);
+      border-radius: 999px;
+      padding: 3px 7px;
+      font-size: 10px;
+    }
+
+    .crosscut {
+      position: absolute;
+      right: 8px;
+      top: 8px;
+      bottom: 8px;
+      width: 11px;
+      border: 1px dashed var(--pink);
+      border-radius: 999px;
+      opacity: .7;
+      pointer-events: none;
+    }
+
+    .crosscut-label {
+      position: absolute;
+      right: 21px;
+      top: 50%;
+      transform: translateY(-50%) rotate(180deg);
+      writing-mode: vertical-rl;
+      color: var(--pink);
+      font-size: 10px;
+      letter-spacing: .1em;
+      pointer-events: none;
+    }
+
+    .detail {
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: rgba(10, 22, 34, .68);
+      padding: 20px;
+    }
+
+    .detail.sticky {
+      position: sticky;
+      top: 82px;
+      align-self: start;
+    }
+
+    .detail-label {
+      color: var(--cyan);
+      font-family: "SFMono-Regular", Consolas, monospace;
+      font-size: 11px;
+      letter-spacing: .08em;
+    }
+
+    .detail h3 {
+      margin: 7px 0 10px;
+      font-size: 23px;
+    }
+
+    .detail > p {
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .detail-list {
+      display: grid;
+      gap: 8px;
+      margin-top: 16px;
+    }
+
+    .detail-item {
+      border-top: 1px solid var(--line);
+      padding-top: 10px;
+    }
+
+    .detail-item strong {
+      display: block;
+      margin-bottom: 3px;
+      font-size: 12px;
+      color: var(--yellow);
+    }
+
+    .detail-item span {
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .boundary-note {
+      margin-top: 15px;
+      border: 1px solid rgba(255, 209, 102, .42);
+      background: rgba(255, 209, 102, .06);
+      border-radius: 11px;
+      padding: 11px;
+      color: #ffe7a5;
+      font-size: 12px;
+    }
+
+    .scope-spectrum {
+      margin-top: 18px;
+      padding: 15px;
+      border-top: 1px solid var(--line);
+    }
+
+    .spectrum-track {
+      height: 13px;
+      border-radius: 999px;
+      background: linear-gradient(90deg, var(--purple), var(--blue), var(--green), var(--yellow));
+      position: relative;
+    }
+
+    .spectrum-labels {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 8px;
+      margin-top: 9px;
+      color: var(--muted);
+      font-size: 11px;
+    }
+
+    .spectrum-labels span:last-child {
+      text-align: right;
+    }
+
+    .clock-layout {
+      display: grid;
+      grid-template-columns: 1.25fr .75fr;
+      gap: 16px;
+    }
+
+    .clock-stage {
+      min-height: 490px;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background:
+        linear-gradient(rgba(41, 69, 93, .09) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(41, 69, 93, .09) 1px, transparent 1px),
+        rgba(7, 16, 24, .58);
+      background-size: 24px 24px;
+      padding: 20px;
+      display: grid;
+      align-content: center;
+      gap: 14px;
+    }
+
+    .clock-lane {
+      display: grid;
+      grid-template-columns: 150px 1fr;
+      gap: 12px;
+      align-items: center;
+      padding: 10px;
+      border: 1px solid transparent;
+      border-radius: 12px;
+      transition: .22s ease;
+    }
+
+    .clock-lane.active {
+      border-color: var(--lane-color);
+      background: rgba(18, 36, 54, .88);
+      box-shadow: 0 0 28px rgba(114, 200, 255, .08);
+    }
+
+    .clock-label {
+      cursor: pointer;
+      border: 0;
+      color: var(--text);
+      background: transparent;
+      padding: 0;
+      text-align: left;
+    }
+
+    .clock-label strong {
+      display: block;
+      font-size: 13px;
+    }
+
+    .clock-label span {
+      color: var(--muted);
+      font-size: 10px;
+    }
+
+    .lane-track {
+      min-height: 60px;
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      position: relative;
+    }
+
+    .lane-block {
+      height: 42px;
+      flex: var(--size, 1);
+      min-width: 26px;
+      border: 1px solid var(--lane-color);
+      border-radius: 9px;
+      background: color-mix(in srgb, var(--lane-color) 14%, transparent);
+      display: grid;
+      place-items: center;
+      color: var(--muted);
+      font-size: 10px;
+      transition: .24s ease;
+    }
+
+    .clock-lane.active .lane-block {
+      color: var(--text);
+      transform: translateY(-2px);
+    }
+
+    .clock-detail .relationship {
+      margin-top: 16px;
+      padding: 12px;
+      border: 1px solid var(--line);
+      border-radius: 11px;
+      background: rgba(7, 16, 24, .55);
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .primitive-layout {
+      display: grid;
+      grid-template-columns: 260px 1fr;
+      gap: 16px;
+    }
+
+    .primitive-tabs {
+      display: grid;
+      gap: 7px;
+      align-content: start;
+    }
+
+    .tab {
+      text-align: left;
+      display: grid;
+      grid-template-columns: 30px 1fr;
+      gap: 8px;
+      align-items: center;
+    }
+
+    .tab b {
+      color: var(--cyan);
+      font-family: "SFMono-Regular", Consolas, monospace;
+    }
+
+    .tab span {
+      display: block;
+      font-size: 12px;
+    }
+
+    .tab small {
+      display: block;
+      color: var(--muted);
+      font-size: 10px;
+    }
+
+    .primitive-stage {
+      min-height: 470px;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: rgba(7, 16, 24, .62);
+      padding: 20px;
+      display: grid;
+      grid-template-rows: 1fr auto;
+      gap: 15px;
+    }
+
+    .primitive-visual {
+      min-height: 310px;
+      display: grid;
+      place-items: center;
+      overflow: hidden;
+    }
+
+    .primitive-flow {
+      width: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    .primitive-node {
+      min-width: 115px;
+      min-height: 72px;
+      padding: 11px;
+      border: 1px solid var(--line-strong);
+      border-radius: 12px;
+      background: var(--panel-2);
+      text-align: center;
+      position: relative;
+    }
+
+    .primitive-node strong {
+      display: block;
+      font-size: 12px;
+    }
+
+    .primitive-node span {
+      color: var(--muted);
+      font-size: 10px;
+    }
+
+    .primitive-arrow {
+      width: 48px;
+      height: 2px;
+      background: var(--line-strong);
+      position: relative;
+    }
+
+    .primitive-arrow::after {
+      content: "";
+      position: absolute;
+      right: -1px;
+      top: -4px;
+      border-left: 7px solid var(--line-strong);
+      border-top: 5px solid transparent;
+      border-bottom: 5px solid transparent;
+    }
+
+    .primitive-packet {
+      position: absolute;
+      left: -4px;
+      top: -4px;
+      width: 9px;
+      height: 9px;
+      border-radius: 50%;
+      background: var(--cyan);
+      box-shadow: 0 0 13px rgba(94, 230, 210, .7);
+      animation: packet 1.8s ease-in-out infinite;
+    }
+
+    @keyframes packet {
+      0% { transform: translateX(0); opacity: 0; }
+      15% { opacity: 1; }
+      85% { opacity: 1; }
+      100% { transform: translateX(44px); opacity: 0; }
+    }
+
+    .fanout {
+      display: grid;
+      gap: 5px;
+    }
+
+    .buffer {
+      display: flex;
+      gap: 4px;
+      padding: 9px;
+      border: 1px solid var(--yellow);
+      border-radius: 10px;
+      background: rgba(255, 209, 102, .06);
+    }
+
+    .buffer i {
+      width: 22px;
+      height: 34px;
+      border-radius: 5px;
+      background: rgba(255, 209, 102, .3);
+      animation: bufferPulse 2s ease-in-out infinite;
+    }
+
+    .buffer i:nth-child(2) { animation-delay: .2s; }
+    .buffer i:nth-child(3) { animation-delay: .4s; }
+    .buffer i:nth-child(4) { animation-delay: .6s; }
+
+    @keyframes bufferPulse {
+      0%, 100% { opacity: .35; transform: translateY(0); }
+      50% { opacity: 1; transform: translateY(-3px); }
+    }
+
+    .log-strip {
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+      width: 220px;
+    }
+
+    .log-entry {
+      border-left: 3px solid var(--purple);
+      background: rgba(189, 155, 255, .1);
+      padding: 6px 9px;
+      color: var(--muted);
+      font-family: "SFMono-Regular", Consolas, monospace;
+      font-size: 10px;
+      animation: logGlow 2.5s ease-in-out infinite;
+    }
+
+    .log-entry:nth-child(2) { animation-delay: .35s; }
+    .log-entry:nth-child(3) { animation-delay: .7s; }
+
+    @keyframes logGlow {
+      0%, 100% { border-left-color: var(--purple); }
+      50% { border-left-color: var(--cyan); }
+    }
+
+    .primitive-explain {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 8px;
+    }
+
+    .micro-card {
+      border-top: 1px solid var(--line);
+      padding-top: 10px;
+    }
+
+    .micro-card strong {
+      display: block;
+      color: var(--yellow);
+      font-size: 11px;
+      margin-bottom: 3px;
+    }
+
+    .micro-card span {
+      color: var(--muted);
+      font-size: 11px;
+    }
+
+    .mechanism-layout {
+      display: grid;
+      grid-template-columns: 1.05fr .95fr;
+      gap: 16px;
+    }
+
+    .mechanism-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 8px;
+    }
+
+    .mechanism-button {
+      min-height: 125px;
+      text-align: left;
+      position: relative;
+    }
+
+    .mechanism-button .mechanism-icon {
+      display: block;
+      color: var(--cyan);
+      font-size: 20px;
+      margin-bottom: 12px;
+    }
+
+    .mechanism-button strong {
+      display: block;
+      color: var(--text);
+      font-size: 13px;
+      margin-bottom: 4px;
+    }
+
+    .mechanism-button span {
+      color: var(--muted);
+      font-size: 11px;
+    }
+
+    .mechanism-button.active strong,
+    .mechanism-button.active span,
+    .mechanism-button.active .mechanism-icon {
+      color: #06131b;
+    }
+
+    .guarantee {
+      margin-top: 15px;
+      border: 1px solid var(--cyan);
+      border-radius: 12px;
+      padding: 12px;
+      background: rgba(94, 230, 210, .07);
+    }
+
+    .guarantee strong {
+      color: var(--cyan);
+      display: block;
+      font-size: 11px;
+    }
+
+    .guarantee span {
+      font-size: 13px;
+    }
+
+    .failure-layout {
+      display: grid;
+      grid-template-columns: 310px 1fr;
+      gap: 16px;
+    }
+
+    .failure-controls {
+      display: grid;
+      gap: 8px;
+      align-content: start;
+    }
+
+    .switch {
+      display: grid;
+      grid-template-columns: 38px 1fr;
+      gap: 10px;
+      align-items: center;
+      padding: 11px;
+      border: 1px solid var(--line);
+      border-radius: 11px;
+      background: rgba(10, 22, 34, .65);
+      cursor: pointer;
+    }
+
+    .switch input {
+      appearance: none;
+      width: 38px;
+      height: 21px;
+      margin: 0;
+      border: 1px solid var(--line-strong);
+      border-radius: 999px;
+      background: #071018;
+      position: relative;
+      cursor: pointer;
+    }
+
+    .switch input::after {
+      content: "";
+      position: absolute;
+      width: 15px;
+      height: 15px;
+      left: 2px;
+      top: 2px;
+      border-radius: 50%;
+      background: var(--muted);
+      transition: .2s ease;
+    }
+
+    .switch input:checked {
+      border-color: var(--green);
+      background: rgba(126, 226, 168, .2);
+    }
+
+    .switch input:checked::after {
+      left: 19px;
+      background: var(--green);
+    }
+
+    .switch strong {
+      display: block;
+      font-size: 12px;
+    }
+
+    .switch span {
+      display: block;
+      color: var(--muted);
+      font-size: 10px;
+    }
+
+    .failure-stage {
+      min-height: 505px;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background:
+        linear-gradient(rgba(41, 69, 93, .09) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(41, 69, 93, .09) 1px, transparent 1px),
+        rgba(7, 16, 24, .62);
+      background-size: 26px 26px;
+      padding: 18px;
+      display: grid;
+      grid-template-rows: auto 1fr auto;
+      gap: 16px;
+    }
+
+    .health-row {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 7px;
+    }
+
+    .health {
+      padding: 10px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: var(--panel-2);
+    }
+
+    .health strong {
+      display: block;
+      font-size: 16px;
+      color: var(--green);
+    }
+
+    .health.bad strong {
+      color: var(--red);
+    }
+
+    .health span {
+      color: var(--muted);
+      font-size: 10px;
+    }
+
+    .system-flow {
+      display: grid;
+      grid-template-columns: 1fr 38px 1fr 38px 1fr 38px 1fr;
+      align-items: center;
+      gap: 4px;
+    }
+
+    .system-node {
+      min-height: 110px;
+      border: 1px solid var(--line-strong);
+      border-radius: 12px;
+      background: var(--panel-2);
+      display: grid;
+      place-items: center;
+      padding: 10px;
+      text-align: center;
+      position: relative;
+    }
+
+    .system-node strong {
+      display: block;
+      font-size: 12px;
+    }
+
+    .system-node span {
+      display: block;
+      color: var(--muted);
+      font-size: 10px;
+    }
+
+    .system-node.danger {
+      border-color: var(--red);
+      box-shadow: 0 0 25px rgba(255, 127, 143, .14);
+    }
+
+    .warning-pulse {
+      position: absolute;
+      width: 12px;
+      height: 12px;
+      right: 7px;
+      top: 7px;
+      border-radius: 50%;
+      background: var(--red);
+      box-shadow: 0 0 14px rgba(255, 127, 143, .75);
+      display: none;
+      animation: warn 1s ease-in-out infinite;
+    }
+
+    .system-node.danger .warning-pulse {
+      display: block;
+    }
+
+    @keyframes warn {
+      0%, 100% { opacity: .45; transform: scale(.75); }
+      50% { opacity: 1; transform: scale(1); }
+    }
+
+    .flow-arrow {
+      height: 2px;
+      background: var(--line-strong);
+      position: relative;
+    }
+
+    .flow-arrow::after {
+      content: "";
+      position: absolute;
+      right: 0;
+      top: -4px;
+      border-left: 7px solid var(--line-strong);
+      border-top: 5px solid transparent;
+      border-bottom: 5px solid transparent;
+    }
+
+    .incident {
+      min-height: 78px;
+      padding: 12px;
+      border: 1px solid var(--line);
+      border-radius: 11px;
+      color: var(--muted);
+      background: rgba(10, 22, 34, .72);
+      font-size: 12px;
+    }
+
+    .incident strong {
+      color: var(--text);
+      display: block;
+      margin-bottom: 4px;
+    }
+
+    .journey-layout {
+      display: grid;
+      grid-template-columns: 1fr 360px;
+      gap: 16px;
+    }
+
+    .journey-stage {
+      min-height: 610px;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: rgba(7, 16, 24, .62);
+      padding: 20px;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .journey-path {
+      position: absolute;
+      inset: 64px 8% 72px;
+      pointer-events: none;
+    }
+
+    .journey-path svg {
+      width: 100%;
+      height: 100%;
+    }
+
+    .journey-path path {
+      fill: none;
+      stroke: var(--line-strong);
+      stroke-width: 2;
+      stroke-dasharray: 6 8;
+    }
+
+    .journey-packet {
+      width: 15px;
+      height: 15px;
+      border-radius: 50%;
+      background: var(--yellow);
+      box-shadow: 0 0 22px rgba(255, 209, 102, .75);
+      position: absolute;
+      z-index: 5;
+      transition: left .42s ease, top .42s ease;
+    }
+
+    .journey-nodes {
+      height: 520px;
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      grid-template-rows: repeat(3, 1fr);
+      gap: 16px;
+      position: relative;
+      z-index: 4;
+    }
+
+    .journey-node {
+      align-self: center;
+      justify-self: center;
+      width: min(180px, 100%);
+      min-height: 100px;
+      padding: 12px;
+      border: 1px solid var(--line-strong);
+      border-radius: 13px;
+      background: rgba(18, 36, 54, .94);
+      text-align: center;
+      transition: .24s ease;
+    }
+
+    .journey-node.active {
+      border-color: var(--yellow);
+      transform: translateY(-4px);
+      box-shadow: 0 0 30px rgba(255, 209, 102, .13);
+    }
+
+    .journey-node strong {
+      display: block;
+      font-size: 12px;
+    }
+
+    .journey-node span {
+      display: block;
+      color: var(--muted);
+      font-size: 10px;
+    }
+
+    .journey-node:nth-child(1) { grid-area: 1 / 1; }
+    .journey-node:nth-child(2) { grid-area: 1 / 2; }
+    .journey-node:nth-child(3) { grid-area: 1 / 3; }
+    .journey-node:nth-child(4) { grid-area: 2 / 3; }
+    .journey-node:nth-child(5) { grid-area: 2 / 2; }
+    .journey-node:nth-child(6) { grid-area: 2 / 1; }
+    .journey-node:nth-child(7) { grid-area: 3 / 1; }
+    .journey-node:nth-child(8) { grid-area: 3 / 2; }
+    .journey-node:nth-child(9) { grid-area: 3 / 3; }
+
+    .journey-controls {
+      display: flex;
+      gap: 6px;
+      justify-content: center;
+      margin-top: 10px;
+    }
+
+    .step-button {
+      width: 30px;
+      height: 30px;
+      padding: 0;
+      border-radius: 50%;
+      font-size: 11px;
+    }
+
+    .journey-detail {
+      display: grid;
+      align-content: start;
+      gap: 12px;
+    }
+
+    .journey-question {
+      margin-top: 14px;
+      padding: 11px;
+      border-left: 3px solid var(--purple);
+      background: rgba(189, 155, 255, .07);
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .journey-record {
+      margin-top: 10px;
+      padding: 11px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: #071018;
+      color: #bcecff;
+      font-family: "SFMono-Regular", Consolas, monospace;
+      font-size: 10px;
+      white-space: pre-wrap;
+    }
+
+    .pattern-layout {
+      display: grid;
+      grid-template-columns: 1fr 360px;
+      gap: 16px;
+    }
+
+    .pattern-list {
+      display: grid;
+      gap: 7px;
+    }
+
+    .pattern-button {
+      display: grid;
+      grid-template-columns: 38px 1.1fr 1fr 1fr;
+      align-items: center;
+      gap: 10px;
+      text-align: left;
+      min-height: 76px;
+    }
+
+    .pattern-button .pattern-no {
+      color: var(--cyan);
+      font-family: "SFMono-Regular", Consolas, monospace;
+      font-size: 17px;
+    }
+
+    .pattern-button strong {
+      display: block;
+      color: var(--text);
+      font-size: 12px;
+    }
+
+    .pattern-button span {
+      display: block;
+      color: var(--muted);
+      font-size: 10px;
+    }
+
+    .pattern-button.active strong,
+    .pattern-button.active span,
+    .pattern-button.active .pattern-no {
+      color: #06131b;
+    }
+
+    .pattern-axis {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 7px;
+      margin-top: 14px;
+    }
+
+    .axis-card {
+      padding-top: 9px;
+      border-top: 1px solid var(--line);
+    }
+
+    .axis-card strong {
+      display: block;
+      font-size: 11px;
+      color: var(--yellow);
+    }
+
+    .axis-card span {
+      color: var(--muted);
+      font-size: 10px;
+    }
+
+    .real-tabs {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 7px;
+      margin-bottom: 14px;
+    }
+
+    .real-tab {
+      cursor: pointer;
+      min-height: 78px;
+      padding: 11px;
+      text-align: left;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      color: var(--text);
+      background: rgba(10, 22, 34, .72);
+      transition: .2s ease;
+    }
+
+    .real-tab:hover {
+      border-color: var(--blue);
+      transform: translateY(-2px);
+    }
+
+    .real-tab.active {
+      color: #06131b;
+      border-color: var(--text);
+      background: var(--text);
+    }
+
+    .real-tab strong {
+      display: block;
+      font-size: 12px;
+      margin-bottom: 4px;
+    }
+
+    .real-tab span {
+      display: block;
+      color: var(--muted);
+      font-size: 10px;
+    }
+
+    .real-tab.active span {
+      color: #294052;
+    }
+
+    .real-architecture-layout {
+      display: grid;
+      grid-template-columns: minmax(0, 1.18fr) minmax(340px, .82fr);
+      gap: 16px;
+    }
+
+    .real-stage {
+      min-height: 510px;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background:
+        linear-gradient(rgba(41, 69, 93, .09) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(41, 69, 93, .09) 1px, transparent 1px),
+        rgba(7, 16, 24, .62);
+      background-size: 25px 25px;
+      padding: 18px;
+      display: grid;
+      grid-template-rows: auto 1fr auto;
+      gap: 14px;
+    }
+
+    .real-stage-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+
+    .real-stage-head strong {
+      font-size: 14px;
+    }
+
+    .real-stage-head span {
+      color: var(--muted);
+      font-size: 11px;
+    }
+
+    .real-flow {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      gap: 26px;
+      align-items: center;
+      position: relative;
+    }
+
+    .real-flow-node {
+      min-height: 142px;
+      display: grid;
+      place-items: center;
+      align-content: center;
+      gap: 5px;
+      padding: 12px;
+      text-align: center;
+      border: 1px solid var(--line-strong);
+      border-radius: 14px;
+      background: rgba(18, 36, 54, .94);
+      position: relative;
+      transition: .25s ease;
+    }
+
+    .real-flow-node::after {
+      content: "";
+      position: absolute;
+      width: 27px;
+      height: 2px;
+      right: -27px;
+      top: 50%;
+      background: var(--line-strong);
+    }
+
+    .real-flow-node::before {
+      content: "";
+      position: absolute;
+      right: -27px;
+      top: calc(50% - 4px);
+      border-left: 7px solid var(--line-strong);
+      border-top: 5px solid transparent;
+      border-bottom: 5px solid transparent;
+      z-index: 2;
+    }
+
+    .real-flow-node:last-child::after,
+    .real-flow-node:last-child::before {
+      display: none;
+    }
+
+    .real-flow-node.active {
+      border-color: var(--cyan);
+      background: linear-gradient(150deg, rgba(94, 230, 210, .17), rgba(18, 36, 54, .95));
+      transform: translateY(-4px);
+      box-shadow: 0 0 28px rgba(94, 230, 210, .12);
+    }
+
+    .real-flow-node b {
+      color: var(--cyan);
+      font-family: "SFMono-Regular", Consolas, monospace;
+      font-size: 11px;
+      font-weight: 500;
+    }
+
+    .real-flow-node strong {
+      font-size: 12px;
+    }
+
+    .real-flow-node span {
+      color: var(--muted);
+      font-size: 10px;
+    }
+
+    .real-flow-caption {
+      min-height: 74px;
+      padding: 11px;
+      border: 1px solid var(--line);
+      border-radius: 11px;
+      background: rgba(10, 22, 34, .7);
+      color: var(--muted);
+      font-size: 11px;
+    }
+
+    .real-flow-caption strong {
+      display: block;
+      color: var(--yellow);
+      margin-bottom: 3px;
+    }
+
+    .real-sources {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+      margin-top: 14px;
+    }
+
+    .real-sources a {
+      color: var(--blue);
+      text-decoration: none;
+      border-bottom: 1px dashed rgba(114, 200, 255, .45);
+      font-size: 10px;
+    }
+
+    .real-sources a:hover {
+      color: var(--text);
+    }
+
+    .interpretation {
+      margin-top: 13px;
+      padding: 11px;
+      border: 1px solid rgba(189, 155, 255, .4);
+      border-radius: 11px;
+      background: rgba(189, 155, 255, .07);
+      color: var(--muted);
+      font-size: 11px;
+    }
+
+    .interpretation strong {
+      display: block;
+      color: var(--purple);
+      margin-bottom: 3px;
+    }
+
+    .comparison-matrix {
+      margin-top: 17px;
+      border-top: 1px solid var(--line);
+      padding-top: 17px;
+    }
+
+    .matrix-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: end;
+      gap: 12px;
+      margin-bottom: 10px;
+    }
+
+    .matrix-head strong {
+      font-size: 14px;
+    }
+
+    .matrix-head span {
+      color: var(--muted);
+      font-size: 10px;
+    }
+
+    .matrix-scroll {
+      overflow-x: auto;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+    }
+
+    .real-matrix {
+      width: 100%;
+      min-width: 1040px;
+      border-collapse: collapse;
+      background: rgba(7, 16, 24, .5);
+      font-size: 10px;
+    }
+
+    .real-matrix th,
+    .real-matrix td {
+      padding: 9px 10px;
+      text-align: left;
+      vertical-align: top;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .real-matrix th {
+      color: var(--text);
+      background: var(--panel-3);
+      font-weight: 500;
+      white-space: nowrap;
+    }
+
+    .real-matrix td {
+      color: var(--muted);
+    }
+
+    .real-matrix tr:last-child td {
+      border-bottom: 0;
+    }
+
+    .real-matrix td:first-child {
+      color: var(--text);
+      font-weight: 500;
+      white-space: nowrap;
+    }
+
+    .cell-core,
+    .cell-service,
+    .cell-external {
+      display: inline-block;
+      border-radius: 999px;
+      padding: 2px 6px;
+      white-space: nowrap;
+    }
+
+    .cell-core {
+      color: var(--green);
+      background: rgba(126, 226, 168, .08);
+      border: 1px solid rgba(126, 226, 168, .3);
+    }
+
+    .cell-service {
+      color: var(--yellow);
+      background: rgba(255, 209, 102, .07);
+      border: 1px solid rgba(255, 209, 102, .3);
+    }
+
+    .cell-external {
+      color: var(--muted);
+      border: 1px solid var(--line);
+    }
+
+    .pairwise-title {
+      margin: 20px 0 10px;
+      font-size: 14px;
+    }
+
+    .pairwise-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 8px;
+    }
+
+    .pairwise {
+      min-height: 178px;
+      padding: 13px;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: rgba(10, 22, 34, .65);
+    }
+
+    .pairwise .versus {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      margin-bottom: 11px;
+      color: var(--cyan);
+      font-family: "SFMono-Regular", Consolas, monospace;
+      font-size: 11px;
+    }
+
+    .pairwise .versus i {
+      width: 18px;
+      height: 1px;
+      background: var(--line-strong);
+    }
+
+    .pairwise strong {
+      display: block;
+      font-size: 12px;
+      margin-bottom: 6px;
+    }
+
+    .pairwise span {
+      color: var(--muted);
+      font-size: 10px;
+    }
+
+    .pairwise em {
+      display: block;
+      margin-top: 9px;
+      color: var(--yellow);
+      font-style: normal;
+      font-size: 10px;
+    }
+
+    .method-grid {
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      gap: 8px;
+    }
+
+    .method-step {
+      min-height: 220px;
+      padding: 15px;
+      border: 1px solid var(--line);
+      border-radius: 13px;
+      background: rgba(10, 22, 34, .66);
+      position: relative;
+    }
+
+    .method-step .method-no {
+      display: block;
+      color: var(--cyan);
+      font-family: "SFMono-Regular", Consolas, monospace;
+      font-size: 22px;
+      margin-bottom: 18px;
+    }
+
+    .method-step strong {
+      display: block;
+      font-size: 13px;
+      margin-bottom: 8px;
+    }
+
+    .method-step span {
+      color: var(--muted);
+      font-size: 11px;
+    }
+
+    .method-step .deliverable {
+      position: absolute;
+      left: 15px;
+      right: 15px;
+      bottom: 14px;
+      padding-top: 8px;
+      border-top: 1px solid var(--line);
+      color: var(--yellow);
+      font-size: 10px;
+    }
+
+    .glossary {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 8px;
+    }
+
+    .term {
+      padding: 13px;
+      border: 1px solid var(--line);
+      border-radius: 11px;
+      background: rgba(10, 22, 34, .62);
+    }
+
+    .term strong {
+      display: block;
+      color: var(--cyan);
+      font-size: 12px;
+      margin-bottom: 4px;
+    }
+
+    .term span {
+      color: var(--muted);
+      font-size: 10px;
+    }
+
+    .term em {
+      display: block;
+      margin-top: 7px;
+      color: var(--text);
+      font-style: normal;
+      font-size: 10px;
+    }
+
+    .closing {
+      margin-top: 18px;
+      padding: 30px;
+      border: 1px solid var(--cyan);
+      border-radius: var(--radius);
+      background:
+        radial-gradient(circle at 85% 15%, rgba(94, 230, 210, .15), transparent 22rem),
+        rgba(13, 27, 41, .9);
+      box-shadow: var(--shadow);
+    }
+
+    .closing-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 24px;
+    }
+
+    .closing blockquote {
+      margin: 16px 0 0;
+      padding: 14px 0 14px 16px;
+      border-left: 3px solid var(--yellow);
+      color: var(--text);
+      font-size: 16px;
+    }
+
+    .closing ul {
+      margin: 0;
+      padding-left: 20px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .closing li + li {
+      margin-top: 8px;
+    }
+
+    @media (max-width: 1180px) {
+      .hero,
+      .planes-layout,
+      .clock-layout,
+      .mechanism-layout,
+      .journey-layout,
+      .pattern-layout,
+      .real-architecture-layout {
+        grid-template-columns: 1fr;
+      }
+
+      .hero {
+        min-height: auto;
+      }
+
+      .detail.sticky {
+        position: static;
+      }
+
+      .truth-grid {
+        grid-template-columns: repeat(2, 1fr);
+      }
+
+      .method-grid {
+        grid-template-columns: repeat(3, 1fr);
+      }
+
+      .glossary {
+        grid-template-columns: repeat(3, 1fr);
+      }
+
+      .real-tabs {
+        grid-template-columns: repeat(2, 1fr);
+      }
+
+      .pairwise-grid {
+        grid-template-columns: repeat(2, 1fr);
+      }
+    }
+
+    @media (max-width: 780px) {
+      .page {
+        width: min(100% - 14px, 1480px);
+        padding-top: 7px;
+      }
+
+      .topbar {
+        top: 5px;
+        border-radius: 14px;
+        align-items: flex-start;
+        flex-direction: column;
+      }
+
+      .nav {
+        width: 100%;
+      }
+
+      .hero,
+      .section,
+      .closing {
+        padding: 16px;
+        border-radius: 13px;
+      }
+
+      .hero {
+        grid-template-columns: minmax(0, 1fr);
+      }
+
+      .hero-atlas {
+        min-height: 500px;
+      }
+
+      .zoom-explain {
+        position: static;
+        max-width: none;
+        margin-bottom: 8px;
+      }
+
+      .atlas-rings {
+        width: min(390px, 86vw);
+      }
+
+      .orbit-dot {
+        display: none;
+      }
+
+      .truth-grid,
+      .primitive-explain,
+      .health-row,
+      .method-grid,
+      .glossary,
+      .closing-grid,
+      .pairwise-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .equation {
+        grid-template-columns: 1fr;
+      }
+
+      .operator {
+        transform: rotate(90deg);
+      }
+
+      .plane-button {
+        grid-template-columns: 42px 1fr;
+      }
+
+      .plane-button .examples {
+        grid-column: 2;
+      }
+
+      .primitive-layout,
+      .failure-layout {
+        grid-template-columns: 1fr;
+      }
+
+      .primitive-tabs {
+        grid-template-columns: repeat(2, 1fr);
+      }
+
+      .mechanism-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .clock-lane {
+        grid-template-columns: 1fr;
+      }
+
+      .system-flow {
+        grid-template-columns: 1fr;
+      }
+
+      .flow-arrow {
+        width: 2px;
+        height: 26px;
+        justify-self: center;
+      }
+
+      .flow-arrow::after {
+        right: -4px;
+        top: auto;
+        bottom: -1px;
+        border-top: 7px solid var(--line-strong);
+        border-left: 5px solid transparent;
+        border-right: 5px solid transparent;
+        border-bottom: 0;
+      }
+
+      .journey-stage {
+        min-height: 1130px;
+      }
+
+      .journey-path,
+      .journey-packet {
+        display: none;
+      }
+
+      .journey-nodes {
+        height: auto;
+        display: grid;
+        grid-template-columns: 1fr;
+        grid-template-rows: none;
+      }
+
+      .journey-node,
+      .journey-node:nth-child(n) {
+        grid-area: auto;
+      }
+
+      .pattern-button {
+        grid-template-columns: 30px 1fr;
+      }
+
+      .pattern-button > span {
+        grid-column: 2;
+      }
+
+      .real-tabs {
+        grid-template-columns: 1fr;
+      }
+
+      .real-flow {
+        grid-template-columns: 1fr;
+      }
+
+      .real-flow-node::after {
+        width: 2px;
+        height: 27px;
+        right: calc(50% - 1px);
+        top: 100%;
+      }
+
+      .real-flow-node::before {
+        right: calc(50% - 5px);
+        top: auto;
+        bottom: -27px;
+        border-top: 7px solid var(--line-strong);
+        border-left: 5px solid transparent;
+        border-right: 5px solid transparent;
+        border-bottom: 0;
+      }
+
+      .method-step {
+        min-height: 190px;
+      }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      *,
+      *::before,
+      *::after {
+        scroll-behavior: auto !important;
+        animation-duration: .001ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: .001ms !important;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <header class="topbar">
+      <div class="brand"><span class="brand-mark" aria-hidden="true"></span>Agent Harness 工程地图</div>
+      <nav class="nav" aria-label="页面章节">
+        <a href="#engineering">工程本质</a>
+        <a href="#planes">系统平面</a>
+        <a href="#lifecycles">生命周期</a>
+        <a href="#primitives">底层原语</a>
+        <a href="#mechanisms">可靠性机制</a>
+        <a href="#failure-lab">故障实验</a>
+        <a href="#journey">请求旅程</a>
+        <a href="#patterns">架构形态</a>
+        <a href="#real-architectures">真实架构</a>
+        <a href="#method">设计方法</a>
+      </nav>
+    </header>
+
+    <section class="hero">
+      <div>
+        <div class="kicker">From systems thinking to code primitives</div>
+        <h1>先理解系统，再理解 Agent Harness</h1>
+        <p class="lead">
+          Agent Harness 不是某个固定类、SDK 或目录结构。它是一组工程能力的组合：把一个开放式、概率性的 Agent 能力，变成能被产品长期使用、被团队维护、被组织治理的系统。
+        </p>
+        <div class="hero-thesis">
+          <strong>本页的出发点</strong>
+          <span>先抛开任何具体项目与具体框架，从“软件系统为什么需要边界、状态、控制和反馈”开始，再逐层缩放到底层代码机制。</span>
+        </div>
+        <div class="hero-meta">
+          <span class="tag">不绑定框架</span>
+          <span class="tag">不假设唯一架构</span>
+          <span class="tag">宏观 → 中观 → 微观</span>
+          <span class="tag">问题 → 保证 → 机制</span>
+        </div>
+      </div>
+
+      <div class="hero-atlas" aria-label="从产品世界逐层缩放到代码原语的交互图">
+        <div class="zoom-explain" aria-live="polite">
+          <strong id="zoomTitle">① 产品与组织</strong>
+          <span id="zoomText">最外层先问：谁在使用？业务承诺是什么？错误会伤害谁？成本由谁承担？</span>
+        </div>
+        <div class="atlas-rings">
+          <div class="atlas-ring r1 active" data-ring="0"><span>产品 · 用户 · 组织</span></div>
+          <div class="atlas-ring r2" data-ring="1"><span>分布式软件系统</span></div>
+          <div class="atlas-ring r3" data-ring="2"><span>Agent 系统</span></div>
+          <div class="atlas-ring r4" data-ring="3"><span>Harness 能力</span></div>
+          <div class="atlas-core"><div><strong>代码原语</strong><span>function · event · queue · state</span></div></div>
+          <div class="orbit-dot" aria-hidden="true"></div>
+        </div>
+        <div class="zoom-controls" aria-label="选择观察层级">
+          <button class="control" type="button" data-zoom="0" aria-pressed="true">产品世界</button>
+          <button class="control" type="button" data-zoom="1" aria-pressed="false">软件系统</button>
+          <button class="control" type="button" data-zoom="2" aria-pressed="false">Agent 系统</button>
+          <button class="control" type="button" data-zoom="3" aria-pressed="false">Harness</button>
+          <button class="control" type="button" data-zoom="4" aria-pressed="false">代码原语</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" id="engineering">
+      <div class="section-head">
+        <div>
+          <div class="section-number">01 / ENGINEERING BEFORE HARNESS</div>
+          <h2>软件工程的本质：把能力变成可依赖的承诺</h2>
+          <p class="section-subtitle">
+            “模型能完成任务”只证明了能力存在；“系统能在真实用户、并发、失败和副作用下持续完成任务”才是工程。
+          </p>
+        </div>
+      </div>
+
+      <div class="truth-grid">
+        <article class="truth" data-index="1">
+          <div class="icon">◇</div>
+          <strong>能力 Capability</strong>
+          <span>它在理想条件下能做什么？例如理解意图、规划步骤、选择工具、生成代码。这通常是 Demo 最先证明的东西。</span>
+        </article>
+        <article class="truth" data-index="2">
+          <div class="icon">⬡</div>
+          <strong>约束 Constraints</strong>
+          <span>它绝不能做什么？谁可以做？一次能花多少钱？工具是否需要批准？约束定义了安全边界。</span>
+        </article>
+        <article class="truth" data-index="3">
+          <div class="icon">↻</div>
+          <strong>保证 Guarantees</strong>
+          <span>失败后是否能重试？请求是否会重复扣款？任务是否最终结束？保证是系统对外做出的可检验承诺。</span>
+        </article>
+        <article class="truth" data-index="4">
+          <div class="icon">◎</div>
+          <strong>反馈 Feedback</strong>
+          <span>我们如何知道系统正在变好还是变坏？日志、指标、轨迹、评估、告警让系统行为重新进入决策。</span>
+        </article>
+      </div>
+
+      <div class="equation" aria-label="从Agent能力到可靠服务的组成关系">
+        <div class="equation-box">
+          <strong>概率性的智能核心</strong>
+          <span>输出不是传统函数那样完全确定；同一输入可能产生不同计划、不同工具选择和不同成本。</span>
+        </div>
+        <div class="operator">＋</div>
+        <div class="equation-box">
+          <strong>真实世界的不可靠性</strong>
+          <span>网络会超时，进程会崩溃，工具有副作用，用户会并发，外部数据会变化。</span>
+        </div>
+        <div class="operator">→</div>
+        <div class="equation-box result">
+          <strong>需要一层可控的工程外壳</strong>
+          <span>给智能核心建立身份、生命周期、边界、持久状态、资源控制、故障处理和反馈闭环。这组能力常被称为 Harness。</span>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" id="planes">
+      <div class="section-head">
+        <div>
+          <div class="section-number">02 / THE WHOLE AGENT SYSTEM</div>
+          <h2>先看整个 Agent 系统，再看 Harness 可能覆盖哪里</h2>
+          <p class="section-subtitle">
+            下面是“工程平面”，不是规定好的代码目录。不同公司会把这些能力合并或拆开，所以 Harness 没有唯一边界。
+          </p>
+        </div>
+        <span class="badge">点击任意平面查看它解决的问题</span>
+      </div>
+
+      <div class="planes-layout">
+        <div>
+          <div class="planes">
+            <button class="plane-button active" type="button" data-plane="product" style="--plane-color:var(--yellow)">
+              <span class="plane-no">01</span>
+              <span><strong>产品与领域平面</strong><span>业务目标、用户体验、人机协作</span></span>
+              <span class="examples"><i>任务入口</i><i>审批界面</i><i>结果呈现</i><i>业务规则</i></span>
+            </button>
+            <button class="plane-button" type="button" data-plane="coordination" style="--plane-color:var(--green)">
+              <span class="plane-no">02</span>
+              <span><strong>协调与控制平面</strong><span>工作如何开始、等待、推进和结束</span></span>
+              <span class="examples"><i>生命周期</i><i>工作流</i><i>队列</i><i>调度</i><i>重试</i></span>
+            </button>
+            <button class="plane-button" type="button" data-plane="intelligence" style="--plane-color:var(--purple)">
+              <span class="plane-no">03</span>
+              <span><strong>智能与 Runtime 平面</strong><span>模型、推理循环、工具选择、上下文</span></span>
+              <span class="examples"><i>Agent loop</i><i>Planner</i><i>Model client</i><i>Context</i></span>
+            </button>
+            <button class="plane-button" type="button" data-plane="state" style="--plane-color:var(--blue)">
+              <span class="plane-no">04</span>
+              <span><strong>状态与知识平面</strong><span>系统记住什么，什么才是事实</span></span>
+              <span class="examples"><i>Session</i><i>Event log</i><i>Checkpoint</i><i>Memory</i><i>Artifact</i></span>
+            </button>
+            <button class="plane-button" type="button" data-plane="capability" style="--plane-color:var(--orange)">
+              <span class="plane-no">05</span>
+              <span><strong>能力与环境平面</strong><span>Agent 能接触和改变的外部世界</span></span>
+              <span class="examples"><i>Tools</i><i>APIs</i><i>Browser</i><i>Code sandbox</i><i>Data</i></span>
+            </button>
+            <button class="plane-button" type="button" data-plane="platform" style="--plane-color:var(--cyan)">
+              <span class="plane-no">06</span>
+              <span><strong>平台与基础设施平面</strong><span>计算、网络、模型服务和存储</span></span>
+              <span class="examples"><i>Workers</i><i>Containers</i><i>Inference</i><i>Database</i><i>Network</i></span>
+            </button>
+            <div class="crosscut" aria-hidden="true"></div>
+            <div class="crosscut-label">安全 · 身份 · 成本 · 可观测性 · 治理</div>
+          </div>
+          <div class="scope-spectrum">
+            <div class="spectrum-track"></div>
+            <div class="spectrum-labels">
+              <span>轻量 SDK 外壳</span>
+              <span>Agent Runtime</span>
+              <span>Durable Harness</span>
+              <span>Agent Platform</span>
+            </div>
+          </div>
+        </div>
+
+        <aside class="detail sticky" aria-live="polite">
+          <div class="detail-label" id="planeLabel">PLANE 01</div>
+          <h3 id="planeTitle">产品与领域平面</h3>
+          <p id="planeSummary">这里定义“为什么做”和“什么算成功”。工程设计必须从业务承诺倒推，而不是从某个类名正推。</p>
+          <div class="detail-list">
+            <div class="detail-item"><strong>它拥有</strong><span id="planeOwns">任务语义、用户交互、审批体验、领域规则、成功标准。</span></div>
+            <div class="detail-item"><strong>它向下提出的契约</strong><span id="planeContract">任务必须可追踪；高风险动作必须等待人类；结果需要在某个 SLO 内返回。</span></div>
+            <div class="detail-item"><strong>缺失时的症状</strong><span id="planeFailure">技术组件很多，但没人能说清系统究竟保证什么、错误由谁承担。</span></div>
+            <div class="detail-item"><strong>设计时要问</strong><span id="planeQuestion">用户提交的是一次聊天、一个长期任务，还是一项带副作用的业务流程？</span></div>
+          </div>
+          <div class="boundary-note">
+            <strong>关键认知：</strong>有人把 Runtime 也叫 Harness，有人只把控制与持久化层叫 Harness，还有人把整个平台都叫 Agent Harness。面试时先说明你采用的边界，再讨论组件。
+          </div>
+        </aside>
+      </div>
+    </section>
+
+    <section class="section" id="lifecycles">
+      <div class="section-head">
+        <div>
+          <div class="section-number">03 / MULTIPLE CLOCKS</div>
+          <h2>Agent 系统同时运行着多只“时钟”</h2>
+          <p class="section-subtitle">
+            Session、Run、Turn、Tool Call、Worker 之所以容易混淆，是因为它们属于不同生命周期。它们会嵌套，但不是同一个东西。
+          </p>
+        </div>
+      </div>
+
+      <div class="clock-layout">
+        <div class="clock-stage" id="clockStage">
+          <div class="clock-lane active" data-clock="session" style="--lane-color:var(--yellow)">
+            <button class="clock-label" type="button"><strong>交互时钟</strong><span>Session：关系持续多久</span></button>
+            <div class="lane-track">
+              <div class="lane-block" style="--size:4">同一段持续交互 / 共享上下文</div>
+            </div>
+          </div>
+          <div class="clock-lane" data-clock="run" style="--lane-color:var(--green)">
+            <button class="clock-label" type="button"><strong>任务时钟</strong><span>Task / Run：工作持续多久</span></button>
+            <div class="lane-track">
+              <div class="lane-block" style="--size:2">Run A</div>
+              <div class="lane-block" style="--size:1">Run B</div>
+              <div class="lane-block" style="--size:1.4">Run C</div>
+            </div>
+          </div>
+          <div class="clock-lane" data-clock="turn" style="--lane-color:var(--purple)">
+            <button class="clock-label" type="button"><strong>推理时钟</strong><span>Turn / Step：Agent 推进一步</span></button>
+            <div class="lane-track">
+              <div class="lane-block">T1</div><div class="lane-block">T2</div><div class="lane-block">T3</div>
+              <div class="lane-block">T4</div><div class="lane-block">T5</div>
+            </div>
+          </div>
+          <div class="clock-lane" data-clock="effect" style="--lane-color:var(--orange)">
+            <button class="clock-label" type="button"><strong>副作用时钟</strong><span>Tool Call：外部动作持续多久</span></button>
+            <div class="lane-track">
+              <div class="lane-block" style="--size:.5">读</div>
+              <div class="lane-block" style="--size:1.5">支付 API</div>
+              <div class="lane-block" style="--size:.8">写文件</div>
+            </div>
+          </div>
+          <div class="clock-lane" data-clock="process" style="--lane-color:var(--blue)">
+            <button class="clock-label" type="button"><strong>进程时钟</strong><span>Worker / Process：计算载体活多久</span></button>
+            <div class="lane-track">
+              <div class="lane-block" style="--size:1.3">Worker 7</div>
+              <div class="lane-block" style="--size:.3">崩溃</div>
+              <div class="lane-block" style="--size:1.6">Worker 12</div>
+            </div>
+          </div>
+        </div>
+
+        <aside class="detail clock-detail" aria-live="polite">
+          <div class="detail-label" id="clockLabel">INTERACTION LIFECYCLE</div>
+          <h3 id="clockTitle">Session 不是一次执行</h3>
+          <p id="clockSummary">Session 表达一段持续关系或上下文边界。它可能包含多个任务、多次 Run，甚至跨越多个进程。</p>
+          <div class="detail-list">
+            <div class="detail-item"><strong>它回答</strong><span id="clockAnswers">“这些交互是否属于同一段关系，需要共享哪些历史？”</span></div>
+            <div class="detail-item"><strong>它不回答</strong><span id="clockNot">某一次工作现在是否运行、失败或排队。</span></div>
+            <div class="detail-item"><strong>典型包含关系</strong><span id="clockContains">一个 Session → 多个 Run；一个 Run → 多个 Turn；一个 Turn → 零或多个 Tool Call。</span></div>
+          </div>
+          <div class="relationship" id="clockRelationship">Session 可以活几小时，Worker 可能只活几分钟。可靠系统不能把业务生命周期绑死在进程生命周期上。</div>
+        </aside>
+      </div>
+    </section>
+
+    <section class="section" id="primitives">
+      <div class="section-head">
+        <div>
+          <div class="section-number">04 / BREAK DOWN TO PRIMITIVES</div>
+          <h2>从函数调用到持久事件日志：底层机制如何一步步出现</h2>
+          <p class="section-subtitle">
+            “事件”“订阅”“队列”不是高级名词堆砌。它们分别解决耦合、并发速度差、进程崩溃和历史追溯等不同问题。
+          </p>
+        </div>
+      </div>
+
+      <div class="primitive-layout">
+        <div class="primitive-tabs" role="tablist" aria-label="选择通信原语">
+          <button class="tab" type="button" role="tab" data-primitive="call" aria-selected="true"><b>01</b><span>函数调用<small>同步、直接、一对一</small></span></button>
+          <button class="tab" type="button" role="tab" data-primitive="callback" aria-selected="false"><b>02</b><span>回调 Handler<small>完成后反向通知</small></span></button>
+          <button class="tab" type="button" role="tab" data-primitive="pubsub" aria-selected="false"><b>03</b><span>发布 / 订阅<small>一份事实，多方关注</small></span></button>
+          <button class="tab" type="button" role="tab" data-primitive="queue" aria-selected="false"><b>04</b><span>消息队列<small>异步缓冲、削峰</small></span></button>
+          <button class="tab" type="button" role="tab" data-primitive="log" aria-selected="false"><b>05</b><span>持久事件日志<small>重放、审计、恢复</small></span></button>
+          <button class="tab" type="button" role="tab" data-primitive="state" aria-selected="false"><b>06</b><span>状态机<small>限制合法变化</small></span></button>
+        </div>
+
+        <div class="primitive-stage" aria-live="polite">
+          <div class="primitive-visual" id="primitiveVisual"></div>
+          <div class="primitive-explain">
+            <div class="micro-card"><strong>解决的问题</strong><span id="primitiveProblem"></span></div>
+            <div class="micro-card"><strong>它不能自动解决</strong><span id="primitiveLimit"></span></div>
+            <div class="micro-card"><strong>Agent 场景</strong><span id="primitiveAgent"></span></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" id="mechanisms">
+      <div class="section-head">
+        <div>
+          <div class="section-number">05 / RELIABILITY MECHANISMS</div>
+          <h2>可靠 Harness 的核心不是组件数量，而是系统保证</h2>
+          <p class="section-subtitle">
+            每个机制都应该从一个故障问题倒推：可能坏在哪里？必须保持什么不变量？靠什么机制守住？
+          </p>
+        </div>
+      </div>
+
+      <div class="mechanism-layout">
+        <div class="mechanism-grid">
+          <button class="mechanism-button active" type="button" data-mechanism="identity"><span class="mechanism-icon">◎</span><strong>身份与工作单元</strong><span>给用户、任务、运行、工具调用稳定 ID。</span></button>
+          <button class="mechanism-button" type="button" data-mechanism="lifecycle"><span class="mechanism-icon">↝</span><strong>生命周期与不变量</strong><span>用状态机限定什么变化是合法的。</span></button>
+          <button class="mechanism-button" type="button" data-mechanism="durability"><span class="mechanism-icon">▤</span><strong>持久性与恢复</strong><span>进程消失后，业务事实仍然存在。</span></button>
+          <button class="mechanism-button" type="button" data-mechanism="idempotency"><span class="mechanism-icon">≡</span><strong>幂等与副作用</strong><span>重复请求不能造成重复业务动作。</span></button>
+          <button class="mechanism-button" type="button" data-mechanism="backpressure"><span class="mechanism-icon">⏳</span><strong>并发与背压</strong><span>生产速度大于消费速度时不让系统崩溃。</span></button>
+          <button class="mechanism-button" type="button" data-mechanism="isolation"><span class="mechanism-icon">⬡</span><strong>隔离与权限</strong><span>限制 Agent 可以看见和改变的世界。</span></button>
+          <button class="mechanism-button" type="button" data-mechanism="observability"><span class="mechanism-icon">⌁</span><strong>可观测性与评估</strong><span>知道发生了什么、为什么、效果怎样。</span></button>
+          <button class="mechanism-button" type="button" data-mechanism="economics"><span class="mechanism-icon">◫</span><strong>配额、成本与公平</strong><span>多个主体竞争有限资源时如何分配。</span></button>
+        </div>
+
+        <aside class="detail" aria-live="polite">
+          <div class="detail-label" id="mechanismLabel">FOUNDATION 01</div>
+          <h3 id="mechanismTitle">身份与工作单元</h3>
+          <p id="mechanismSummary">系统首先要能回答：“这是谁的哪一项工作？这次尝试和上次尝试是否相同？”没有稳定身份，后续的状态、重试、审计都无从挂载。</p>
+          <div class="detail-list">
+            <div class="detail-item"><strong>故障模型</strong><span id="mechanismFailure">请求重发、客户端断线、Worker 重启后，系统无法判断看到的是新任务还是旧任务。</span></div>
+            <div class="detail-item"><strong>常见机制</strong><span id="mechanismTools">Tenant ID、Session ID、Task ID、Run ID、Attempt ID、Tool Call ID、Correlation ID。</span></div>
+            <div class="detail-item"><strong>重要取舍</strong><span id="mechanismTradeoff">业务任务与执行尝试要不要分开？如果 Run 重试，是同一个 Run 还是新的 Attempt？</span></div>
+            <div class="detail-item"><strong>验证方式</strong><span id="mechanismTest">让请求断线重发，再检查是否能准确关联到原任务且不会重复创建。</span></div>
+          </div>
+          <div class="guarantee"><strong>它要守住的保证</strong><span id="mechanismGuarantee">每个重要事实都有稳定归属，跨进程仍可关联。</span></div>
+        </aside>
+      </div>
+    </section>
+
+    <section class="section" id="failure-lab">
+      <div class="section-head">
+        <div>
+          <div class="section-number">06 / FAILURE LAB</div>
+          <h2>关闭工程机制，看看系统会怎样坏掉</h2>
+          <p class="section-subtitle">
+            可靠性机制的价值往往在正常路径上看不见。这里用“退款 Agent”模拟副作用、重试、突发流量和越权访问。
+          </p>
+        </div>
+      </div>
+
+      <div class="failure-layout">
+        <div class="failure-controls">
+          <label class="switch">
+            <input type="checkbox" id="guardIdempotency" checked />
+            <span><strong>幂等键</strong><span>同一退款动作只生效一次</span></span>
+          </label>
+          <label class="switch">
+            <input type="checkbox" id="guardCheckpoint" checked />
+            <span><strong>持久 Checkpoint</strong><span>Worker 崩溃后从已确认位置恢复</span></span>
+          </label>
+          <label class="switch">
+            <input type="checkbox" id="guardBackpressure" checked />
+            <span><strong>队列与背压</strong><span>突发请求先缓冲，不压垮下游</span></span>
+          </label>
+          <label class="switch">
+            <input type="checkbox" id="guardIsolation" checked />
+            <span><strong>工具权限隔离</strong><span>只能访问当前租户允许的数据</span></span>
+          </label>
+          <button class="control" id="simulateFailure" type="button">注入故障并运行</button>
+        </div>
+
+        <div class="failure-stage" aria-live="polite">
+          <div class="health-row">
+            <div class="health" id="healthMoney"><strong>1×</strong><span>退款执行次数</span></div>
+            <div class="health" id="healthRecovery"><strong>可恢复</strong><span>Worker 崩溃后</span></div>
+            <div class="health" id="healthLoad"><strong>稳定</strong><span>突发流量下</span></div>
+            <div class="health" id="healthAccess"><strong>隔离</strong><span>租户数据边界</span></div>
+          </div>
+          <div class="system-flow">
+            <div class="system-node" id="failureIngress"><span class="warning-pulse"></span><div><strong>请求入口</strong><span>重复提交 + 突发流量</span></div></div>
+            <div class="flow-arrow"></div>
+            <div class="system-node" id="failureHarness"><span class="warning-pulse"></span><div><strong>控制与持久层</strong><span>身份 · 队列 · 状态 · 权限</span></div></div>
+            <div class="flow-arrow"></div>
+            <div class="system-node" id="failureWorker"><span class="warning-pulse"></span><div><strong>Agent Worker</strong><span>执行到一半突然崩溃</span></div></div>
+            <div class="flow-arrow"></div>
+            <div class="system-node" id="failureTool"><span class="warning-pulse"></span><div><strong>退款工具</strong><span>产生不可随意回滚的副作用</span></div></div>
+          </div>
+          <div class="incident" id="incidentText">
+            <strong>系统当前具备四层防护</strong>
+            注入故障后，重复请求会被识别；未完成任务能从检查点恢复；突发流量进入队列；工具只能读取当前租户的数据。
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" id="journey">
+      <div class="section-head">
+        <div>
+          <div class="section-number">07 / END-TO-END JOURNEY</div>
+          <h2>一项真实工作如何穿过整个 Agent 系统</h2>
+          <p class="section-subtitle">
+            例子不依赖任何框架：用户要求“检查订单并退款”。点击 1–9，观察控制流、事实记录和副作用边界如何协作。
+          </p>
+        </div>
+      </div>
+
+      <div class="journey-layout">
+        <div class="journey-stage">
+          <div class="journey-path" aria-hidden="true">
+            <svg viewBox="0 0 900 500" preserveAspectRatio="none">
+              <path d="M110 70 H450 H790 V250 H450 H110 V430 H450 H790" />
+            </svg>
+          </div>
+          <div class="journey-packet" id="journeyPacket" aria-hidden="true"></div>
+          <div class="journey-nodes">
+            <div class="journey-node active" data-journey-node="0"><strong>1. 接收意图</strong><span>用户、API、定时器或其他 Agent 发起</span></div>
+            <div class="journey-node" data-journey-node="1"><strong>2. Admission</strong><span>身份、权限、配额、风险检查</span></div>
+            <div class="journey-node" data-journey-node="2"><strong>3. 建立工作单元</strong><span>Task / Run / Attempt 获得稳定身份</span></div>
+            <div class="journey-node" data-journey-node="3"><strong>4. 排队与分配</strong><span>选择何时、在哪里执行</span></div>
+            <div class="journey-node" data-journey-node="4"><strong>5. Agent 推理</strong><span>读取上下文、规划、选择工具</span></div>
+            <div class="journey-node" data-journey-node="5"><strong>6. 工具治理</strong><span>校验参数、权限、审批和幂等</span></div>
+            <div class="journey-node" data-journey-node="6"><strong>7. 执行副作用</strong><span>调用订单与支付系统</span></div>
+            <div class="journey-node" data-journey-node="7"><strong>8. 记录与反馈</strong><span>事件、状态、轨迹、指标、成本</span></div>
+            <div class="journey-node" data-journey-node="8"><strong>9. 结束或继续</strong><span>返回结果、等待人类、重试或补偿</span></div>
+          </div>
+          <div class="journey-controls" aria-label="请求旅程步骤">
+            <button class="step-button active" type="button" data-step="0">1</button>
+            <button class="step-button" type="button" data-step="1">2</button>
+            <button class="step-button" type="button" data-step="2">3</button>
+            <button class="step-button" type="button" data-step="3">4</button>
+            <button class="step-button" type="button" data-step="4">5</button>
+            <button class="step-button" type="button" data-step="5">6</button>
+            <button class="step-button" type="button" data-step="6">7</button>
+            <button class="step-button" type="button" data-step="7">8</button>
+            <button class="step-button" type="button" data-step="8">9</button>
+          </div>
+        </div>
+
+        <aside class="detail journey-detail" aria-live="polite">
+          <div class="detail-label" id="journeyLabel">STEP 01 · INTENT</div>
+          <h3 id="journeyTitle">接收意图，但先不要直接执行</h3>
+          <p id="journeySummary">入口接到的是“想做什么”，还不是“已经做成了什么”。系统要保留原始请求和发起者身份。</p>
+          <div class="journey-question" id="journeyQuestion">工程问题：如果客户端因为超时重发同一个请求，我们怎样识别它？</div>
+          <div class="journey-record" id="journeyRecord">command:
+  type: REQUEST_REFUND
+  request_id: req_7f2
+  actor_id: user_42</div>
+          <div class="detail-list">
+            <div class="detail-item"><strong>此时产生</strong><span id="journeyCreates">Command / Intent</span></div>
+            <div class="detail-item"><strong>此时尚未保证</strong><span id="journeyNotYet">任务已被接受，更没有保证退款已发生。</span></div>
+          </div>
+        </aside>
+      </div>
+    </section>
+
+    <section class="section" id="patterns">
+      <div class="section-head">
+        <div>
+          <div class="section-number">08 / ARCHITECTURAL SHAPES</div>
+          <h2>Agent Harness 领域没有唯一架构，只有不同规模下的形态</h2>
+          <p class="section-subtitle">
+            选择架构不是“越分布式越高级”，而是根据任务时长、故障成本、并发规模、副作用风险和团队能力做权衡。
+          </p>
+        </div>
+      </div>
+
+      <div class="pattern-layout">
+        <div class="pattern-list">
+          <button class="pattern-button active" type="button" data-pattern="embedded">
+            <span class="pattern-no">01</span><span><strong>嵌入式 Harness Library</strong><span>和产品进程运行在一起</span></span><span><strong>适合</strong><span>短任务、低并发、快速验证</span></span><span><strong>主要代价</strong><span>业务进程与 Agent 生命周期耦合</span></span>
+          </button>
+          <button class="pattern-button" type="button" data-pattern="service">
+            <span class="pattern-no">02</span><span><strong>独立 Agent Service</strong><span>通过 API 提供 Agent 能力</span></span><span><strong>适合</strong><span>多个产品共享统一执行能力</span></span><span><strong>主要代价</strong><span>需要定义稳定网络契约</span></span>
+          </button>
+          <button class="pattern-button" type="button" data-pattern="durable">
+            <span class="pattern-no">03</span><span><strong>Durable Workflow-backed</strong><span>由持久工作流驱动长任务</span></span><span><strong>适合</strong><span>跨小时/天、审批、可恢复流程</span></span><span><strong>主要代价</strong><span>确定性边界与状态设计更复杂</span></span>
+          </button>
+          <button class="pattern-button" type="button" data-pattern="event">
+            <span class="pattern-no">04</span><span><strong>事件驱动分布式 Harness</strong><span>组件通过队列和事件解耦</span></span><span><strong>适合</strong><span>高吞吐、异步、多下游消费者</span></span><span><strong>主要代价</strong><span>顺序、一致性、重复消费更难</span></span>
+          </button>
+          <button class="pattern-button" type="button" data-pattern="platform">
+            <span class="pattern-no">05</span><span><strong>多租户 Agent Platform</strong><span>统一治理多种 Agent 与 Runtime</span></span><span><strong>适合</strong><span>组织级共享、配额、合规与成本治理</span></span><span><strong>主要代价</strong><span>平台复杂度和团队投入最高</span></span>
+          </button>
+        </div>
+
+        <aside class="detail" aria-live="polite">
+          <div class="detail-label" id="patternLabel">SHAPE 01</div>
+          <h3 id="patternTitle">嵌入式 Harness Library</h3>
+          <p id="patternSummary">Harness 作为应用中的库，直接调用模型和工具。部署简单，边界也最少，适合先验证真实需求。</p>
+          <div class="detail-list">
+            <div class="detail-item"><strong>事实来源</strong><span id="patternTruth">通常是应用数据库与进程内状态。</span></div>
+            <div class="detail-item"><strong>故障边界</strong><span id="patternFailure">应用崩溃会同时终止 Agent 执行；长任务恢复能力有限。</span></div>
+            <div class="detail-item"><strong>演进信号</strong><span id="patternSignal">任务越来越长、多个应用要共享、失败需要恢复时，考虑拆成服务或工作流。</span></div>
+          </div>
+          <div class="pattern-axis">
+            <div class="axis-card"><strong id="axisOps">低</strong><span>运维复杂度</span></div>
+            <div class="axis-card"><strong id="axisDurability">低</strong><span>持久执行能力</span></div>
+            <div class="axis-card"><strong id="axisScale">小</strong><span>典型组织规模</span></div>
+          </div>
+        </aside>
+      </div>
+    </section>
+
+    <section class="section" id="real-architectures">
+      <div class="section-head">
+        <div>
+          <div class="section-number">09 / REAL-WORLD ARCHITECTURE ATLAS</div>
+          <h2>八种真实架构，八个不同的“系统重心”</h2>
+          <p class="section-subtitle">
+            这些系统并不是同一层级的竞品：有的是嵌入式 SDK，有的是编排 Runtime，有的是有状态 Agent 服务，还有的是持久执行底座。正因为层级不同，把它们放在同一张工程地图里才有价值。
+          </p>
+        </div>
+        <span class="badge">基于官方文档 · 资料核对日期 2026-07-24</span>
+      </div>
+
+      <div class="real-tabs" aria-label="选择真实 Agent 架构">
+        <button class="real-tab active" type="button" data-real="openai"><strong>OpenAI Agents SDK</strong><span>小原语 · Runner/Loop 优先</span></button>
+        <button class="real-tab" type="button" data-real="langgraph"><strong>LangGraph</strong><span>状态图 · Checkpoint 优先</span></button>
+        <button class="real-tab" type="button" data-real="adk"><strong>Google ADK</strong><span>Runner · Event · Service</span></button>
+        <button class="real-tab" type="button" data-real="microsoft"><strong>Microsoft Agent Framework</strong><span>Agent + Workflow 双层</span></button>
+        <button class="real-tab" type="button" data-real="temporal"><strong>Temporal</strong><span>持久执行 · Workflow History</span></button>
+        <button class="real-tab" type="button" data-real="openhands"><strong>OpenHands</strong><span>Sandbox · Workspace 优先</span></button>
+        <button class="real-tab" type="button" data-real="letta"><strong>Letta</strong><span>有状态 Agent · Memory 优先</span></button>
+        <button class="real-tab" type="button" data-real="anthropic"><strong>Anthropic Managed Agents</strong><span>托管 Session · Environment</span></button>
+      </div>
+
+      <div class="real-architecture-layout">
+        <div class="real-stage">
+          <div class="real-stage-head">
+            <div><strong id="realStageTitle">OpenAI Agents SDK：代码拥有控制权</strong><span id="realStageSubtitle">核心很小，复杂编排仍然使用普通代码表达</span></div>
+            <span class="badge" id="realKind">Embedded SDK</span>
+          </div>
+          <div class="real-flow" id="realFlow" aria-label="当前架构核心数据流">
+            <div class="real-flow-node"><b>01</b><strong id="realNode1Title">Application</strong><span id="realNode1Text">业务代码决定何时运行</span></div>
+            <div class="real-flow-node active"><b>02</b><strong id="realNode2Title">Runner</strong><span id="realNode2Text">驱动 Agent loop</span></div>
+            <div class="real-flow-node"><b>03</b><strong id="realNode3Title">Agent</strong><span id="realNode3Text">instructions + model + tools</span></div>
+            <div class="real-flow-node"><b>04</b><strong id="realNode4Title">Tools / Handoffs</strong><span id="realNode4Text">行动或移交控制权</span></div>
+            <div class="real-flow-node"><b>05</b><strong id="realNode5Title">Session / Trace</strong><span id="realNode5Text">历史与观测</span></div>
+          </div>
+          <div class="real-flow-caption">
+            <strong id="realCaptionTitle">核心循环</strong>
+            <span id="realCaption">Runner 调用当前 Agent；模型产生最终答案、工具调用或 handoff；工具结果重新进入循环，直到满足停止条件。</span>
+          </div>
+        </div>
+
+        <aside class="detail" aria-live="polite">
+          <div class="detail-label" id="realLabel">LOOP-FIRST / EMBEDDED</div>
+          <h3 id="realTitle">OpenAI Agents SDK</h3>
+          <p id="realSummary">以少量原语组织 Agent、工具、guardrail、handoff 和 Runner。它刻意让普通语言代码继续拥有编排控制，而不是要求先把一切声明成图。</p>
+          <div class="detail-list">
+            <div class="detail-item"><strong>控制流拥有者</strong><span id="realControl">Runner 管理单次 Agent loop；跨 Run、分支和更高层流程主要由应用代码组织。</span></div>
+            <div class="detail-item"><strong>状态真相来源</strong><span id="realTruth">Session 保存跨 Run 的对话历史；Trace 保存运行观测。二者不是同一类状态。</span></div>
+            <div class="detail-item"><strong>恢复与持久性</strong><span id="realRecovery">SDK 提供多种 Session 后端；跨进程的长时持久执行由 Temporal、Dapr、Restate 等集成补足。</span></div>
+            <div class="detail-item"><strong>最值得借鉴</strong><span id="realBorrow">保持核心抽象少；把“manager 调 specialist”和“handoff 后 specialist 接管”明确区分。</span></div>
+          </div>
+          <div class="interpretation"><strong>工程解读（不是官方原话）</strong><span id="realInterpretation">适合把 Agent 当作应用内能力；如果任务必须跨进程、跨小时可靠恢复，不应误把会话记忆当成持久工作流。</span></div>
+          <div class="real-sources" id="realSources">
+            <a href="https://openai.github.io/openai-agents-python/" target="_blank" rel="noreferrer">官方概览</a>
+            <a href="https://openai.github.io/openai-agents-python/running_agents/" target="_blank" rel="noreferrer">Runner 与持久集成</a>
+            <a href="https://openai.github.io/openai-agents-python/sessions/" target="_blank" rel="noreferrer">Sessions</a>
+          </div>
+        </aside>
+      </div>
+
+      <div class="comparison-matrix">
+        <div class="matrix-head">
+          <div><strong>统一维度对比</strong><span>“核心”表示该能力处于设计中心；“可插拔/服务化”表示框架提供接口或独立服务；“外接”表示通常需要组合其他系统。</span></div>
+          <span>这是一张职责地图，不是质量评分</span>
+        </div>
+        <div class="matrix-scroll">
+          <table class="real-matrix">
+            <thead>
+              <tr>
+                <th>架构</th>
+                <th>第一抽象</th>
+                <th>控制流</th>
+                <th>状态真相</th>
+                <th>跨进程恢复</th>
+                <th>环境隔离</th>
+                <th>多 Agent 机制</th>
+                <th>最自然的场景</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>OpenAI Agents SDK</td>
+                <td><span class="cell-core">Agent + Runner</span></td>
+                <td>代码 + LLM 决策</td>
+                <td>Session / Trace 分离</td>
+                <td><span class="cell-service">通过集成补足</span></td>
+                <td><span class="cell-external">按工具/沙箱配置</span></td>
+                <td>Agents-as-tools / Handoff</td>
+                <td>应用内动态 Agent 能力</td>
+              </tr>
+              <tr>
+                <td>LangGraph</td>
+                <td><span class="cell-core">StateGraph</span></td>
+                <td>节点、边、Command</td>
+                <td>Thread + Checkpoint</td>
+                <td><span class="cell-core">Checkpointer 核心</span></td>
+                <td><span class="cell-external">外接</span></td>
+                <td>图或子图组合</td>
+                <td>长时、有状态、可中断流程</td>
+              </tr>
+              <tr>
+                <td>Google ADK</td>
+                <td><span class="cell-core">Runner + Event</span></td>
+                <td>Event loop / Agent hierarchy</td>
+                <td>SessionService 事件历史</td>
+                <td><span class="cell-service">取决于 Service 后端</span></td>
+                <td><span class="cell-external">部署环境提供</span></td>
+                <td>Agent transfer / AgentTool / workflow agents</td>
+                <td>事件驱动、服务可替换的 Agent App</td>
+              </tr>
+              <tr>
+                <td>Microsoft Agent Framework</td>
+                <td><span class="cell-core">Agent + Workflow</span></td>
+                <td>代码或 Executor Graph</td>
+                <td>Conversation / Workflow checkpoint</td>
+                <td><span class="cell-core">Checkpoint + Durable Extension</span></td>
+                <td><span class="cell-external">Hosting 层提供</span></td>
+                <td>Sequential / Concurrent / Handoff / Group / Magentic</td>
+                <td>Agent 与企业流程混合</td>
+              </tr>
+              <tr>
+                <td>Temporal</td>
+                <td><span class="cell-core">Durable Workflow</span></td>
+                <td>确定性 Workflow 代码</td>
+                <td>不可变 Workflow History</td>
+                <td><span class="cell-core">平台核心</span></td>
+                <td><span class="cell-external">Activity Worker 自行隔离</span></td>
+                <td>Workflow / Activity 编排</td>
+                <td>跨天任务、审批、强恢复保证</td>
+              </tr>
+              <tr>
+                <td>OpenHands</td>
+                <td><span class="cell-core">Conversation + Workspace</span></td>
+                <td>Agent loop + Event stream</td>
+                <td>Conversation / Event state</td>
+                <td><span class="cell-service">Agent Server 管理</span></td>
+                <td><span class="cell-core">容器 Workspace 核心</span></td>
+                <td>SDK 自定义编排</td>
+                <td>代码 Agent、远程执行、多用户工作区</td>
+              </tr>
+              <tr>
+                <td>Letta</td>
+                <td><span class="cell-core">Stateful Agent</span></td>
+                <td>服务端 Agent loop</td>
+                <td>Agent DB + Memory hierarchy</td>
+                <td><span class="cell-core">服务端状态核心</span></td>
+                <td><span class="cell-service">工具执行方式决定</span></td>
+                <td>共享 Memory Block / Groups</td>
+                <td>长期关系、人格与记忆持续演化</td>
+              </tr>
+              <tr>
+                <td>Anthropic Managed Agents</td>
+                <td><span class="cell-core">Agent + Environment + Session</span></td>
+                <td>托管事件驱动 Agent loop</td>
+                <td>Session event stream</td>
+                <td><span class="cell-core">Rescheduling + Sandbox checkpoint</span></td>
+                <td><span class="cell-core">Environment / Sandbox 核心</span></td>
+                <td>托管 Agent / Multi-agent 配置</td>
+                <td>希望直接使用托管控制面与执行环境</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <h3 class="pairwise-title">真正有用的不是“选谁”，而是看设计分歧</h3>
+      <div class="pairwise-grid">
+        <article class="pairwise">
+          <div class="versus">OpenAI SDK <i></i> LangGraph</div>
+          <strong>动态代码控制 vs 显式状态图</strong>
+          <span>前者让 Runner 和普通代码保持轻量；后者把状态、节点、边、Checkpoint 与 interrupt 提到一等位置。</span>
+          <em>问题：你的流程主要是开放式决策，还是需要随时检查和恢复的显式状态？</em>
+        </article>
+        <article class="pairwise">
+          <div class="versus">LangGraph <i></i> Temporal</div>
+          <strong>Agent 编排 Runtime vs 分布式持久执行</strong>
+          <span>LangGraph理解 Agent 的 state graph；Temporal 理解 Workflow history、Activity、Signal 与故障恢复，但不替你定义 Agent 语义。</span>
+          <em>组合方式：LangGraph 负责 Agent 行为，Temporal 负责跨进程可靠执行，或只选其中满足需求的一层。</em>
+        </article>
+        <article class="pairwise">
+          <div class="versus">OpenAI SDK <i></i> Google ADK</div>
+          <strong>少量原语 vs 明确的 Runner–Service 分工</strong>
+          <span>ADK 让 Agent yield Event，Runner 先通过 Service 提交 state/artifact 变化，再恢复执行；它把事件提交边界展示得更明确。</span>
+          <em>问题：你更看重最小心智负担，还是更清晰、可替换的服务边界？</em>
+        </article>
+        <article class="pairwise">
+          <div class="versus">OpenHands <i></i> Letta</div>
+          <strong>环境状态优先 vs 记忆状态优先</strong>
+          <span>OpenHands 把隔离 Workspace、容器和远程事件流放在中心；Letta 把持久 Agent、Memory Block 和上下文层级放在中心。</span>
+          <em>问题：你的 Agent 价值主要来自“能改变复杂环境”，还是“能长期记住并演化”？</em>
+        </article>
+        <article class="pairwise">
+          <div class="versus">Microsoft AF <i></i> Temporal</div>
+          <strong>Agent/Workflow 统一开发模型 vs 通用可靠执行底座</strong>
+          <span>Microsoft 同时给出 Agent 与类型化 Workflow、多 Agent 模式；Temporal 把确定性编排、重试、Signal 和历史重放做成通用基础设施。</span>
+          <em>问题：你要的是面向 Agent 的开发抽象，还是可以承载任何业务的持久执行内核？</em>
+        </article>
+        <article class="pairwise">
+          <div class="versus">Embedded SDK <i></i> Managed Agents</div>
+          <strong>应用拥有运行时 vs 平台拥有运行时</strong>
+          <span>嵌入式 SDK 让你掌握进程、存储和工具边界；托管 Agent 把版本、Session、Environment、事件和恢复变成远程资源。</span>
+          <em>问题：你愿意维护控制面来换取可控性，还是接受平台边界来换取交付速度？</em>
+        </article>
+      </div>
+    </section>
+
+    <section class="section" id="method">
+      <div class="section-head">
+        <div>
+          <div class="section-number">10 / HOW ENGINEERS THINK</div>
+          <h2>搭系统时，不从类名开始；从承诺和故障开始</h2>
+          <p class="section-subtitle">
+            这是一套可迁移到任何 Harness 项目的工程推理顺序。每一步都有明确产物，能防止“先写了一堆类，却不知道为什么存在”。
+          </p>
+        </div>
+      </div>
+
+      <div class="method-grid">
+        <article class="method-step">
+          <span class="method-no">01</span>
+          <strong>定义业务承诺</strong>
+          <span>谁发起什么工作？成功是什么？最长等多久？哪些错误可接受？哪些动作必须人工确认？</span>
+          <span class="deliverable">产物：Use cases + SLO + 风险边界</span>
+        </article>
+        <article class="method-step">
+          <span class="method-no">02</span>
+          <strong>定义工作单元与身份</strong>
+          <span>区分 Tenant、Session、Task、Run、Attempt、Turn、Tool Call。明确它们的归属和生命周期。</span>
+          <span class="deliverable">产物：领域模型 + ID 关系图</span>
+        </article>
+        <article class="method-step">
+          <span class="method-no">03</span>
+          <strong>列出故障模型与不变量</strong>
+          <span>进程崩溃、网络超时、重复消息、越权、工具部分成功时，哪些事实必须仍然成立？</span>
+          <span class="deliverable">产物：Failure matrix + Invariants</span>
+        </article>
+        <article class="method-step">
+          <span class="method-no">04</span>
+          <strong>选择最小机制</strong>
+          <span>状态机、幂等键、队列、事件日志、Checkpoint、租约、审批、沙箱分别对应哪个故障？</span>
+          <span class="deliverable">产物：组件边界 + 契约 + ADR</span>
+        </article>
+        <article class="method-step">
+          <span class="method-no">05</span>
+          <strong>用故障验证保证</strong>
+          <span>杀 Worker、重复投递、制造超时、压满队列、伪造租户身份，验证系统是否仍守住承诺。</span>
+          <span class="deliverable">产物：测试、指标、演练与改进闭环</span>
+        </article>
+      </div>
+    </section>
+
+    <section class="section" id="glossary">
+      <div class="section-head">
+        <div>
+          <div class="section-number">11 / CONCEPTUAL GLOSSARY</div>
+          <h2>用“职责”理解术语，不用框架里的类名理解术语</h2>
+          <p class="section-subtitle">下面是领域级含义。具体 SDK 可能使用不同名字，甚至把多个概念合并成一个对象。</p>
+        </div>
+      </div>
+
+      <div class="glossary">
+        <div class="term"><strong>Agent</strong><span>利用模型、上下文和工具进行选择与行动的智能行为体。</span><em>重点：它负责“决定做什么”。</em></div>
+        <div class="term"><strong>Runtime</strong><span>让 Agent 真正跑起来的执行环境与循环。</span><em>重点：它负责“怎样跑”。</em></div>
+        <div class="term"><strong>Harness</strong><span>围绕 Agent 的控制、状态、治理、恢复与观测能力集合。</span><em>重点：它负责“怎样可靠地被系统使用”。</em></div>
+        <div class="term"><strong>Orchestrator</strong><span>协调多个步骤、Worker、Agent 或服务之间的顺序与依赖。</span><em>它可能是 Harness 的一部分。</em></div>
+        <div class="term"><strong>Workflow</strong><span>工作步骤、等待点、分支和补偿的显式流程模型。</span><em>它比开放式 Agent 规划更结构化。</em></div>
+        <div class="term"><strong>Session</strong><span>一段持续交互或上下文共享边界。</span><em>不等同于一次执行。</em></div>
+        <div class="term"><strong>Task</strong><span>用户或业务希望系统完成的工作目标。</span><em>它是业务语义。</em></div>
+        <div class="term"><strong>Run / Attempt</strong><span>完成任务的一次执行实例或一次尝试。</span><em>它有明确开始、状态和结束。</em></div>
+        <div class="term"><strong>Turn / Step</strong><span>Agent 在一次运行中推进的一小步。</span><em>可能包含一次模型调用或工具决策。</em></div>
+        <div class="term"><strong>Command</strong><span>希望系统做某事的意图。</span><em>“请开始”不代表“已经开始”。</em></div>
+        <div class="term"><strong>Event</strong><span>系统中已经发生且不可改写的事实。</span><em>可以被订阅、存储和重放。</em></div>
+        <div class="term"><strong>State</strong><span>截至目前事实折叠出的当前视图。</span><em>便于快速回答“现在怎样”。</em></div>
+        <div class="term"><strong>Checkpoint</strong><span>可供恢复的已确认执行位置和必要数据。</span><em>不是简单保存一段聊天文本。</em></div>
+        <div class="term"><strong>Tool</strong><span>Agent 读取或改变外部世界的受控接口。</span><em>副作用、权限和幂等最关键。</em></div>
+        <div class="term"><strong>Memory</strong><span>跨步骤或跨会话保留、检索的经验与事实。</span><em>它不天然等于数据库全部状态。</em></div>
+        <div class="term"><strong>Policy</strong><span>根据身份、风险、资源和上下文决定允许、拒绝或等待的规则。</span><em>可确定，也可包含受约束的智能判断。</em></div>
+      </div>
+    </section>
+
+    <section class="closing">
+      <div class="closing-grid">
+        <div>
+          <div class="eyebrow">The durable mental model</div>
+          <h2>Harness 是不确定智能与可靠软件之间的“工程翻译层”</h2>
+          <blockquote>
+            Agent 提供开放式能力；Harness 把能力约束在可识别的工作单元中，用状态记住现在，用事件保留过去，用策略限制下一步，用反馈判断系统是否值得信任。
+          </blockquote>
+        </div>
+        <div>
+          <ul>
+            <li>看到一个新组件时，先问它在防哪一种故障，而不是先背 API。</li>
+            <li>看到一个术语时，先问它属于哪只生命周期时钟。</li>
+            <li>讨论 Harness 边界时，先声明语境；不要假设所有框架定义一致。</li>
+            <li>设计系统时，先写业务承诺、故障模型和不变量，再决定类、表和事件。</li>
+            <li>评价架构时，不看组件多不多，而看它是否以可承受的复杂度守住了需要的保证。</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    const zoomData = [
+      { title: "① 产品与组织", text: "最外层先问：谁在使用？业务承诺是什么？错误会伤害谁？成本由谁承担？", ring: 0 },
+      { title: "② 分布式软件系统", text: "再问：并发、网络、进程崩溃、重复请求和部分成功出现时，系统怎样守住承诺？", ring: 1 },
+      { title: "③ Agent 系统", text: "加入概率性推理、动态工具选择、长上下文和开放式执行后，传统故障之外又多了行为不确定性。", ring: 2 },
+      { title: "④ Harness 能力", text: "围绕智能核心建立身份、控制、持久化、治理、恢复、资源分配和反馈。它的边界因系统而异。", ring: 3 },
+      { title: "⑤ 代码原语", text: "最终所有架构都会落到函数、事件、队列、状态转换、数据库事务、租约和权限检查。", ring: 4 }
+    ];
+
+    const zoomButtons = document.querySelectorAll("[data-zoom]");
+    const rings = document.querySelectorAll("[data-ring]");
+    zoomButtons.forEach((button) => {
+      button.addEventListener("click", () => {
+        const index = Number(button.dataset.zoom);
+        zoomButtons.forEach((item) => item.setAttribute("aria-pressed", String(item === button)));
+        rings.forEach((ring) => ring.classList.toggle("active", Number(ring.dataset.ring) === Math.min(index, 3)));
+        document.getElementById("zoomTitle").textContent = zoomData[index].title;
+        document.getElementById("zoomText").textContent = zoomData[index].text;
+      });
+    });
+
+    const planeData = {
+      product: {
+        label: "PLANE 01", title: "产品与领域平面",
+        summary: "这里定义“为什么做”和“什么算成功”。工程设计必须从业务承诺倒推，而不是从某个类名正推。",
+        owns: "任务语义、用户交互、审批体验、领域规则、成功标准。",
+        contract: "任务必须可追踪；高风险动作必须等待人类；结果需要在某个 SLO 内返回。",
+        failure: "技术组件很多，但没人能说清系统究竟保证什么、错误由谁承担。",
+        question: "用户提交的是一次聊天、一个长期任务，还是一项带副作用的业务流程？"
+      },
+      coordination: {
+        label: "PLANE 02", title: "协调与控制平面",
+        summary: "这里把开放式工作变成有边界的执行：接纳、排队、启动、等待、恢复、取消和结束。",
+        owns: "Task/Run 生命周期、工作流、调度、并发限制、重试、超时、取消、人工等待点。",
+        contract: "任何工作只能处于合法状态；失败不能悄悄丢失；负载超过能力时必须产生背压。",
+        failure: "任务重复启动、永远挂起、进程一崩就消失，或流量直接压垮模型与工具。",
+        question: "谁拥有当前状态？谁有权推进状态？一次失败创建新 Attempt 还是复用旧 Run？"
+      },
+      intelligence: {
+        label: "PLANE 03", title: "智能与 Runtime 平面",
+        summary: "这里实现 Agent 的思考与行动循环：构造上下文、调用模型、解释输出、选择并调用工具。",
+        owns: "模型客户端、推理循环、上下文窗口、工具协议、结构化输出、规划策略。",
+        contract: "接受规范化输入，发出规范化运行事件；支持中断；不私自越过工具治理边界。",
+        failure: "Harness 与某个 SDK 的内部事件耦合，换模型或 Runtime 时上层全部重写。",
+        question: "哪些能力属于 Runtime，哪些属于上层控制？Runtime 中断后能否安全恢复？"
+      },
+      state: {
+        label: "PLANE 04", title: "状态与知识平面",
+        summary: "这里回答“系统记住什么”。业务状态、事件历史、对话上下文、长期记忆和产物并不是同一种数据。",
+        owns: "事件日志、当前状态、Checkpoint、消息历史、长期记忆、检索索引、文件与产物血缘。",
+        contract: "事实不可随意改写；状态更新与关键事件保持一致；恢复数据具有明确版本。",
+        failure: "只有最终答案，没有过程；状态与历史矛盾；恢复后上下文对不上；数据版本无法升级。",
+        question: "哪一个存储是真相来源？哪些数据可以重建？哪些必须事务性保存？"
+      },
+      capability: {
+        label: "PLANE 05", title: "能力与环境平面",
+        summary: "工具把 Agent 的文字决策变成真实世界动作，因此这是风险、权限和副作用最集中的边界。",
+        owns: "工具目录、参数模式、凭据、沙箱、浏览器、代码执行、外部 API、数据访问。",
+        contract: "最小权限、参数校验、超时、结果上限、幂等键、审计；危险动作需要审批或补偿。",
+        failure: "提示注入诱导越权、重复扣款、工具无限运行、跨租户读数据或把秘密写入模型上下文。",
+        question: "这个工具是只读还是写操作？是否可逆？重复调用会怎样？凭据属于谁？"
+      },
+      platform: {
+        label: "PLANE 06", title: "平台与基础设施平面",
+        summary: "这里提供运行所需的计算、网络、模型服务和存储，并定义真正的物理故障边界。",
+        owns: "Worker、容器、推理服务、数据库、缓存、对象存储、网络、密钥服务。",
+        contract: "容量可测量、故障可探测、租约可回收、敏感资源可隔离、关键依赖有 SLO。",
+        failure: "业务状态绑在单进程内；Worker 死后资源泄露；存储故障让系统误判任务已完成。",
+        question: "最小故障单元是什么？如果任意一台机器消失，哪些业务事实会丢失？"
+      }
+    };
+
+    const planeButtons = document.querySelectorAll("[data-plane]");
+    planeButtons.forEach((button) => {
+      button.addEventListener("click", () => {
+        const data = planeData[button.dataset.plane];
+        planeButtons.forEach((item) => item.classList.toggle("active", item === button));
+        ["Label", "Title", "Summary", "Owns", "Contract", "Failure", "Question"].forEach((key) => {
+          document.getElementById(`plane${key}`).textContent = data[key.toLowerCase()];
+        });
+      });
+    });
+
+    const clockData = {
+      session: {
+        label: "INTERACTION LIFECYCLE", title: "Session 不是一次执行",
+        summary: "Session 表达一段持续关系或上下文边界。它可能包含多个任务、多次 Run，甚至跨越多个进程。",
+        answers: "“这些交互是否属于同一段关系，需要共享哪些历史？”",
+        not: "某一次工作现在是否运行、失败或排队。",
+        contains: "一个 Session → 多个 Run；一个 Run → 多个 Turn；一个 Turn → 零或多个 Tool Call。",
+        relationship: "Session 可以活几小时，Worker 可能只活几分钟。可靠系统不能把业务生命周期绑死在进程生命周期上。"
+      },
+      run: {
+        label: "WORK LIFECYCLE", title: "Task 是目标，Run 是执行",
+        summary: "Task 表达业务上要完成的工作；Run 或 Attempt 表达完成它的一次实际执行。一次 Task 可能因为重试拥有多个 Attempt。",
+        answers: "“这次工作从何时开始、现在什么状态、为何结束？”",
+        not: "完整的用户关系，也不等同于一次模型调用。",
+        contains: "一个 Task → 一个或多个 Run/Attempt；一个 Run → 多个 Turn 和 Tool Call。",
+        relationship: "把业务目标与执行尝试分开，才能清楚表达“任务没变，但第一次执行失败、第二次成功”。"
+      },
+      turn: {
+        label: "REASONING LIFECYCLE", title: "Turn / Step 是执行中的推进",
+        summary: "它通常是一次模型推理、一次计划推进，或工作流中的一个节点。不同 Runtime 对 Step 的定义可能不同。",
+        answers: "“Agent 这一步看到了什么、决定了什么、下一步是什么？”",
+        not: "整个任务已经成功，也不保证外部副作用已经提交。",
+        contains: "一次 Run 包含许多 Step；Step 可能发出 Tool Call，工具结果又成为下一 Step 的输入。",
+        relationship: "Step 属于 Runtime 的细粒度时钟；Run 属于 Harness 的业务执行时钟。二者通过事件关联。"
+      },
+      effect: {
+        label: "SIDE-EFFECT LIFECYCLE", title: "Tool Call 有自己的事务边界",
+        summary: "工具调用可能比模型推理更危险：它可能扣款、发消息、删除文件，且在超时时无法立即知道是否已成功。",
+        answers: "“外部动作是否真正发生？是否可重试？是否需要补偿？”",
+        not: "Agent 的整体意图是否正确，也不代表 Run 已完成。",
+        contains: "一个 Step → 零或多个 Tool Call；一个 Tool Call → 请求、执行、结果或未知状态。",
+        relationship: "网络超时只说明调用方没收到结果，不说明工具没执行。幂等键和对账机制因此很重要。"
+      },
+      process: {
+        label: "COMPUTE LIFECYCLE", title: "Worker 只是临时计算载体",
+        summary: "进程、容器和机器会创建、崩溃、替换。可靠系统把业务事实放在进程之外，让新 Worker 能接手。",
+        answers: "“这段代码现在在哪里运行，租约由谁持有？”",
+        not: "业务任务的真实生命周期；Worker 退出不等于 Task 失败。",
+        contains: "一个 Worker 可先后执行多个 Run；一个 Run 也可能跨多个 Worker 恢复。",
+        relationship: "业务状态持久化 + Worker 租约，才能避免进程崩溃后任务永远卡在 RUNNING。"
+      }
+    };
+
+    const clockLanes = document.querySelectorAll("[data-clock]");
+    clockLanes.forEach((lane) => {
+      lane.querySelector("button").addEventListener("click", () => {
+        const data = clockData[lane.dataset.clock];
+        clockLanes.forEach((item) => item.classList.toggle("active", item === lane));
+        ["Label", "Title", "Summary", "Answers", "Not", "Contains", "Relationship"].forEach((key) => {
+          document.getElementById(`clock${key}`).textContent = data[key.toLowerCase()];
+        });
+      });
+    });
+
+    const primitiveData = {
+      call: {
+        visual: `<div class="primitive-flow">
+          <div class="primitive-node"><strong>caller()</strong><span>停下来等待结果</span></div>
+          <div class="primitive-arrow"><i class="primitive-packet"></i></div>
+          <div class="primitive-node"><strong>handler()</strong><span>立即执行并返回</span></div>
+        </div>`,
+        problem: "最直接地复用一段逻辑，并立刻得到返回值。控制流清楚，调试简单。",
+        limit: "调用方和被调用方在时间与接口上紧耦合；慢调用会阻塞，进程崩溃后调用痕迹通常消失。",
+        agent: "控制层直接调用 runtime.start(run)，等待这次调用返回或抛错。"
+      },
+      callback: {
+        visual: `<div class="primitive-flow">
+          <div class="primitive-node"><strong>start(handler)</strong><span>先登记完成后做什么</span></div>
+          <div class="primitive-arrow"><i class="primitive-packet"></i></div>
+          <div class="primitive-node"><strong>异步工作</strong><span>稍后完成</span></div>
+          <div class="primitive-arrow"><i class="primitive-packet"></i></div>
+          <div class="primitive-node"><strong>handler(result)</strong><span>结果回来时执行</span></div>
+        </div>`,
+        problem: "工作不能立刻完成时，把“完成后做什么”的函数交给执行者，调用方无需一直同步阻塞。",
+        limit: "一个回调通常仍是一对一的进程内关系；没有自动持久化，也容易产生嵌套控制流。",
+        agent: "模型流式输出一个片段时，Runtime 调用 onToken；工具结束时调用 onToolResult。"
+      },
+      pubsub: {
+        visual: `<div class="primitive-flow">
+          <div class="primitive-node"><strong>Publisher</strong><span>只发布“发生了什么”</span></div>
+          <div class="primitive-arrow"><i class="primitive-packet"></i></div>
+          <div class="fanout">
+            <div class="primitive-node"><strong>UI handler</strong><span>刷新界面</span></div>
+            <div class="primitive-node"><strong>Audit handler</strong><span>记录审计</span></div>
+            <div class="primitive-node"><strong>Metrics handler</strong><span>计算指标</span></div>
+          </div>
+        </div>`,
+        problem: "事件源不必知道所有使用者；多个订阅者可以对同一事实做不同反应。",
+        limit: "普通进程内 pub/sub 仍可能在崩溃后丢事件；订阅顺序、错误隔离和取消订阅需要设计。",
+        agent: "Runtime 发布 tool_started，UI、持久化器和指标收集器分别订阅。"
+      },
+      queue: {
+        visual: `<div class="primitive-flow">
+          <div class="primitive-node"><strong>Producers</strong><span>任务到达速度不稳定</span></div>
+          <div class="primitive-arrow"><i class="primitive-packet"></i></div>
+          <div class="buffer" aria-label="队列中有四项任务"><i></i><i></i><i></i><i></i></div>
+          <div class="primitive-arrow"><i class="primitive-packet"></i></div>
+          <div class="primitive-node"><strong>Workers</strong><span>按自身能力消费</span></div>
+        </div>`,
+        problem: "生产者和消费者速度不一致时提供缓冲；支持异步处理、削峰、工作分配与背压。",
+        limit: "消息可能重复、乱序或被处理到一半；队列本身不等于业务状态，也不自动保证 exactly-once。",
+        agent: "大量 Task 先进入队列，有限 Worker 按配额和优先级领取 Run。"
+      },
+      log: {
+        visual: `<div class="primitive-flow">
+          <div class="primitive-node"><strong>Append</strong><span>只追加已发生事实</span></div>
+          <div class="primitive-arrow"><i class="primitive-packet"></i></div>
+          <div class="log-strip">
+            <div class="log-entry">#41 RUN_STARTED</div>
+            <div class="log-entry">#42 TOOL_REQUESTED</div>
+            <div class="log-entry">#43 TOOL_COMPLETED</div>
+          </div>
+          <div class="primitive-arrow"><i class="primitive-packet"></i></div>
+          <div class="primitive-node"><strong>Replay / Fold</strong><span>重建状态或新视图</span></div>
+        </div>`,
+        problem: "让事实跨进程存在，可审计、重放、调试，并从历史重建状态或派生新视图。",
+        limit: "事件模式演进、顺序、分区和一致性很复杂；也不是所有系统都需要完整 Event Sourcing。",
+        agent: "保存每个 Run 的关键事件，让恢复器知道已完成到哪一步，审计者知道工具为何被调用。"
+      },
+      state: {
+        visual: `<div class="primitive-flow">
+          <div class="primitive-node"><strong>QUEUED</strong><span>等待执行</span></div>
+          <div class="primitive-arrow"><i class="primitive-packet"></i></div>
+          <div class="primitive-node" style="border-color:var(--green)"><strong>RUNNING</strong><span>持有执行租约</span></div>
+          <div class="fanout">
+            <div class="primitive-arrow"></div>
+            <div class="primitive-node"><strong>COMPLETED</strong><span>终态</span></div>
+            <div class="primitive-node"><strong>FAILED</strong><span>终态或待重试</span></div>
+          </div>
+        </div>`,
+        problem: "明确当前状态和允许的转换，让非法变化在边界上被拒绝，而不是事后猜测。",
+        limit: "状态机只规定合法变化，不自动持久化，也不解释过去为何到达当前状态。",
+        agent: "Run 不能从 COMPLETED 再回到 RUNNING；中断恢复必须走定义好的路径。"
+      }
+    };
+
+    const primitiveVisual = document.getElementById("primitiveVisual");
+    const primitiveTabs = document.querySelectorAll("[data-primitive]");
+    function renderPrimitive(key) {
+      const data = primitiveData[key];
+      primitiveVisual.innerHTML = data.visual;
+      document.getElementById("primitiveProblem").textContent = data.problem;
+      document.getElementById("primitiveLimit").textContent = data.limit;
+      document.getElementById("primitiveAgent").textContent = data.agent;
+    }
+    primitiveTabs.forEach((tab) => {
+      tab.addEventListener("click", () => {
+        primitiveTabs.forEach((item) => item.setAttribute("aria-selected", String(item === tab)));
+        renderPrimitive(tab.dataset.primitive);
+      });
+    });
+    renderPrimitive("call");
+
+    const mechanismData = {
+      identity: {
+        label: "FOUNDATION 01", title: "身份与工作单元",
+        summary: "系统首先要能回答：“这是谁的哪一项工作？这次尝试和上次尝试是否相同？”没有稳定身份，后续的状态、重试、审计都无从挂载。",
+        failure: "请求重发、客户端断线、Worker 重启后，系统无法判断看到的是新任务还是旧任务。",
+        tools: "Tenant ID、Session ID、Task ID、Run ID、Attempt ID、Tool Call ID、Correlation ID。",
+        tradeoff: "业务任务与执行尝试要不要分开？如果 Run 重试，是同一个 Run 还是新的 Attempt？",
+        test: "让请求断线重发，再检查是否能准确关联到原任务且不会重复创建。",
+        guarantee: "每个重要事实都有稳定归属，跨进程仍可关联。"
+      },
+      lifecycle: {
+        label: "FOUNDATION 02", title: "生命周期与不变量",
+        summary: "状态机把“可以发生什么”写成显式规则。不变量则表达无论发生什么都必须成立的条件。",
+        failure: "重复的完成事件让已结束任务再次运行；两个 Worker 同时认为自己拥有同一个 Run。",
+        tools: "有限状态机、版本号、乐观锁、租约、Compare-and-Swap、终态保护。",
+        tradeoff: "状态应该粗到易理解，还是细到覆盖每个内部步骤？过粗不可控，过细难演进。",
+        test: "并发发送 start/cancel/complete，证明最多只有一条合法转换成功。",
+        guarantee: "每一时刻只有合法且可解释的业务状态。"
+      },
+      durability: {
+        label: "FOUNDATION 03", title: "持久性与恢复",
+        summary: "把业务生命周期从进程生命周期中解耦。进程可以消失，但已确认的事实、检查点和待办工作不能消失。",
+        failure: "Agent 执行十分钟后 Worker 崩溃，任务永远停在 RUNNING，或只能从头重做全部副作用。",
+        tools: "数据库事务、事件日志、Checkpoint、持久队列、租约超时、恢复扫描器。",
+        tradeoff: "保存得越频繁恢复损失越小，但写放大和状态版本复杂度越高。",
+        test: "在每个关键步骤后强杀 Worker，验证新 Worker 能继续且不会重复已提交动作。",
+        guarantee: "计算载体失败不会抹去已确认的业务进度。"
+      },
+      idempotency: {
+        label: "FOUNDATION 04", title: "幂等与副作用",
+        summary: "分布式系统无法彻底避免重试，因此关键不是“永不重复请求”，而是“重复请求不会重复改变业务世界”。",
+        failure: "工具已经扣款但响应丢失，系统重试后再次扣款；或同一封邮件发送两次。",
+        tools: "Idempotency Key、唯一约束、Outbox/Inbox、去重表、对账、补偿动作。",
+        tradeoff: "哪些动作天然幂等？幂等窗口多长？外部系统不支持幂等时如何对账或补偿？",
+        test: "让工具成功后故意丢弃响应，再重试相同调用，验证外部效果只出现一次。",
+        guarantee: "同一业务意图的重复交付不会产生重复副作用。"
+      },
+      backpressure: {
+        label: "FOUNDATION 05", title: "并发与背压",
+        summary: "资源永远有限。背压是在系统不能继续以当前速度消费时，主动排队、限流、降级或拒绝。",
+        failure: "一百个请求同时启动模型、浏览器和工具，导致内存耗尽、延迟雪崩并拖垮所有租户。",
+        tools: "有界队列、并发信号量、令牌桶、优先级、公平调度、熔断、Admission Control。",
+        tradeoff: "排队多久后拒绝？优先级会不会造成饥饿？公平与吞吐如何平衡？",
+        test: "持续压入超过容量的任务，验证队列有界、延迟可测、关键租户不会永久饥饿。",
+        guarantee: "负载超过容量时，系统以可预测方式变慢或拒绝，而不是整体失控。"
+      },
+      isolation: {
+        label: "FOUNDATION 06", title: "隔离与权限",
+        summary: "Agent 生成的动作不能被天然信任。工具边界需要按身份、上下文、风险和最小权限重新校验。",
+        failure: "提示注入诱导 Agent 读取其他租户文件、泄露密钥、执行危险命令或越权退款。",
+        tools: "RBAC/ABAC、租户隔离、沙箱、Capability Token、审批、参数 Schema、输出过滤。",
+        tradeoff: "隔离越强，工具能力和开发体验可能越受限；需要按风险分级。",
+        test: "伪造 tenant_id、注入越权路径、请求危险参数，验证在工具执行前被拒绝并留下审计。",
+        guarantee: "Agent 的错误决定被限制在明确的权限与故障域内。"
+      },
+      observability: {
+        label: "FOUNDATION 07", title: "可观测性与评估",
+        summary: "普通日志只说代码发生了什么；Agent 观测还要关联输入、模型、提示版本、轨迹、工具、副作用、成本和结果质量。",
+        failure: "任务失败只能看到 500；无法区分是模型判断错、工具超时、策略拒绝还是上下文污染。",
+        tools: "结构化事件、Trace/Span、Metrics、日志、成本账本、轨迹回放、离线/在线评估。",
+        tradeoff: "记录越多越可调试，但成本、隐私和敏感数据风险越高。",
+        test: "从一个用户投诉反向定位到 Run、模型调用、工具参数、策略决定和最终外部效果。",
+        guarantee: "系统行为可以被解释、定位、衡量并持续改进。"
+      },
+      economics: {
+        label: "FOUNDATION 08", title: "配额、成本与公平",
+        summary: "多用户系统不只追求最高吞吐，还要决定谁先得到稀缺资源、谁为成本负责、怎样避免一个主体占满系统。",
+        failure: "一个租户提交大量长任务，其他用户永远等待；预算失控但无法归因到具体任务。",
+        tools: "Quota、Budget、Rate Limit、Weighted Fair Queue、优先级老化、成本归因、资源估算。",
+        tradeoff: "效率、公平、优先级与 SLA 常常冲突；策略需要可解释并能审计。",
+        test: "同时压入不同租户和优先级任务，验证配额、等待上限和成本归因符合策略。",
+        guarantee: "有限资源按可解释策略分配，成本能够归属和约束。"
+      }
+    };
+
+    const mechanismButtons = document.querySelectorAll("[data-mechanism]");
+    mechanismButtons.forEach((button) => {
+      button.addEventListener("click", () => {
+        const data = mechanismData[button.dataset.mechanism];
+        mechanismButtons.forEach((item) => item.classList.toggle("active", item === button));
+        ["Label", "Title", "Summary", "Failure", "Tools", "Tradeoff", "Test", "Guarantee"].forEach((key) => {
+          document.getElementById(`mechanism${key}`).textContent = data[key.toLowerCase()];
+        });
+      });
+    });
+
+    const guardIds = ["guardIdempotency", "guardCheckpoint", "guardBackpressure", "guardIsolation"];
+    document.getElementById("simulateFailure").addEventListener("click", () => {
+      const values = Object.fromEntries(guardIds.map((id) => [id, document.getElementById(id).checked]));
+      const failures = [];
+      const money = document.getElementById("healthMoney");
+      const recovery = document.getElementById("healthRecovery");
+      const load = document.getElementById("healthLoad");
+      const access = document.getElementById("healthAccess");
+      const nodes = ["failureIngress", "failureHarness", "failureWorker", "failureTool"].map((id) => document.getElementById(id));
+      [...nodes, money, recovery, load, access].forEach((item) => item.classList.remove("danger", "bad"));
+
+      if (values.guardIdempotency) {
+        money.querySelector("strong").textContent = "1×";
+      } else {
+        money.querySelector("strong").textContent = "2×";
+        money.classList.add("bad");
+        document.getElementById("failureTool").classList.add("danger");
+        failures.push("响应在退款成功后丢失，重试再次退款：外部副作用重复。");
+      }
+
+      if (values.guardCheckpoint) {
+        recovery.querySelector("strong").textContent = "可恢复";
+      } else {
+        recovery.querySelector("strong").textContent = "进度丢失";
+        recovery.classList.add("bad");
+        document.getElementById("failureWorker").classList.add("danger");
+        failures.push("Worker 崩溃后没有已确认位置，任务只能从头重做或永久卡住。");
+      }
+
+      if (values.guardBackpressure) {
+        load.querySelector("strong").textContent = "稳定";
+      } else {
+        load.querySelector("strong").textContent = "过载";
+        load.classList.add("bad");
+        document.getElementById("failureIngress").classList.add("danger");
+        document.getElementById("failureHarness").classList.add("danger");
+        failures.push("突发请求全部直接启动，Worker 与工具池被压满，延迟形成雪崩。");
+      }
+
+      if (values.guardIsolation) {
+        access.querySelector("strong").textContent = "隔离";
+      } else {
+        access.querySelector("strong").textContent = "越权";
+        access.classList.add("bad");
+        document.getElementById("failureTool").classList.add("danger");
+        failures.push("工具相信了 Agent 传来的租户参数，读取了不属于当前用户的订单。");
+      }
+
+      const incident = document.getElementById("incidentText");
+      if (failures.length === 0) {
+        incident.innerHTML = "<strong>故障被工程机制限制住了</strong>Worker 虽然崩溃、请求虽然重复且突发，但业务副作用只发生一次，任务可以恢复，负载得到缓冲，数据边界没有被突破。";
+      } else {
+        incident.innerHTML = `<strong>出现 ${failures.length} 个可预见事故</strong>${failures.join(" ")}`;
+      }
+    });
+
+    const journeyData = [
+      {
+        label: "STEP 01 · INTENT", title: "接收意图，但先不要直接执行",
+        summary: "入口接到的是“想做什么”，还不是“已经做成了什么”。系统要保留原始请求和发起者身份。",
+        question: "工程问题：如果客户端因为超时重发同一个请求，我们怎样识别它？",
+        record: "command:\n  type: REQUEST_REFUND\n  request_id: req_7f2\n  actor_id: user_42",
+        creates: "Command / Intent", notYet: "任务已被接受，更没有保证退款已发生。"
+      },
+      {
+        label: "STEP 02 · ADMISSION", title: "先判断是否允许进入系统",
+        summary: "Admission Control 检查身份、权限、配额、预算和风险等级，可能接受、拒绝或要求人工确认。",
+        question: "工程问题：系统已过载或用户无权限时，是排队、降级还是立即拒绝？",
+        record: "decision:\n  subject: user_42\n  policy: refund-under-500\n  outcome: ACCEPT",
+        creates: "Policy Decision / Audit Event", notYet: "任务已经开始执行。"
+      },
+      {
+        label: "STEP 03 · UNIT OF WORK", title: "把意图变成可追踪的工作单元",
+        summary: "系统创建稳定的 Task/Run 身份和初始状态。以后所有事件、成本、工具调用和恢复都关联到它。",
+        question: "工程问题：重试应创建新 Attempt，还是覆盖原来的 Run？",
+        record: "task_id: task_91\nrun_id: run_91_a1\nstate: QUEUED\nversion: 1",
+        creates: "Task、Run、初始状态与 RUN_CREATED", notYet: "Run 已经占用 Worker。"
+      },
+      {
+        label: "STEP 04 · SCHEDULING", title: "决定何时以及在哪里执行",
+        summary: "调度器根据容量、优先级、租户配额、数据位置和 Worker 能力授予执行租约。",
+        question: "工程问题：Worker 领取任务后崩溃，谁发现租约过期并重新分配？",
+        record: "lease:\n  run_id: run_91_a1\n  worker_id: worker_12\n  expires_at: 10:31:00Z",
+        creates: "Lease / Assignment / RUN_STARTED", notYet: "Agent 已经做出正确决策。"
+      },
+      {
+        label: "STEP 05 · REASONING", title: "Runtime 承载 Agent 的推理循环",
+        summary: "Runtime 组装上下文、调用模型、解释工具请求。Harness 关注规范化事件和边界，不必理解每个 SDK 的内部细节。",
+        question: "工程问题：模型输出不可预测时，哪些内容允许自由决定，哪些必须由确定性代码守住？",
+        record: "runtime_event:\n  type: TOOL_REQUESTED\n  tool: lookup_order\n  turn: 3",
+        creates: "Turn、Model Call、Tool Request", notYet: "工具请求一定可以被执行。"
+      },
+      {
+        label: "STEP 06 · TOOL GOVERNANCE", title: "在副作用边界重新校验",
+        summary: "工具层不盲目信任模型。它检查 Schema、授权范围、风险、审批、预算和幂等键。",
+        question: "工程问题：提示注入让 Agent 请求其他租户订单时，在哪一层阻止？",
+        record: "tool_policy:\n  scope: tenant_8/orders\n  risk: financial_write\n  approval: granted",
+        creates: "Policy Decision / TOOL_APPROVED", notYet: "退款已经在支付系统完成。"
+      },
+      {
+        label: "STEP 07 · SIDE EFFECT", title: "执行真实世界动作并处理未知结果",
+        summary: "退款工具使用幂等键调用外部系统。超时时结果可能是“未知”，不能简单当成失败并无脑重试。",
+        question: "工程问题：调用超时后，退款到底有没有发生？怎样对账？",
+        record: "tool_call:\n  idempotency_key: refund_order_63\n  status: COMMITTED\n  external_ref: pay_882",
+        creates: "外部副作用 + TOOL_COMMITTED", notYet: "整个 Agent 任务已经完成。"
+      },
+      {
+        label: "STEP 08 · RECORD & FEEDBACK", title: "同时更新事实、视图和观测",
+        summary: "关键事件持久化，当前状态更新，Trace 关联成本与延迟，评估系统记录结果质量所需的轨迹。",
+        question: "工程问题：事件已写入但状态视图更新失败时，怎样恢复一致？",
+        record: "event: TOOL_COMPLETED\nsequence: 18\nstate_projection: RUNNING\ntrace_id: tr_19",
+        creates: "Event、State Projection、Trace、Cost Entry", notYet: "用户已经收到最终回答。"
+      },
+      {
+        label: "STEP 09 · COMPLETE OR WAIT", title: "任务可以结束，也可以进入等待",
+        summary: "系统根据结果进入 COMPLETED、FAILED、WAITING_HUMAN、RETRY_SCHEDULED 等状态，并向调用方发出可追踪结果。",
+        question: "工程问题：完成事件成功写入，但返回用户的网络响应丢失，会发生什么？",
+        record: "event: RUN_COMPLETED\nresult_ref: artifact_203\nfinal_state: COMPLETED\nversion: 12",
+        creates: "终态事件、结果引用、通知", notYet: "历史可以被删除；审计和评估仍可能需要它。"
+      }
+    ];
+
+    const journeyPositions = [
+      [16, 16], [49, 16], [82, 16],
+      [82, 47], [49, 47], [16, 47],
+      [16, 79], [49, 79], [82, 79]
+    ];
+    const journeyButtons = document.querySelectorAll("[data-step]");
+    const journeyNodes = document.querySelectorAll("[data-journey-node]");
+    const journeyPacket = document.getElementById("journeyPacket");
+    function setJourney(index) {
+      const data = journeyData[index];
+      journeyButtons.forEach((button) => button.classList.toggle("active", Number(button.dataset.step) === index));
+      journeyNodes.forEach((node) => node.classList.toggle("active", Number(node.dataset.journeyNode) === index));
+      ["Label", "Title", "Summary", "Question", "Record", "Creates", "NotYet"].forEach((key) => {
+        document.getElementById(`journey${key}`).textContent = data[key.charAt(0).toLowerCase() + key.slice(1)];
+      });
+      journeyPacket.style.left = `calc(${journeyPositions[index][0]}% - 7px)`;
+      journeyPacket.style.top = `calc(${journeyPositions[index][1]}% - 7px)`;
+    }
+    journeyButtons.forEach((button) => button.addEventListener("click", () => setJourney(Number(button.dataset.step))));
+    setJourney(0);
+
+    const patternData = {
+      embedded: {
+        label: "SHAPE 01", title: "嵌入式 Harness Library",
+        summary: "Harness 作为应用中的库，直接调用模型和工具。部署简单，边界也最少，适合先验证真实需求。",
+        truth: "通常是应用数据库与进程内状态。",
+        failure: "应用崩溃会同时终止 Agent 执行；长任务恢复能力有限。",
+        signal: "任务越来越长、多个应用要共享、失败需要恢复时，考虑拆成服务或工作流。",
+        ops: "低", durability: "低", scale: "小"
+      },
+      service: {
+        label: "SHAPE 02", title: "独立 Agent Service",
+        summary: "把 Agent 执行和控制封装成独立服务，产品通过 API 或流式连接使用。Runtime 与业务应用开始解耦。",
+        truth: "Agent 服务数据库；业务结果仍可能由产品数据库持有。",
+        failure: "网络边界引入超时、重复请求和版本兼容；必须定义幂等 API。",
+        signal: "任务需要跨进程恢复、等待人工或复杂重试时，引入持久工作流。",
+        ops: "中", durability: "中", scale: "团队"
+      },
+      durable: {
+        label: "SHAPE 03", title: "Durable Workflow-backed Harness",
+        summary: "把长任务拆成可持久恢复的步骤，显式表达等待、重试、超时、人工确认和补偿。",
+        truth: "工作流历史或事件存储成为执行进度的事实来源。",
+        failure: "非确定性 Agent 逻辑和确定性工作流重放边界若混乱，会造成难以恢复的历史不兼容。",
+        signal: "吞吐和组件数量继续增长、多个下游需要独立消费时，再考虑事件驱动拆分。",
+        ops: "中高", durability: "高", scale: "多团队"
+      },
+      event: {
+        label: "SHAPE 04", title: "事件驱动分布式 Harness",
+        summary: "接纳、调度、Runtime、工具、审计与观测通过持久消息和事件解耦，可独立扩展。",
+        truth: "事件日志与各服务投影共同表达事实；必须明确最终权威来源。",
+        failure: "重复、乱序、延迟、事件版本和跨服务一致性成为主要复杂度。",
+        signal: "组织需要统一身份、配额、成本、Runtime 接入和治理时，向平台化演进。",
+        ops: "高", durability: "高", scale: "大型"
+      },
+      platform: {
+        label: "SHAPE 05", title: "多租户 Agent Platform",
+        summary: "组织级平台统一承载不同 Agent、模型、工具和产品，提供标准身份、治理、成本、观测与执行接口。",
+        truth: "平台控制面与各业务域共同拥有不同层次的事实，需要清晰数据所有权。",
+        failure: "抽象过早会限制业务；治理太弱又会使平台只剩一层昂贵代理。",
+        signal: "它通常是演进结果，不是第一天目标；持续根据真实共享需求扩展。",
+        ops: "很高", durability: "高", scale: "组织"
+      }
+    };
+
+    const patternButtons = document.querySelectorAll("[data-pattern]");
+    patternButtons.forEach((button) => {
+      button.addEventListener("click", () => {
+        const data = patternData[button.dataset.pattern];
+        patternButtons.forEach((item) => item.classList.toggle("active", item === button));
+        ["Label", "Title", "Summary", "Truth", "Failure", "Signal"].forEach((key) => {
+          document.getElementById(`pattern${key}`).textContent = data[key.toLowerCase()];
+        });
+        document.getElementById("axisOps").textContent = data.ops;
+        document.getElementById("axisDurability").textContent = data.durability;
+        document.getElementById("axisScale").textContent = data.scale;
+      });
+    });
+
+    const realArchitectureData = {
+      openai: {
+        stageTitle: "OpenAI Agents SDK：代码拥有控制权",
+        stageSubtitle: "核心很小，复杂编排仍然使用普通代码表达",
+        kind: "Embedded SDK",
+        label: "LOOP-FIRST / EMBEDDED",
+        title: "OpenAI Agents SDK",
+        summary: "以少量原语组织 Agent、工具、guardrail、handoff 和 Runner。它刻意让普通语言代码继续拥有编排控制，而不是要求先把一切声明成图。",
+        control: "Runner 管理单次 Agent loop；跨 Run、分支和更高层流程主要由应用代码组织。",
+        truth: "Session 保存跨 Run 的对话历史；Trace 保存运行观测。二者不是同一类状态。",
+        recovery: "SDK 提供多种 Session 后端；跨进程的长时持久执行由 Temporal、Dapr、Restate 等集成补足。",
+        borrow: "保持核心抽象少；把“manager 调 specialist”和“handoff 后 specialist 接管”明确区分。",
+        interpretation: "适合把 Agent 当作应用内能力；如果任务必须跨进程、跨小时可靠恢复，不应误把会话记忆当成持久工作流。",
+        captionTitle: "核心循环",
+        caption: "Runner 调用当前 Agent；模型产生最终答案、工具调用或 handoff；工具结果重新进入循环，直到满足停止条件。",
+        activeNode: 1,
+        nodes: [
+          ["Application", "业务代码决定何时运行"],
+          ["Runner", "驱动 Agent loop"],
+          ["Agent", "instructions + model + tools"],
+          ["Tools / Handoffs", "行动或移交控制权"],
+          ["Session / Trace", "历史与观测"]
+        ],
+        sources: [
+          ["官方概览", "https://openai.github.io/openai-agents-python/"],
+          ["Runner 与持久集成", "https://openai.github.io/openai-agents-python/running_agents/"],
+          ["Sessions", "https://openai.github.io/openai-agents-python/sessions/"]
+        ]
+      },
+      langgraph: {
+        stageTitle: "LangGraph：状态图是执行骨架",
+        stageSubtitle: "每一步读写显式 State，Checkpointer 保存 superstep 快照",
+        kind: "Orchestration Runtime",
+        label: "STATE-GRAPH / DURABLE",
+        title: "LangGraph",
+        summary: "以 StateGraph、节点和边表达长时、有状态 Agent。图编译后由 Runtime 推进，线程与 Checkpoint 把多次执行连接成可恢复历史。",
+        control: "节点和条件边约束可能路径；节点内部仍可使用 LLM 做动态决策，Command 可以更新状态并改变路由。",
+        truth: "线程中的图状态 Checkpoint 是恢复基准；每个 superstep 都可保存状态快照。",
+        recovery: "持久 Checkpointer 支持失败后继续、interrupt 等待外部输入、时间旅行和从任意 Checkpoint 分叉。",
+        borrow: "把“可检查的状态”和“下一步路由”显式化；Human-in-the-loop 不是阻塞线程，而是保存状态后暂停。",
+        interpretation: "适合你已经能画出状态和关键节点的任务；如果流程极短且主要靠普通代码，图本身可能成为额外认知成本。",
+        captionTitle: "Checkpoint 边界",
+        caption: "输入进入指定 thread；节点读取 State 并返回增量；Runtime 合并状态、写入 Checkpoint，再根据边选择下一节点。interrupt 会在持久化后等待 resume Command。",
+        activeNode: 3,
+        nodes: [
+          ["Input / Command", "携带 thread_id"],
+          ["StateGraph", "节点、边与 reducer"],
+          ["Node Execution", "模型、工具或确定逻辑"],
+          ["Checkpointer", "保存 superstep 状态"],
+          ["Interrupt / Resume", "等待、恢复或分叉"]
+        ],
+        sources: [
+          ["官方概览", "https://docs.langchain.com/oss/python/langgraph/overview"],
+          ["Persistence", "https://docs.langchain.com/oss/python/langgraph/persistence"],
+          ["Interrupts", "https://docs.langchain.com/oss/python/langgraph/interrupts"]
+        ]
+      },
+      adk: {
+        stageTitle: "Google ADK：Runner 在事件提交后才让 Agent 继续",
+        stageSubtitle: "执行逻辑负责 yield Event，Service 负责保存共享资源",
+        kind: "Event-driven Runtime",
+        label: "RUNNER / EVENT / SERVICES",
+        title: "Google Agent Development Kit",
+        summary: "ADK 将 Runtime 明确拆成 Runner、Execution Logic、Event 与 Services。Agent、Tool、Callback 产生事件；Runner 处理事件动作并协调持久服务。",
+        control: "Runner 驱动一次 Invocation 的 event loop；Agent hierarchy、AgentTool 和 workflow agents 决定内部协作方式。",
+        truth: "SessionService 管理 Session 的 state 与 event history；ArtifactService 与 MemoryService 分别拥有产物和长期记忆。",
+        recovery: "持久性取决于所选 Service 实现和部署；架构通过统一 Service 接口把内存实现与持久实现分开。",
+        borrow: "让 Agent 只表达 state_delta、artifact_delta 等意图，由 Runner 提交后再恢复 Agent，形成清晰的一致性边界。",
+        interpretation: "它很适合学习“事件不是日志装饰”：Event 是 Runner 与执行逻辑之间的控制协议，也是状态提交载体。",
+        captionTitle: "事件提交循环",
+        caption: "Runner 调用 Agent；Agent yield Event；Runner 读取 Event.actions，通过 Session/Artifact Service 提交变化并向上游转发；提交完成后 Agent 才继续。",
+        activeNode: 3,
+        nodes: [
+          ["Client", "发起一次 Invocation"],
+          ["Runner", "拥有 event loop"],
+          ["Execution Logic", "Agent + Tool + Callback"],
+          ["Event", "消息与 state delta"],
+          ["Services", "Session / Artifact / Memory"]
+        ],
+        sources: [
+          ["Runtime Event Loop", "https://adk.dev/runtime/event-loop/"],
+          ["Sessions", "https://adk.dev/sessions/"],
+          ["ADK GitHub", "https://github.com/google/adk-python"]
+        ]
+      },
+      microsoft: {
+        stageTitle: "Microsoft Agent Framework：开放式 Agent 嵌入确定性 Workflow",
+        stageSubtitle: "Executor Graph 采用 superstep，Agent 只是其中一种执行单元",
+        kind: "Agent + Workflow",
+        label: "DUAL ABSTRACTION / SUPERSTEP",
+        title: "Microsoft Agent Framework",
+        summary: "框架明确区分 Agent 与 Workflow：Agent 的步骤由 LLM 动态决定；Workflow 用 executors、edges 或 async functions 显式表达业务流程。",
+        control: "简单流程可用 Functional Workflow；固定拓扑可用 graph。Graph 在每个 superstep 收集消息、并行执行目标 executor，再越过同步屏障。",
+        truth: "Conversation 保存多轮 Agent 状态；Workflow checkpoint 捕获 executor 状态、待处理消息、请求响应和共享状态。",
+        recovery: "标准 Workflow 可在 superstep 边界 Checkpoint；Durable Extension 进一步把进度放到分布式 Durable Task 基础设施。",
+        borrow: "不要试图让 LLM 决定所有业务步骤：把稳定流程放在 Workflow，把开放判断留给 Agent executor。",
+        interpretation: "这是“确定性外骨骼 + 非确定性节点”的典型设计，适合企业流程、审批和多 Agent 编排。",
+        captionTitle: "Superstep 执行模型",
+        caption: "上一 superstep 的消息被统一路由；本轮目标 executors 并行执行；全部完成后形成同步屏障与 Checkpoint，再进入下一 superstep。",
+        activeNode: 3,
+        nodes: [
+          ["Input Messages", "进入 Workflow Run"],
+          ["Router / Edges", "类型化消息路由"],
+          ["Executors", "Agent 或确定性代码"],
+          ["Superstep Barrier", "并行完成后统一推进"],
+          ["Checkpoint / Events", "恢复与观测"]
+        ],
+        sources: [
+          ["Workflows", "https://learn.microsoft.com/en-us/agent-framework/workflows/"],
+          ["执行与 Supersteps", "https://learn.microsoft.com/en-us/agent-framework/workflows/workflows"],
+          ["Durable Extension", "https://learn.microsoft.com/en-us/agent-framework/integrations/durable-extension"]
+        ]
+      },
+      temporal: {
+        stageTitle: "Temporal：把故障恢复变成编程模型",
+        stageSubtitle: "Workflow 保存确定性控制状态，LLM 与工具作为 Activities 执行",
+        kind: "Durable Execution Platform",
+        label: "DURABLE WORKFLOW / HISTORY",
+        title: "Temporal",
+        summary: "Temporal 不是 Agent SDK，而是通用持久执行平台。它把 Orchestrator Workflow 的历史持久化，并把模型、工具、外部 API 等不可靠动作隔离为 Activities。",
+        control: "Workflow 代码拥有确定性控制流；Agent plan–act–observe loop 可以写在 Workflow 中，也可以由上层 Agent SDK 负责。",
+        truth: "不可变 Workflow History 是执行真相；Worker 可通过历史重放恢复本地 Workflow 状态。",
+        recovery: "Activity 有超时、重试和心跳；Signal/Update 支持长时间等待人类或外部事件；Worker 崩溃不等于 Workflow 消失。",
+        borrow: "把“决定下一步”的纯控制逻辑与“可能失败且有副作用”的 Activity 分开；恢复依赖历史，而不是依赖原进程。",
+        interpretation: "当任务跨小时/天、涉及审批或高价值副作用时，它能补上许多 Agent SDK 不负责的可靠性；代价是确定性与版本演进约束。",
+        captionTitle: "持久大脑与不可靠 Activities",
+        caption: "Client 启动 Workflow；Temporal Service 记录每次调度与结果；Worker 重放 History 恢复控制状态；LLM/Tool 作为 Activity 执行，结果写回 History。",
+        activeNode: 1,
+        nodes: [
+          ["Client / Signal", "消息、审批或外部事件"],
+          ["Workflow History", "不可变执行事实"],
+          ["Orchestrator", "确定性控制逻辑"],
+          ["Activities", "LLM、Tool、API"],
+          ["Workers", "可崩溃、可替换"]
+        ],
+        sources: [
+          ["AI Reference Architecture", "https://go.temporal.io/platform-hub/ai-engineering/ai-reference-architecture"],
+          ["AI Engineering", "https://go.temporal.io/platform-hub/ai-engineering"],
+          ["Temporal Overview", "https://temporal.io/"]
+        ]
+      },
+      openhands: {
+        stageTitle: "OpenHands：Agent 与隔离 Workspace 一起成为运行单元",
+        stageSubtitle: "HTTP 控制面、Conversation、WebSocket Event Stream、容器执行环境",
+        kind: "Sandboxed Agent Server",
+        label: "WORKSPACE / SANDBOX-FIRST",
+        title: "OpenHands Agent Server",
+        summary: "面向软件工程 Agent，OpenHands 把远程 Agent Server 与隔离 Workspace 放在架构中心。客户端管理 Conversation，服务端把执行路由到本地、Docker 或远程 Workspace。",
+        control: "Conversation handler 管理会话与并发请求；Agent 在 Workspace 中执行工具，事件通过 WebSocket 持续返回客户端。",
+        truth: "Conversation history 与 Event stream 描述 Agent 过程；Workspace 文件系统承载大量任务产物和环境状态。",
+        recovery: "RemoteConversation 负责连接与重连；Agent Server 管理容器生命周期、资源限制与清理。更强业务级恢复仍需看部署和持久化设计。",
+        borrow: "对于 Coding Agent，环境不是普通 Tool 的附属品；Workspace 身份、隔离、生命周期和资源回收本身就是 Harness 核心。",
+        interpretation: "它展示了另一种系统重心：对代码 Agent 来说，真正昂贵且危险的状态往往在文件系统、依赖和运行进程中，而不只在消息历史里。",
+        captionTitle: "远程 Workspace 调度",
+        caption: "Client 通过 HTTP 创建/控制 Conversation；Agent Server 选择 Workspace 类型并维护连接；工具在隔离环境中执行；观察结果进入 Event stream 并通过 WebSocket 返回。",
+        activeNode: 3,
+        nodes: [
+          ["Client", "创建与控制 Conversation"],
+          ["Agent Server", "HTTP / auth / routing"],
+          ["Conversation Handler", "状态与事件流"],
+          ["Workspace Manager", "本地 / Docker / Remote"],
+          ["Sandbox Tools", "Shell、文件、浏览器"]
+        ],
+        sources: [
+          ["Agent Server Architecture", "https://docs.openhands.dev/sdk/arch/agent-server"],
+          ["SDK Agent API", "https://docs.openhands.dev/sdk/api-reference/openhands.sdk.agent"],
+          ["OpenHands SDK", "https://www.openhands.dev/product/sdk"]
+        ]
+      },
+      letta: {
+        stageTitle: "Letta：Agent 本身是数据库中的长期状态实体",
+        stageSubtitle: "客户端只发送新消息，服务端维护历史、Memory 与上下文层级",
+        kind: "Stateful Agent Service",
+        label: "MEMORY-FIRST / STATEFUL",
+        title: "Letta",
+        summary: "Letta 把 Agent 定义为有状态服务，而不是无状态模型调用。Agent 具有持久消息历史、可编辑 Memory Blocks、文件、archival memory 与工具规则。",
+        control: "服务端 Agent loop 处理新消息；Agent 可通过内置 memory tools 主动修改自己的 Memory Block 和检索外部记忆。",
+        truth: "服务器数据库中的 Agent state 是真相；客户端不需要每次重发完整对话。Memory Block 是始终进入上下文的结构化持久状态。",
+        recovery: "Agent state 与历史由服务持久化；AgentFile 可以序列化模型配置、历史、Memory、工具与规则以迁移或版本控制。",
+        borrow: "明确区分始终可见的核心记忆、按需打开的文件、可搜索归档记忆和外部 RAG；不要把所有记忆都塞进同一数组。",
+        interpretation: "适合长期关系和持续演化的 Agent。它解决的是“这个 Agent 以后还是不是同一个 Agent”，不等同于持久业务工作流。",
+        captionTitle: "上下文层级",
+        caption: "Client 只发送新消息；服务端加载 Agent state；核心 Memory Blocks 始终进上下文，Files/Archival/External RAG 按需检索；Agent 可用工具更新自己的记忆。",
+        activeNode: 1,
+        nodes: [
+          ["New Message", "客户端只发送增量"],
+          ["Stateful Agent", "数据库中的长期实体"],
+          ["Agent Loop", "模型与工具决策"],
+          ["Memory Hierarchy", "Blocks / Files / Archive"],
+          ["Persistent Store", "历史、配置与工具规则"]
+        ],
+        sources: [
+          ["Stateful Agent 概念", "https://docs.letta.com/guides/get-started/for-agents"],
+          ["Memory Blocks", "https://docs.letta.com/guides/core-concepts/memory/memory-blocks"],
+          ["Context Hierarchy", "https://docs.letta.com/guides/core-concepts/memory/context-hierarchy"]
+        ]
+      },
+      anthropic: {
+        stageTitle: "Anthropic Managed Agents：把 Harness 控制面做成托管资源",
+        stageSubtitle: "版本化 Agent + Environment + Session 状态机 + 双向 Event Stream",
+        kind: "Managed Control Plane",
+        label: "MANAGED SESSION / ENVIRONMENT",
+        title: "Anthropic Managed Agents",
+        summary: "托管架构把 Agent 定义、Environment 与 Session 分离。Agent 是版本化配置；Environment 定义执行环境；Session 是维护历史并接收事件的运行实例。",
+        control: "用户和系统向 Session 发送事件；托管 loop 运行并发出 session、agent 与 span events。Session 在 idle、running、rescheduling、terminated 之间变化。",
+        truth: "Session event history 和状态机是托管运行事实；Agent version 是配置来源；Environment/Sandbox 保存执行环境状态。",
+        recovery: "瞬时错误进入 rescheduling；idle Session 的 Sandbox 会 checkpoint，之后发送新 user.message 可恢复环境与历史。",
+        borrow: "把“Agent 配置版本”“执行环境”“一次长期 Session”拆成独立资源；工具权限策略决定自动执行还是暂停等待确认。",
+        interpretation: "这是从嵌入式 SDK 走向托管控制面的典型形态：调用方少维护基础设施，但接受平台定义的状态机、保留期和资源边界。",
+        captionTitle: "托管 Session 状态机",
+        caption: "版本化 Agent 与 Environment 组合创建 Session；user events 驱动运行；session/agent/span events 向外流出；工具确认可以暂停；idle 后 Sandbox checkpoint 支持后续恢复。",
+        activeNode: 2,
+        nodes: [
+          ["Agent Version", "model、system、tools"],
+          ["Environment", "Sandbox 与执行配置"],
+          ["Session", "idle / running / rescheduling"],
+          ["Event Stream", "双向控制与观测"],
+          ["Checkpoint / Resume", "历史与 Sandbox 状态"]
+        ],
+        sources: [
+          ["Start a Session", "https://platform.claude.com/docs/en/managed-agents/sessions"],
+          ["Event Stream", "https://platform.claude.com/docs/en/managed-agents/events-and-streaming"],
+          ["Permission Policies", "https://platform.claude.com/docs/en/managed-agents/permission-policies"]
+        ]
+      }
+    };
+
+    const realTabs = document.querySelectorAll("[data-real]");
+    const realFlowNodes = document.querySelectorAll("#realFlow .real-flow-node");
+    function renderRealArchitecture(key) {
+      const data = realArchitectureData[key];
+      document.getElementById("realStageTitle").textContent = data.stageTitle;
+      document.getElementById("realStageSubtitle").textContent = data.stageSubtitle;
+      document.getElementById("realKind").textContent = data.kind;
+      document.getElementById("realLabel").textContent = data.label;
+      document.getElementById("realTitle").textContent = data.title;
+      document.getElementById("realSummary").textContent = data.summary;
+      document.getElementById("realControl").textContent = data.control;
+      document.getElementById("realTruth").textContent = data.truth;
+      document.getElementById("realRecovery").textContent = data.recovery;
+      document.getElementById("realBorrow").textContent = data.borrow;
+      document.getElementById("realInterpretation").textContent = data.interpretation;
+      document.getElementById("realCaptionTitle").textContent = data.captionTitle;
+      document.getElementById("realCaption").textContent = data.caption;
+      data.nodes.forEach((node, index) => {
+        document.getElementById(`realNode${index + 1}Title`).textContent = node[0];
+        document.getElementById(`realNode${index + 1}Text`).textContent = node[1];
+        realFlowNodes[index].classList.toggle("active", index === data.activeNode);
+      });
+      const sourceContainer = document.getElementById("realSources");
+      sourceContainer.replaceChildren();
+      data.sources.forEach(([label, url]) => {
+        const link = document.createElement("a");
+        link.href = url;
+        link.target = "_blank";
+        link.rel = "noreferrer";
+        link.textContent = label;
+        sourceContainer.appendChild(link);
+      });
+    }
+    realTabs.forEach((tab) => {
+      tab.addEventListener("click", () => {
+        realTabs.forEach((item) => item.classList.toggle("active", item === tab));
+        renderRealArchitecture(tab.dataset.real);
+      });
+    });
+    renderRealArchitecture("openai");
+  </script>
+</body>
+</html>

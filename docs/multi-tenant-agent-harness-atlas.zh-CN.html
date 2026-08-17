@@ -1,0 +1,2421 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="color-scheme" content="dark" />
+  <title>多租户 Agent 任务服务技术架构图谱</title>
+  <style>
+    :root {
+      --bg: #07100f;
+      --bg-deep: #040a0a;
+      --panel: rgba(12, 27, 25, 0.87);
+      --panel-2: rgba(17, 37, 34, 0.84);
+      --ink: #edf9f5;
+      --muted: #98aea7;
+      --faint: #607971;
+      --line: rgba(155, 196, 183, 0.17);
+      --line-strong: rgba(155, 196, 183, 0.34);
+      --mint: #62f0bf;
+      --mint-soft: rgba(98, 240, 191, 0.12);
+      --amber: #ffc46b;
+      --amber-soft: rgba(255, 196, 107, 0.12);
+      --blue: #75c7ff;
+      --blue-soft: rgba(117, 199, 255, 0.11);
+      --violet: #b6a7ff;
+      --violet-soft: rgba(182, 167, 255, 0.11);
+      --red: #ff8f9e;
+      --red-soft: rgba(255, 143, 158, 0.1);
+      --radius: 18px;
+      --shadow: 0 24px 80px rgba(0, 0, 0, 0.33);
+      --mono: "SFMono-Regular", "Cascadia Code", "Roboto Mono", Consolas, monospace;
+      --sans: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI",
+        "PingFang SC", "Microsoft YaHei", sans-serif;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html {
+      scroll-behavior: smooth;
+    }
+
+    body {
+      margin: 0;
+      min-width: 320px;
+      color: var(--ink);
+      background:
+        radial-gradient(circle at 12% 0%, rgba(98, 240, 191, 0.11), transparent 28rem),
+        radial-gradient(circle at 88% 18%, rgba(255, 196, 107, 0.08), transparent 32rem),
+        linear-gradient(180deg, #081412 0%, var(--bg) 40%, var(--bg-deep) 100%);
+      font-family: var(--sans);
+      font-size: 17px;
+      line-height: 1.65;
+    }
+
+    body::before {
+      position: fixed;
+      inset: 0;
+      z-index: -2;
+      pointer-events: none;
+      content: "";
+      opacity: 0.3;
+      background-image:
+        linear-gradient(var(--line) 1px, transparent 1px),
+        linear-gradient(90deg, var(--line) 1px, transparent 1px);
+      background-size: 52px 52px;
+      mask-image: linear-gradient(to bottom, black, transparent 80%);
+    }
+
+    a {
+      color: inherit;
+    }
+
+    button,
+    select {
+      font: inherit;
+    }
+
+    button {
+      color: inherit;
+    }
+
+    button:focus-visible,
+    a:focus-visible,
+    select:focus-visible {
+      outline: 3px solid rgba(98, 240, 191, 0.54);
+      outline-offset: 3px;
+    }
+
+    .skip {
+      position: fixed;
+      top: 12px;
+      left: 12px;
+      z-index: 100;
+      padding: 8px 13px;
+      color: #04100c;
+      background: var(--mint);
+      border-radius: 8px;
+      transform: translateY(-160%);
+    }
+
+    .skip:focus {
+      transform: translateY(0);
+    }
+
+    .shell {
+      width: min(1440px, calc(100% - 48px));
+      margin: 0 auto;
+    }
+
+    .topbar {
+      position: sticky;
+      top: 0;
+      z-index: 30;
+      border-bottom: 1px solid var(--line);
+      background: rgba(4, 10, 10, 0.84);
+      backdrop-filter: blur(18px);
+    }
+
+    .topbar-inner {
+      min-height: 58px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 20px;
+    }
+
+    .brand {
+      display: inline-flex;
+      align-items: center;
+      gap: 9px;
+      color: var(--ink);
+      font-size: 14px;
+      font-weight: 750;
+      text-decoration: none;
+      white-space: nowrap;
+    }
+
+    .brand-mark {
+      width: 28px;
+      height: 28px;
+      display: grid;
+      place-items: center;
+      border: 1px solid rgba(98, 240, 191, 0.48);
+      border-radius: 8px;
+      color: var(--mint);
+      background: var(--mint-soft);
+      font-family: var(--mono);
+      font-size: 12px;
+    }
+
+    .nav {
+      display: flex;
+      gap: 18px;
+      overflow-x: auto;
+      scrollbar-width: none;
+    }
+
+    .nav::-webkit-scrollbar {
+      display: none;
+    }
+
+    .nav a {
+      color: var(--muted);
+      font-size: 14px;
+      text-decoration: none;
+      white-space: nowrap;
+    }
+
+    .nav a:hover {
+      color: var(--mint);
+    }
+
+    .hero {
+      min-height: 690px;
+      display: grid;
+      grid-template-columns: 0.92fr 1.08fr;
+      align-items: center;
+      gap: 54px;
+      padding: 88px 0 72px;
+    }
+
+    .eyebrow {
+      margin: 0 0 16px;
+      color: var(--mint);
+      font-family: var(--mono);
+      font-size: 13px;
+      letter-spacing: 0.15em;
+      text-transform: uppercase;
+    }
+
+    h1,
+    h2,
+    h3,
+    p {
+      margin-top: 0;
+    }
+
+    h1 {
+      margin-bottom: 22px;
+      font-size: clamp(42px, 6.2vw, 74px);
+      line-height: 1.02;
+      letter-spacing: -0.048em;
+    }
+
+    .gradient-text {
+      color: transparent;
+      background: linear-gradient(90deg, var(--mint), #bcffe9 48%, var(--amber));
+      background-clip: text;
+      -webkit-background-clip: text;
+    }
+
+    .hero-copy {
+      max-width: 650px;
+      margin-bottom: 28px;
+      color: var(--muted);
+      font-size: 19px;
+      line-height: 1.75;
+    }
+
+    .hero-copy strong {
+      color: var(--ink);
+    }
+
+    .hero-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+
+    .action {
+      min-height: 44px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0 16px;
+      border: 1px solid var(--line-strong);
+      border-radius: 10px;
+      color: var(--ink);
+      background: rgba(13, 29, 27, 0.78);
+      font-weight: 700;
+      text-decoration: none;
+      transition: 160ms ease;
+    }
+
+    .action:hover {
+      border-color: rgba(98, 240, 191, 0.62);
+      background: var(--mint-soft);
+      transform: translateY(-2px);
+    }
+
+    .action.primary {
+      color: #06120e;
+      border-color: var(--mint);
+      background: var(--mint);
+    }
+
+    .platform-map {
+      position: relative;
+      padding: 20px;
+      border: 1px solid var(--line);
+      border-radius: 24px;
+      background: rgba(7, 18, 16, 0.84);
+      box-shadow: var(--shadow);
+    }
+
+    .platform-map::before {
+      position: absolute;
+      inset: -9px 12px 13px -9px;
+      z-index: -1;
+      content: "";
+      border: 1px solid rgba(98, 240, 191, 0.13);
+      border-radius: 24px;
+    }
+
+    .map-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 20px;
+      margin-bottom: 13px;
+      color: var(--faint);
+      font-family: var(--mono);
+      font-size: 12px;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+    }
+
+    .control-plane {
+      margin-bottom: 10px;
+      padding: 15px;
+      border: 1px solid rgba(98, 240, 191, 0.3);
+      border-radius: 13px;
+      background: linear-gradient(90deg, var(--mint-soft), rgba(17, 37, 34, 0.7));
+    }
+
+    .plane-title {
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      margin-bottom: 10px;
+      color: var(--mint);
+      font-family: var(--mono);
+      font-size: 12px;
+      text-transform: uppercase;
+    }
+
+    .control-items {
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      gap: 7px;
+    }
+
+    .control-item {
+      padding: 10px 7px;
+      border-radius: 7px;
+      color: #c7ddd6;
+      background: rgba(4, 10, 10, 0.48);
+      font-size: 12px;
+      text-align: center;
+    }
+
+    .worker-grid {
+      position: relative;
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 9px;
+      margin-bottom: 10px;
+    }
+
+    .worker {
+      min-height: 145px;
+      padding: 12px;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: var(--panel-2);
+    }
+
+    .worker:nth-child(2) {
+      border-color: rgba(255, 196, 107, 0.35);
+    }
+
+    .worker-user {
+      display: flex;
+      justify-content: space-between;
+      margin-bottom: 14px;
+      color: var(--faint);
+      font-family: var(--mono);
+      font-size: 12px;
+      text-transform: uppercase;
+    }
+
+    .worker-run {
+      margin-bottom: 8px;
+      color: var(--ink);
+      font-size: 14px;
+      font-weight: 750;
+    }
+
+    .worker-box {
+      min-height: 60px;
+      display: grid;
+      place-items: center;
+      padding: 7px;
+      border: 1px dashed var(--line-strong);
+      border-radius: 8px;
+      color: var(--muted);
+      background: rgba(4, 10, 10, 0.38);
+      font-size: 12px;
+      text-align: center;
+    }
+
+    .shared-plane {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 9px;
+    }
+
+    .shared-box {
+      padding: 10px 12px;
+      border: 1px solid rgba(117, 199, 255, 0.2);
+      border-radius: 10px;
+      color: #bdddf3;
+      background: var(--blue-soft);
+      font-size: 12px;
+    }
+
+    .shared-box b {
+      display: block;
+      margin-bottom: 3px;
+      color: var(--blue);
+      font-family: var(--mono);
+      font-size: 12px;
+      text-transform: uppercase;
+    }
+
+    .pulse {
+      position: absolute;
+      top: 88px;
+      left: 50%;
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--amber);
+      box-shadow: 0 0 18px var(--amber);
+      animation: dispatch 3s ease-in-out infinite;
+    }
+
+    @keyframes dispatch {
+      0% {
+        transform: translate(-220px, -54px);
+        opacity: 0;
+      }
+      15% {
+        opacity: 1;
+      }
+      52% {
+        transform: translate(0, 15px);
+      }
+      88% {
+        opacity: 1;
+      }
+      100% {
+        transform: translate(220px, 88px);
+        opacity: 0;
+      }
+    }
+
+    section {
+      scroll-margin-top: 72px;
+      padding: 84px 0;
+    }
+
+    .section-head {
+      display: grid;
+      grid-template-columns: minmax(0, 0.72fr) minmax(300px, 0.45fr);
+      align-items: end;
+      gap: 42px;
+      margin-bottom: 34px;
+    }
+
+    .section-index {
+      display: inline-flex;
+      align-items: center;
+      gap: 9px;
+      margin-bottom: 12px;
+      color: var(--mint);
+      font-family: var(--mono);
+      font-size: 12px;
+      letter-spacing: 0.13em;
+      text-transform: uppercase;
+    }
+
+    .section-index::before {
+      width: 28px;
+      height: 1px;
+      content: "";
+      background: var(--mint);
+    }
+
+    h2 {
+      margin-bottom: 0;
+      font-size: clamp(30px, 4vw, 47px);
+      line-height: 1.12;
+      letter-spacing: -0.036em;
+    }
+
+    .section-lead {
+      margin-bottom: 2px;
+      color: var(--muted);
+      font-size: 16px;
+      line-height: 1.75;
+    }
+
+    .orthogonal-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 14px;
+    }
+
+    .orthogonal-card {
+      min-height: 210px;
+      padding: 26px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--panel);
+    }
+
+    .orthogonal-card:nth-child(2) {
+      border-color: rgba(98, 240, 191, 0.3);
+      background: linear-gradient(145deg, var(--mint-soft), var(--panel));
+    }
+
+    .orthogonal-card:nth-child(3) {
+      border-color: rgba(255, 196, 107, 0.26);
+      background: linear-gradient(145deg, var(--amber-soft), var(--panel));
+    }
+
+    .card-code {
+      display: block;
+      margin-bottom: 13px;
+      color: var(--faint);
+      font-family: var(--mono);
+      font-size: 12px;
+      text-transform: uppercase;
+    }
+
+    .orthogonal-card h3 {
+      margin-bottom: 8px;
+      font-size: 23px;
+    }
+
+    .orthogonal-card p {
+      margin-bottom: 14px;
+      color: var(--muted);
+      font-size: 15px;
+      line-height: 1.7;
+    }
+
+    .example {
+      color: var(--mint);
+      font-family: var(--mono);
+      font-size: 12px;
+    }
+
+    .systems {
+      border-top: 1px solid var(--line);
+      border-bottom: 1px solid var(--line);
+      background: rgba(3, 9, 8, 0.34);
+    }
+
+    .system-tabs {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(210px, 1fr));
+      gap: 10px;
+      margin-bottom: 22px;
+      overflow-x: auto;
+      padding-bottom: 4px;
+    }
+
+    .system-tab {
+      min-height: 82px;
+      padding: 13px 16px;
+      border: 1px solid var(--line);
+      border-radius: 11px;
+      color: var(--muted);
+      background: rgba(13, 29, 27, 0.72);
+      cursor: pointer;
+      text-align: left;
+      transition: 150ms ease;
+    }
+
+    .system-tab:hover {
+      color: var(--ink);
+      border-color: var(--line-strong);
+      transform: translateY(-2px);
+    }
+
+    .system-tab[aria-selected="true"] {
+      color: var(--ink);
+      border-color: rgba(98, 240, 191, 0.54);
+      background: var(--mint-soft);
+    }
+
+    .tab-type {
+      display: block;
+      margin-bottom: 2px;
+      color: var(--faint);
+      font-family: var(--mono);
+      font-size: 12px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    .system-tab[aria-selected="true"] .tab-type {
+      color: var(--mint);
+    }
+
+    .tab-name {
+      font-size: 15px;
+      font-weight: 750;
+    }
+
+    .system-stage {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 18px;
+    }
+
+    .swimlane-board,
+    .system-profile {
+      border: 1px solid var(--line);
+      border-radius: 20px;
+      background: var(--panel);
+      box-shadow: var(--shadow);
+    }
+
+    .swimlane-board {
+      min-height: 770px;
+      padding: 30px;
+    }
+
+    .board-head {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 20px;
+      margin-bottom: 20px;
+    }
+
+    .board-kicker {
+      margin-bottom: 5px;
+      color: var(--mint);
+      font-family: var(--mono);
+      font-size: 12px;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+    }
+
+    .board-title {
+      margin: 0;
+      font-size: 29px;
+      line-height: 1.25;
+    }
+
+    .evidence-badge {
+      padding: 5px 8px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      color: var(--muted);
+      background: rgba(4, 10, 10, 0.54);
+      font-family: var(--mono);
+      font-size: 12px;
+      white-space: nowrap;
+    }
+
+    .lane-stack {
+      display: grid;
+      gap: 11px;
+    }
+
+    .lane {
+      display: grid;
+      grid-template-columns: 165px 1fr;
+      min-height: 125px;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: rgba(6, 16, 14, 0.55);
+    }
+
+    .lane-label {
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      gap: 4px;
+      padding: 18px;
+      border-right: 1px solid var(--line);
+      color: var(--faint);
+      background: rgba(4, 10, 10, 0.48);
+      font-family: var(--mono);
+      font-size: 12px;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+    }
+
+    .lane-label b {
+      color: var(--ink);
+      font-size: 13px;
+    }
+
+    .lane-flow {
+      position: relative;
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 13px;
+      align-items: center;
+      padding: 15px;
+    }
+
+    .lane-flow::before {
+      position: absolute;
+      top: 50%;
+      right: 4%;
+      left: 4%;
+      height: 1px;
+      content: "";
+      background: var(--line-strong);
+    }
+
+    .flow-box {
+      position: relative;
+      z-index: 2;
+      min-height: 82px;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      padding: 12px 15px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #10231f;
+    }
+
+    .flow-box::after {
+      position: absolute;
+      top: calc(50% - 3px);
+      right: -7px;
+      width: 6px;
+      height: 6px;
+      content: "";
+      border-top: 1px solid var(--mint);
+      border-right: 1px solid var(--mint);
+      transform: rotate(45deg);
+    }
+
+    .flow-box:last-child::after {
+      display: none;
+    }
+
+    .flow-box b {
+      margin-bottom: 4px;
+      color: var(--ink);
+      font-size: 14px;
+    }
+
+    .flow-box span {
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.5;
+    }
+
+    .lane[data-kind="control"] .flow-box {
+      border-color: rgba(98, 240, 191, 0.2);
+      background: linear-gradient(145deg, var(--mint-soft), #10231f);
+    }
+
+    .lane[data-kind="execution"] .flow-box {
+      border-color: rgba(255, 196, 107, 0.2);
+      background: linear-gradient(145deg, var(--amber-soft), #10231f);
+    }
+
+    .lane[data-kind="state"] .flow-box {
+      border-color: rgba(117, 199, 255, 0.2);
+      background: linear-gradient(145deg, var(--blue-soft), #10231f);
+    }
+
+    .lane[data-kind="model"] .flow-box {
+      border-color: rgba(182, 167, 255, 0.2);
+      background: linear-gradient(145deg, var(--violet-soft), #10231f);
+    }
+
+    .system-profile {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      column-gap: 22px;
+      padding: 28px;
+    }
+
+    .profile-mark {
+      width: 46px;
+      height: 46px;
+      display: grid;
+      place-items: center;
+      grid-column: 1;
+      grid-row: 1 / 3;
+      margin-bottom: 0;
+      border: 1px solid rgba(98, 240, 191, 0.42);
+      border-radius: 13px;
+      color: var(--mint);
+      background: var(--mint-soft);
+      font-family: var(--mono);
+      font-size: 13px;
+      font-weight: 800;
+    }
+
+    .profile-title {
+      grid-column: 2 / 4;
+      margin-bottom: 7px;
+      font-size: 27px;
+    }
+
+    .profile-summary {
+      grid-column: 2 / 4;
+      min-height: 0;
+      margin-bottom: 18px;
+      color: var(--muted);
+      font-size: 15px;
+      line-height: 1.7;
+    }
+
+    .profile-fact {
+      padding: 18px 12px 8px 0;
+      border-top: 1px solid var(--line);
+    }
+
+    .profile-fact h4 {
+      margin: 0 0 5px;
+      color: var(--faint);
+      font-family: var(--mono);
+      font-size: 12px;
+      letter-spacing: 0.09em;
+      text-transform: uppercase;
+    }
+
+    .profile-fact p {
+      margin: 0;
+      color: #c7d9d3;
+      font-size: 13px;
+      line-height: 1.65;
+    }
+
+    .source-link {
+      grid-column: 1 / 4;
+      display: inline-flex;
+      gap: 6px;
+      margin-top: 17px;
+      color: var(--mint);
+      font-size: 13px;
+      text-underline-offset: 3px;
+    }
+
+    .source-link::after {
+      content: "↗";
+    }
+
+    .matrix-shell {
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: 19px;
+      background: var(--panel);
+      box-shadow: var(--shadow);
+    }
+
+    .matrix-scroll {
+      overflow-x: auto;
+    }
+
+    table {
+      width: 100%;
+      min-width: 1660px;
+      border-collapse: collapse;
+      text-align: left;
+    }
+
+    th,
+    td {
+      padding: 17px 16px;
+      border-bottom: 1px solid var(--line);
+      vertical-align: top;
+    }
+
+    th {
+      color: var(--faint);
+      background: rgba(4, 10, 10, 0.56);
+      font-family: var(--mono);
+      font-size: 12px;
+      letter-spacing: 0.07em;
+      text-transform: uppercase;
+    }
+
+    td {
+      color: #bdd0ca;
+      font-size: 13px;
+      line-height: 1.58;
+    }
+
+    th:first-child,
+    td:first-child {
+      position: sticky;
+      left: 0;
+      z-index: 3;
+      width: 180px;
+      color: var(--ink);
+      background: #0d1e1b;
+      font-weight: 750;
+    }
+
+    tr:last-child td {
+      border-bottom: 0;
+    }
+
+    .matrix-foot {
+      display: flex;
+      justify-content: space-between;
+      gap: 20px;
+      padding: 14px 16px;
+      border-top: 1px solid var(--line);
+      color: var(--faint);
+      font-size: 13px;
+    }
+
+    .journey {
+      display: grid;
+      grid-template-columns: minmax(285px, 0.38fr) minmax(0, 1.62fr);
+      gap: 18px;
+    }
+
+    .journey-controls,
+    .journey-canvas {
+      border: 1px solid var(--line);
+      border-radius: 19px;
+      background: var(--panel);
+      box-shadow: var(--shadow);
+    }
+
+    .journey-controls {
+      padding: 23px;
+    }
+
+    .journey-controls h3 {
+      margin-bottom: 6px;
+      font-size: 21px;
+    }
+
+    .journey-controls > p {
+      margin-bottom: 15px;
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .step-buttons {
+      display: grid;
+      gap: 6px;
+    }
+
+    .step-button {
+      min-height: 50px;
+      display: grid;
+      grid-template-columns: 24px 1fr;
+      gap: 8px;
+      align-items: center;
+      padding: 9px 11px;
+      border: 1px solid transparent;
+      border-radius: 8px;
+      color: var(--muted);
+      background: transparent;
+      cursor: pointer;
+      text-align: left;
+    }
+
+    .step-button:hover {
+      color: var(--ink);
+      background: rgba(98, 240, 191, 0.05);
+    }
+
+    .step-button[aria-pressed="true"] {
+      color: var(--ink);
+      border-color: rgba(98, 240, 191, 0.3);
+      background: var(--mint-soft);
+    }
+
+    .step-num {
+      color: var(--mint);
+      font-family: var(--mono);
+      font-size: 12px;
+    }
+
+    .step-text {
+      font-size: 13px;
+    }
+
+    .journey-canvas {
+      position: relative;
+      min-height: 620px;
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      grid-template-rows: repeat(2, 1fr);
+      gap: 45px 25px;
+      align-items: center;
+      padding: 48px 34px 100px;
+    }
+
+    .journey-canvas::before {
+      position: absolute;
+      top: 25%;
+      right: 7%;
+      left: 7%;
+      height: 1px;
+      content: "";
+      background: linear-gradient(90deg, transparent, var(--line-strong), transparent);
+    }
+
+    .journey-canvas::after {
+      position: absolute;
+      right: 7%;
+      bottom: 31%;
+      left: 7%;
+      height: 1px;
+      content: "";
+      background: linear-gradient(90deg, transparent, var(--line-strong), transparent);
+    }
+
+    .journey-node {
+      position: relative;
+      z-index: 2;
+      min-height: 145px;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      padding: 17px;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: #10231f;
+      transition: 190ms ease;
+    }
+
+    .journey-node:nth-child(5) {
+      grid-column: 4;
+      grid-row: 2;
+    }
+
+    .journey-node:nth-child(6) {
+      grid-column: 3;
+      grid-row: 2;
+    }
+
+    .journey-node:nth-child(7) {
+      grid-column: 2;
+      grid-row: 2;
+    }
+
+    .journey-node:nth-child(8) {
+      grid-column: 1;
+      grid-row: 2;
+    }
+
+    .journey-node.active {
+      border-color: var(--mint);
+      background: linear-gradient(145deg, rgba(98, 240, 191, 0.21), #10231f);
+      box-shadow: 0 0 30px rgba(98, 240, 191, 0.12);
+      transform: translateY(-4px);
+    }
+
+    .journey-node.complete {
+      border-color: rgba(255, 196, 107, 0.34);
+    }
+
+    .journey-node b {
+      margin-bottom: 7px;
+      font-size: 15px;
+    }
+
+    .journey-node span {
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.55;
+    }
+
+    .journey-detail {
+      position: absolute;
+      right: 30px;
+      bottom: 22px;
+      left: 30px;
+      min-height: 62px;
+      display: grid;
+      grid-template-columns: 115px 1fr;
+      gap: 12px;
+      align-items: center;
+      padding: 10px 12px;
+      border-top: 1px solid var(--line);
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .journey-detail b {
+      color: var(--amber);
+      font-family: var(--mono);
+      font-size: 12px;
+      text-transform: uppercase;
+    }
+
+    .scheduler-diagram {
+      display: grid;
+      grid-template-columns: 1fr 100px 1fr;
+      gap: 16px;
+      align-items: center;
+    }
+
+    .scheduler-box {
+      min-height: 390px;
+      padding: 29px;
+      border: 1px solid var(--line);
+      border-radius: 19px;
+      background: var(--panel);
+      box-shadow: var(--shadow);
+    }
+
+    .scheduler-box:first-child {
+      border-color: rgba(98, 240, 191, 0.3);
+      background: linear-gradient(145deg, var(--mint-soft), var(--panel));
+    }
+
+    .scheduler-box:last-child {
+      border-color: rgba(182, 167, 255, 0.28);
+      background: linear-gradient(145deg, var(--violet-soft), var(--panel));
+    }
+
+    .scheduler-box .eyebrow {
+      margin-bottom: 9px;
+    }
+
+    .scheduler-box h3 {
+      margin-bottom: 10px;
+      font-size: 25px;
+    }
+
+    .scheduler-box > p {
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.7;
+    }
+
+    .scheduler-list {
+      display: grid;
+      gap: 7px;
+      margin-top: 17px;
+    }
+
+    .scheduler-item {
+      display: grid;
+      grid-template-columns: 100px 1fr;
+      gap: 8px;
+      padding: 11px 12px;
+      border-radius: 7px;
+      background: rgba(4, 10, 10, 0.42);
+    }
+
+    .scheduler-item b {
+      color: var(--ink);
+      font-family: var(--mono);
+      font-size: 12px;
+    }
+
+    .scheduler-item span {
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .boundary-arrow {
+      display: grid;
+      place-items: center;
+      min-height: 140px;
+      color: var(--amber);
+      font-family: var(--mono);
+      font-size: 13px;
+      text-align: center;
+    }
+
+    .boundary-arrow::before,
+    .boundary-arrow::after {
+      width: 100%;
+      height: 1px;
+      content: "";
+      background: linear-gradient(90deg, transparent, var(--amber), transparent);
+    }
+
+    .blueprint-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 13px;
+    }
+
+    .blueprint-item {
+      position: relative;
+      min-height: 195px;
+      padding: 24px;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: 15px;
+      background: var(--panel);
+    }
+
+    .blueprint-item::before {
+      position: absolute;
+      top: 0;
+      right: 0;
+      left: 0;
+      height: 2px;
+      content: "";
+      background: var(--line-strong);
+    }
+
+    .blueprint-item.done::before {
+      background: var(--mint);
+    }
+
+    .blueprint-item.next::before {
+      background: var(--amber);
+    }
+
+    .blueprint-status {
+      display: inline-block;
+      margin-bottom: 12px;
+      padding: 3px 7px;
+      border-radius: 999px;
+      color: var(--faint);
+      background: rgba(155, 196, 183, 0.08);
+      font-family: var(--mono);
+      font-size: 12px;
+      text-transform: uppercase;
+    }
+
+    .blueprint-item.done .blueprint-status {
+      color: var(--mint);
+      background: var(--mint-soft);
+    }
+
+    .blueprint-item.next .blueprint-status {
+      color: var(--amber);
+      background: var(--amber-soft);
+    }
+
+    .blueprint-item h3 {
+      margin-bottom: 7px;
+      font-size: 20px;
+    }
+
+    .blueprint-item p {
+      margin-bottom: 0;
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.7;
+    }
+
+    .hybrid-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 14px;
+    }
+
+    .hybrid-card {
+      min-height: 320px;
+      padding: 25px;
+      border: 1px solid var(--line);
+      border-radius: 17px;
+      background: var(--panel);
+    }
+
+    .hybrid-card h3 {
+      margin-bottom: 7px;
+      font-size: 23px;
+    }
+
+    .hybrid-card > p {
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.65;
+    }
+
+    .hybrid-flow {
+      display: grid;
+      gap: 6px;
+      margin: 16px 0;
+    }
+
+    .hybrid-flow span {
+      padding: 9px 11px;
+      border-left: 2px solid var(--line-strong);
+      color: #c0d2cc;
+      background: rgba(4, 10, 10, 0.4);
+      font-size: 12px;
+    }
+
+    .hybrid-note {
+      padding-top: 12px;
+      border-top: 1px solid var(--line);
+      color: var(--amber);
+      font-size: 13px;
+      line-height: 1.55;
+    }
+
+    .hybrid-card a {
+      display: inline-block;
+      margin-top: 12px;
+      color: var(--mint);
+      font-size: 12px;
+      text-underline-offset: 3px;
+    }
+
+    .questions {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 9px;
+      counter-reset: question;
+    }
+
+    .question {
+      position: relative;
+      min-height: 130px;
+      padding: 20px 20px 20px 58px;
+      border: 1px solid var(--line);
+      border-radius: 13px;
+      background: rgba(13, 29, 27, 0.67);
+      counter-increment: question;
+    }
+
+    .question::before {
+      position: absolute;
+      top: 17px;
+      left: 17px;
+      content: "0" counter(question);
+      color: var(--mint);
+      font-family: var(--mono);
+      font-size: 12px;
+    }
+
+    .question b {
+      display: block;
+      margin-bottom: 7px;
+      font-size: 15px;
+    }
+
+    .question span {
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.6;
+    }
+
+    .source-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 11px;
+    }
+
+    .source-card {
+      min-height: 96px;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      padding: 17px;
+      border: 1px solid var(--line);
+      border-radius: 11px;
+      color: var(--muted);
+      background: rgba(13, 29, 27, 0.58);
+      font-size: 13px;
+      text-decoration: none;
+      transition: 150ms ease;
+    }
+
+    .source-card:hover {
+      color: var(--ink);
+      border-color: rgba(98, 240, 191, 0.43);
+      transform: translateY(-2px);
+    }
+
+    .source-card b {
+      margin-bottom: 3px;
+      color: var(--mint);
+      font-family: var(--mono);
+      font-size: 13px;
+    }
+
+    footer {
+      padding: 34px 0 52px;
+      color: var(--faint);
+      font-size: 12px;
+    }
+
+    .footer-inner {
+      display: flex;
+      justify-content: space-between;
+      gap: 20px;
+      padding-top: 19px;
+      border-top: 1px solid var(--line);
+    }
+
+    .reveal {
+      opacity: 0;
+      transform: translateY(16px);
+      transition: opacity 500ms ease, transform 500ms ease;
+    }
+
+    .reveal.visible {
+      opacity: 1;
+      transform: translateY(0);
+    }
+
+    @media (max-width: 1080px) {
+      .hero {
+        grid-template-columns: 1fr;
+      }
+
+      .platform-map {
+        max-width: 780px;
+      }
+
+      .orthogonal-grid {
+        grid-template-columns: repeat(2, 1fr);
+      }
+
+      .system-stage {
+        grid-template-columns: 1fr;
+      }
+
+      .system-profile {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        column-gap: 18px;
+      }
+
+      .profile-mark {
+        grid-column: 1;
+        grid-row: 1 / 3;
+      }
+
+      .profile-title,
+      .profile-summary {
+        grid-column: 2;
+      }
+
+      .source-link {
+        grid-column: 1 / 3;
+      }
+
+      .journey {
+        grid-template-columns: 1fr;
+      }
+
+      .step-buttons {
+        grid-template-columns: repeat(4, 1fr);
+      }
+
+      .scheduler-diagram {
+        grid-template-columns: 1fr;
+      }
+
+      .boundary-arrow {
+        min-height: 80px;
+      }
+
+      .boundary-arrow::before,
+      .boundary-arrow::after {
+        width: 60%;
+      }
+    }
+
+    @media (max-width: 760px) {
+      .shell {
+        width: min(100% - 24px, 1240px);
+      }
+
+      .topbar-inner {
+        align-items: flex-start;
+        flex-direction: column;
+        padding: 10px 0;
+      }
+
+      .nav {
+        width: 100%;
+      }
+
+      .system-tabs {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+
+      .hero {
+        min-height: 0;
+        padding: 65px 0 50px;
+      }
+
+      h1 {
+        font-size: clamp(40px, 13vw, 60px);
+      }
+
+      section {
+        padding: 62px 0;
+      }
+
+      .section-head {
+        grid-template-columns: 1fr;
+        gap: 17px;
+      }
+
+      .control-items {
+        grid-template-columns: repeat(2, 1fr);
+      }
+
+      .worker-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .worker {
+        min-height: 112px;
+      }
+
+      .shared-plane,
+      .orthogonal-grid,
+      .blueprint-grid,
+      .hybrid-grid,
+      .questions,
+      .source-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .swimlane-board {
+        padding: 14px;
+      }
+
+      .board-head {
+        flex-direction: column;
+        gap: 9px;
+      }
+
+      .lane {
+        grid-template-columns: 1fr;
+      }
+
+      .lane-label {
+        border-right: 0;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .lane-flow {
+        grid-template-columns: 1fr;
+      }
+
+      .lane-flow::before {
+        top: 5%;
+        bottom: 5%;
+        left: 50%;
+        width: 1px;
+        height: auto;
+      }
+
+      .flow-box::after {
+        top: auto;
+        right: 50%;
+        bottom: -7px;
+        transform: rotate(135deg);
+      }
+
+      .system-profile {
+        display: block;
+      }
+
+      .profile-summary {
+        min-height: 0;
+      }
+
+      .step-buttons {
+        grid-template-columns: repeat(2, 1fr);
+      }
+
+      .journey-canvas {
+        grid-template-columns: 1fr;
+        grid-template-rows: none;
+        gap: 18px;
+        padding: 24px 18px 104px;
+      }
+
+      .journey-canvas::before,
+      .journey-canvas::after {
+        display: none;
+      }
+
+      .journey-node:nth-child(n) {
+        grid-column: 1;
+        grid-row: auto;
+        min-height: 84px;
+      }
+
+      .journey-detail {
+        right: 18px;
+        bottom: 14px;
+        left: 18px;
+        grid-template-columns: 1fr;
+        gap: 3px;
+      }
+
+      .scheduler-item {
+        grid-template-columns: 1fr;
+      }
+
+      .footer-inner {
+        flex-direction: column;
+      }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      *,
+      *::before,
+      *::after {
+        scroll-behavior: auto !important;
+        animation-duration: 0.001ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.001ms !important;
+      }
+
+      .reveal {
+        opacity: 1;
+        transform: none;
+      }
+    }
+  </style>
+</head>
+<body>
+  <a class="skip" href="#main">跳到正文</a>
+
+  <header class="topbar">
+    <div class="shell topbar-inner">
+      <a class="brand" href="#top" aria-label="回到页面顶部">
+        <span class="brand-mark">MT</span>
+        <span>Multi-tenant Agent Task Service Atlas</span>
+      </a>
+      <nav class="nav" aria-label="页面导航">
+        <a href="#meaning">概念边界</a>
+        <a href="#systems">系统拆解</a>
+        <a href="#matrix">技术矩阵</a>
+        <a href="#journey">一次请求</a>
+        <a href="#schedulers">双调度器</a>
+        <a href="#blueprint">我们的蓝图</a>
+      </nav>
+    </div>
+  </header>
+
+  <main id="main">
+    <div id="top" class="shell hero">
+      <div>
+        <p class="eyebrow">User product · isolated execution · shared inference</p>
+        <h1>让多个团队安全地使用<br /><span class="gradient-text">同一套 Agent 服务</span></h1>
+        <p class="hero-copy">
+          用户要创建 Workspace、提交任务并取得文件修改；Pi 解决“一次 Agent 怎样
+          思考和调用工具”，服务内部还要解决<strong>谁可以运行、在哪个隔离环境运行、
+          何时分到资源、失败后怎样恢复</strong>。这是用户产品，其中第③ Sandbox 和
+          第④ Orchestration 是主要工程深度。
+        </p>
+        <div class="hero-actions">
+          <a class="action primary" href="#systems">对比公开架构</a>
+          <a class="action" href="#blueprint">映射到我们的项目</a>
+        </div>
+      </div>
+
+      <div class="platform-map" aria-label="多租户 Agent 平台结构图">
+        <div class="map-head">
+          <span>one platform · many isolated runs</span>
+          <span>logical architecture</span>
+        </div>
+        <div class="control-plane">
+          <div class="plane-title">
+            <span>Tenant Control Plane</span>
+            <span>shared governance</span>
+          </div>
+          <div class="control-items">
+            <span class="control-item">Identity / RBAC</span>
+            <span class="control-item">Quota</span>
+            <span class="control-item">Fair Queue</span>
+            <span class="control-item">Policy</span>
+            <span class="control-item">Audit</span>
+          </div>
+        </div>
+        <div class="worker-grid">
+          <article class="worker">
+            <div class="worker-user"><span>tenant-a</span><span>run-101</span></div>
+            <div class="worker-run">AgentRun A</div>
+            <div class="worker-box">Pi Session<br />Workspace / Tools</div>
+          </article>
+          <article class="worker">
+            <div class="worker-user"><span>tenant-b</span><span>run-202</span></div>
+            <div class="worker-run">AgentRun B</div>
+            <div class="worker-box">Pi Session<br />Workspace / Tools</div>
+          </article>
+          <article class="worker">
+            <div class="worker-user"><span>tenant-a</span><span>run-103</span></div>
+            <div class="worker-run">AgentRun C</div>
+            <div class="worker-box">Pi Session<br />Workspace / Tools</div>
+          </article>
+          <span class="pulse" aria-hidden="true"></span>
+        </div>
+        <div class="shared-plane">
+          <div class="shared-box"><b>Durable state</b>RunEvent · Checkpoint · Session mapping</div>
+          <div class="shared-box"><b>Inference plane</b>vLLM · batching · KV cache · GPU</div>
+        </div>
+      </div>
+    </div>
+
+    <section id="meaning">
+      <div class="shell">
+        <div class="section-head reveal">
+          <div>
+            <span class="section-index">01 · four independent axes</span>
+            <h2>“很多用户”不是一个技术结论</h2>
+          </div>
+          <p class="section-lead">
+            多用户、多租户、多任务和多 Agent 是四个正交维度。面试中先拆开它们，后续架构讨论才不会混乱。
+          </p>
+        </div>
+
+        <div class="orthogonal-grid reveal">
+          <article class="orthogonal-card">
+            <span class="card-code">Account dimension</span>
+            <h3>多用户</h3>
+            <p>产品有多个账号。只说明登录规模，不自动说明数据隔离、资源公平或任务并发。</p>
+            <span class="example">userCount &gt; 1</span>
+          </article>
+          <article class="orthogonal-card">
+            <span class="card-code">Isolation dimension</span>
+            <h3>多租户</h3>
+            <p>用户或组织拥有独立的数据、权限、配额、Secret、策略与审计边界。</p>
+            <span class="example">tenantId → policy / quota / data</span>
+          </article>
+          <article class="orthogonal-card">
+            <span class="card-code">Concurrency dimension</span>
+            <h3>多任务</h3>
+            <p>一个或多个用户可以同时提交很多 Run；平台必须排队、限流、放置和取消。</p>
+            <span class="example">many AgentRun instances</span>
+          </article>
+          <article class="orthogonal-card">
+            <span class="card-code">Orchestration dimension</span>
+            <h3>多 Agent</h3>
+            <p>单个任务内部存在 Lead、Subagent 或专家团队；它解决分工，不等于多租户。</p>
+            <span class="example">one run → N agent workers</span>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section id="systems" class="systems">
+      <div class="shell">
+        <div class="section-head reveal">
+          <div>
+            <span class="section-index">02 · public architectures</span>
+            <h2>六套系统，放进同一组技术平面</h2>
+          </div>
+          <p class="section-lead">
+            点击切换。图中只画官方公开或本项目明确设计的责任；商业产品未公开的队列和数据库不会被猜成事实。
+          </p>
+        </div>
+
+        <div id="system-tabs" class="system-tabs reveal" role="tablist" aria-label="选择多租户 Agent 系统"></div>
+
+        <div class="system-stage reveal">
+          <article class="swimlane-board" aria-live="polite">
+            <div class="board-head">
+              <div>
+                <div id="board-kicker" class="board-kicker"></div>
+                <h3 id="board-title" class="board-title"></h3>
+              </div>
+              <span id="evidence-badge" class="evidence-badge"></span>
+            </div>
+            <div id="lane-stack" class="lane-stack"></div>
+          </article>
+
+          <aside class="system-profile" aria-live="polite">
+            <div id="profile-mark" class="profile-mark"></div>
+            <h3 id="profile-title" class="profile-title"></h3>
+            <p id="profile-summary" class="profile-summary"></p>
+            <div class="profile-fact">
+              <h4>租户边界</h4>
+              <p id="profile-tenant"></p>
+            </div>
+            <div class="profile-fact">
+              <h4>执行隔离</h4>
+              <p id="profile-isolation"></p>
+            </div>
+            <div class="profile-fact">
+              <h4>状态与恢复</h4>
+              <p id="profile-state"></p>
+            </div>
+            <div class="profile-fact">
+              <h4>资源控制</h4>
+              <p id="profile-resource"></p>
+            </div>
+            <div class="profile-fact">
+              <h4>我们应该借鉴</h4>
+              <p id="profile-borrow"></p>
+            </div>
+            <a id="profile-source" class="source-link" target="_blank" rel="noreferrer">查看官方技术资料</a>
+          </aside>
+        </div>
+      </div>
+    </section>
+
+    <section id="matrix">
+      <div class="shell">
+        <div class="section-head reveal">
+          <div>
+            <span class="section-index">03 · engineering matrix</span>
+            <h2>真正需要对比的是这些技术责任</h2>
+          </div>
+          <p class="section-lead">
+            横向矩阵不做产品评分，只比较每套系统把身份、Session、隔离、配额、恢复和模型资源放在哪一层。
+          </p>
+        </div>
+
+        <div class="matrix-shell reveal">
+          <div class="matrix-scroll">
+            <table>
+              <thead>
+                <tr>
+                  <th>系统</th>
+                  <th>Tenant / Identity</th>
+                  <th>Run / Session</th>
+                  <th>执行隔离</th>
+                  <th>持久状态</th>
+                  <th>并发与配额</th>
+                  <th>事件 / 审计</th>
+                  <th>模型资源层</th>
+                  <th>公开程度</th>
+                </tr>
+              </thead>
+              <tbody id="matrix-body"></tbody>
+            </table>
+          </div>
+          <div class="matrix-foot">
+            <span>隔离越强，启动成本通常越高；恢复越强，状态模型通常越复杂。</span>
+            <span>横向滚动查看全部列 →</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="journey">
+      <div class="shell">
+        <div class="section-head reveal">
+          <div>
+            <span class="section-index">04 · one request through our platform</span>
+            <h2>一次请求，不是直接调用 session.prompt()</h2>
+          </div>
+          <p class="section-lead">
+            点击步骤，看一个 Tenant 的任务怎样从入口穿过控制面，最终进入 Pi 和 vLLM。每一步都对应一个可测试的工程承诺。
+          </p>
+        </div>
+
+        <div class="journey reveal">
+          <aside class="journey-controls">
+            <h3>AgentRun 路径</h3>
+            <p>选择任一步骤，右侧会标出它在整条链路中的位置。</p>
+            <div id="step-buttons" class="step-buttons"></div>
+          </aside>
+          <div id="journey-canvas" class="journey-canvas" aria-live="polite">
+            <div class="journey-node"><b>API / Task</b><span>认证用户并接收 workspaceId、任务和幂等键</span></div>
+            <div class="journey-node"><b>Tenant Context</b><span>从 Principal 派生 Tenant、scope、策略和配额</span></div>
+            <div class="journey-node"><b>Admission</b><span>结合队列、GPU 与硬约束决定 START / QUEUE</span></div>
+            <div class="journey-node"><b>Fair Queue</b><span>按 Tenant 公平性和优先级选择下一个 Run</span></div>
+            <div class="journey-node"><b>Sandbox</b><span>按 ExecutionProfile 创建 Attempt 隔离环境</span></div>
+            <div class="journey-node"><b>Pi + Tools</b><span>在 Sandbox 内读写 Workspace、执行命令并转译事件</span></div>
+            <div class="journey-node"><b>vLLM / GPU</b><span>模型请求进入 batching、KV cache 和物理显存调度</span></div>
+            <div class="journey-node"><b>Result + Evidence</b><span>交付回答、Diff、Artifact 并保存恢复证据</span></div>
+            <div class="journey-detail">
+              <b id="journey-detail-title"></b>
+              <span id="journey-detail-text"></span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="schedulers">
+      <div class="shell">
+        <div class="section-head reveal">
+          <div>
+            <span class="section-index">05 · the critical boundary</span>
+            <h2>我们的核心特色：两个调度器协作，但不越界</h2>
+          </div>
+          <p class="section-lead">
+            多数托管 Harness 隐藏了 GPU；我们的自托管 vLLM 让 GPU 压力成为 Admission 输入，但 Harness 仍不接管 vLLM 的物理调度。
+          </p>
+        </div>
+
+        <div class="scheduler-diagram reveal">
+          <article class="scheduler-box">
+            <p class="eyebrow">Scheduler A · our ownership</p>
+            <h3>Agent Run Scheduler</h3>
+            <p>决定哪一个 Tenant 的哪一个 Run，现在是否可以向 Runtime 提交新的工作。</p>
+            <div class="scheduler-list">
+              <div class="scheduler-item"><b>INPUT</b><span>Tenant、优先级、队列等待、GPU 趋势、任务估计</span></div>
+              <div class="scheduler-item"><b>DECISION</b><span>START / QUEUE / DEFER / REJECT</span></div>
+              <div class="scheduler-item"><b>GUARANTEE</b><span>并发上限、公平性、SLO、取消、可解释原因</span></div>
+              <div class="scheduler-item"><b>UNIT</b><span>AgentRun / model execution admission</span></div>
+            </div>
+          </article>
+
+          <div class="boundary-arrow">
+            <span>model request<br />↔<br />resource signals</span>
+          </div>
+
+          <article class="scheduler-box">
+            <p class="eyebrow">Scheduler B · vLLM ownership</p>
+            <h3>Inference Scheduler</h3>
+            <p>在已经进入模型服务的请求之间安排真实计算、batch 和显存结构。</p>
+            <div class="scheduler-list">
+              <div class="scheduler-item"><b>INPUT</b><span>Tokens、sequence、KV block、模型实例和 GPU 状态</span></div>
+              <div class="scheduler-item"><b>DECISION</b><span>Batch formation、preemption、KV allocation</span></div>
+              <div class="scheduler-item"><b>GUARANTEE</b><span>吞吐、延迟、物理显存正确性</span></div>
+              <div class="scheduler-item"><b>UNIT</b><span>Sequence / token / KV block</span></div>
+            </div>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section id="blueprint">
+      <div class="shell">
+        <div class="section-head reveal">
+          <div>
+            <span class="section-index">06 · our learning blueprint</span>
+            <h2>映射到我们的 Harness：每层该学谁</h2>
+          </div>
+          <p class="section-lead">
+            这是实现顺序的架构地图，不替代一周 MVP 手册。绿色是已有基础，黄色是当前纵向切片接下来要补的责任。
+          </p>
+        </div>
+
+        <div class="blueprint-grid reveal">
+          <article class="blueprint-item done">
+            <span class="blueprint-status">foundation ready</span>
+            <h3>Runtime Adapter</h3>
+            <p>借鉴 AgentCore 的“宿主不绑定 Agent 框架”边界：AgentRuntime 接口隔离 Pi，Fake Runtime 证明合同。</p>
+          </article>
+          <article class="blueprint-item done">
+            <span class="blueprint-status">foundation ready</span>
+            <h3>Pi AgentSession</h3>
+            <p>单次 Agent 的 loop、上下文和工具协议由 Pi 管理；Harness 不重新实现模型—工具循环。</p>
+          </article>
+          <article class="blueprint-item next">
+            <span class="blueprint-status">build next</span>
+            <h3>AgentRun State Machine</h3>
+            <p>借鉴云端平台的 Run / Session 分离：Run 是业务生命周期，Pi Session 是 Runtime 内部上下文。</p>
+          </article>
+          <article class="blueprint-item next">
+            <span class="blueprint-status">build next</span>
+            <h3>Durable Event Store</h3>
+            <p>借鉴 OpenHands 的事件流与 Codex 的可验证过程：事实先落盘，再由状态机投影当前状态。</p>
+          </article>
+          <article class="blueprint-item next">
+            <span class="blueprint-status">build next</span>
+            <h3>Checkpoint + Recovery</h3>
+            <p>借鉴 AgentCore 的“计算可销毁、状态另持久化”：不能把 worker 内存误当作恢复能力。</p>
+          </article>
+          <article class="blueprint-item">
+            <span class="blueprint-status">later slice</span>
+            <h3>Tenant Context</h3>
+            <p>Tenant → User → Run → RuntimeSession 显式映射；策略、Secret、配额和数据查询全部带 tenantId。</p>
+          </article>
+          <article class="blueprint-item">
+            <span class="blueprint-status">later slice</span>
+            <h3>Fair Queue + Lease</h3>
+            <p>借鉴托管平台的并发边界：per-tenant 限额、全局并发、租约和幂等消费必须分开建模。</p>
+          </article>
+          <article class="blueprint-item">
+            <span class="blueprint-status">later slice</span>
+            <h3>Resource Observer</h3>
+            <p>读取 GPU 使用率、显存、队列与趋势，为 Admission 提供事实；不直接修改 vLLM 的 KV 管理。</p>
+          </article>
+          <article class="blueprint-item">
+            <span class="blueprint-status">later slice</span>
+            <h3>Tool Isolation + Audit</h3>
+            <p>借鉴 Codex、Copilot 和 microVM 平台：工具权限、执行隔离、审计事件是三种不同责任。</p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section id="hybrid">
+      <div class="shell">
+        <div class="section-head reveal">
+          <div>
+            <span class="section-index">07 · hybrid IDE products</span>
+            <h2>TRAE、CodeBuddy、Qoder：可学习产品契约，不能臆测后端</h2>
+          </div>
+          <p class="section-lead">
+            它们服务大量账号，也支持多任务或多 Agent，但公开资料主要描述用户可见行为。可以学习控制面契约，不能据此断言内部队列和数据库实现。
+          </p>
+        </div>
+
+        <div class="hybrid-grid reveal">
+          <article class="hybrid-card">
+            <h3>TRAE SOLO</h3>
+            <p>强调同一工作区内多个专用 Agent 并行、任务可见性，以及从需求到部署的完整交付。</p>
+            <div class="hybrid-flow">
+              <span>Account / IDE workspace</span>
+              <span>Parallel SOLO tasks</span>
+              <span>Editor · browser · terminal · docs</span>
+            </div>
+            <div class="hybrid-note">可学习：多任务监督 UI。未知：服务端公平队列、租户数据模型、资源调度。</div>
+            <a href="https://www.trae.ai/blog/product_solo_1112" target="_blank" rel="noreferrer">官方 SOLO 介绍 ↗</a>
+          </article>
+          <article class="hybrid-card">
+            <h3>CodeBuddy</h3>
+            <p>Agents 支持并行任务；Agent Teams 公开了 Lead、成员、共享任务表和 mailbox 协作模型。</p>
+            <div class="hybrid-flow">
+              <span>User / project context</span>
+              <span>Lead + independent teammates</span>
+              <span>Shared task list + messaging</span>
+            </div>
+            <div class="hybrid-note">可学习：多 Agent 协作协议。注意：官方 CLI 文档显示 Team 数据可本地存储，不等于云端多租户实现。</div>
+            <a href="https://www.codebuddy.ai/docs/cli/agent-teams" target="_blank" rel="noreferrer">官方 Agent Teams ↗</a>
+          </article>
+          <article class="hybrid-card">
+            <h3>Qoder Quest</h3>
+            <p>通过任务板管理并行 Quest；Experts Mode 自动拆解任务并组织专家 Agent，支持 Worktree 隔离。</p>
+            <div class="hybrid-flow">
+              <span>Workspace / Knowledge</span>
+              <span>Quest task board</span>
+              <span>Agent or Experts + review</span>
+            </div>
+            <div class="hybrid-note">可学习：任务状态、Artifact review 与 Worktree。未知：平台后端 Tenant 和容量管理实现。</div>
+            <a href="https://docs.qoder.com/user-guide/quest/overview" target="_blank" rel="noreferrer">官方 Quest 架构 ↗</a>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section id="questions">
+      <div class="shell">
+        <div class="section-head reveal">
+          <div>
+            <span class="section-index">08 · interview checklist</span>
+            <h2>设计多租户 Harness 时，必须回答的八个问题</h2>
+          </div>
+          <p class="section-lead">
+            如果这些问题答不清楚，系统往往只是“能跑多个 Agent”，还不能称为可靠的多租户执行平台。
+          </p>
+        </div>
+
+        <div class="questions reveal">
+          <div class="question"><b>身份怎样传递？</b><span>tenantId、userId、runId、runtimeSessionId 谁生成、谁校验，能否跨租户伪造？</span></div>
+          <div class="question"><b>配额在哪一层执行？</b><span>并发 Run、排队数、Token、GPU 时间、工具调用分别由谁限流？</span></div>
+          <div class="question"><b>隔离边界是什么？</b><span>只做数据库逻辑隔离，还是进程、容器、microVM、网络和 Secret 也隔离？</span></div>
+          <div class="question"><b>Worker 消失后还剩什么？</b><span>哪些状态在内存，哪些事件已落盘，恢复会不会重复执行有副作用的工具？</span></div>
+          <div class="question"><b>如何防止重复执行？</b><span>Task 幂等键、Run lease、工具幂等键和事件唯一约束是否分别存在？</span></div>
+          <div class="question"><b>公平性怎样证明？</b><span>大 Tenant 是否会饿死小 Tenant？优先级是否能绕过全局硬约束？</span></div>
+          <div class="question"><b>审计记录到什么粒度？</b><span>命令、模型请求、工具参数、审批人、策略版本和资源快照能否串成时间线？</span></div>
+          <div class="question"><b>Agent 和模型资源谁负责？</b><span>Harness 决定何时提交；推理服务决定 token、batch、KV 和 GPU 物理分配。</span></div>
+        </div>
+      </div>
+    </section>
+
+    <section id="sources">
+      <div class="shell">
+        <div class="section-head reveal">
+          <div>
+            <span class="section-index">09 · primary sources</span>
+            <h2>官方技术资料</h2>
+          </div>
+          <p class="section-lead">优先使用公开架构和官方文档。产品没有公开的内部实现，在页面中明确标为未知。</p>
+        </div>
+
+        <div class="source-grid reveal">
+          <a class="source-card" href="https://openai.com/index/introducing-codex/" target="_blank" rel="noreferrer"><b>Codex Cloud</b><span>独立云端环境、并行任务和可验证执行</span></a>
+          <a class="source-card" href="https://help.openai.com/en/articles/11390924" target="_blank" rel="noreferrer"><b>Codex Enterprise</b><span>Workspace、环境、GitHub 权限和企业控制</span></a>
+          <a class="source-card" href="https://docs.github.com/en/copilot/concepts/agents/cloud-agent/about-cloud-agent" target="_blank" rel="noreferrer"><b>GitHub Copilot Cloud Agent</b><span>Actions 驱动的临时开发环境</span></a>
+          <a class="source-card" href="https://docs.github.com/en/copilot/concepts/policies" target="_blank" rel="noreferrer"><b>GitHub Enterprise Policy</b><span>组织策略和审计边界</span></a>
+          <a class="source-card" href="https://docs.openhands.dev/sdk/arch/agent-server" target="_blank" rel="noreferrer"><b>OpenHands Agent Server</b><span>多用户 API、Workspace Manager 与 WebSocket</span></a>
+          <a class="source-card" href="https://docs.openhands.dev/openhands/usage/architecture/runtime" target="_blank" rel="noreferrer"><b>OpenHands Runtime</b><span>容器、Action Server、REST action / observation</span></a>
+          <a class="source-card" href="https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-sessions.html" target="_blank" rel="noreferrer"><b>AWS AgentCore Sessions</b><span>每 Session microVM、stickiness 和生命周期</span></a>
+          <a class="source-card" href="https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/harness-vs-runtime.html" target="_blank" rel="noreferrer"><b>AgentCore Harness vs Runtime</b><span>Agent 逻辑与托管基础设施的责任分界</span></a>
+          <a class="source-card" href="https://learn.microsoft.com/en-us/azure/foundry/agents/concepts/hosted-agents" target="_blank" rel="noreferrer"><b>Foundry Hosted Agents</b><span>VM 隔离 Session、身份、持久文件和伸缩</span></a>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <div class="shell footer-inner">
+      <span>Multi-tenant Agent Task Service Architecture Atlas</span>
+      <span>用户获得任务结果；内部 Sandbox 与编排让多个 Run 安全、公平、可恢复地共存。</span>
+    </div>
+  </footer>
+
+  <script>
+    const systems = [
+      {
+        id: "ours",
+        order: "00",
+        short: "VH",
+        name: "VRAM-Aware Agent Task Service",
+        type: "user-facing product · target architecture",
+        evidence: "项目设计 · 目标架构",
+        summary: "用户在受管 Workspace 中提交任务并获得 Diff/Artifact；内部用 Pi 承担 Agent loop，以 Sandbox 和编排建立安全执行边界。",
+        tenant: "认证 Principal → Tenant → Workspace → Task/Run；身份、数据、策略、资源和结果按 Tenant 收口。",
+        isolation: "目标是每 Attempt 独立容器；文件、进程、网络、Secret 和计算资源攻击测试必须通过。当前 ManagedLocal 仅用于开发。",
+        state: "RunEvent 作为事实；Checkpoint 标记安全恢复边界；Pi Session 提供 Runtime 上下文。",
+        resource: "ResourceObserver 读取 GPU / vLLM 信号；ExecutionPolicy 决定 Run 启动或排队。",
+        borrow: "把 AgentCore 的 Session 映射、OpenHands 的远程执行边界、Codex 的审计证据和云平台的双层配额组合起来。",
+        source: "multi-tenant-agent-task-service-roadmap.zh-CN.md",
+        lanes: [
+          ["tenant", "Product / Tenant", [["Authenticated API", "principal + workspaceId"], ["Tenant Context", "scope + quota + policy"], ["Task Result", "answer + diff + artifact"]]],
+          ["control", "Control Plane", [["Admission", "GPU + queue + guardrails"], ["Fair Queue", "per-tenant scheduling"], ["Run Lease", "single active consumer"]]],
+          ["execution", "Sandbox / Runtime", [["SandboxInstance", "per-attempt isolation"], ["PiAdapter", "runtime translation"], ["Tools", "execute inside sandbox"]]],
+          ["state", "State Plane", [["RunEvent", "append-only facts"], ["Checkpoint", "safe recovery boundary"], ["Audit View", "tenant timeline"]]],
+          ["model", "Inference Plane", [["vLLM API", "model request"], ["Scheduler", "batch + KV"], ["GPU", "physical VRAM"]]]
+        ],
+        matrix: {
+          tenant: "可信 Principal；Tenant-scoped Workspace、任务、策略与结果",
+          run: "AgentRun ≠ Pi Session；start / resume / interrupt",
+          isolation: "当前仅最小逻辑边界；产品目标为每 Attempt 容器和真实攻击测试",
+          state: "SQLite RunEvent + Checkpoint 目标",
+          quota: "全局并发 + per-tenant 公平队列 + GPU admission",
+          audit: "统一 Run 时间线目标",
+          model: "自托管 vLLM；可观测 GPU，但不接管 KV",
+          openness: "本项目完全可见"
+        }
+      },
+      {
+        id: "codex-cloud",
+        order: "01",
+        short: "CX",
+        name: "Codex Cloud",
+        type: "managed coding agent product",
+        evidence: "官方行为公开 · 后端部分封闭",
+        summary: "面向个人与企业 Workspace 的云端编码 Agent；每个任务在独立云环境运行，可并行执行并产出可审查证据。",
+        tenant: "ChatGPT 用户 / Workspace / Tenant；GitHub 仓库授权、环境可见性与企业管理员配置形成访问边界。",
+        isolation: "每个任务进入独立、预加载仓库的云端 sandbox；网络默认受限，任务相互独立。",
+        state: "任务进度、终端日志、测试证据、Diff 和后续修订保留在云端任务上下文中。",
+        resource: "用户看到计划额度、credits 和并行任务；内部队列与 GPU placement 未公开。",
+        borrow: "把“执行证据”做成一等产物：事件、日志、测试结果和 Diff 必须可由用户验证。",
+        source: "https://openai.com/index/introducing-codex/",
+        lanes: [
+          ["tenant", "Tenant / Access", [["ChatGPT Identity", "user + workspace"], ["GitHub Auth", "repo allowlist"], ["Environment", "shared or private config"]]],
+          ["control", "Cloud Control", [["Task Create", "Ask / Code"], ["Parallel Tasks", "independent runs"], ["Admin Controls", "environment + analytics"]]],
+          ["execution", "Task Sandbox", [["Repo Checkout", "preloaded codebase"], ["Codex Agent", "edit + commands"], ["Verification", "tests + linters"]]],
+          ["state", "Evidence", [["Progress", "live task status"], ["Logs / Citations", "verifiable actions"], ["Diff / PR", "review + integrate"]]],
+          ["model", "Model Service", [["Model Routing", "managed"], ["Capacity", "credits / limits"], ["Inference", "implementation hidden"]]]
+        ],
+        matrix: {
+          tenant: "ChatGPT Tenant / Workspace / user / repo authorization",
+          run: "云端 task；可并行、迭代和继续",
+          isolation: "每任务独立 cloud sandbox",
+          state: "任务进度、日志、测试、Diff、环境配置",
+          quota: "计划额度 / credits；内部调度未公开",
+          audit: "执行证据 + 企业 analytics / compliance",
+          model: "托管模型服务；GPU 层隐藏",
+          openness: "产品契约公开，内部控制面封闭"
+        }
+      },
+      {
+        id: "copilot",
+        order: "02",
+        short: "GH",
+        name: "GitHub Copilot Cloud Agent",
+        type: "repository-native cloud agent",
+        evidence: "官方执行环境与治理公开",
+        summary: "把 Issue、PR、自动化触发器转成云端编码 Session，在 GitHub Actions 驱动的临时开发环境中工作。",
+        tenant: "GitHub Enterprise / Organization / Repository 权限天然成为租户与资源边界；策略可跨 GitHub、IDE 和 CLI surface。",
+        isolation: "每个 coding session 使用自己的 ephemeral development environment，由 GitHub Actions 提供。",
+        state: "任务与 PR/Issue 生命周期绑定；代码变更、检查和审计事件留在 GitHub 对象模型中。",
+        resource: "消费 Actions minutes 和 AI credits；组织策略控制可用性，底层 capacity scheduling 不公开。",
+        borrow: "不要另造所有业务对象：Task 可以与现有 Issue / PR / workflow 身份和权限模型对齐。",
+        source: "https://docs.github.com/en/copilot/concepts/agents/cloud-agent/about-cloud-agent",
+        lanes: [
+          ["tenant", "GitHub Scope", [["Enterprise", "AI controls"], ["Organization", "policy + seats"], ["Repository", "code permissions"]]],
+          ["control", "Task Control", [["Issue / Prompt", "task source"], ["Session", "cloud agent run"], ["Automation", "schedule / event trigger"]]],
+          ["execution", "Actions Env", [["Ephemeral Env", "isolated workspace"], ["Copilot Agent", "explore + edit"], ["Checks", "tests + linters"]]],
+          ["state", "GitHub Objects", [["Progress", "session status"], ["Branch / PR", "review boundary"], ["Audit Log", "actor:Copilot"]]],
+          ["model", "Managed Capacity", [["AI Credits", "usage unit"], ["Actions Minutes", "compute unit"], ["Model Plane", "implementation hidden"]]]
+        ],
+        matrix: {
+          tenant: "Enterprise → Organization → Repository RBAC",
+          run: "Cloud agent session；Issue / PR / automation 触发",
+          isolation: "GitHub Actions ephemeral development environment",
+          state: "Issue、branch、PR、checks、session status",
+          quota: "Actions minutes + AI credits + enterprise policy",
+          audit: "GitHub audit log 可查询 agent activity",
+          model: "托管模型服务；capacity 隐藏",
+          openness: "产品与治理边界公开，内部 scheduler 封闭"
+        }
+      },
+      {
+        id: "openhands",
+        order: "03",
+        short: "OH",
+        name: "OpenHands Agent Server",
+        type: "open multi-user architecture",
+        evidence: "组件架构公开 · 最适合读源码",
+        summary: "以 HTTP / WebSocket Agent Server、Conversation Handler 和 Workspace Manager 组织多用户远程 Agent 执行。",
+        tenant: "API 层负责认证授权；Workspace Manager 为每个用户分配隔离 workspace。开源本地 GUI 本身不适合共享多租户。",
+        isolation: "生产模式可为用户创建 Docker / remote sandbox；Docker Manager 负责创建、限制和销毁容器。",
+        state: "Conversation Handler 管会话状态和并发；WebSocket 流式返回事件；workspace 负责执行侧文件状态。",
+        resource: "公开设计包含容器生命周期与 resource limits；模型 quota / GPU 取决于外接 LLM 和部署者。",
+        borrow: "把 Conversation Handler 和 Workspace Manager 分离：前者管状态，后者管执行环境生命周期。",
+        source: "https://docs.openhands.dev/sdk/arch/agent-server",
+        lanes: [
+          ["tenant", "API Boundary", [["FastAPI", "HTTP ingress"], ["AuthN / AuthZ", "user boundary"], ["Validation", "request contract"]]],
+          ["control", "Conversation", [["Handler", "route + state"], ["Concurrency", "request coordination"], ["WebSocket", "stream events"]]],
+          ["execution", "Workspace", [["Workspace Manager", "provider selection"], ["Docker Manager", "container lifecycle"], ["Agent Server", "agent + tools"]]],
+          ["state", "Action Loop", [["Action", "tool intent"], ["Executor", "sandbox operation"], ["Observation", "result to agent"]]],
+          ["model", "LLM Provider", [["Model Config", "BYO provider"], ["Rate Limits", "external"], ["GPU", "deployment-specific"]]]
+        ],
+        matrix: {
+          tenant: "Agent Server auth + per-user workspace；Enterprise RBAC",
+          run: "Conversation Handler 管 conversation 和并发",
+          isolation: "Docker / remote sandbox；每用户 workspace",
+          state: "Conversation state + workspace files + event stream",
+          quota: "Workspace resource limits；模型 quota 外置",
+          audit: "WebSocket 事件；企业审计能力",
+          model: "BYO LLM；GPU 不由 Agent Server 固定管理",
+          openness: "核心架构与代码公开；Enterprise 部分封闭"
+        }
+      },
+      {
+        id: "agentcore",
+        order: "04",
+        short: "AC",
+        name: "AWS Bedrock AgentCore",
+        type: "managed agent runtime substrate",
+        evidence: "基础设施语义公开",
+        summary: "框架无关的 Agent 托管底座：Runtime 管伸缩、Session、microVM 隔离和可观测性，Agent loop 仍由应用提供。",
+        tenant: "IAM / JWT 负责入口身份；关键点是 AgentCore 不替应用强制 sessionId → userId 映射，客户端后端必须维护。",
+        isolation: "每个 runtimeSessionId 获得专用 microVM，CPU、内存和文件系统隔离；Session 结束后 VM 销毁并清理内存。",
+        state: "microVM 内状态是临时的；持久文件用 session storage，结构化长期信息用 AgentCore Memory。",
+        resource: "Runtime 自动伸缩并按 Session 计费；单次生命周期最长可达 8 小时。每用户 Session 上限仍由应用控制。",
+        borrow: "最值得抄的是责任声明：基础设施隔离 Session，但 Tenant 映射和每用户并发必须由我们的控制面完成。",
+        source: "https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-sessions.html",
+        lanes: [
+          ["tenant", "Application Edge", [["Client Backend", "user mapping"], ["IAM / JWT", "authenticate"], ["Session ID", "app-provided identity"]]],
+          ["control", "AgentCore Runtime", [["Endpoint", "versioned runtime"], ["Session Router", "microVM stickiness"], ["Lifecycle", "active / idle / stopped"]]],
+          ["execution", "Dedicated microVM", [["Agent Code", "any framework"], ["Command API", "deterministic shell"], ["Tools", "gateway / browser / code"]]],
+          ["state", "Persistence", [["Ephemeral RAM", "compute lifetime"], ["Session Storage", "filesystem resume"], ["Memory", "long-term structured state"]]],
+          ["model", "Model Access", [["Bedrock / Other", "model call"], ["CloudWatch", "metrics + traces"], ["Capacity", "managed separately"]]]
+        ],
+        matrix: {
+          tenant: "IAM/JWT；user ↔ session 映射由应用维护",
+          run: "runtimeSessionId；Active / Idle / Stopped；最长 8h 生命周期",
+          isolation: "每 Session 专用 microVM",
+          state: "临时上下文 + session storage + AgentCore Memory",
+          quota: "自动伸缩；每用户 Session 上限由应用实现",
+          audit: "CloudWatch / CloudTrail / agent observability",
+          model: "Runtime 与模型访问分层",
+          openness: "托管实现封闭，Session 与安全合同公开"
+        }
+      },
+      {
+        id: "foundry",
+        order: "05",
+        short: "MF",
+        name: "Microsoft Foundry Hosted Agents",
+        type: "managed enterprise agent platform",
+        evidence: "托管合同与网络架构公开",
+        summary: "将自定义 Agent 容器部署到托管基础设施；平台负责 Session 沙箱、状态恢复、Agent 身份、伸缩和可观测性。",
+        tenant: "Foundry Resource → Project → Agent；Azure RBAC 控制创建、调用和管理，每个 Agent 有独立 Entra identity。",
+        isolation: "每个 Session 运行在 VM-isolated sandbox，拥有持久 $HOME / files；Session 空闲后可 scale-to-zero 并恢复。",
+        state: "平台保存 Session；Basic 使用逻辑隔离托管存储，Standard 可把文件、Search 和 Cosmos DB 放进客户资源。",
+        resource: "每 Session 配置 CPU / memory；模型调用额度在 model deployment 层另行执行，Agent 与模型是两套 limit。",
+        borrow: "显式分离 Agent Service quota 和 Model quota；这正对应我们的 Run 并发与 vLLM / GPU 容量。",
+        source: "https://learn.microsoft.com/en-us/azure/foundry/agents/concepts/hosted-agents",
+        lanes: [
+          ["tenant", "Azure Scope", [["Foundry Resource", "governance"], ["Project", "team isolation"], ["Agent Identity", "dedicated Entra ID"]]],
+          ["control", "Agent Service", [["Endpoint", "Responses / Invoke"], ["Session", "platform lifecycle"], ["Autoscale", "scale to zero"]]],
+          ["execution", "VM Sandbox", [["Agent Container", "custom framework"], ["Toolbox MCP", "managed tools"], ["Data Proxy", "customer resources"]]],
+          ["state", "State Services", [["Persistent HOME", "resume files"], ["Cosmos DB", "threads / messages"], ["Storage / Search", "files + retrieval"]]],
+          ["model", "Model Deployment", [["Model Catalog", "reasoning"], ["Model Quota", "TPM / RPM"], ["Agent Quota", "separate limits"]]]
+        ],
+        matrix: {
+          tenant: "Resource → Project → Agent；Azure RBAC + Agent identity",
+          run: "Per-session sandbox；Responses / Invocations / WebSocket",
+          isolation: "每 Session VM-isolated sandbox + VNet options",
+          state: "持久 HOME / files；托管或 BYO Storage / Cosmos / Search",
+          quota: "Agent Service limits 与 model TPM/RPM 分离",
+          audit: "Application Insights + Azure governance",
+          model: "Foundry model deployment；与 agent compute 分层",
+          openness: "托管实现封闭，网络 / identity / state 合同详细公开"
+        }
+      }
+    ];
+
+    const journeySteps = [
+      ["01 / ingress", "入口验证 API Key，从 RequestPrincipal 派生 Tenant，再以 workspaceId 创建幂等 Task；不接受客户端自报身份和任意宿主机路径。"],
+      ["02 / identity", "所有 Workspace、Run、事件和操作都使用 Tenant-scoped 查询；跨租户对象对外不可见。"],
+      ["03 / admission", "确定性 Hard Guardrails 先判断全局并发、Tenant 配额和 GPU 安全线，再决定启动或排队。"],
+      ["04 / queue", "Fair Queue 决定谁先运行。优先级属于 Tenant 策略，但不能绕过显存和全局并发硬约束。"],
+      ["05 / sandbox", "编排层为 Attempt 创建受 ExecutionProfile 约束的 Sandbox，ready 后才进入 RUNNING；退出或丢失必须释放 slot。"],
+      ["06 / runtime", "PiAdapter 驱动 AgentSession，文件和 Shell 工具通过 Sandbox Executor 操作被授权 Workspace。"],
+      ["07 / inference", "Harness 只提交模型请求；vLLM 自己决定 batching、token 调度、KV block 和物理显存分配。"],
+      ["08 / result", "服务向用户交付回答、Diff、测试结果和 Artifact，同时用事件与 Checkpoint 判断哪些副作用不能重放。"]
+    ];
+
+    const tabsRoot = document.getElementById("system-tabs");
+    const laneStack = document.getElementById("lane-stack");
+    const matrixBody = document.getElementById("matrix-body");
+    const stepButtons = document.getElementById("step-buttons");
+    const journeyNodes = [...document.querySelectorAll(".journey-node")];
+
+    function renderTabs() {
+      tabsRoot.innerHTML = systems.map((system, index) => `
+        <button
+          class="system-tab"
+          id="tab-${system.id}"
+          type="button"
+          role="tab"
+          aria-selected="${index === 0 ? "true" : "false"}"
+          aria-controls="lane-stack"
+          data-system="${system.id}">
+          <span class="tab-type">${system.order} / ${system.type}</span>
+          <span class="tab-name">${system.name}</span>
+        </button>
+      `).join("");
+
+      tabsRoot.addEventListener("click", (event) => {
+        const tab = event.target.closest(".system-tab");
+        if (!tab) return;
+        selectSystem(tab.dataset.system);
+      });
+
+      tabsRoot.addEventListener("keydown", (event) => {
+        if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+        const tabs = [...tabsRoot.querySelectorAll(".system-tab")];
+        const current = tabs.indexOf(document.activeElement);
+        let next = current;
+        if (event.key === "ArrowRight") next = (current + 1) % tabs.length;
+        if (event.key === "ArrowLeft") next = (current - 1 + tabs.length) % tabs.length;
+        if (event.key === "Home") next = 0;
+        if (event.key === "End") next = tabs.length - 1;
+        if (next >= 0) {
+          event.preventDefault();
+          tabs[next].focus();
+          selectSystem(tabs[next].dataset.system);
+        }
+      });
+    }
+
+    function selectSystem(id) {
+      const system = systems.find((item) => item.id === id) || systems[0];
+      tabsRoot.querySelectorAll(".system-tab").forEach((tab) => {
+        tab.setAttribute("aria-selected", String(tab.dataset.system === system.id));
+      });
+
+      document.getElementById("board-kicker").textContent = `${system.order} / responsibility planes`;
+      document.getElementById("board-title").textContent = `${system.name}：请求怎样穿过平台`;
+      document.getElementById("evidence-badge").textContent = system.evidence;
+
+      laneStack.innerHTML = system.lanes.map((lane) => `
+        <div class="lane" data-kind="${lane[0]}">
+          <div class="lane-label"><span>plane</span><b>${lane[1]}</b></div>
+          <div class="lane-flow">
+            ${lane[2].map((node) => `
+              <div class="flow-box">
+                <b>${node[0]}</b>
+                <span>${node[1]}</span>
+              </div>
+            `).join("")}
+          </div>
+        </div>
+      `).join("");
+
+      document.getElementById("profile-mark").textContent = system.short;
+      document.getElementById("profile-title").textContent = system.name;
+      document.getElementById("profile-summary").textContent = system.summary;
+      document.getElementById("profile-tenant").textContent = system.tenant;
+      document.getElementById("profile-isolation").textContent = system.isolation;
+      document.getElementById("profile-state").textContent = system.state;
+      document.getElementById("profile-resource").textContent = system.resource;
+      document.getElementById("profile-borrow").textContent = system.borrow;
+      document.getElementById("profile-source").href = system.source;
+    }
+
+    function renderMatrix() {
+      matrixBody.innerHTML = systems.map((system) => `
+        <tr>
+          <td>${system.name}</td>
+          <td>${system.matrix.tenant}</td>
+          <td>${system.matrix.run}</td>
+          <td>${system.matrix.isolation}</td>
+          <td>${system.matrix.state}</td>
+          <td>${system.matrix.quota}</td>
+          <td>${system.matrix.audit}</td>
+          <td>${system.matrix.model}</td>
+          <td>${system.matrix.openness}</td>
+        </tr>
+      `).join("");
+    }
+
+    function renderJourneyControls() {
+      stepButtons.innerHTML = journeySteps.map((step, index) => `
+        <button class="step-button" type="button" aria-pressed="${index === 0 ? "true" : "false"}" data-step="${index}">
+          <span class="step-num">${String(index + 1).padStart(2, "0")}</span>
+          <span class="step-text">${step[0].split(" / ")[1]}</span>
+        </button>
+      `).join("");
+
+      stepButtons.addEventListener("click", (event) => {
+        const button = event.target.closest(".step-button");
+        if (!button) return;
+        selectJourneyStep(Number(button.dataset.step));
+      });
+
+      selectJourneyStep(0);
+    }
+
+    function selectJourneyStep(index) {
+      const safeIndex = Math.min(Math.max(index, 0), journeySteps.length - 1);
+      stepButtons.querySelectorAll(".step-button").forEach((button, buttonIndex) => {
+        button.setAttribute("aria-pressed", String(buttonIndex === safeIndex));
+      });
+
+      journeyNodes.forEach((node, nodeIndex) => {
+        node.classList.toggle("active", nodeIndex === safeIndex);
+        node.classList.toggle("complete", nodeIndex < safeIndex);
+      });
+
+      document.getElementById("journey-detail-title").textContent = journeySteps[safeIndex][0];
+      document.getElementById("journey-detail-text").textContent = journeySteps[safeIndex][1];
+    }
+
+    function enableReveals() {
+      const items = document.querySelectorAll(".reveal");
+      if (!("IntersectionObserver" in window)) {
+        items.forEach((item) => item.classList.add("visible"));
+        return;
+      }
+
+      const observer = new IntersectionObserver((entries) => {
+        entries.forEach((entry) => {
+          if (entry.isIntersecting) {
+            entry.target.classList.add("visible");
+            observer.unobserve(entry.target);
+          }
+        });
+      }, { threshold: 0.08 });
+
+      items.forEach((item) => observer.observe(item));
+    }
+
+    renderTabs();
+    selectSystem("ours");
+    renderMatrix();
+    renderJourneyControls();
+    enableReveals();
+  </script>
+</body>
+</html>

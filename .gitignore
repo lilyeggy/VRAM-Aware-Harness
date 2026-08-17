@@ -39,7 +39,3 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 
 # build artifacts
 artifacts/
-
-# nested independent git repos (tracked separately)
-agentic-rl-lab/
-explainer-site/
