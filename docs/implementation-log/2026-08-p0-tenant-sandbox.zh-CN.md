@@ -220,3 +220,7 @@ microVM Provider 的路由位置，不在本项目内自研 VMM。必须实现�
 | `src/app/harness-config.ts`、`.env.example` | 容器默认 profile/runtime 为 `default/runsc`；ManagedLocal 明确限制为 `development`，default/restricted 禁止配置 runc。 | `tsc --noEmit` 通过；当前环境缺少 `bun`，所以 `bun run test` 未能执行。 |
 
 当前能说的结论：源码会把 `runsc` 选择和 `docker inspect` 观察结果关联到每个 Sandbox 记录，且 runtime 不匹配会 fail closed。当前不能说的结论：没有 Linux Docker daemon + gVisor/runsc 真机输出，不能声称 default 实际运行在 gVisor，也不能声称跨 Tenant 文件/Secret、宿主路径、外网、fork bomb、资源耗尽或 Sandbox kill 攻击已通过。这些仍是 P0.5 的下一项真机验收。
+
+### 2026-08-17：攻击式真机 smoke 入口已补齐（未执行）
+
+新增 `scripts/container-sandbox-attack-smoke.ts` 与 `bun run smoke:container:attacks`。它只接受真实 Docker 命令，不使用 fake：启动两个 `default/runsc` Sandbox，验证两个 Tenant 的 Workspace/Secret/路径不可见、宿主路径不可见、默认网络不可外连，并以受限 PID/临时文件压力和直接 `docker rm --force` 验证资源边界及 `LOST` 事件。该脚本是验收入口而非已通过的证据；当前环境没有 Bun，也没有 Linux Docker/runsc，因此这些攻击检查尚未执行，脚本中资源压力的实际退出行为仍需在 A6000 Linux 机器记录原始输出。

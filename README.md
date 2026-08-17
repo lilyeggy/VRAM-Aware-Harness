@@ -265,12 +265,15 @@ Workspace，再提交任务即可看到 Run 终态和持久化输出。该命令
 
 ```bash
 bun run smoke:container
+bun run smoke:container:attacks
 ```
 
-它会通过当前 `HARNESS_SANDBOX_RUNTIME`（容器默认是 `runsc`）拉起一个真实容器，并验证
+前者通过当前 `HARNESS_SANDBOX_RUNTIME`（容器默认是 `runsc`）拉起一个真实容器，并验证
 非 root UID、仅挂载 Workspace 的写入、只读 RootFS 和默认无网络；Provider 还会通过
 `docker inspect` 记录实际 runtime。无论成功或失败都会清理容器和临时目录。当前开发机若
-没有 Docker daemon 或 gVisor/runsc，该命令应失败而不是把 fake unit test 当作真机证据。
+没有 Docker daemon 或 gVisor/runsc，这些命令应失败而不是把 fake unit test 当作真机证据。
+`smoke:container:attacks` 额外覆盖两个 Tenant 的 Workspace/Secret/路径、默认无网络、PID/
+临时文件资源上限和意外 kill → LOST；它的 PASS 输出必须在 Linux Docker + runsc 上保存。
 
 ## 启动完整 Harness
 
