@@ -382,6 +382,7 @@ docs/adr/         # 架构决策记录
 
 - [多租户 Agent 任务服务路线图](docs/multi-tenant-agent-task-service-roadmap.zh-CN.md)：当前唯一产品实施入口，覆盖身份、Workspace、真实 Sandbox、编排恢复与用户结果闭环。
 - [Agent Infra 面试演示 Runbook](docs/interview-demo-runbook.zh-CN.md)：三分钟演示、代码锚点、追问速答与诚实边界。
+- [Sandbox Runtime 对比实验手册](docs/sandbox-runtime-benchmark-runbook.zh-CN.md)：在真实 Linux Docker 环境比较 runc/runsc，并为 Kata/Firecracker Provider 预留同一实验方法。
 - [历史秋招面试项目路线图](docs/interview-project-roadmap.zh-CN.md)：保留 A6000、故障演示和 Benchmark 等证据设计，不再定义产品形态。
 - [历史异构 Harness 控制面路线图](docs/heterogeneous-harness-control-plane-roadmap.zh-CN.md)：已暂停，仅保留为秋招后的演进参考。
 - [Stage 0 MVP 基线与核心契约](docs/stage0-mvp-baseline.zh-CN.md)：记录进入 Stage 1 前不可破坏的 schema、状态、恢复、资源和调度语义。

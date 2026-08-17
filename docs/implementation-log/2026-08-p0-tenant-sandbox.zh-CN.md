@@ -224,3 +224,10 @@ microVM Provider 的路由位置，不在本项目内自研 VMM。必须实现�
 ### 2026-08-17：攻击式真机 smoke 入口已补齐（未执行）
 
 新增 `scripts/container-sandbox-attack-smoke.ts` 与 `bun run smoke:container:attacks`。它只接受真实 Docker 命令，不使用 fake：启动两个 `default/runsc` Sandbox，验证两个 Tenant 的 Workspace/Secret/路径不可见、宿主路径不可见、默认网络不可外连，并以受限 PID/临时文件压力和直接 `docker rm --force` 验证资源边界及 `LOST` 事件。该脚本是验收入口而非已通过的证据；当前环境没有 Bun，也没有 Linux Docker/runsc，因此这些攻击检查尚未执行，脚本中资源压力的实际退出行为仍需在 A6000 Linux 机器记录原始输出。
+
+### 2026-08-17：Sandbox runtime benchmark runner 已补齐（未执行）
+
+新增 `scripts/sandbox-runtime-benchmark.ts`、`bun run benchmark:sandbox` 和
+`docs/sandbox-runtime-benchmark-runbook.zh-CN.md`。当前 runner 使用同一 Alpine 镜像、非 root UID、Workspace、CPU/内存/网络策略和每 Attempt 生命周期，分别测 runc baseline 与 runsc 的冷启动、`docker exec` 命令往返、文件/tmpfs I/O 和清理耗时，并保存每轮实际 inspect runtime。结果只输出描述性 P50/P95 和比值，不自动宣称哪个 runtime 更安全或更适合。
+
+Kata/Firecracker 尚无本项目 Provider，因此没有伪造 benchmark 结果；接入 strict Provider 后应直接复用同一结果 schema 和控制变量。当前环境缺少 Bun、Linux Docker 和 runsc，benchmark 尚未执行。

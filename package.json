@@ -12,7 +12,8 @@
     "demo:console": "bun run src/demo/task-console-demo.ts",
     "smoke:http": "bun run scripts/day7-http-smoke.ts",
     "smoke:container": "bun run scripts/container-sandbox-smoke.ts",
-    "smoke:container:attacks": "bun run scripts/container-sandbox-attack-smoke.ts"
+    "smoke:container:attacks": "bun run scripts/container-sandbox-attack-smoke.ts",
+    "benchmark:sandbox": "bun run scripts/sandbox-runtime-benchmark.ts"
   },
   "devDependencies": {
     "@types/bun": "latest"
