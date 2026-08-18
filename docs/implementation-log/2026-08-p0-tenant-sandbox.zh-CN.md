@@ -297,3 +297,20 @@ Kata/Firecracker 尚无本项目 Provider，因此没有伪造 benchmark 结果�
 真机实证（ECS）：policy（default、`/srv/workspaces/tenant`、禁网、限 secret）+ spec + runsc 已验证证据 注入后，报告整体 **PASS**，`tripleConsistent=true`（policy 指纹 `5e6b2ddf2efed2a3`、spec 指纹 `2f04d7312cd51595`、inspect 证实 runsc）。
 
 仍不能声称：三元组自洽只证明「隔离边界可追溯」，不表示攻击面为零；Kata/Firecracker strict 与 A6000 显存准入仍需对应真机。
+
+### 2026-08-18：租户级资源预算 + Fair-Share + 核算账本（差异化方向 B）
+
+把资源管控从「只数并发」升级为「以租户已消耗资源为尺度的会计模型」，落地方向 B。新增 `src/resources/`：
+
+- `tenant-budget.ts`：每租户预算（`weight` 公平份额权重 + `maxUnits` 硬上限）+ `computeFairShareUnits`（总容量按权重分配）+ `canAdmitUnits`（用量+请求不得越过 min(fair-share, max)）；
+- `resource-ledger.ts`：核算账本——每次 attempt 先 `commit`（预留 units）、退出时 `settle`（结算，含 COMPLETED/FAILED/LOST/TERMINATED/INTERRUPTED），支持 `activeUnits(tenant)` 与 `settledTotalUnits(tenant)`（chargeback）双视图；
+- `budget-aware-policy.ts`：`BudgetAwareExecutionPolicy` 作为**装饰器**包装现有 `DeterministicExecutionPolicy`——基础策略若判 START，再检查租户当前用量是否仍有预算余量；不足则降级 `QUEUE` + 新 reasonCode `TENANT_BUDGET_EXCEEDED`。`LedgerBudgetUsage` 把账本/预算/权重串成可用单位解析器。**opt-in 组合**，不触碰原策略，已有判定逻辑不变；
+- `execution-policy.ts` 仅新增 `TENANT_BUDGET_EXCEEDED` reasonCode。
+
+演示：`scripts/tenant-budget-demo.ts` 模拟两租户生命周期（a 权重 2 / b 权重 1，容量 9 → fair-share 6/3）：a 持仓升至公平份额后第 4 个 run 被拦（available=0），结算后再次放行；并输出各租户 chargeback 累计。
+
+测试：`tests/resources/resource-budget-ledger.test.ts` 10 例（fair-share 分配、ceiling 取小、账本 commit/settle/active/chargeback、预算耗尽降级、结算后释放）。git 跟踪测试 226 → 236 全绿。
+
+如何接入控制面（opt-in）：在组装 `ResourceAdmissionService` 时把 `new BudgetAwareExecutionPolicy(deterministic, new LedgerBudgetUsage(ledger, budgets, capacity, weights))` 作为其 `policy` 传入即可，`ResourceAdmissionService`、`DeterministicExecutionPolicy`、`TenantRunScheduler` 均无需改动。
+
+诚实的边界：账本单位是抽象 unit，可折算 CPU/内存/Latency；**真实显存（vLLM metrics）维度的准入仍需 A6000**；核算账本目前是内存实现，后续可换持久化 store。

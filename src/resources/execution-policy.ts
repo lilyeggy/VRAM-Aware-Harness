@@ -18,7 +18,8 @@ export type PolicyReasonCode =
     | "RESOURCE_BUSY_TENANT_LIMIT"
     | "RESOURCE_CRITICAL"
     | "RESOURCE_UNKNOWN"
-    | "RESOURCE_OBSERVATION_FAILED";
+    | "RESOURCE_OBSERVATION_FAILED"
+    | "TENANT_BUDGET_EXCEEDED";
 
 // 策略需要的上下文
 export interface ExecutionPolicyInput {
