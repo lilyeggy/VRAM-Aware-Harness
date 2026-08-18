@@ -1,0 +1,455 @@
+<section class="module" id="module-3" style="background: var(--color-bg-warm)">
+  <div class="module-content">
+    <header class="module-header animate-in">
+      <span class="module-number">03</span>
+      <h1 class="module-title">数据如何流动</h1>
+      <p class="module-subtitle">Command、Event、State 三种信息，怎样落进 SQLite，又怎样回放——跟着一封信走完整个系统。</p>
+    </header>
+
+    <div class="module-body">
+
+      <!-- ═══════════ SCREEN 1 · 三种信息 ═══════════ -->
+      <section class="screen animate-in">
+        <h2 class="screen-heading">三种信息：想干嘛、发生了什么、现在是什么</h2>
+        <p>系统里跑一次任务，会产生三种信息——就像寄一封信：快递单上的指令、每一站盖下的邮戳、信件此刻所在的站点。</p>
+        <p>把它们记成三个词：<span class="term" data-definition="「想让它干嘛」的指令——像快递单上填的寄送要求。在代码里，它带着「用户要做什么」进入系统。">Command</span>、<span class="term" data-definition="「刚刚发生了什么」的事实——像每一站盖下的邮戳。邮戳只能一张张往下加，不能涂改。">Event</span>、<span class="term" data-definition="「现在是什么」——像信件此刻停在哪一站。它是一张会被不断更新的「当前快照」。">State</span>。</p>
+
+        <div class="pattern-cards stagger-children">
+          <div class="pattern-card animate-in" style="border-top: 3px solid var(--color-actor-1)">
+            <div class="pattern-icon" style="background: var(--color-actor-1)">✉️</div>
+            <h4 class="pattern-title">Command · 想让它干嘛</h4>
+            <p class="pattern-desc">快递单上的指令。用户说「帮我把这个任务跑通」，指令带着目标进入系统。</p>
+          </div>
+          <div class="pattern-card animate-in" style="border-top: 3px solid var(--color-actor-2)">
+            <div class="pattern-icon" style="background: var(--color-actor-2)">📮</div>
+            <h4 class="pattern-title">Event · 刚刚发生了什么</h4>
+            <p class="pattern-desc">每一站盖下的邮戳：「已排队」「工具已调用」……只追加，不改写。</p>
+          </div>
+          <div class="pattern-card animate-in" style="border-top: 3px solid var(--color-actor-4)">
+            <div class="pattern-icon" style="background: var(--color-actor-4)">📍</div>
+            <h4 class="pattern-title">State · 现在是什么</h4>
+            <p class="pattern-desc">信件此刻在哪一站。最新状态一查就知，但它只反映「现在」。</p>
+          </div>
+        </div>
+
+        <div class="flow-animation animate-in" data-steps='[
+          {"highlight":"flow-actor-1","label":"用户提交任务：一封信被投进邮筒（HTTP 请求）"},
+          {"highlight":"flow-actor-1","label":"信先被送到第一个窗口","packet":true,"from":"actor-1","to":"actor-2"},
+          {"highlight":"flow-actor-2","label":"Principal 检查寄件人身份：你是谁、有没有权限"},
+          {"highlight":"flow-actor-2","label":"身份通过，信件转入分拣中心","packet":true,"from":"actor-2","to":"actor-3"},
+          {"highlight":"flow-actor-3","label":"RunService 是分拣中心：决定任务排队、开始，还是等工具"},
+          {"highlight":"flow-actor-3","label":"分拣结论连同邮戳一起送往档案库","packet":true,"from":"actor-3","to":"actor-4"},
+          {"highlight":"flow-actor-4","label":"SQLite 档案库落库：状态表和事件表在同一笔事务里写入"},
+          {"highlight":"flow-actor-4","label":"事件流按顺序钉进邮戳册","packet":true,"from":"actor-4","to":"actor-5"},
+          {"highlight":"flow-actor-5","label":"任务结束：完整旅程可回放，随时查得到"}
+        ]'>
+          <div class="flow-actors">
+            <div class="flow-actor" id="flow-actor-1">
+              <div class="flow-actor-icon">✉️</div>
+              <span>HTTP 请求</span>
+            </div>
+            <div class="flow-actor" id="flow-actor-2">
+              <div class="flow-actor-icon">🪪</div>
+              <span>Principal</span>
+            </div>
+            <div class="flow-actor" id="flow-actor-3">
+              <div class="flow-actor-icon">🗂️</div>
+              <span>RunService</span>
+            </div>
+            <div class="flow-actor" id="flow-actor-4">
+              <div class="flow-actor-icon">🗄️</div>
+              <span>SQLite</span>
+            </div>
+            <div class="flow-actor" id="flow-actor-5">
+              <div class="flow-actor-icon">📜</div>
+              <span>事件流</span>
+            </div>
+          </div>
+
+          <div class="flow-packet" id="flow-packet"></div>
+          <div class="flow-step-label" id="flow-label">点击「下一步」看这封信的旅程</div>
+
+          <div class="flow-controls">
+            <button class="btn flow-next-btn">下一步</button>
+            <button class="btn flow-reset-btn">重放</button>
+            <span class="flow-progress"></span>
+          </div>
+        </div>
+      </section>
+
+      <!-- ═══════════ SCREEN 2 · 快照 vs 历史 ═══════════ -->
+      <section class="screen animate-in">
+        <h2 class="screen-heading">快照 vs 历史：一张状态牌 + 一本邮戳册</h2>
+        <p>系统同时维护两张表：<span class="term" data-definition="某一刻状态的「照片」。状态表里保存的，就是最新一张。">快照</span>表 <code>agent_runs</code> 是「当前状态牌」，<span class="term" data-definition="只能往下加、不能改旧记录的写法，像钉邮戳的册子：只增不改。">追加式</span>表 <code>run_events</code> 是「邮戳合订本」。</p>
+        <p>为什么不能只留一本？因为「现在」会被不断覆盖，而「过去」必须完整保留——排障、回放、审计都靠它。</p>
+
+        <div class="pattern-cards stagger-children">
+          <div class="pattern-card animate-in" style="border-top: 3px solid var(--color-actor-4)">
+            <div class="pattern-icon" style="background: var(--color-actor-4)">🪧</div>
+            <h4 class="pattern-title">agent_runs · 当前状态牌</h4>
+            <p class="pattern-desc">每封信只占一行，永远是最新状态。像快递页顶部的最新动态，一查就知。</p>
+          </div>
+          <div class="pattern-card animate-in" style="border-top: 3px solid var(--color-actor-2)">
+            <div class="pattern-icon" style="background: var(--color-actor-2)">📔</div>
+            <h4 class="pattern-title">run_events · 邮戳合订本</h4>
+            <p class="pattern-desc">每一站一条记录，按 sequence 编号，只增不改。像钉在册子里的邮戳，一张张往下加。</p>
+          </div>
+        </div>
+
+        <div class="translation-block animate-in">
+          <div class="translation-code">
+            <span class="translation-label">CODE · run-state-machine.ts</span>
+            <pre><code>
+<span class="code-line"><span class="code-comment">// 只允许规定的状态转换</span></span>
+<span class="code-line"><span class="code-keyword">export function</span> <span class="code-function">assertValidTransition</span>(</span>
+<span class="code-line">    from : AgentRunStatus,</span>
+<span class="code-line">    to : AgentRunStatus,</span>
+<span class="code-line">): <span class="code-keyword">void</span> {</span>
+<span class="code-line">    <span class="code-keyword">if</span> (!<span class="code-function">canTransition</span>(from,to)){</span>
+<span class="code-line">        <span class="code-keyword">throw new</span> <span class="code-function">Error</span>(</span>
+<span class="code-line">            <span class="code-string">`非法的 AgentRun 状态转换：${from} -> ${to}`</span></span>
+<span class="code-line">        )</span>
+<span class="code-line">    }</span>
+<span class="code-line">}</span>
+            </code></pre>
+          </div>
+          <div class="translation-english">
+            <span class="translation-label">PLAIN ENGLISH</span>
+            <div class="translation-lines">
+              <p class="tl">状态跳转不是随意的，得遵守规则表——这就是「状态机」。</p>
+              <p class="tl">定义一个「盖章检查员」：想从 A 状态跳到 B 状态时，先叫他来验票。</p>
+              <p class="tl">检查员读规则表，看看这个跳法在不在许可名单里。</p>
+              <p class="tl">不在？直接抛错：报出「从哪跳到哪不合法」——邮戳不能乱盖。</p>
+              <p class="tl">合法才放行，状态才能往前走。</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="badge-list animate-in">
+          <div class="badge-item">
+            <code class="badge-code">QUEUED → RUNNING</code>
+            <span class="badge-desc">排队中 → 资源到位，开始跑（也可能被打断）</span>
+          </div>
+          <div class="badge-item">
+            <code class="badge-code">RUNNING → WAITING_TOOL</code>
+            <span class="badge-desc">运行中 → 停下来等工具结果</span>
+          </div>
+          <div class="badge-item">
+            <code class="badge-code">WAITING_TOOL → RUNNING</code>
+            <span class="badge-desc">工具结果回来了 → 继续跑</span>
+          </div>
+          <div class="badge-item">
+            <code class="badge-code">RUNNING → COMPLETED / FAILED</code>
+            <span class="badge-desc">正常完成，或失败</span>
+          </div>
+          <div class="badge-item">
+            <code class="badge-code">INTERRUPTED → QUEUED</code>
+            <span class="badge-desc">被打断 → 重新排队</span>
+          </div>
+          <div class="badge-item">
+            <code class="badge-code">COMPLETED / FAILED → 终点</code>
+            <span class="badge-desc">到终点后不再跳转</span>
+          </div>
+        </div>
+      </section>
+
+      <!-- ═══════════ SCREEN 3 · 决策也要留证据 ═══════════ -->
+      <section class="screen animate-in">
+        <h2 class="screen-heading">决策也要留证据</h2>
+        <p>任务能不能开始，由<span class="term" data-definition="系统里「能不能放行」的规则——资源够就 START 放行，不够就 QUEUE 排队。">策略</span>决定：放行（START）还是排队（QUEUE）。</p>
+        <p>每一次<span class="term" data-definition="策略给出的结论。每次决策连同理由一起落库，留作证据。">决策</span>，连同「当时的<span class="term" data-definition="决策那一刻 GPU 显存、内存等资源的实时读数。决策记录里必须保存它，才能解释「当时为什么这么做」。">资源快照</span>」和「给出的理由」，一起写进 <code>policy_decisions</code> 表。</p>
+
+        <div class="translation-block animate-in">
+          <div class="translation-code">
+            <span class="translation-label">CODE · migrations.ts</span>
+            <pre><code>
+<span class="code-line">            <span class="code-keyword">CREATE TABLE</span> <span class="code-property">policy_decisions</span> (</span>
+<span class="code-line">                <span class="code-property">decision_id</span> TEXT <span class="code-keyword">PRIMARY KEY</span>,</span>
+<span class="code-line">                <span class="code-property">run_id</span> TEXT <span class="code-keyword">NOT NULL</span>,</span>
+<span class="code-line">                <span class="code-property">action</span> TEXT <span class="code-keyword">NOT NULL CHECK</span> (</span>
+<span class="code-line">                    <span class="code-property">action</span> <span class="code-keyword">IN</span> (<span class="code-string">'START'</span>, <span class="code-string">'QUEUE'</span>)</span>
+<span class="code-line">                ),</span>
+<span class="code-line">                <span class="code-property">reason_code</span> TEXT <span class="code-keyword">NOT NULL CHECK</span> (</span>
+<span class="code-line">                    <span class="code-property">reason_code</span> <span class="code-keyword">IN</span> (</span>
+<span class="code-line">                        <span class="code-string">'RESOURCE_NORMAL'</span>,</span>
+<span class="code-line">                        <span class="code-string">'GLOBAL_CONCURRENCY_LIMIT'</span>,</span>
+            </code></pre>
+          </div>
+          <div class="translation-english">
+            <span class="translation-label">PLAIN ENGLISH</span>
+            <div class="translation-lines">
+              <p class="tl">建一张「决策登记簿」，每次决策占一行。</p>
+              <p class="tl">每条决策有自己的身份证号（主键）。</p>
+              <p class="tl">记下这是哪封信（哪个任务）的决策。</p>
+              <p class="tl">结论只有两种：放行或排队——别的值，数据库直接拒收。</p>
+              <p class="tl">还必须写明理由代码：资源正常？全局并发到顶？——证据齐全。</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="callout callout-accent animate-in">
+          <div class="callout-icon">💡</div>
+          <div class="callout-content">
+            <strong class="callout-title">历史决定不能事后篡改</strong>
+            <p>改策略只影响「未来的决策」——已经落库的 START / QUEUE 记录纹丝不动。这正是<span class="term" data-definition="事后能查证「当时发生了什么、为什么」的记录能力——像寄信全程的邮戳都在。">审计</span>信任的基础：当时用了哪个资源快照、给了什么理由，永远查得到。</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- ═══════════ SCREEN 4 · 医院级可靠 ═══════════ -->
+      <section class="screen animate-in">
+        <h2 class="screen-heading">落库要像医院病历一样可靠</h2>
+        <p>RunStore 把「更新状态」和「追加事件」放进同一个<span class="term" data-definition="一组「要么全部成功、要么全部不作数」的操作，像医院里「开处方 + 发药」必须同时完成，少一步都退回重来。">事务</span>：要么都成功，要么都不发生。</p>
+        <p>SQLite 再用<span class="term" data-definition="让同一件事只被记录一次。重复投递的同一个事实，第二次会被安全忽略。">去重</span>键配<span class="term" data-definition="数据库强制「某组值不能重复」的规则。撞上重复的，第二次写入直接失败。">唯一索引</span>——同一个事实重复投递，第二次会被安全忽略。</p>
+
+        <div class="translation-block animate-in">
+          <div class="translation-code">
+            <span class="translation-label">CODE · runstore.ts</span>
+            <pre><code>
+<span class="code-line">        <span class="code-keyword">const</span> updateRunAndAppendEvent = <span class="code-keyword">this</span>.db.<span class="code-function">transaction</span>(() => {</span>
+<span class="code-line">            <span class="code-keyword">const</span> currentRun = <span class="code-keyword">this</span>.<span class="code-function">get</span>(run.id);</span>
+<span class="code-line"></span>
+<span class="code-line">            <span class="code-keyword">if</span> (currentRun === <span class="code-keyword">null</span>) {</span>
+<span class="code-line">                <span class="code-keyword">throw new</span> <span class="code-function">Error</span>(<span class="code-string">`找不到 AgentRun：${run.id}`</span>);</span>
+<span class="code-line">            }</span>
+<span class="code-line"></span>
+<span class="code-line">            <span class="code-function">assertValidTransition</span>(currentRun.status, run.status);</span>
+            </code></pre>
+          </div>
+          <div class="translation-english">
+            <span class="translation-label">PLAIN ENGLISH</span>
+            <div class="translation-lines">
+              <p class="tl">打开一个事务：这组操作要「同生共死」——状态更新和事件追加，要么一起成功，要么一起退回。</p>
+              <p class="tl">先读出这封信当前的记录。</p>
+              <p class="tl">找不到？说明这封信根本不存在，直接报错，绝不硬写。</p>
+              <p class="tl">请状态机验票：从「当前状态」跳到「新状态」合法吗？</p>
+              <p class="tl">验票通过，才同时更新状态牌并盖上新的邮戳。</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="callout callout-info animate-in">
+          <div class="callout-icon">ℹ️</div>
+          <div class="callout-content">
+            <strong class="callout-title">事务的意义：两张表必须同步</strong>
+            <p>如果状态改了、事件没记上，重启后就无法解释「它怎么走到这的」。所以状态牌和邮戳册被绑进同一笔事务——<span class="term" data-definition="一组操作要么全成功要么全失败，不会停在中间状态。">原子性</span>是它们之间的保险绳。</p>
+          </div>
+        </div>
+
+        <div class="badge-list animate-in">
+          <div class="badge-item">
+            <code class="badge-code">tool:${event.toolCallId}:finished</code>
+            <span class="badge-desc">同一个工具调用只能有一个最终结果——成功失败共用一把钥匙，后到的被忽略</span>
+          </div>
+          <div class="badge-item">
+            <code class="badge-code">tool:${event.toolCallId}:started</code>
+            <span class="badge-desc">同一个工具调用的开始，只记一次</span>
+          </div>
+          <div class="badge-item">
+            <code class="badge-code">model:${event.modelCallId}:started</code>
+            <span class="badge-desc">同一次模型调用的开始，只记一次</span>
+          </div>
+          <div class="badge-item">
+            <code class="badge-code">model:${event.modelCallId}:finished</code>
+            <span class="badge-desc">同一次模型调用的结束，只记一次</span>
+          </div>
+        </div>
+      </section>
+
+      <!-- ═══════════ SCREEN 5 · 回放视角 ═══════════ -->
+      <section class="screen animate-in">
+        <h2 class="screen-heading">任务结束，旅程可以完整回放</h2>
+        <p>任务落库后，<code>run_events</code> 里的事件按<span class="term" data-definition="事件流里的顺序编号，从 1 开始，一封信一个号，用来保证回放顺序。">sequence</span> 编号——像一本按时间钉好的邮戳册，随时可以<span class="term" data-definition="按事件顺序把任务过程重新走一遍。事件都在，就能重播。">回放</span>。</p>
+        <p>用户看到的「结果」，其实是四样东西拼起来的：最终状态 + <span class="term" data-definition="按顺序排列的事件列表——这一站盖了什么戳、那一站又发生了什么。">事件时间线</span> + 工作区 <span class="term" data-definition="任务前后工作区文件的差异对比——哪些文件被改过、改了什么。">Diff</span> + 产物 <span class="term" data-definition="任务产出的不可变成果快照（文件加哈希），事后可以核对。">Artifact</span>。</p>
+
+        <div class="flow-steps animate-in">
+          <div class="flow-step">
+            <div class="flow-step-num">1</div>
+            <p>QUEUED 已排队</p>
+          </div>
+          <div class="flow-arrow">→</div>
+          <div class="flow-step">
+            <div class="flow-step-num">2</div>
+            <p>RUNNING 运行中</p>
+          </div>
+          <div class="flow-arrow">→</div>
+          <div class="flow-step">
+            <div class="flow-step-num">3</div>
+            <p>WAITING_TOOL 等工具</p>
+          </div>
+          <div class="flow-arrow">→</div>
+          <div class="flow-step">
+            <div class="flow-step-num">4</div>
+            <p>TOOL_STARTED 工具开始</p>
+          </div>
+          <div class="flow-arrow">→</div>
+          <div class="flow-step">
+            <div class="flow-step-num">5</div>
+            <p>TOOL_COMPLETED 工具完成</p>
+          </div>
+          <div class="flow-arrow">→</div>
+          <div class="flow-step">
+            <div class="flow-step-num">6</div>
+            <p>RUNNING 继续跑</p>
+          </div>
+          <div class="flow-arrow">→</div>
+          <div class="flow-step">
+            <div class="flow-step-num">7</div>
+            <p>COMPLETED 完成</p>
+          </div>
+        </div>
+
+        <div class="translation-block animate-in">
+          <div class="translation-code">
+            <span class="translation-label">CODE · migrations.ts</span>
+            <pre><code>
+<span class="code-line">            <span class="code-keyword">CREATE TABLE</span> <span class="code-property">run_events</span> (</span>
+<span class="code-line">                <span class="code-comment">-- event_id 是事件自己的唯一 ID。</span></span>
+<span class="code-line">                <span class="code-property">event_id</span> TEXT <span class="code-keyword">PRIMARY KEY</span>,</span>
+<span class="code-line">                <span class="code-property">run_id</span> TEXT <span class="code-keyword">NOT NULL</span>,</span>
+<span class="code-line">                <span class="code-property">sequence</span> INTEGER <span class="code-keyword">NOT NULL CHECK</span> (sequence &gt; <span class="code-number">0</span>),</span>
+<span class="code-line">                <span class="code-property">type</span> TEXT <span class="code-keyword">NOT NULL</span>,</span>
+<span class="code-line">                <span class="code-property">timestamp</span> TEXT <span class="code-keyword">NOT NULL</span>,</span>
+<span class="code-line">                <span class="code-property">payload_version</span> INTEGER <span class="code-keyword">NOT NULL</span></span>
+<span class="code-line">                    <span class="code-keyword">CHECK</span> (payload_version &gt; <span class="code-number">0</span>),</span>
+<span class="code-line">                <span class="code-property">payload_json</span> TEXT <span class="code-keyword">NOT NULL</span>,</span>
+            </code></pre>
+          </div>
+          <div class="translation-english">
+            <span class="translation-label">PLAIN ENGLISH</span>
+            <div class="translation-lines">
+              <p class="tl">邮戳册的表结构：每盖一个戳，就追加一行。</p>
+              <p class="tl">每个邮戳有自己的唯一编号。</p>
+              <p class="tl">记下它属于哪封信（哪个任务）。</p>
+              <p class="tl">sequence 是邮戳的顺序号，从 1 开始，必须大于 0——回放就靠它排序。</p>
+              <p class="tl">盖戳的时间、事件类型、附带数据（payload），一行齐全。</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="pattern-cards stagger-children">
+          <div class="pattern-card animate-in" style="border-top: 3px solid var(--color-actor-4)">
+            <div class="pattern-icon" style="background: var(--color-actor-4)">🏁</div>
+            <h4 class="pattern-title">最终状态</h4>
+            <p class="pattern-desc">agent_runs 里的最后一行：任务最终停在哪一站。</p>
+          </div>
+          <div class="pattern-card animate-in" style="border-top: 3px solid var(--color-actor-2)">
+            <div class="pattern-icon" style="background: var(--color-actor-2)">📜</div>
+            <h4 class="pattern-title">事件时间线</h4>
+            <p class="pattern-desc">run_events 里的全部邮戳：每一步都查得到。</p>
+          </div>
+          <div class="pattern-card animate-in" style="border-top: 3px solid var(--color-actor-1)">
+            <div class="pattern-icon" style="background: var(--color-actor-1)">🔀</div>
+            <h4 class="pattern-title">工作区 Diff</h4>
+            <p class="pattern-desc">任务前后文件对比：哪些被改过、改了什么。</p>
+          </div>
+          <div class="pattern-card animate-in" style="border-top: 3px solid var(--color-actor-5)">
+            <div class="pattern-icon" style="background: var(--color-actor-5)">📦</div>
+            <h4 class="pattern-title">产物 Artifact</h4>
+            <p class="pattern-desc">不可变成果快照：事后随时可以核对。</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- ═══════════ SCREEN 6 · 小测 ═══════════ -->
+      <section class="screen animate-in">
+        <h2 class="screen-heading">小测：你会往哪看？</h2>
+        <p>不用背定义——想象你是排障的人，想想你会先查什么。</p>
+
+        <div class="quiz-container" id="quiz-module3">
+          <div class="quiz-question-block"
+               data-correct="option-b"
+               data-explanation-right="状态表和事件表都持久化在 SQLite 里，重启后都读得到。状态表负责「现在」，事件流负责「为什么」——一封信的两个视角，缺一不可。"
+               data-explanation-wrong="两张表都会落盘，重启后都还在。难点不是「哪张还在」，而是「各回答什么问题」：状态给快照，事件给过程。">
+            <h3 class="quiz-question">服务重启后，你想知道上次任务进行到哪一步、以及它怎么走到这一步的。该看哪里？</h3>
+            <div class="quiz-options">
+              <button class="quiz-option" data-value="option-a" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>只能看事件流，因为状态表重启后就丢了</span>
+              </button>
+              <button class="quiz-option" data-value="option-b" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>先看状态表拿到「当前在哪一站」，再翻事件流还原「怎么走到这里的」</span>
+              </button>
+              <button class="quiz-option" data-value="option-c" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>只能看状态表，事件流是临时文件，重启就读不了</span>
+              </button>
+            </div>
+            <div class="quiz-feedback"></div>
+          </div>
+
+          <div class="quiz-question-block"
+               data-correct="option-b"
+               data-explanation-right="状态是「结果」，事件是「过程」。结果会不断被覆盖，过程必须全部保留——排障、回放、审计都靠它。"
+               data-explanation-wrong="想想邮戳册：如果只记「信现在到哪了」，就永远说不清它路过哪些站、在哪站耽搁了。事件表存在的意义就是保留完整过程。">
+            <h3 class="quiz-question">为什么不能只存状态、不存事件？</h3>
+            <div class="quiz-options">
+              <button class="quiz-option" data-value="option-a" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>因为状态表会越存越大，事件表更省空间</span>
+              </button>
+              <button class="quiz-option" data-value="option-b" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>因为状态会被覆盖——「现在」永远只有一行；每一步发生了什么、在哪一步卡住，只有追加的事件才记得</span>
+              </button>
+              <button class="quiz-option" data-value="option-c" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>因为数据库不允许只建一张表</span>
+              </button>
+            </div>
+            <div class="quiz-feedback"></div>
+          </div>
+
+          <div class="quiz-question-block"
+               data-correct="option-b"
+               data-explanation-right="dedupe_key 配上唯一索引就是一道「只收一次」的闸门：同一事实重复到达时，第二次返回 false、什么都不写。这就是幂等：同一事实无论来几次，效果都跟一次一样。"
+               data-explanation-wrong="不是不处理，而是「安全地忽略」——如果每次都写，时间线就会充满一模一样的重复邮戳。">
+            <h3 class="quiz-question">同一个「工具完成」事件被 Runtime 重复投递了两次，系统会怎样？</h3>
+            <div class="quiz-options">
+              <button class="quiz-option" data-value="option-a" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>写两条一模一样的记录</span>
+              </button>
+              <button class="quiz-option" data-value="option-b" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>第一次写入成功；第二次撞上去重唯一索引，被安全忽略</span>
+              </button>
+              <button class="quiz-option" data-value="option-c" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>程序直接崩溃报错</span>
+              </button>
+            </div>
+            <div class="quiz-feedback"></div>
+          </div>
+
+          <div class="quiz-question-block"
+               data-correct="option-b"
+               data-explanation-right="这就是「历史不可篡改」：审计信任正来自这里——当时用了哪个资源快照、给了什么理由，永远查得到。"
+               data-explanation-wrong="如果旧决策能事后改写，审计就没意义了。追加式设计保证：改策略只改变「从今往后的判断」。">
+            <h3 class="quiz-question">你把资源策略从「允许同时 2 个任务」改成「允许 4 个」，之前被 QUEUE 排队的历史决策记录会怎样？</h3>
+            <div class="quiz-options">
+              <button class="quiz-option" data-value="option-a" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>全部自动重算，变成 START</span>
+              </button>
+              <button class="quiz-option" data-value="option-b" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>保持原样——决策历史是追加式的，改策略只影响未来的决策，不影响已发生的事实</span>
+              </button>
+              <button class="quiz-option" data-value="option-c" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>会被删掉，以免误导后人</span>
+              </button>
+            </div>
+            <div class="quiz-feedback"></div>
+          </div>
+
+          <button class="quiz-check-btn" onclick="checkQuiz('quiz-module3')">检查答案</button>
+          <button class="quiz-reset-btn" onclick="resetQuiz('quiz-module3')">再来一次</button>
+        </div>
+      </section>
+
+    </div>
+  </div>
+</section>

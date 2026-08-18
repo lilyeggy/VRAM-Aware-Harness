@@ -1,0 +1,449 @@
+<section class="module" id="module-5" style="background: var(--color-bg-warm)">
+  <div class="module-content">
+    <header class="module-header animate-in">
+      <span class="module-number">05</span>
+      <h1 class="module-title">聪明的机制</h1>
+      <p class="module-subtitle">为什么 AI 不能"说做就做、崩了就重跑"——记账、副作用分类、Checkpoint，以及拿不准就拒绝。</p>
+    </header>
+
+    <div class="module-body">
+
+      <!-- ══════════════ SCREEN 1 · 为什么执行前要"记账" ══════════════ -->
+      <section class="screen animate-in">
+        <h2 class="screen-heading">为什么执行前要"记账"？</h2>
+
+        <p>AI 说"帮我干活"的时候，它面对的不是沙盘，而是真实的外部世界：文件真的会被改、请求真的会发出去、钱真的会动。所以系统有一条铁律——<span class="term" data-definition="工具对外部世界造成的真实改变，比如写文件、发请求、扣钱。就像烧菜时油烟进了屋子——屋子真的被改变了，不只是'想了想'。">副作用</span>发生之前，先记账。</p>
+        <p>这本账叫<b>双复写记账本</b>：动手前先写下"我准备做X"（<span class="term" data-definition="AI 可以调用的真实能力，比如读写文件、执行命令、调用 API。每个工具都有名字和参数。">工具</span>的复写联），做完了再盖一枚"已完成"章。<span class="term" data-definition="AI 运行之外的现实世界：真实的文件系统、真实的 API、真实的银行账户。副作用就在这里发生。">外部世界</span>一旦被改动，就没有撤回键。</p>
+
+        <div class="flow-steps animate-in">
+          <div class="flow-step">
+            <div class="flow-step-num">1</div>
+            <p>工具请求进来</p>
+          </div>
+          <div class="flow-arrow">→</div>
+          <div class="flow-step">
+            <div class="flow-step-num">2</div>
+            <p>先记账：PREPARED（复写联）</p>
+          </div>
+          <div class="flow-arrow">→</div>
+          <div class="flow-step">
+            <div class="flow-step-num">3</div>
+            <p>执行工具</p>
+          </div>
+          <div class="flow-arrow">→</div>
+          <div class="flow-step">
+            <div class="flow-step-num">4</div>
+            <p>成功 → 盖"已完成"章 SUCCEEDED</p>
+          </div>
+          <div class="flow-arrow">→</div>
+          <div class="flow-step">
+            <div class="flow-step-num">5</div>
+            <p><span class="term" data-definition="程序意外停止运行——可能断电、可能出错、可能被强制终止。关键是：崩溃时进行到一半的事，没人知道最后结果。">崩溃</span>或未知 → 红牌，请人来确认</p>
+          </div>
+        </div>
+
+        <p>崩溃了也不慌：翻开账本，盖过章的绝不重做；没盖完又危险的那笔，必须等人点头。这份"先记录、后动手"的坚持，就是系统能<span class="term" data-definition="从崩溃或中断的地方把任务继续下去，而不是从头再来。">恢复</span>的根本原因。</p>
+
+        <p>来看真实代码里"先记账"长什么样——这是 Tool Gateway 在真正执行工具之前做的事：</p>
+
+        <div class="translation-block animate-in">
+          <div class="translation-code">
+            <span class="translation-label">真实代码</span>
+            <pre><code>
+<span class="code-line">                <span class="code-property">effect</span>:input.<span class="code-property">effect</span>,</span>
+<span class="code-line">                <span class="code-property">status</span>:<span class="code-string">"PREPARED"</span>,</span>
+<span class="code-line">                <span class="code-property">result</span>:<span class="code-keyword">null</span>,</span>
+<span class="code-line">                <span class="code-property">errorMessage</span>:<span class="code-keyword">null</span>,</span>
+<span class="code-line">                <span class="code-property">createdAt</span>:<span class="code-keyword">new</span> <span class="code-function">Date</span>().<span class="code-function">toISOString</span>(),</span>
+<span class="code-line">                <span class="code-property">finishedAt</span>:<span class="code-keyword">null</span>,</span>
+<span class="code-line">            }</span>
+<span class="code-line">            <span class="code-keyword">this</span>.<span class="code-property">store</span>.<span class="code-function">prepare</span>(preparedExecution);</span></code></pre>
+          </div>
+          <div class="translation-english">
+            <span class="translation-label">大白话</span>
+            <div class="translation-lines">
+              <p class="tl">记下这支工具声明的<span class="term" data-definition="记录一项工作进行到哪一步的标签，比如 PREPARED、SUCCEEDED、FAILED。">状态</span>之外最重要的东西——副作用类型（下一屏讲三种墨水）。</p>
+              <p class="tl">状态先写成 PREPARED：登记好了、还没动手。</p>
+              <p class="tl">结果还是空的。</p>
+              <p class="tl">错误也还没有。</p>
+              <p class="tl">记下登记时间。</p>
+              <p class="tl">完成时间留空（还没做完）。</p>
+              <p class="tl">账页写好了。</p>
+              <p class="tl">关键一步：先存进账本，再执行工具——顺序绝不能反。</p>
+            </div>
+          </div>
+        </div>
+
+        <p>这段代码出自 <code>src/tools/tool-gateway.ts</code>。注意 <span class="term" data-definition="一种状态：工具成功执行完，结果已盖章确认。盖过章的，恢复时绝不重做。">SUCCEEDED</span> 在这里还没出现——因为工具还没真的动。把"打算做什么"和"做完了"分开记，是整套机制的起点。</p>
+      </section>
+
+      <!-- ══════════════ SCREEN 2 · 三种墨水 ══════════════ -->
+      <section class="screen animate-in">
+        <h2 class="screen-heading">三种墨水：副作用的分类</h2>
+
+        <p>每支工具进场前都要声明自己是哪一类副作用。账本上有三种墨水颜色，决定它享受什么待遇——能不能自动重试，还是永远要人拍板。</p>
+
+        <div class="pattern-cards animate-in">
+          <div class="pattern-card" style="border-top: 3px solid var(--color-actor-2)">
+            <div class="pattern-icon" style="background: var(--color-actor-2)">📖</div>
+            <h4 class="pattern-title"><span class="term" data-definition="只读：只看不动。读文件、查配置、问状态都属于这一类，重复执行没有任何破坏。">READ_ONLY</span> · 蓝笔</h4>
+            <p class="pattern-desc">只看不改：读文件、查配置、问状态。重复执行一百次也不会改变任何东西——像翻书翻到同一页。</p>
+          </div>
+          <div class="pattern-card" style="border-top: 3px solid var(--color-actor-5)">
+            <div class="pattern-icon" style="background: var(--color-actor-5)">🔄</div>
+            <h4 class="pattern-title"><span class="term" data-definition="同一个操作执行一次和执行一百次，结果完全一样。盖两次章还是同一个章——只有这样的事才允许安全重试。">幂等</span><span class="term" data-definition="幂等写入：重复执行结果与第一次完全相同，可以安全重试。系统仍会验证'是否真有稳定的幂等证据'。">IDEMPOTENT_WRITE</span> · 绿笔</h4>
+            <p class="pattern-desc">重复执行结果和第一次完全相同：盖两次章，还是同一个章。所以系统允许安全重试。</p>
+          </div>
+          <div class="pattern-card" style="border-top: 3px solid var(--color-actor-1)">
+            <div class="pattern-icon" style="background: var(--color-actor-1)">🔥</div>
+            <h4 class="pattern-title"><span class="term" data-definition="后果不明、无法保证重复执行无害的副作用：可能调用外部 API 改了别人的系统、可能花了钱、可能发了消息。这是热炉子——不确定，就绝不自动碰。">UNKNOWN_EFFECT</span> · 红笔</h4>
+            <p class="pattern-desc">可能改外部系统、可能花钱、可能发消息——谁也没法保证重复执行无害。这是热炉子：不确定，就绝不自动重试。</p>
+          </div>
+        </div>
+
+        <p>分类决定待遇：蓝笔绿笔可以自动重放，红笔永远要人拍板。真实代码里，这三种墨水就是一组简单的定义：</p>
+
+        <div class="translation-block animate-in">
+          <div class="translation-code">
+            <span class="translation-label">真实代码</span>
+            <pre><code>
+<span class="code-line"><span class="code-keyword">export</span> <span class="code-keyword">type</span> <span class="code-function">ToolEffect</span> = </span>
+<span class="code-line">    | <span class="code-string">"READ_ONLY"</span></span>
+<span class="code-line">    | <span class="code-string">"IDEMPOTENT_WRITE"</span></span>
+<span class="code-line">    | <span class="code-string">"UNKNOWN_EFFECT"</span>;</span></code></pre>
+          </div>
+          <div class="translation-english">
+            <span class="translation-label">大白话</span>
+            <div class="translation-lines">
+              <p class="tl">给"工具效果"定义一组类型。</p>
+              <p class="tl">只读：只看不动。</p>
+              <p class="tl">幂等写入：重复做结果一样。</p>
+              <p class="tl">未知副作用：后果不明，危险。</p>
+            </div>
+          </div>
+        </div>
+
+        <p>这段代码出自 <code>src/tools/tool-execution.ts</code>。注意：分类只是"声明"。系统不会因为一支工具自称"幂等"就完全信任它——真正的安全，还要看后面几屏的机制。</p>
+      </section>
+
+      <!-- ══════════════ SCREEN 3 · Checkpoint：账本上的装订线 ══════════════ -->
+      <section class="screen animate-in">
+        <h2 class="screen-heading">Checkpoint：账本上的装订线</h2>
+
+        <p>光有账本还不够——每次崩溃都从第一页开始恢复太慢了。所以每隔一段，系统会在账本上画一条装订线，这就是 <span class="term" data-definition="账本上的装订线：标记'到这里为止都确认过'。崩溃后从最近的装订线继续，而不是从头开始。">Checkpoint</span>：到这里为止，一切都确认过。</p>
+        <p>恢复时从最近的装订线接着走：已经盖过"已完成"章的记录直接复用结果，绝不重做。系统还把"成功结果"和"装订线"两笔写入放进同一个<span class="term" data-definition="一组要么全部成功、要么全部失败的操作。就像一批货物要么整箱送达、要么整箱退回，绝不允许'送了一半'。">事务</span>里——绝不会出现"账本说成功、却没有装订线"的中间状态。</p>
+
+        <div class="step-cards animate-in">
+          <div class="step-card">
+            <div class="step-num">1</div>
+            <div class="step-body">
+              <strong>找到最近的装订线</strong>
+              <p>从<span class="term" data-definition="把数据长期存下来的地方，像一本能快速查找的超大账本。">数据库</span>里读出这个任务最新的 Checkpoint——这是 CheckpointStore 干的活。</p>
+            </div>
+          </div>
+          <div class="step-card">
+            <div class="step-num">2</div>
+            <div class="step-body">
+              <strong>检查装订线之后有没有"红笔未盖章"</strong>
+              <p>把崩溃时还没完成的工具记录翻出来，逐个问：能安全<span class="term" data-definition="把记录过的事件重新判断一遍，已确认安全的部分直接复用结果，不重复执行。">重放</span>吗？</p>
+            </div>
+          </div>
+          <div class="step-card">
+            <div class="step-num">3</div>
+            <div class="step-body">
+              <strong>两条路</strong>
+              <p>全部安全 → <span class="term" data-definition="自动继续：崩溃点之后没有危险记录，系统自动从 Checkpoint 接着跑。">AUTO_RESUME</span> 自动继续；有红笔 → <span class="term" data-definition="人工审查：把决策权交给人，由人判断这笔到底能不能重做。">MANUAL_REVIEW</span>，请人来做决定。</p>
+            </div>
+          </div>
+        </div>
+
+        <p>来看真实代码里的恢复决策——只要发现一条不能安全重放的红笔记录，就立刻转人工：</p>
+
+        <div class="translation-block animate-in">
+          <div class="translation-code">
+            <span class="translation-label">真实代码</span>
+            <pre><code>
+<span class="code-line">    <span class="code-keyword">if</span> (unsafeExecution !== <span class="code-keyword">undefined</span>){</span>
+<span class="code-line">        <span class="code-keyword">return</span> {</span>
+<span class="code-line">            <span class="code-property">action</span>:<span class="code-string">"MANUAL_REVIEW"</span>,</span>
+<span class="code-line">            <span class="code-property">reason</span>:<span class="code-string">"UNSAFE_TOOL_EFFECT"</span>,</span>
+<span class="code-line">            <span class="code-property">blockingToolExecutionId</span>:unsafeExecution.<span class="code-property">id</span>,</span>
+<span class="code-line">        }</span>
+<span class="code-line">    }</span></code></pre>
+          </div>
+          <div class="translation-english">
+            <span class="translation-label">大白话</span>
+            <div class="translation-lines">
+              <p class="tl">只要找到哪怕一条不能安全重放的记录……</p>
+              <p class="tl">恢复决策就是：</p>
+              <p class="tl">动作：交给人工审查。</p>
+              <p class="tl">原因：存在不安全的工具副作用。</p>
+              <p class="tl">并且指明是哪条记录挡住了自动恢复——人一看账本就知道该查哪里。</p>
+              <p class="tl">决策打包完成。</p>
+              <p class="tl">结束。</p>
+            </div>
+          </div>
+        </div>
+
+        <p>这段代码出自 <code>src/checkpoints/recovery-decision.ts</code>。决策只看一件事：装订线之后有没有不能安全重放的记录。</p>
+
+        <div class="callout callout-warning animate-in">
+          <div class="callout-icon">🔥</div>
+          <div class="callout-content">
+            <strong class="callout-title">热炉子警告</strong>
+            <p>想象厨房里一锅"可能已经在烧的红烧肉"：账本上写着"准备开火"，但没有"已完成"章。肉可能在锅里炖着，也可能还没下锅——这时盲目再开一次火，就是重复扣款、重复发钱。正确做法：让人来看一眼。</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- ══════════════ SCREEN 4 · Fail-closed：拿不准就拒绝 ══════════════ -->
+      <section class="screen animate-in">
+        <h2 class="screen-heading">Fail-closed：拿不准就拒绝</h2>
+
+        <p>热炉子哲学：不确定炉子烧没烧，就绝不碰开关。系统的默认答案是<b>拒绝</b>，而不是"先试试看"。这份谨慎体现在每一道关口：</p>
+
+        <div class="icon-rows animate-in">
+          <div class="icon-row">
+            <div class="icon-circle" style="background: var(--color-actor-3)">🧩</div>
+            <div>
+              <strong><span class="term" data-definition="系统定的规则集：谁可以用什么、资源上限多少、允许做什么。所有工具和沙箱都要遵守。">策略</span>与 <span class="term" data-definition="沙箱的一套预设配置组合（网络、权限、隔离级别），像一个'房间装修方案'。">profile</span> 冲突</strong>
+              <p>Provider 配置与策略要求的 profile 不一致 → 直接抛错，不硬着头皮建<span class="term" data-definition="隔离出来给 AI 干活的'独立小房间'，里面的动静不会直接影响到外面。">沙箱</span>。</p>
+            </div>
+          </div>
+          <div class="icon-row">
+            <div class="icon-circle" style="background: var(--color-actor-4)">💾</div>
+            <div>
+              <strong>磁盘<span class="term" data-definition="允许使用的资源上限，比如磁盘最多 512MB。">配额</span>无法落实</strong>
+              <p><span class="term" data-definition="把宿主机的某个目录直接'绑定'进容器，两边共享同一块空间——容器外的人可能绕过限制。">bind mount</span> 技术上无法强制磁盘配额 → 干脆拒绝执行，而不是假装限了。</p>
+            </div>
+          </div>
+          <div class="icon-row">
+            <div class="icon-circle" style="background: var(--color-actor-1)">🔍</div>
+            <div>
+              <strong>Runtime 证据不符</strong>
+              <p><span class="term" data-definition="问 Docker：这个容器现在到底是什么状态、什么配置。系统把它的返回当成'证据'。">Docker inspect</span> 发现实际 <span class="term" data-definition="运行容器的引擎实现（如 runc / docker 底层），也就是'实际是谁在跑'。">runtime</span> 和声明不一致 → 标记 <span class="term" data-definition="一种状态：工具或沙箱确定失败。失败会记进账本，不会假装成功。">FAILED</span>，先销毁<span class="term" data-definition="一个独立、隔离的运行环境，像集装箱：里面随便折腾，不影响外面。">容器</span>再报错。</p>
+            </div>
+          </div>
+        </div>
+
+        <p>第三个例子最有代表性——"<span class="term" data-definition="用来证明'系统之外真的发生了什么'的观测结果，比如容器实际配置、实际 runtime。">证据</span>"和声明不符，就按失败处理，绝不睁一只眼闭一只眼。看真实代码里第一个例子怎么拒绝：</p>
+
+        <div class="translation-block animate-in">
+          <div class="translation-code">
+            <span class="translation-label">真实代码</span>
+            <pre><code>
+<span class="code-line">        <span class="code-keyword">if</span> (policy.<span class="code-property">resourceLimits</span>.<span class="code-property">diskMiB</span> !== <span class="code-keyword">null</span>) {</span>
+<span class="code-line">            <span class="code-keyword">throw</span> <span class="code-keyword">new</span> <span class="code-function">Error</span>(<span class="code-string">"Container bind mount 无法强制磁盘配额，拒绝执行"</span>);</span>
+<span class="code-line">        }</span></code></pre>
+          </div>
+          <div class="translation-english">
+            <span class="translation-label">大白话</span>
+            <div class="translation-lines">
+              <p class="tl">如果策略要求了磁盘配额……</p>
+              <p class="tl">而这套实现根本没法强制配额——那就直接抛错：拒绝执行。</p>
+              <p class="tl">结束。</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="callout callout-accent animate-in">
+          <div class="callout-icon">💡</div>
+          <div class="callout-content">
+            <strong class="callout-title">这是整个系统最重要的工程品格</strong>
+            <p><span class="term" data-definition="拿不准就关门、默认拒绝：宁可浪费一次重试，也不让没把握的操作溜过去。">fail-closed</span>（拿不准就关门），而不是 <span class="term" data-definition="拿不准就放行、默认开门：风险会在你最意想不到的时候爆出来。">fail-open</span>（拿不准就放行）。对 AI 干活来说，放行一次可能真金白银地烧掉钱；拒绝一次，最多浪费一次重试。</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- ══════════════ SCREEN 5 · 事件证据链 ══════════════ -->
+      <section class="screen animate-in">
+        <h2 class="screen-heading">事件证据链：崩溃后还能回放</h2>
+
+        <p>除了账本，系统还留了三样东西，组成一条完整的证据链：<span class="term" data-definition="系统记录下来的每一个事件，按顺序排列，像流水账。崩溃后可以按它回放全过程。">RunEvent</span>（流水账）、Checkpoint（装订线）、<span class="term" data-definition="改动前后的对比：这一行原来是 A，现在变成了 B。用来证明'到底改了什么'。">Diff</span>（改过页面的复印件）。重启之后，任务可以像看监控回放一样，把出事前的事重新走一遍。</p>
+        <p>但回放不等于放行：恢复的任务必须重新过一遍<span class="term" data-definition="证明'你是谁'的信息，比如用户、API key、租户标识。恢复任务也要重新验明正身。">身份</span>、策略、沙箱、<span class="term" data-definition="任务运行要用的东西：CPU、内存、磁盘、网络。恢复时也要重新计算。">资源</span><span class="term" data-definition="进入系统前的检查关：验身份、验策略、建沙箱、算资源，全部通过才放行。就像重新进一次安检，不因为'上次验过'就免检。">准入</span>。</p>
+
+        <div class="icon-rows animate-in">
+          <div class="icon-row">
+            <div class="icon-circle" style="background: var(--color-actor-2)">🎬</div>
+            <div>
+              <strong>RunEvent</strong>
+              <p>每一个事件的流水记录，崩溃后按顺序<span class="term" data-definition="把记录的事件按原顺序重新放一遍，像看监控回放。注意：回放不等于重新执行——回放只是看清发生了什么。">回放</span>。</p>
+            </div>
+          </div>
+          <div class="icon-row">
+            <div class="icon-circle" style="background: var(--color-actor-4)">📌</div>
+            <div>
+              <strong>Checkpoint</strong>
+              <p>装订线：标出"确认过的最新位置"，恢复从这里继续。</p>
+            </div>
+          </div>
+          <div class="icon-row">
+            <div class="icon-circle" style="background: var(--color-actor-5)">📄</div>
+            <div>
+              <strong>Diff</strong>
+              <p>改动前后的对比快照，证明"到底改了什么"。</p>
+            </div>
+          </div>
+        </div>
+
+        <p>把这一幕串起来，就是一次完整的"崩溃后复活"：</p>
+
+        <div class="flow-animation animate-in" data-steps='[
+          {"highlight":"flow-actor-1","label":"任务运行到一半，系统崩溃了"},
+          {"highlight":"flow-actor-2","label":"重启后先回放事件账本，直到上一次 Checkpoint","packet":true,"from":"actor-1","to":"actor-2"},
+          {"highlight":"flow-actor-3","label":"重新过身份、策略、沙箱、资源准入","packet":true,"from":"actor-2","to":"actor-3"},
+          {"highlight":"flow-actor-4","label":"从 Checkpoint 继续执行：盖过章的绝不重做","packet":true,"from":"actor-3","to":"actor-4"}
+        ]'>
+          <div class="flow-actors">
+            <div class="flow-actor" id="flow-actor-1">
+              <div class="flow-actor-icon">🧭</div>
+              <span>任务</span>
+            </div>
+            <div class="flow-actor" id="flow-actor-2">
+              <div class="flow-actor-icon">📒</div>
+              <span>事件账本</span>
+            </div>
+            <div class="flow-actor" id="flow-actor-3">
+              <div class="flow-actor-icon">🛂</div>
+              <span>准入检查</span>
+            </div>
+            <div class="flow-actor" id="flow-actor-4">
+              <div class="flow-actor-icon">📌</div>
+              <span>恢复点</span>
+            </div>
+          </div>
+
+          <div class="flow-packet" id="flow-packet"></div>
+
+          <div class="flow-step-label" id="flow-label">任务运行到一半，系统崩溃了</div>
+
+          <div class="flow-controls">
+            <button class="btn flow-next-btn">下一步</button>
+            <button class="btn flow-reset-btn">重来</button>
+            <span class="flow-progress"></span>
+          </div>
+        </div>
+
+        <p>这套"证据链 + 重新准入"的设计，让系统既能看到过去发生了什么，又绝不信任"上次的状态还能直接用"。</p>
+      </section>
+
+      <!-- ══════════════ SCREEN 6 · 应用题 ══════════════ -->
+      <section class="screen animate-in">
+        <h2 class="screen-heading">想清楚再动手</h2>
+
+        <p>四道应用题，每一道都是真实会发生的情况。别急着选——先把账本、墨水、装订线的逻辑在脑子里过一遍。</p>
+
+        <div class="quiz-container" id="quiz-module5">
+
+          <div class="quiz-question-block"
+               data-correct="option-b"
+               data-explanation-right="对！红笔 + 未盖章 = 肉可能已经在锅里，也可能没有。自动重跑就是把同样的钱再发一次；伪造账本更是大忌。系统把决策权交给人。"
+               data-explanation-wrong="再想想：红笔说明重复执行后果未知，自动重跑可能重复扣款；跳过往后走可能漏掉关键步骤；改账本是自欺欺人。只有让人确认才安全。">
+            <h3 class="quiz-question">「给用户发钱」的工具执行到一半，系统崩溃了。重启后，账本上有一笔红笔（UNKNOWN_EFFECT）、状态 PREPARED、没有"已完成"章的记录。系统应该怎么做？</h3>
+            <div class="quiz-options">
+              <button class="quiz-option" data-value="option-a" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>自动重跑一遍，确保钱发出去了</span>
+              </button>
+              <button class="quiz-option" data-value="option-b" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>标记为待人工审查（MANUAL_REVIEW），把这条记录指给人看，绝不自动重试</span>
+              </button>
+              <button class="quiz-option" data-value="option-c" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>跳过这笔记录，继续后面的任务</span>
+              </button>
+              <button class="quiz-option" data-value="option-d" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>把这笔记录改成 SUCCEEDED，假装完成</span>
+              </button>
+            </div>
+            <div class="quiz-feedback"></div>
+          </div>
+
+          <div class="quiz-question-block"
+               data-correct="option-a"
+               data-explanation-right="对！盖两次章还是同一个章，才是幂等。注意系统很谨慎：即使工具自称幂等写入，在真实幂等证据被验证之前，系统仍然保持 fail-closed。"
+               data-explanation-wrong="幂等不是速度、不是只读、也不是'凡是写入都安全'。它说的是重复执行的效果完全一样——真正确认了这一点，重试才安全。">
+            <h3 class="quiz-question">什么是"幂等"？哪种情况可以安全重试？</h3>
+            <div class="quiz-options">
+              <button class="quiz-option" data-value="option-a" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>幂等 = 执行一次和执行一百次结果完全相同。READ_ONLY 和真正带稳定幂等键的写入可以安全重试</span>
+              </button>
+              <button class="quiz-option" data-value="option-b" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>幂等 = 执行得很快，所以可以重试</span>
+              </button>
+              <button class="quiz-option" data-value="option-c" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>幂等 = 只读操作，和写入无关</span>
+              </button>
+              <button class="quiz-option" data-value="option-d" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>幂等 = 写入操作，所以一定能重试</span>
+              </button>
+            </div>
+            <div class="quiz-feedback"></div>
+          </div>
+
+          <div class="quiz-question-block"
+               data-correct="option-a"
+               data-explanation-right="对！决策只看'未完成记录是否全部安全'：全绿就 AUTO_RESUME，有红笔就 MANUAL_REVIEW。这就是 decideRecovery 的真实逻辑。"
+               data-explanation-wrong="恢复决策只取决于一件事：崩溃点之后有没有不能安全重放的记录。有红笔就请人、全绿就自动——与任务重要程度、随机数都无关。">
+            <h3 class="quiz-question">系统怎么决定恢复时是自动继续，还是请人确认？</h3>
+            <div class="quiz-options">
+              <button class="quiz-option" data-value="option-a" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>检查崩溃点之后所有未完成的工具记录：全部能安全重放 → AUTO_RESUME；只要有一条红笔未盖章 → MANUAL_REVIEW</span>
+              </button>
+              <button class="quiz-option" data-value="option-b" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>看任务的用户重不重要</span>
+              </button>
+              <button class="quiz-option" data-value="option-c" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>掷硬币随机决定</span>
+              </button>
+              <button class="quiz-option" data-value="option-d" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>永远自动继续，简单省事</span>
+              </button>
+            </div>
+            <div class="quiz-feedback"></div>
+          </div>
+
+          <div class="quiz-question-block"
+               data-correct="option-a"
+               data-explanation-right="对！拿不准就拒绝（fail-closed），宁可浪费一次重试，也不让风险悄悄溜过去。真实代码里就是这么干的。"
+               data-explanation-wrong="假装、打折、悄悄降级都属于 fail-open——风险会在你最意想不到的时候爆出来。系统选择直接拒绝，这是有意为之的品格。">
+            <h3 class="quiz-question">你想给沙箱加磁盘配额，但当前实现（bind mount）技术上无法强制配额。系统应该怎么做？</h3>
+            <div class="quiz-options">
+              <button class="quiz-option" data-value="option-a" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>拒绝执行，并明确报错"无法强制磁盘配额"</span>
+              </button>
+              <button class="quiz-option" data-value="option-b" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>假装限了配额，继续跑</span>
+              </button>
+              <button class="quiz-option" data-value="option-c" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>只对一半用户生效，另一半不设限</span>
+              </button>
+              <button class="quiz-option" data-value="option-d" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>悄悄降级成不限配额，反正没人发现</span>
+              </button>
+            </div>
+            <div class="quiz-feedback"></div>
+          </div>
+
+          <button class="quiz-check-btn" onclick="checkQuiz('quiz-module5')">检查答案</button>
+          <button class="quiz-reset-btn" onclick="resetQuiz('quiz-module5')">再试一次</button>
+        </div>
+      </section>
+
+    </div>
+  </div>
+</section>

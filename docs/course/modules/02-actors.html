@@ -1,0 +1,515 @@
+<section class="module" id="module-2" style="background: var(--color-bg)">
+  <div class="module-content">
+    <header class="module-header animate-in">
+      <span class="module-number">02</span>
+      <h1 class="module-title">认识主角们</h1>
+      <p class="module-subtitle">一张演员表：谁负责什么、边界在哪里、出了故障找谁。</p>
+    </header>
+
+    <div class="module-body">
+
+      <!-- ═══ SCREEN 1 · 开场：一张机场岗位图 ═══ -->
+      <section class="screen animate-in">
+        <h2 class="screen-heading">开场：一张机场岗位图</h2>
+        <p>上一模块里那些若隐若现的「角色」，现在逐个登场。这套系统的
+          <span class="term" data-definition="系统各部分的组织方式，相当于机场的整体布局图：哪里是航站楼、哪里是跑道、谁和谁相连。">架构</span>
+          就像一座机场：每个岗位各管一摊，谁也替代不了谁。</p>
+        <p>先把机场岗位和主角对上号，再点开下面的全景图，逐个认识他们。</p>
+
+        <div class="badge-list animate-in">
+          <div class="badge-item">
+            <code class="badge-code">安检口</code>
+            <span class="badge-desc"><span class="term" data-definition="一串只有系统和你（或你的程序）知道的秘密字符串，相当于机场安检时出示的护照。每次调用系统都要出示它，系统用它在数据库里查出你的身份。">密钥</span>验证：先证明「你是谁」</span>
+          </div>
+          <div class="badge-item">
+            <code class="badge-code">塔台</code>
+            <span class="badge-desc"><span class="term" data-definition="系统的『调度中枢』，相当于机场塔台：负责接收任务、排队、安排执行、分配资源。它自己不干活，只管派活。">控制面</span>：调度与排队</span>
+          </div>
+          <div class="badge-item">
+            <code class="badge-code">登机桥</code>
+            <span class="badge-desc"><span class="term" data-definition="一次连续的『对话通道』，相当于连接航站楼和飞机的登机桥。一次任务从开始到结束，AI 和系统之间的所有交流都走这条通道。">会话</span>：连接航站楼与飞机</span>
+          </div>
+          <div class="badge-item">
+            <code class="badge-code">乘客区</code>
+            <span class="badge-desc"><span class="term" data-definition="一块被严格隔离的执行空间，相当于客机里的乘客区：AI 在里面干活，但碰不到驾驶舱和机场的其他地方。就算它在里面乱来，也影响不到外面的世界。">沙箱</span>：隔离的执行舱</span>
+          </div>
+          <div class="badge-item">
+            <code class="badge-code">地勤装货</code>
+            <span class="badge-desc"><span class="term" data-definition="AI 可以调用的小能力，比如读文件、跑命令、查数据库。相当于地勤手里的设备——AI 不能自己动手，只能借工具干活。">工具</span>闸门：每件行李都过检</span>
+          </div>
+          <div class="badge-item">
+            <code class="badge-code">飞行记录仪</code>
+            <span class="badge-desc"><span class="term" data-definition="系统记录下来的每一件『发生过的事』，比如任务创建、工具被调用。相当于飞行记录仪里的一条条记录，只追加、不改写。">事件</span>记账本：全程留痕</span>
+          </div>
+        </div>
+
+        <div class="arch-diagram animate-in">
+          <div class="arch-zone">
+            <h4 class="arch-zone-label">航站楼 · 租户层</h4>
+            <div class="arch-component" data-desc="每个客户/团队一个独立空间，相当于一家航空公司在机场的专属区。一切数据（工作区、密钥、任务、事件）都按它隔离。">
+              <div class="arch-icon">🏢</div>
+              <span><span class="term" data-definition="一个客户或一个团队的独立空间，相当于机场里一家航空公司的专属区域。所有数据都按租户隔开，租户之间互不可见。">租户</span></span>
+            </div>
+            <div class="arch-component" data-desc="每个项目一块受管理的目录，相当于专属行李区。路径由服务器生成，客户端不能乱填宿主机路径。">
+              <div class="arch-icon">📁</div>
+              <span><span class="term" data-definition="每个项目专属的一块受管理目录，相当于航空公司给每个航班分配的专属行李区。路径由系统生成，客户端不能乱填宿主机路径。">工作区</span></span>
+            </div>
+          </div>
+          <div class="arch-zone">
+            <h4 class="arch-zone-label">控制塔 · 控制面</h4>
+            <div class="arch-component" data-desc="一次用户任务，相当于乘客的行程单：记录了用户想要什么、属于哪个会话、当前状态。">
+              <div class="arch-icon">✈️</div>
+              <span>Run · <span class="term" data-definition="用户提交的一次任务，相当于一位乘客的行程单。它记录『用户想要什么』，可以对应很多次实际执行。">任务</span></span>
+            </div>
+            <div class="arch-component" data-desc="一次实际执行，相当于航班的一次具体起飞。失败重试会创建新的 Attempt，而不是覆盖旧的。">
+              <div class="arch-icon">🛫</div>
+              <span>Attempt · <span class="term" data-definition="一次实际执行，相当于航班的一次具体起飞。同一次任务重试会创建新的 Attempt，而不是覆盖旧的。">执行</span></span>
+            </div>
+            <div class="arch-component" data-desc="控制面与 AI 之间的『登机桥』：一次任务从开始到结束，所有交流都走这条通道。">
+              <div class="arch-icon">🌉</div>
+              <span>Session</span>
+            </div>
+            <div class="arch-component" data-desc="AI 想调用工具时，先过它这一关：执行、复用还是阻止，由策略和历史记录决定。">
+              <div class="arch-icon">🧰</div>
+              <span>ToolGateway</span>
+            </div>
+          </div>
+          <div class="arch-zone">
+            <h4 class="arch-zone-label">停机坪 · 执行舱</h4>
+            <div class="arch-component" data-desc="被隔离的执行舱：AI 在里面干活，碰不到宿主机。分档位：development=本地、default=容器+runsc、strict=预留 microVM。">
+              <div class="arch-icon">🛡️</div>
+              <span>Sandbox</span>
+            </div>
+            <div class="arch-component" data-desc="真正动脑的 Agent Runtime：读任务、规划步骤、调用工具。外部模型通过它来驱动。">
+              <div class="arch-icon">🧠</div>
+              <span>Pi · <span class="term" data-definition="真正动脑的程序运行时，相当于机长。它读任务、规划步骤、调用工具，外部模型（AI 大脑）通过它来驱动。">Agent Runtime</span></span>
+            </div>
+          </div>
+          <div class="arch-zone">
+            <h4 class="arch-zone-label">窗外 · 外部模型</h4>
+            <div class="arch-component" data-desc="AI 的思考引擎：只负责生成文字和决策，不直接碰文件或执行命令。">
+              <div class="arch-icon">☁️</div>
+              <span><span class="term" data-definition="AI 的『思考引擎』，相当于给机长提供建议的导航系统。它只负责生成文字和决策，不直接碰文件或执行命令。">模型</span></span>
+            </div>
+          </div>
+          <div class="arch-zone">
+            <h4 class="arch-zone-label">机库 · 记账本</h4>
+            <div class="arch-component" data-desc="整套系统的记账本：所有事件、状态、结果都持久化保存，只追加、不篡改。">
+              <div class="arch-icon">🗄️</div>
+              <span><span class="term" data-definition="一个非常轻量的数据库软件，相当于机场的记账本/档案室。所有任务、执行、事件都持久化保存在这里。">SQLite</span> Store</span>
+            </div>
+          </div>
+          <div class="arch-description" id="arch-desc">👆 点击任意方框，看看这位主角在机场里负责什么岗位。</div>
+        </div>
+      </section>
+
+      <!-- ═══ SCREEN 2 · 安检口：身份与隔离墙 ═══ -->
+      <section class="screen animate-in">
+        <h2 class="screen-heading">安检口：身份与隔离墙</h2>
+        <p>想进贵宾室，先过安检。系统的
+          <span class="term" data-definition="系统里证明『你是谁』的信息集合，相当于登机牌：写着你是谁、属于哪个租户、能做什么。它不是客户端自己说了算，而是由密钥查出来。">身份</span>
+          是从密钥派生出来的——请求体里自称的租户，一个字都不信。</p>
+
+        <div class="pattern-cards animate-in">
+          <div class="pattern-card" style="border-top: 3px solid var(--color-actor-2)">
+            <div class="pattern-icon" style="background: var(--color-actor-2)">🏢</div>
+            <h4 class="pattern-title">Tenant · 租户</h4>
+            <p class="pattern-desc">一个客户/团队一个独立空间。所有数据按它
+              <span class="term" data-definition="把不同的数据或执行环境严格分开、互不影响，相当于机场里『乘客区』和『驾驶舱』之间的门。">隔离</span>，别的租户看不见。</p>
+          </div>
+          <div class="pattern-card" style="border-top: 3px solid var(--color-actor-4)">
+            <div class="pattern-icon" style="background: var(--color-actor-4)">📁</div>
+            <h4 class="pattern-title">Workspace · 工作区</h4>
+            <p class="pattern-desc">每个项目一块受管理的目录，路径由服务器生成，客户端不能乱填宿主机路径。</p>
+          </div>
+          <div class="pattern-card" style="border-top: 3px solid var(--color-actor-1)">
+            <div class="pattern-icon" style="background: var(--color-actor-1)">🎫</div>
+            <h4 class="pattern-title">密钥 · 安检凭证</h4>
+            <p class="pattern-desc">密钥不直接存<span class="term" data-definition="专门用来长期保存数据的软件，相当于一个有索引的档案室：存得快、查得快、还能保证不出错。">数据库</span>，只存<span class="term" data-definition="把任意内容变成一串固定长度的『指纹』的算法。密钥不直接存数据库，只存哈希——就算数据库被偷，也推不出原密钥。">哈希</span>。查得到才算数，查不到就拒绝。</p>
+          </div>
+        </div>
+
+        <div class="translation-block animate-in">
+          <div class="translation-code">
+            <span class="translation-label">真实代码</span>
+            <pre><code>
+<span class="code-line">    <span class="code-function">authenticate</span>(<span class="code-property">rawKey</span>: <span class="code-keyword">string</span>): RequestPrincipal | <span class="code-keyword">null</span> {</span>
+<span class="code-line">        <span class="code-keyword">const</span> row = <span class="code-keyword">this</span>.<span class="code-property">db</span>.<span class="code-function">query</span>&lt;CredentialRow, { keyDigest: <span class="code-keyword">string</span> }&gt;(<span class="code-string">`</span></span>
+<span class="code-line"><span class="code-string">            SELECT id, key_digest AS keyDigest, subject_id AS subjectId,</span></span>
+<span class="code-line"><span class="code-string">                tenant_id AS tenantId, scopes_json AS scopesJson,</span></span>
+<span class="code-line"><span class="code-string">                created_at AS createdAt, revoked_at AS revokedAt</span></span>
+<span class="code-line"><span class="code-string">            FROM api_credentials</span></span>
+<span class="code-line"><span class="code-string">            WHERE key_digest = $keyDigest AND revoked_at IS NULL;</span></span>
+<span class="code-line"><span class="code-string">        `</span>).<span class="code-function">get</span>({ keyDigest: <span class="code-function">digest</span>(rawKey) });</span>
+<span class="code-line">        <span class="code-keyword">if</span> (row === <span class="code-keyword">null</span>) <span class="code-keyword">return</span> <span class="code-keyword">null</span>;</span>
+            </code></pre>
+          </div>
+          <div class="translation-english">
+            <span class="translation-label">大白话</span>
+            <div class="translation-lines">
+              <p class="tl">「验证」：拿客户端递过来的密钥，查出它的身份。名字就叫 authenticate（认证）。</p>
+              <p class="tl">先把密钥做一次哈希处理，然后去数据库里找匹配的记录。</p>
+              <p class="tl">找到就把它的身份信息取出来：属于谁、属于哪个租户、带哪些权限。</p>
+              <p class="tl">查询锁定在两件事上：只按密钥指纹找，而且只找没被吊销的。</p>
+              <p class="tl">执行查询，把「密钥指纹」作为查找条件传进去。</p>
+              <p class="tl">一条都没查到（密钥错了或已吊销）就返回「没有这个人」，直接拒绝。</p>
+              <p class="tl">注意：身份全部来自查表结果，而不是
+                <span class="term" data-definition="客户端发给服务器的请求里携带的数据部分，相当于递进安检口的纸条。系统不会相信纸条上自称的身份，只认密钥查出来的结果。">请求体</span>里客户自己报的。</p>
+            </div>
+          </div>
+        </div>
+
+        <p>验证通过后，「登机牌」长这样：你是谁、属于哪个租户、能做什么（
+          <span class="term" data-definition="身份上标注的『允许做什么』的清单，相当于登机牌上印的舱位等级。系统用它在每一步检查：这个人有没有资格做这件事。">权限范围</span>）。</p>
+
+        <div class="translation-code animate-in" style="margin: var(--space-4) 0;">
+          <span class="translation-label">真实代码</span>
+          <pre><code>
+<span class="code-line"><span class="code-keyword">export</span> <span class="code-keyword">interface</span> RequestPrincipal {</span>
+<span class="code-line">    <span class="code-keyword">readonly</span> <span class="code-property">subjectId</span>: <span class="code-keyword">string</span>;</span>
+<span class="code-line">    <span class="code-keyword">readonly</span> <span class="code-property">tenantId</span>: <span class="code-keyword">string</span>;</span>
+<span class="code-line">    <span class="code-keyword">readonly</span> <span class="code-property">scopes</span>: <span class="code-keyword">readonly</span> <span class="code-keyword">string</span>[];</span>
+<span class="code-line">}</span>
+          </code></pre>
+        </div>
+      </section>
+
+      <!-- ═══ SCREEN 3 · 塔台：Run 与 Attempt ═══ -->
+      <section class="screen animate-in">
+        <h2 class="screen-heading">塔台：Run 与 Attempt</h2>
+        <p>Run 是「一次用户任务」，Attempt 是「那一次实际执行」。任务先进入
+          <span class="term" data-definition="让请求按顺序排队等待处理的地方，相当于机场的等待跑道。任务先进队列，轮到才执行。">队列</span>排队，轮到才执行；失败
+          <span class="term" data-definition="一次执行失败后，自动或手动再来一次。每次重试都是全新的 Attempt，原记录原样保留。">重试</span> = 新的 Attempt，绝不覆盖原任务。</p>
+
+        <div class="pattern-cards animate-in">
+          <div class="pattern-card" style="border-top: 3px solid var(--color-actor-2)">
+            <div class="pattern-icon" style="background: var(--color-actor-2)">✈️</div>
+            <h4 class="pattern-title">Run · 一次任务</h4>
+            <p class="pattern-desc">乘客的行程单：用户想要什么、属于哪个会话、当前什么状态。任务可以对应很多次执行。</p>
+          </div>
+          <div class="pattern-card" style="border-top: 3px solid var(--color-actor-1)">
+            <div class="pattern-icon" style="background: var(--color-actor-1)">🛫</div>
+            <h4 class="pattern-title">Attempt · 一次执行</h4>
+            <p class="pattern-desc">航班的一次具体起飞：尝试编号、用了哪个沙箱、什么状态、失败原因。重试 = 新 Attempt。</p>
+          </div>
+        </div>
+
+        <div class="flow-steps animate-in">
+          <div class="flow-step">
+            <div class="flow-step-num">1</div>
+            <p>用户提交任务，Run 创建</p>
+          </div>
+          <div class="flow-arrow">→</div>
+          <div class="flow-step">
+            <div class="flow-step-num">2</div>
+            <p>Attempt #1 起飞</p>
+          </div>
+          <div class="flow-arrow">→</div>
+          <div class="flow-step">
+            <div class="flow-step-num">3</div>
+            <p>中途失败 ✗</p>
+          </div>
+          <div class="flow-arrow">→</div>
+          <div class="flow-step">
+            <div class="flow-step-num">4</div>
+            <p>重试：Attempt #2（新编号）</p>
+          </div>
+          <div class="flow-arrow">→</div>
+          <div class="flow-step">
+            <div class="flow-step-num">5</div>
+            <p>原 Run 完好，可<span class="term" data-definition="事后回看『谁在什么时候做了什么』的能力，相当于翻查黑匣子。多租户系统靠完整记录来追责和排障。">审计</span></p>
+          </div>
+        </div>
+
+        <div class="translation-block animate-in">
+          <div class="translation-code">
+            <span class="translation-label">真实代码</span>
+            <pre><code>
+<span class="code-line"><span class="code-keyword">export</span> <span class="code-keyword">function</span> <span class="code-function">startRunAttempt</span>(</span>
+<span class="code-line">    <span class="code-property">attempt</span>: RunAttempt,</span>
+<span class="code-line">    <span class="code-property">startedAt</span>: <span class="code-keyword">string</span>,</span>
+<span class="code-line">    <span class="code-property">policySnapshotId</span>: <span class="code-keyword">string</span>,</span>
+<span class="code-line">    <span class="code-property">sandboxId</span>: <span class="code-keyword">string</span>,</span>
+<span class="code-line">): RunAttempt {</span>
+<span class="code-line">    <span class="code-keyword">if</span> (attempt.<span class="code-property">status</span> !== <span class="code-string">"PENDING"</span>) {</span>
+<span class="code-line">        <span class="code-keyword">throw</span> <span class="code-keyword">new</span> <span class="code-function">Error</span>(<span class="code-string">`只有 PENDING Attempt 可以启动：${attempt.id}`</span>);</span>
+<span class="code-line">    }</span>
+            </code></pre>
+          </div>
+          <div class="translation-english">
+            <span class="translation-label">大白话</span>
+            <div class="translation-lines">
+              <p class="tl">「给一次执行点火」的函数：把 Attempt 从等待状态推进到运行状态。</p>
+              <p class="tl">参数一：这次执行本身（Attempt）。</p>
+              <p class="tl">参数二：开始时间。</p>
+              <p class="tl">参数三：当时生效的那版规则——<span class="term" data-definition="某一时刻状态的完整副本，相当于给机舱拍了张全景照。策略快照保证执行时用的是当时那版规则。">策略快照</span>的编号。</p>
+              <p class="tl">参数四：分配好的沙箱（执行舱）编号。</p>
+              <p class="tl">规矩很严：只有还处在「等待中（PENDING）」的 Attempt 才允许启动。</p>
+              <p class="tl">否则直接报错——<span class="term" data-definition="一套『状态只能按规定路线变化』的规则表，相当于交通信号灯：绿灯只能变黄灯，不能直接跳红灯。系统用它保证任务状态不乱跳。">状态机</span>不许乱跳。</p>
+              <p class="tl">收尾：点火前检查完毕。</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ═══ SCREEN 4 · 停机坪：执行舱与大脑 ═══ -->
+      <section class="screen animate-in">
+        <h2 class="screen-heading">停机坪：执行舱与大脑</h2>
+        <p>沙箱是被隔离的「乘客区」，分三个档位，档位由
+          <span class="term" data-definition="一套规则，决定谁能做什么、资源给多少，相当于机场的安全规章。每个任务执行前都会对照当时的策略快照检查。">策略</span>决定；Pi 是真正动脑的机长。谁创建谁？看下面这根接力棒。</p>
+
+        <div class="pattern-cards animate-in">
+          <div class="pattern-card" style="border-top: 3px solid var(--color-actor-4)">
+            <div class="pattern-icon" style="background: var(--color-actor-4)">🧪</div>
+            <h4 class="pattern-title">development · 本地调试</h4>
+            <p class="pattern-desc">只给本地开发用，跑在自己电脑上，不隔离也安全——因为根本没有别人。</p>
+          </div>
+          <div class="pattern-card" style="border-top: 3px solid var(--color-actor-5)">
+            <div class="pattern-icon" style="background: var(--color-actor-5)">📦</div>
+            <h4 class="pattern-title">default · 容器 + runsc</h4>
+            <p class="pattern-desc">多租户的默认档位：
+              <span class="term" data-definition="一种轻量级的隔离执行环境，相当于给每个航班配的独立客舱：有自己的空间，但和别的航班互不干扰。">容器</span>隔离 +
+              <span class="term" data-definition="一种给容器加装安全边界的运行时，相当于给客舱加上防弹玻璃：即使程序出问题，也扩散不到外面。">runsc</span> 安全边界，AI 碰不到
+              <span class="term" data-definition="运行这套系统的那台真实电脑，相当于机场的机房。沙箱的意义就是让 AI 永远碰不到宿主机上的东西。">宿主机</span>。</p>
+          </div>
+          <div class="pattern-card" style="border-top: 3px solid var(--color-actor-3)">
+            <div class="pattern-icon" style="background: var(--color-actor-3)">🔒</div>
+            <h4 class="pattern-title">strict · 预留 microVM</h4>
+            <p class="pattern-desc">最高隔离档：计划每个任务一台
+              <span class="term" data-definition="一种更彻底的隔离方式：每个任务跑在一个独立的微型虚拟机里，相当于每个乘客坐自己的专机。隔离最强，代价也最大。">microVM</span>「专机」。目前还没实现，先留好了接口。</p>
+          </div>
+        </div>
+
+        <div class="flow-steps animate-in">
+          <div class="flow-step">
+            <div class="flow-step-num">1</div>
+            <p>用户提交任务，Run 建档</p>
+          </div>
+          <div class="flow-arrow">→</div>
+          <div class="flow-step">
+            <div class="flow-step-num">2</div>
+            <p>控制面创建 Attempt</p>
+          </div>
+          <div class="flow-arrow">→</div>
+          <div class="flow-step">
+            <div class="flow-step-num">3</div>
+            <p>按策略分配 Sandbox 执行舱</p>
+          </div>
+          <div class="flow-arrow">→</div>
+          <div class="flow-step">
+            <div class="flow-step-num">4</div>
+            <p>通过会话接入 Pi 大脑</p>
+          </div>
+          <div class="flow-arrow">→</div>
+          <div class="flow-step">
+            <div class="flow-step-num">5</div>
+            <p>每一步写进 Store 记账本</p>
+          </div>
+        </div>
+
+        <div class="icon-rows animate-in">
+          <div class="icon-row">
+            <div class="icon-circle" style="background: var(--color-actor-3)">🧠</div>
+            <div>
+              <strong>Pi · Agent Runtime</strong>
+              <p>真正动脑的
+                <span class="term" data-definition="程序实际运行的『环境+引擎』，相当于飞机的动力系统。同样的代码，在不同运行时上安全级别可能完全不同。">运行时</span>：读任务、规划步骤、调用工具。外部模型通过它驱动。</p>
+            </div>
+          </div>
+          <div class="icon-row">
+            <div class="icon-circle" style="background: var(--color-actor-2)">🌉</div>
+            <div>
+              <strong>会话 Session · 登机桥</strong>
+              <p>连接控制面与 AI 的对话通道，一次任务期间保持畅通，任务结束才收起。</p>
+            </div>
+          </div>
+          <div class="icon-row">
+            <div class="icon-circle" style="background: var(--color-actor-4)">🧰</div>
+            <div>
+              <strong>ToolGateway · 地勤</strong>
+              <p>每个工具请求先过它：执行、复用还是阻止，由策略和历史记录说了算。</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="translation-block animate-in">
+          <div class="translation-code">
+            <span class="translation-label">真实代码</span>
+            <pre><code>
+<span class="code-line"><span class="code-keyword">export</span> <span class="code-keyword">interface</span> SandboxProvider {</span>
+<span class="code-line">    <span class="code-function">create</span>(input: {</span>
+<span class="code-line">        <span class="code-property">id</span>: <span class="code-keyword">string</span>;</span>
+<span class="code-line">        <span class="code-property">runId</span>: <span class="code-keyword">string</span>;</span>
+<span class="code-line">        <span class="code-property">instanceId</span>: <span class="code-keyword">string</span>;</span>
+<span class="code-line">        <span class="code-property">workspacePath</span>: <span class="code-keyword">string</span>;</span>
+<span class="code-line">        <span class="code-property">policy</span>: EffectivePolicySnapshot;</span>
+<span class="code-line">    }): <span class="code-keyword">Promise</span>&lt;SandboxHandle&gt;;</span>
+<span class="code-line">    <span class="code-function">terminate</span>(<span class="code-property">sandboxId</span>: <span class="code-keyword">string</span>): <span class="code-keyword">Promise</span>&lt;<span class="code-keyword">void</span>&gt;;</span>
+            </code></pre>
+          </div>
+          <div class="translation-english">
+            <span class="translation-label">大白话</span>
+            <div class="translation-lines">
+              <p class="tl">沙箱服务对外承诺的「合同」——<span class="term" data-definition="一个组件对外承诺的『合同』：别人只要按这个格式调用，就能拿到想要的结果。相当于登机桥的规格说明书。">接口</span>。任何提供者都得按这个来。</p>
+              <p class="tl">「创建执行舱」：开舱前必须说清楚三件事。</p>
+              <p class="tl">这个舱给哪个任务用（runId）。</p>
+              <p class="tl">挂在哪个实例下（instanceId）。</p>
+              <p class="tl">舱门对准哪块工作区目录（workspacePath）。</p>
+              <p class="tl">以及舱内要遵守什么规则（policy）——沙箱不是想怎么开就怎么开。</p>
+              <p class="tl">开好了，交回一个操作手柄（SandboxHandle）。</p>
+              <p class="tl">「销毁执行舱」：用完必须收掉，防止垃圾舱残留。</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ═══ SCREEN 5 · 机库：飞行记录仪与记账本 ═══ -->
+      <section class="screen animate-in">
+        <h2 class="screen-heading">机库：飞行记录仪与记账本</h2>
+        <p>每一次执行、每一步动作，都作为事件写进 SQLite，长期
+          <span class="term" data-definition="把数据存到不会因为断电或重启而丢失的地方，相当于把重要文件从黑板抄到纸质档案。">持久化</span>保存。</p>
+
+        <div class="badge-list animate-in">
+          <div class="badge-item">
+            <code class="badge-code">0001 RUN_CREATED</code>
+            <span class="badge-desc">任务建档</span>
+          </div>
+          <div class="badge-item">
+            <code class="badge-code">0002 RUN_QUEUED</code>
+            <span class="badge-desc">进跑道排队</span>
+          </div>
+          <div class="badge-item">
+            <code class="badge-code">0003 TOOL_STARTED</code>
+            <span class="badge-desc">地勤开始装货（调用工具）</span>
+          </div>
+          <div class="badge-item">
+            <code class="badge-code">0004 TOOL_COMPLETED</code>
+            <span class="badge-desc">工具完成，结果入账</span>
+          </div>
+          <div class="badge-item">
+            <code class="badge-code">0005 RUN_COMPLETED</code>
+            <span class="badge-desc">任务收官</span>
+          </div>
+        </div>
+
+        <p>每条事件都带着递增的
+          <span class="term" data-definition="每件事按发生顺序编的号（sequence），相当于电影票上的场次号。靠它可以把事件排成一条有序的时间线。">序号</span>，只
+          <span class="term" data-definition="只往末尾添加新记录、不改动旧记录，相当于写日记只往后写，从不撕页。">追加</span>、不可
+          <span class="term" data-definition="已写下的记录无法被偷偷修改或删除，相当于记账本每一页都有编号和装订，撕页就会被发现。">篡改</span>。改动任何一步，后面的时间线就对不上了；网络抖动导致重复上报时，系统靠稳定编号
+          <span class="term" data-definition="防止同一条事件被重复记录两次，相当于快递签收时核对单号。网络抖动导致重发时，系统靠稳定编号只记一次。">去重</span>，只记一次。</p>
+
+        <div class="quiz-container animate-in" id="quiz-module2">
+          <div class="scenario-block">
+            <div class="scenario-context">
+              <span class="scenario-label">场景</span>
+              <p>你的客户要求「只有付费团队能调用敏感工具」。现在的架构是：密钥上挂着权限范围（scope），工具层只负责执行。第一步该改哪里？</p>
+            </div>
+            <div class="quiz-question-block"
+                 data-correct="option-b"
+                 data-explanation-right="权限挂在身份上（scope），工具层只负责执行。身份从密钥派生，客户端自报的字段一律不信——这样换了工具、换了沙箱，权限规则都还在。"
+                 data-explanation-wrong="再想想『身份从密钥派生』：把判断散落到每个工具里，等于每个登机口各设一套安检，迟早漏。权限应该跟着身份走，而不是跟着工具走。">
+              <h3 class="quiz-question">想加权限，先改哪里？</h3>
+              <div class="quiz-options">
+                <button class="quiz-option" data-value="option-a" onclick="selectOption(this)">
+                  <div class="quiz-option-radio"></div>
+                  <span>在工具的代码里加一个 if 判断</span>
+                </button>
+                <button class="quiz-option" data-value="option-b" onclick="selectOption(this)">
+                  <div class="quiz-option-radio"></div>
+                  <span>给付费团队的密钥/身份加对应的权限范围（scope）</span>
+                </button>
+                <button class="quiz-option" data-value="option-c" onclick="selectOption(this)">
+                  <div class="quiz-option-radio"></div>
+                  <span>让客户端在请求里多传一个「我是付费用户」的字段</span>
+                </button>
+                <button class="quiz-option" data-value="option-d" onclick="selectOption(this)">
+                  <div class="quiz-option-radio"></div>
+                  <span>让 AI 自己判断，别管了</span>
+                </button>
+              </div>
+              <div class="quiz-feedback"></div>
+            </div>
+          </div>
+
+          <div class="scenario-block">
+            <div class="scenario-context">
+              <span class="scenario-label">场景</span>
+              <p>同一个用户任务第一次执行失败，系统自动重试了一次，成功了。数据库里为什么要有两条 Attempt 记录，而不是把第一条覆盖掉？</p>
+            </div>
+            <div class="quiz-question-block"
+                 data-correct="option-b"
+                 data-explanation-right="Run 是任务、Attempt 是执行。一次任务可以有很多次执行，每次执行独立记录，才能回答『哪一步出的错、当时用了什么』。覆盖了，黑匣子就没了。"
+                 data-explanation-wrong="把 Run 想成乘客的行程单，Attempt 是每一次具体起飞。黑匣子要的是每一次的完整记录——覆盖掉第一次，就再也查不出第一次为什么失败。">
+              <h3 class="quiz-question">为什么重跑不算覆盖原任务？</h3>
+              <div class="quiz-options">
+                <button class="quiz-option" data-value="option-a" onclick="selectOption(this)">
+                  <div class="quiz-option-radio"></div>
+                  <span>因为数据库不允许覆盖记录</span>
+                </button>
+                <button class="quiz-option" data-value="option-b" onclick="selectOption(this)">
+                  <div class="quiz-option-radio"></div>
+                  <span>因为 Attempt 是独立的一次执行，旧记录是审计的黑匣子，必须原样保留</span>
+                </button>
+                <button class="quiz-option" data-value="option-c" onclick="selectOption(this)">
+                  <div class="quiz-option-radio"></div>
+                  <span>因为新 Attempt 比旧的更好用</span>
+                </button>
+                <button class="quiz-option" data-value="option-d" onclick="selectOption(this)">
+                  <div class="quiz-option-radio"></div>
+                  <span>因为覆盖会触发程序 bug</span>
+                </button>
+              </div>
+              <div class="quiz-feedback"></div>
+            </div>
+          </div>
+
+          <div class="scenario-block">
+            <div class="scenario-context">
+              <span class="scenario-label">场景</span>
+              <p>有个大客户想让你把 AI 直接放在宿主机上跑，这样它能访问所有文件，跑得「更快」。你是架构师，你的选择是？</p>
+            </div>
+            <div class="quiz-question-block"
+                 data-correct="option-c"
+                 data-explanation-right="default 档用容器 + runsc 隔离，工具请求再过一道 ToolGateway 审查（执行/复用/阻止）。多租户系统里，隔离是底线，速度不能拿安全换。"
+                 data-explanation-wrong="想想沙箱三个档位：development=只用于本地调试、default=容器隔离、strict=预留 microVM。把多租户执行放进不可信的宿主机，等于让所有乘客共用驾驶舱。">
+              <h3 class="quiz-question">AI 要直接跑在宿主机上，答应吗？</h3>
+              <div class="quiz-options">
+                <button class="quiz-option" data-value="option-a" onclick="selectOption(this)">
+                  <div class="quiz-option-radio"></div>
+                  <span>好主意，直接把沙箱删了，快最重要</span>
+                </button>
+                <button class="quiz-option" data-value="option-b" onclick="selectOption(this)">
+                  <div class="quiz-option-radio"></div>
+                  <span>用 development 沙箱跑，反正本地调试没问题</span>
+                </button>
+                <button class="quiz-option" data-value="option-c" onclick="selectOption(this)">
+                  <div class="quiz-option-radio"></div>
+                  <span>用 default 沙箱（容器 + runsc 隔离），工具调用再过一道 ToolGateway</span>
+                </button>
+                <button class="quiz-option" data-value="option-d" onclick="selectOption(this)">
+                  <div class="quiz-option-radio"></div>
+                  <span>只要客户签免责协议就行</span>
+                </button>
+              </div>
+              <div class="quiz-feedback"></div>
+            </div>
+          </div>
+
+          <button class="quiz-check-btn" onclick="checkQuiz('quiz-module2')">检查答案</button>
+          <button class="quiz-reset-btn" onclick="resetQuiz('quiz-module2')">再试一次</button>
+        </div>
+
+        <div class="callout callout-accent animate-in">
+          <div class="callout-icon">💡</div>
+          <div class="callout-content">
+            <strong class="callout-title">Aha！每个主角只干一件事</strong>
+            <p>身份只回答「你是谁」，控制面只管调度，沙箱只负责隔离，记账本只负责记录。把职责拆开、各管一摊，工程师叫它「关注点分离」（separation of concerns）。你越早用这个眼光看系统，就越能对 AI 说出：「这个逻辑放在 X 而不是 Y。」</p>
+          </div>
+        </div>
+
+        <p style="color: var(--color-text-muted); font-size: var(--text-sm);">下一模块：这些演员之间，究竟是怎么传话的。</p>
+      </section>
+
+    </div>
+  </div>
+</section>

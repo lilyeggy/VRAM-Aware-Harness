@@ -1,0 +1,361 @@
+<section class="module" id="module-6" style="background: var(--color-bg)">
+  <div class="module-content">
+    <header class="module-header animate-in">
+      <span class="module-number">06</span>
+      <h1 class="module-title">当它出故障时</h1>
+      <p class="module-subtitle">安全<span class="term" data-definition="收敛：遇到故障时按预案一步步把运行中的工作'收回来'——不硬扛、不悬空，像飞机备降一样有章法。">收敛</span>与诚实边界——系统如何优雅地"坏掉"，以及哪些话绝不能说。</p>
+    </header>
+
+    <div class="module-body">
+
+      <!-- ═══════════ Screen 1 · 故障类型一览 ═══════════ -->
+      <section class="screen animate-in">
+        <h2 class="screen-heading">飞机不会硬着头皮继续飞</h2>
+        <p>发动机<span class="term" data-definition="失联：失去联系、怎么呼叫都没回应。技术里指一个组件消失了或再也联系不上。">失联</span>时，机长不会赌一把继续飞，而是立刻按预案备降、腾空跑道、复盘。这套系统也一样：每一环都可能出故障，而它的设计目标是<strong>安全收敛</strong>——不硬扛、不泄漏、不重复。</p>
+
+        <div class="pattern-cards">
+          <div class="pattern-card" style="border-top: 3px solid var(--color-actor-1)">
+            <div class="pattern-icon" style="background: var(--color-actor-1)">🔇</div>
+            <h4 class="pattern-title"><span class="term" data-definition="沙箱（Sandbox）：每个任务运行的隔离工作区——任务在里面跑代码、装环境，和外面的世界隔开，像飞机上每个乘客独立的小隔间。">沙箱</span>失联（<span class="term" data-definition="LOST：'失联'的状态标记。终态之一，表示'这个沙箱找不到了'——它是系统启动收敛的信号。">LOST</span>）</h4>
+            <p class="pattern-desc"><span class="term" data-definition="容器：一种把程序和它的运行环境打包在一起、可以独立启动的'小盒子'。沙箱通常就装在这种盒子里。">容器</span>被外部杀死或整个消失，怎么喊都没有回应。</p>
+          </div>
+          <div class="pattern-card" style="border-top: 3px solid var(--color-actor-2)">
+            <div class="pattern-icon" style="background: var(--color-actor-2)">💥</div>
+            <h4 class="pattern-title"><span class="term" data-definition="进程：一个正在运行中的程序。一个进程'崩溃'就是它自己突然挂了。">进程</span>崩溃（<span class="term" data-definition="FAILED：'失败'的状态标记。终态之一，表示这次执行明确失败了。">FAILED</span>）</h4>
+            <p class="pattern-desc">任务里的 Agent 进程自己挂了，执行当场<span class="term" data-definition="中断：半途停下。系统里它是一类特殊状态——既不是成功，也不是失败。">中断</span>。</p>
+          </div>
+          <div class="pattern-card" style="border-top: 3px solid var(--color-actor-3)">
+            <div class="pattern-icon" style="background: var(--color-actor-3)">🔪</div>
+            <h4 class="pattern-title">被外部 <span class="term" data-definition="kill：强制终止一个进程或容器。'外部 kill'指不是代码自己出错，而是别人（系统管理员、内存保护机制）把进程杀掉了。">kill</span></h4>
+            <p class="pattern-desc">这不是代码的 bug，是外力把容器强制终止了——系统必须能识别出这种"非我之过"。</p>
+          </div>
+          <div class="pattern-card" style="border-top: 3px solid var(--color-actor-4)">
+            <div class="pattern-icon" style="background: var(--color-actor-4)">🔁</div>
+            <h4 class="pattern-title"><span class="term" data-definition="重试：失败了再试一次。网络抖动这类瞬时小故障，重试通常就好了；但致命故障（如容器没了）重试只会浪费钱。">重试</span>策略</h4>
+            <p class="pattern-desc">网络抖动这类小故障，按策略重试而不是放弃；但致命故障绝不盲目重试。</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- ═══════════ Screen 2 · LOST 的传播 ═══════════ -->
+      <section class="screen animate-in">
+        <h2 class="screen-heading">火灾报警：LOST 事件如何传遍全系统</h2>
+        <p>整栋楼装了烟雾探测器：容器一消失，管家立刻按响火灾报警，让每一层都按预案行动。这个"报警器"叫 <span class="term" data-definition="事件（event）：系统里发生的'一件事'的通知。LOST 事件就是'这个沙箱失联了'的官方通报。">事件</span>，而按响它的动作叫 <span class="term" data-definition="markLost：'标记为失联'。这是容器沙箱管家给失联沙箱盖章的函数——盖了章，整个系统才知道要收敛。">markLost()</span>。</p>
+
+        <div class="flow-animation" data-steps='[
+          {"highlight":"flow-actor-1","label":"第 1 步：发动机失联——容器被外部杀死或崩溃消失"},
+          {"highlight":"flow-actor-2","label":"第 2 步：下次发指令失败，docker exec 报 no such container，管家判定失联","packet":true,"from":"actor-1","to":"actor-2"},
+          {"highlight":"flow-actor-2","label":"第 3 步：markLost() 按响火灾报警——标记 LOST、划掉记录、清掉密钥"},
+          {"highlight":"flow-actor-3","label":"第 4 步：LOST 事件广播给控制面","packet":true,"from":"actor-2","to":"actor-3"},
+          {"highlight":"flow-actor-5","label":"第 5 步：Instance 置 FAILED——这条执行线路关停","packet":true,"from":"actor-3","to":"actor-5"},
+          {"highlight":"flow-actor-4","label":"第 6 步：Attempt 置 INTERRUPTED——这次尝试到此为止，不再重跑","packet":true,"from":"actor-3","to":"actor-4"},
+          {"highlight":"flow-actor-5","label":"第 7 步：Run 收到中断信号，备降完成：已确认成功的不重做，未知的进人工"}
+        ]'>
+          <div class="flow-actors">
+            <div class="flow-actor" id="flow-actor-1">
+              <div class="flow-actor-icon">📦</div>
+              <span>沙箱容器</span>
+            </div>
+            <div class="flow-actor" id="flow-actor-2">
+              <div class="flow-actor-icon">🧯</div>
+              <span><span class="term" data-definition="Provider：'提供者'，沙箱的管家。它负责创建、执行、终止沙箱，并负责发现'沙箱不见了'这件事。">沙箱管家</span></span>
+            </div>
+            <div class="flow-actor" id="flow-actor-3">
+              <div class="flow-actor-icon">🎛️</div>
+              <span><span class="term" data-definition="控制面（控制平面）：系统的'大脑'，负责调度任务、监听各组件状态、做决策。">控制面</span></span>
+            </div>
+            <div class="flow-actor" id="flow-actor-4">
+              <div class="flow-actor-icon">📋</div>
+              <span><span class="term" data-definition="Attempt（一次尝试）：对同一个任务的一次尝试执行。任务失败后可能再开新的一次尝试。">Attempt</span></span>
+            </div>
+            <div class="flow-actor" id="flow-actor-5">
+              <div class="flow-actor-icon">✈️</div>
+              <span><span class="term" data-definition="Run（一次任务）：从开始到结束的完整一次任务。一个 Run 内部会拆成一次次的尝试和一步步的执行。">Run</span></span>
+            </div>
+          </div>
+
+          <div class="flow-packet" id="flow-packet"></div>
+
+          <div class="flow-step-label" id="flow-label">点击「下一步」，看 LOST 事件如何传遍全系统</div>
+
+          <div class="flow-controls">
+            <button class="btn flow-next-btn">下一步</button>
+            <button class="btn flow-reset-btn">重播</button>
+            <span class="flow-progress"></span>
+          </div>
+        </div>
+
+        <p>下面就是管家按响报警器的真实代码——它把事情做得干净利落。</p>
+
+        <div class="translation-block animate-in">
+          <div class="translation-code">
+            <span class="translation-label">CODE</span>
+            <pre><code>
+<span class="code-line">    <span class="code-keyword">private</span> <span class="code-function">markLost</span>(sandboxId: string, reason: string): void {</span>
+<span class="code-line">        <span class="code-keyword">const</span> current = <span class="code-keyword">this</span>.store.<span class="code-function">get</span>(sandboxId);</span>
+<span class="code-line">        <span class="code-keyword">if</span> (current === <span class="code-keyword">null</span> || current.status !== <span class="code-string">"ACTIVE"</span>) <span class="code-keyword">return</span>;</span>
+<span class="code-line">        <span class="code-keyword">this</span>.containerBySandboxId.<span class="code-function">delete</span>(sandboxId);</span>
+<span class="code-line">        <span class="code-keyword">this</span>.secretValues.<span class="code-function">delete</span>(sandboxId);</span>
+<span class="code-line">        <span class="code-keyword">const</span> lost: SandboxRecord = {</span>
+<span class="code-line">            ...current,</span>
+<span class="code-line">            <span class="code-property">status</span>: <span class="code-string">"LOST"</span>,</span>
+<span class="code-line">            <span class="code-property">updatedAt</span>: <span class="code-keyword">new</span> <span class="code-function">Date</span>().<span class="code-function">toISOString</span>(),</span>
+<span class="code-line">            <span class="code-property">failureReason</span>: reason || <span class="code-string">"docker exec reported missing container"</span>,</span>
+<span class="code-line">        };</span>
+<span class="code-line">        <span class="code-keyword">this</span>.store.<span class="code-function">update</span>(lost, <span class="code-string">"ACTIVE"</span>);</span>
+<span class="code-line">        <span class="code-keyword">this</span>.<span class="code-function">emit</span>(lost, <span class="code-string">"LOST"</span>, lost.failureReason!);</span>
+<span class="code-line">    }</span>
+            </code></pre>
+          </div>
+          <div class="translation-english">
+            <span class="translation-label">PLAIN ENGLISH</span>
+            <div class="translation-lines">
+              <p class="tl">管家的"标记失联"函数：告诉它哪个沙箱丢了、为什么丢的。</p>
+              <p class="tl">先翻账本找到这个沙箱；如果它根本不在账上，或已经不是"活跃"状态，就立刻收手——绝不重复报警。</p>
+              <p class="tl">从名册上划掉"容器 ↔ 沙箱"的对应关系，清掉这个沙箱的<span class="term" data-definition="密钥（secret）：像钥匙一样的敏感信息，比如 API 令牌。沙箱没了，钥匙必须一并作废。">密钥</span>。</p>
+              <p class="tl">基于原记录造一份"失联版"：盖上 LOST 的章，记下报警时间。</p>
+              <p class="tl">写下失联原因；如果没有原因，就记录"docker exec 报告容器不存在"。</p>
+              <p class="tl">把这份失联记录写回账本（要求之前必须是活跃状态，防止写脏数据）。</p>
+              <p class="tl">最后 <span class="term" data-definition="广播（emit）：把一件事同时通知给所有关注它的人。emit 在这里就是把 LOST 事件发给所有订阅者。">广播</span> LOST 事件——火灾报警正式响起，整栋楼都听得到。</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ═══════════ Screen 3 · 槽位与资源不泄漏 ═══════════ -->
+      <section class="screen animate-in">
+        <h2 class="screen-heading">槽位不泄漏，重启不慌</h2>
+        <p>飞机备降后，跑道<span class="term" data-definition="槽位（slot）：资源占位。任务运行时占着一个'位置'（比如一块显存额度），别人就不能用了；任务结束必须把占位还回去。">槽位</span>必须还给塔台，下一班才能用。系统同理：沙箱终止时，容器、密钥、槽位一样都不能<span class="term" data-definition="泄漏：该释放的资源没释放。内存、槽位、容器泄漏多了，系统会被慢慢拖垮。">泄漏</span>。</p>
+
+        <div class="step-cards">
+          <div class="step-card">
+            <div class="step-num">1</div>
+            <div class="step-body">
+              <strong>取出记录</strong>
+              <p>从账本里找到这个沙箱和它对应的容器——先定位，再动手。</p>
+            </div>
+          </div>
+          <div class="step-card">
+            <div class="step-num">2</div>
+            <div class="step-body">
+              <strong>划掉映射、清掉密钥</strong>
+              <p>容器映射和密钥先从内存里删除——从这一刻起，它不再是"活跃"的。</p>
+            </div>
+          </div>
+          <div class="step-card">
+            <div class="step-num">3</div>
+            <div class="step-body">
+              <strong>强制删容器</strong>
+              <p><span class="term" data-definition="docker：最流行的容器管理工具。docker rm --force 的意思是'把容器连根拔掉，不管它是否还在运行'。">docker rm --force</span> 把容器尸体也清掉，磁盘不留渣。</p>
+            </div>
+          </div>
+          <div class="step-card">
+            <div class="step-num">4</div>
+            <div class="step-body">
+              <strong>标记 TERMINATED</strong>
+              <p>状态落账，<span class="term" data-definition="TERMINATED：终态之一，表示'已终止'。标记之后，这个沙箱占用的槽位和资源正式释放。">TERMINATED</span>——槽位随之还给池子。</p>
+            </div>
+          </div>
+        </div>
+
+        <p>控制面自己也会挂（比如半夜重启）。<span class="term" data-definition="重启：程序或系统停了再启动。重启后内存里的东西全没了，所以必须能从持久化存储里把状态捞回来。">重启</span>之后，它靠三招<span class="term" data-definition="恢复：把系统带回正常状态的过程——重建丢失的现场，接着处理没做完的事。">恢复</span>现场：</p>
+
+        <div class="icon-rows">
+          <div class="icon-row">
+            <div class="icon-circle" style="background: var(--color-actor-1)">🔁</div>
+            <div>
+              <strong>重建队列</strong>
+              <p>从<span class="term" data-definition="持久化存储：把数据存到硬盘这类'断电也不丢'的地方，区别于内存。">持久化</span>存储里把待办<span class="term" data-definition="队列：排成一排等待处理的待办事项。">队列</span>重新搭起来。</p>
+            </div>
+          </div>
+          <div class="icon-row">
+            <div class="icon-circle" style="background: var(--color-actor-2)">🔍</div>
+            <div>
+              <strong>扫描可恢复的 Run</strong>
+              <p>找到被中断的 Run，逐个评估：还能不能接着做？</p>
+            </div>
+          </div>
+          <div class="icon-row">
+            <div class="icon-circle" style="background: var(--color-actor-3)">🧭</div>
+            <div>
+              <strong>逐个消费恢复计划</strong>
+              <p>按恢复决策执行：能自动接着做的自动恢复，不能的进<span class="term" data-definition="人工复核：让真人检查后决定怎么处理。代码里叫 MANUAL_REVIEW。">人工复核</span>。</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="callout callout-info">
+          <div class="callout-icon">💡</div>
+          <div class="callout-content">
+            <strong class="callout-title">关键洞察</strong>
+            <p>"释放"不是可选项，而是每个出口的必经程序。飞机备降后腾空跑道、系统终止后释放槽位——把"绝不泄漏"刻进每个退出路径，系统才不会慢慢被掏空。</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- ═══════════ Screen 4 · 安全恢复 + Quiz ═══════════ -->
+      <section class="screen animate-in">
+        <h2 class="screen-heading">危险副作用，绝不重复执行</h2>
+        <p>火灾报警响过后最怕什么？怕各层"自作主张重跑"。系统靠 Module 5 的 <span class="term" data-definition="Checkpoint（检查点）：执行到关键步骤时拍一张'快照'，记录这一步的结果。有了快照，恢复时才知道哪些已经做过。">Checkpoint</span> 与结果<span class="term" data-definition="分类：把每一步的结果分成几类——已确认成功、明确失败、未知。三类处理方式完全不同。">分类</span>来兜底：已确认成功的不重做，未知的进人工。</p>
+
+        <p>下面这段真实代码，是控制面收到 LOST 事件后对"一次尝试"的收敛——它只在尝试还运行时收尾一次：</p>
+
+        <div class="translation-block animate-in">
+          <div class="translation-code">
+            <span class="translation-label">CODE</span>
+            <pre><code>
+<span class="code-line">        <span class="code-keyword">const</span> attempt = <span class="code-keyword">this</span>.attempts.<span class="code-function">get</span>(active.attemptId);</span>
+<span class="code-line">        <span class="code-keyword">if</span> (attempt?.status === <span class="code-string">"RUNNING"</span>) {</span>
+<span class="code-line">            <span class="code-keyword">const</span> interrupted = <span class="code-function">finishRunAttempt</span>(</span>
+<span class="code-line">                attempt,</span>
+<span class="code-line">                <span class="code-string">"INTERRUPTED"</span>,</span>
+<span class="code-line">                event.timestamp,</span>
+<span class="code-line">            );</span>
+<span class="code-line">            <span class="code-keyword">this</span>.attempts.<span class="code-function">update</span>(interrupted, attempt.status);</span>
+<span class="code-line">        }</span>
+            </code></pre>
+          </div>
+          <div class="translation-english">
+            <span class="translation-label">PLAIN ENGLISH</span>
+            <div class="translation-lines">
+              <p class="tl">找到这次任务当前的那条尝试记录。</p>
+              <p class="tl">只有当它还在"运行中"时才动手——已经收过尾的绝不二次收尾。</p>
+              <p class="tl">调用"结束这次尝试"的函数，把它标记为 <span class="term" data-definition="INTERRUPTED：终态之一，表示'被中断'——不是成功，也不是失败，是半路被叫停。">INTERRUPTED</span>。</p>
+              <p class="tl">记下中断发生的时间戳。</p>
+              <p class="tl">把收尾后的记录写回账本，这次尝试正式关闭。</p>
+              <p class="tl">关闭之后，已确认完成的步骤不会重做，未知的交给人工——<span class="term" data-definition="副作用：执行产生的'外部后果'，比如扣钱、发帖子、发邮件。这类后果重复执行一次就多一笔伤害。">副作用</span>绝不重复。</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="quiz-container" id="quiz-module6">
+          <div class="scenario-block">
+            <div class="scenario-context">
+              <span class="scenario-label">Scenario</span>
+              <p>服务半夜重启。早上醒来，你发现一个 Run 被中断了——它当时正在"发帖子"（每发一篇都会扣一次钱）。系统应该怎么处理，才不会重复扣钱、重复发帖？</p>
+            </div>
+            <div class="quiz-question-block"
+                 data-correct="option-b"
+                 data-explanation-right="对！这就是安全恢复：先看 Checkpoint 分类——已确认成功发出去的帖子标记为完成、绝不重做；没确认的部分进人工复核。既不停摆，也不重复伤害。"
+                 data-explanation-wrong="不对。想想 Checkpoint 和分类是干嘛用的——已确认成功的副作用绝不能再执行一次，否则帖子发两遍、钱扣两次。">
+              <h3 class="quiz-question">系统应该怎么做？</h3>
+              <div class="quiz-options">
+                <button class="quiz-option" data-value="option-a" onclick="selectOption(this)">
+                  <div class="quiz-option-radio"></div>
+                  <span>直接把整个 Run 从头重跑一遍——反正任务总要做完</span>
+                </button>
+                <button class="quiz-option" data-value="option-b" onclick="selectOption(this)">
+                  <div class="quiz-option-radio"></div>
+                  <span>查 Checkpoint：已确认成功的帖子不重做，未知的进人工复核</span>
+                </button>
+                <button class="quiz-option" data-value="option-c" onclick="selectOption(this)">
+                  <div class="quiz-option-radio"></div>
+                  <span>当无事发生，把 Run 直接标记为成功</span>
+                </button>
+                <button class="quiz-option" data-value="option-d" onclick="selectOption(this)">
+                  <div class="quiz-option-radio"></div>
+                  <span>把所有步骤全部标记为失败，让用户重新创建任务</span>
+                </button>
+              </div>
+              <div class="quiz-feedback"></div>
+            </div>
+          </div>
+
+          <div class="quiz-question-block"
+               data-correct="option-b"
+               data-explanation-right="对！故障的第一现场就在沙箱管家那里：它会判定失联、发出 LOST 事件并记下原因。从这里能确认'容器被外部杀死'，而不是代码的 bug——证据链清晰。"
+               data-explanation-wrong="不对。想想哪个角色负责'发现沙箱不见了'这件事——管家。它的记录里才有失联判定和 LOST 事件。">
+            <h3 class="quiz-question">半夜，容器被系统的 <span class="term" data-definition="OOM：Out Of Memory，内存耗尽。操作系统为了自救，会强制杀掉最占内存的进程——你的容器可能就这样被'外部 kill'了。">OOM</span> 机制杀掉了。第二天你想搞清楚"昨晚到底发生了什么"，应该先看哪一层？</h3>
+            <div class="quiz-options">
+              <button class="quiz-option" data-value="option-a" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>先翻业务代码，找 bug</span>
+              </button>
+              <button class="quiz-option" data-value="option-b" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>看沙箱管家的记录：容器状态、docker exec 失败信息、LOST 事件</span>
+              </button>
+              <button class="quiz-option" data-value="option-c" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>直接问用户昨晚发生了什么</span>
+              </button>
+              <button class="quiz-option" data-value="option-d" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>重装整个系统，眼不见为净</span>
+              </button>
+            </div>
+            <div class="quiz-feedback"></div>
+          </div>
+
+          <button class="quiz-check-btn" onclick="checkQuiz('quiz-module6')">检查答案</button>
+          <button class="quiz-reset-btn" onclick="resetQuiz('quiz-module6')">再试一次</button>
+        </div>
+      </section>
+
+      <!-- ═══════════ Screen 5 · 诚实的边界 ═══════════ -->
+      <section class="screen animate-in">
+        <h2 class="screen-heading">诚实的边界：什么没做，就别说做了</h2>
+        <p>这个项目能跑 demo，但它是<span class="term" data-definition="面试级：目标是让面试官看懂你的设计思路和工程判断力，而不是直接拿去生产环境扛真实流量。">面试级</span>的单机原型，不是<span class="term" data-definition="生产级：能真实上线的水平——扛得住真实流量、故障、多用户同时使用，出了问题有人负责。">生产级</span>。边界写清楚，才是工程判断力。</p>
+
+        <div class="callout callout-warning">
+          <div class="callout-icon">🚨</div>
+          <div class="callout-content">
+            <strong class="callout-title">诚实是信任的底线</strong>
+            <p>把一个"能做 demo 的项目"说成"生产级"，是在自毁信任。没有真机 <span class="term" data-definition="KVM：Kernel-based Virtual Machine，Linux 内核自带的虚拟化能力。没有它，轻量虚拟机就跑不起来。">KVM</span>，就不假装验证过 <span class="term" data-definition="Kata、Firecracker：两种'轻量虚拟机'技术，隔离性比普通容器强得多，常被用来做严格隔离。代码里注明 strict Provider '尚未接入'。">Kata、Firecracker</span> 的 microVM 隔离；没有 <span class="term" data-definition="GPU：图形处理器，AI 模型主要跑在上面。这里的显存就是 GPU 的内存。">GPU</span>，就不假装验证过<span class="term" data-definition="显存：GPU 上供模型使用的高速内存，容量有限；任务太多或太大时，显存会不够用。">显存</span><span class="term" data-definition="准入（admission）：'进入前的检查'。显存准入指任务开始前先确认显存够不够，不够就不放行。">准入</span>。</p>
+          </div>
+        </div>
+
+        <div class="pattern-cards">
+          <div class="pattern-card" style="border-top: 3px solid var(--color-actor-1)">
+            <div class="pattern-icon" style="background: var(--color-actor-1)">🧱</div>
+            <h4 class="pattern-title">没装：strict 隔离</h4>
+            <p class="pattern-desc">Kata / Firecracker <span class="term" data-definition="microVM：微型虚拟机，介于容器和完整虚拟机之间——比容器更隔离，比虚拟机更轻。">microVM</span> 尚未接入（无 KVM 硬件）。代码里写的是"尚未接入"，不是"已验证"。</p>
+          </div>
+          <div class="pattern-card" style="border-top: 3px solid var(--color-actor-2)">
+            <div class="pattern-icon" style="background: var(--color-actor-2)">🎮</div>
+            <h4 class="pattern-title">没验证：真实 GPU 显存准入</h4>
+            <p class="pattern-desc">硬件基线是 <span class="term" data-definition="RTX A6000：英伟达的专业显卡型号，48GB 显存，常用于跑大模型。">RTX A6000</span> 级别的真机——没真机就没有可复现证据，只能诚实标注"未验证"。</p>
+          </div>
+          <div class="pattern-card" style="border-top: 3px solid var(--color-actor-3)">
+            <div class="pattern-icon" style="background: var(--color-actor-3)">🌐</div>
+            <h4 class="pattern-title">没做：<span class="term" data-definition="高可用：系统出了故障也不中断服务的能力。常见手段是多台机器互相备份、故障自动切换。">高可用</span></h4>
+            <p class="pattern-desc">单机 demo：非<span class="term" data-definition="多机：部署在多台服务器上。单机则是一台机器搞定一切，坏了就全没了。">多机</span>、无 <span class="term" data-definition="SLA：Service Level Agreement，服务等级承诺，比如'一年 99.9% 的时间可用'。">SLA</span> 承诺。重启能恢复是 demo 级保障，不是生产级承诺。</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- ═══════════ Screen 6 · 收尾：你现在能做什么 ═══════════ -->
+      <section class="screen animate-in">
+        <h2 class="screen-heading">现在，你能做什么</h2>
+        <p>六个模块讲完，你不再只是"听说过 Agent 系统"——你现在能用精确的词汇描述故障、恢复与边界。这比会敲代码更接近真正的工程思维。</p>
+
+        <div class="step-cards">
+          <div class="step-card">
+            <div class="step-num">1</div>
+            <div class="step-body">
+              <strong>读懂系统如何做决定</strong>
+              <p>看到"容器消失 → markLost → INTERRUPTED → 不重做"的因果链，你能解释系统为什么这样收敛、好在哪。</p>
+            </div>
+          </div>
+          <div class="step-card">
+            <div class="step-num">2</div>
+            <div class="step-body">
+              <strong>识破 AI <span class="term" data-definition="AI 幻觉：AI 一本正经地编造不存在的'事实'——比如声称'已处理'，其实没处理。现在你知道该去哪个文件验证。">幻觉</span>与坏模式</strong>
+              <p>当 AI 说"已处理、已重试"，你知道该去验证哪一层，不被糊弄；也能识别"把 demo 说成生产级"这类坏模式。</p>
+            </div>
+          </div>
+          <div class="step-card">
+            <div class="step-num">3</div>
+            <div class="step-body">
+              <strong>把<span class="term" data-definition="需求：你想让软件做的事，用大白话讲清楚就行。现在你能用专业词汇讲得更准。">需求</span>讲给 AI</strong>
+              <p>"中断后已确认成功的不重做、未知的进人工复核、槽位绝不泄漏"——这句话，你现在可以直接写进任何系统设计需求里。</p>
+            </div>
+          </div>
+        </div>
+
+        <p>故障不可怕，可怕的是没有预案、没有边界。这套系统给了你一份可以照着讲的"安全收敛"范本——祝你面试顺利。</p>
+      </section>
+
+    </div>
+  </div>
+</section>

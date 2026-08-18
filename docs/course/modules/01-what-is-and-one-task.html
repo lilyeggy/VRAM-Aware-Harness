@@ -1,0 +1,476 @@
+<section class="module" id="module-1" style="background: var(--color-bg-warm)">
+  <div class="module-content">
+
+    <header class="module-header animate-in">
+      <span class="module-number">01</span>
+      <h1 class="module-title">这是什么？一次任务的一生</h1>
+      <p class="module-subtitle">这不是另一个「会聊天的 AI」——它是一层<span class="term" data-definition="控制面（Control Plane）= 系统里负责「管理」的那一层：决定谁能跑、在哪跑、何时跑、失败后怎么办。它自己不思考，只做安排与安保。">控制面</span>：决定谁能跑、在哪跑、何时跑、失败后怎么办，最后把回答 + Diff + Artifact 交给你。</p>
+    </header>
+
+    <!-- ── SCREEN 01 · 这是什么 ─────────────────────────────── -->
+    <section class="screen animate-in">
+      <h2 class="screen-heading">这不是 AI，是一家「代办事委托中介」</h2>
+      <p>想象你走进一家<span class="term" data-definition="代办事委托中介 = 你只管把任务交给柜台，它自己不干活，而是替你安排执行者、场地和记账，最后把结果和收据一起还给你。">代办事委托中介</span>：你把任务交给柜台，它替你把一切都安排妥当。</p>
+
+      <div class="pattern-cards stagger-children">
+        <div class="pattern-card animate-in" style="border-top: 3px solid var(--color-actor-2)">
+          <div class="pattern-icon" style="background: var(--color-actor-2)">🧾</div>
+          <h4 class="pattern-title">登记台</h4>
+          <p class="pattern-desc">接收你的任务，先验明正身（密钥），再登记入册。</p>
+        </div>
+        <div class="pattern-card animate-in" style="border-top: 3px solid var(--color-actor-5)">
+          <div class="pattern-icon" style="background: var(--color-actor-5)">🗓️</div>
+          <h4 class="pattern-title">派单调度</h4>
+          <p class="pattern-desc">看资源够不够，安排谁先上、谁排队。</p>
+        </div>
+        <div class="pattern-card animate-in" style="border-top: 3px solid var(--color-actor-3)">
+          <div class="pattern-icon" style="background: var(--color-actor-3)">📦</div>
+          <h4 class="pattern-title">隔离工作间</h4>
+          <p class="pattern-desc">每个任务一间独立<span class="term" data-definition="隔离 = 把每个任务关在互不相通的小隔间里，谁也看不到谁的文件、谁的网络。">隔离</span>的房间，谁也不能串门。</p>
+        </div>
+        <div class="pattern-card animate-in" style="border-top: 3px solid var(--color-actor-1)">
+          <div class="pattern-icon" style="background: var(--color-actor-1)">📒</div>
+          <h4 class="pattern-title">记账本</h4>
+          <p class="pattern-desc">每一步动作都落账，最后给你一张可查的<span class="term" data-definition="审计（Audit）= 系统给每一次动作留下的正式记录，像超市小票：谁、何时、做了什么、结果如何，事后随时可查。">审计</span>收据。</p>
+        </div>
+      </div>
+
+      <p>办完后，中介把结果和收据一起还给你。<span class="term" data-definition="模型（Model）= 负责「动脑」的 AI，比如 Pi 或外部队列模型。它擅长思考和写代码，但不负责安保与调度。">模型</span>负责动脑，这套系统负责「中介与安保」。</p>
+
+      <div class="callout callout-info">
+        <div class="callout-icon">🏗️</div>
+        <div class="callout-content">
+          <strong class="callout-title">一个系统，三层分工</strong>
+          <p>控制面（Control）管「谁能跑、在哪跑、何时跑、失败了怎么办」；行为（Behavior）由模型负责——它动脑；基础设施（Infrastructure）提供隔离工作间与算力。三层各司其职，互不越界。</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ── SCREEN 02 · 你提交一次任务 ───────────────────────── -->
+    <section class="screen animate-in">
+      <h2 class="screen-heading">你提交一次任务</h2>
+      <p>你喊一嗓子——本质上只是一次<span class="term" data-definition="HTTP = 浏览器、程序之间对话的通用语言。你发出的每一条请求（Request）都是一句标准化的「问话」。">HTTP 请求</span>，只需要给两样东西：一个 <span class="term" data-definition="workspaceId = 工作区的身份证号，告诉系统这次任务在哪间办公室干活。">workspaceId</span> 和一段话。</p>
+
+      <div class="icon-rows stagger-children">
+        <div class="icon-row animate-in">
+          <div class="icon-circle" style="background: var(--color-actor-1)">🔑</div>
+          <div>
+            <strong>密钥</strong>
+            <p><span class="term" data-definition="密钥（API Key）= 一串只有你和服务器知道的暗号，用来证明「我是我」。服务器在后台用它查你是谁、有什么权限。">密钥</span>放在请求头里，身份不用你自报。</p>
+          </div>
+        </div>
+        <div class="icon-row animate-in">
+          <div class="icon-circle" style="background: var(--color-actor-2)">📇</div>
+          <div>
+            <strong>workspaceId</strong>
+            <p>告诉系统：这次任务在哪间办公室干活。</p>
+          </div>
+        </div>
+        <div class="icon-row animate-in">
+          <div class="icon-circle" style="background: var(--color-actor-5)">💬</div>
+          <div>
+            <strong>userInput</strong>
+            <p>要办的事，就一段话——你说人话，它听得懂。</p>
+          </div>
+        </div>
+      </div>
+
+      <p>身份验证不过关，服务器就直接回你一个 <span class="term" data-definition="401 = HTTP 的「身份未通过」编号，像门卫说：你没有通行证。">401</span>。来看看真实代码里，这个「验明正身」的动作长什么样：</p>
+
+      <div class="translation-block animate-in">
+        <div class="translation-code">
+          <span class="translation-label">CODE</span>
+          <pre><code><span class="code-line">        <span class="code-keyword">const</span> authorization = request.headers.<span class="code-function">get</span>(<span class="code-string">"authorization"</span>);</span>
+<span class="code-line">        <span class="code-keyword">const</span> rawKey = authorization?.<span class="code-function">startsWith</span>(<span class="code-string">"Bearer "</span>)</span>
+<span class="code-line">            ? authorization.<span class="code-function">slice</span>(<span class="code-string">"Bearer "</span>.length).<span class="code-function">trim</span>()</span>
+<span class="code-line">            : request.headers.<span class="code-function">get</span>(<span class="code-string">"x-api-key"</span>)?.<span class="code-function">trim</span>();</span>
+<span class="code-line">        <span class="code-keyword">if</span> (rawKey === <span class="code-keyword">undefined</span> <span class="code-operator">||</span> rawKey.length === <span class="code-number">0</span>) {</span>
+<span class="code-line">            <span class="code-keyword">this</span>.<span class="code-function">audit</span>(<span class="code-string">"AUTHENTICATE"</span>, <span class="code-string">"DENY"</span>, <span class="code-keyword">null</span>, <span class="code-string">"missing_api_key"</span>);</span>
+<span class="code-line">            <span class="code-keyword">throw</span> <span class="code-keyword">new</span> <span class="code-function">HttpError</span>(<span class="code-number">401</span>, <span class="code-string">"缺少 API Key"</span>);</span>
+<span class="code-line">        }</span>
+<span class="code-line">        <span class="code-keyword">const</span> principal = <span class="code-keyword">this</span>.accessControl.<span class="code-function">authenticate</span>(rawKey);</span></code></pre>
+        </div>
+        <div class="translation-english">
+          <span class="translation-label">PLAIN ENGLISH</span>
+          <div class="translation-lines">
+            <p class="tl">先从请求头的 authorization 栏里，取出那一串凭证。</p>
+            <p class="tl">如果它以 Bearer 开头，就剪掉前缀只留暗号；否则试试另一个叫 x-api-key 的栏位——两种常见的「递暗号」方式都认。</p>
+            <p class="tl">如果什么都没拿到，先在账本上记一笔「鉴权被拒」……</p>
+            <p class="tl">……然后抛出一个 401：HTTP 界的「你没有通行证」。</p>
+            <p class="tl">把密钥交给认证器核对，换回一张代表「你是谁」的身份卡（principal）。</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ── SCREEN 03 · 先去排队 ─────────────────────────────── -->
+    <section class="screen animate-in">
+      <h2 class="screen-heading">先去排队，而不是抢跑</h2>
+      <p>系统先看当前<span class="term" data-definition="资源（Resource）= 电脑里被抢着用的东西：CPU、内存、GPU。好比营业厅的柜台数。">资源</span>（<span class="term" data-definition="CPU = 电脑的「大脑」，负责计算。任务跑得多，它就越忙。">CPU</span>、<span class="term" data-definition="GPU = 显卡，专为并行计算设计，AI 模型主要靠它跑。GPU 忙不忙，直接决定新任务能不能马上开跑。">GPU</span>、<span class="term" data-definition="vLLM = 一个专门高效运行大模型的服务，负责把模型「喂」给任务用。它的负载也是判断能否开工的依据。">vLLM</span>）够不够，再决定直接 START 还是进<span class="term" data-definition="队列（Queue）= 排队等待的名单。任务太多、资源不够时，后来的任务先排着，按顺序轮流上场。">队列</span> QUEUE 排队。</p>
+
+      <div class="flow-steps">
+        <div class="flow-step">
+          <div class="flow-step-num">1</div>
+          <p>任务提交</p>
+        </div>
+        <div class="flow-arrow">→</div>
+        <div class="flow-step">
+          <div class="flow-step-num">2</div>
+          <p>资源体检<br><small>CPU / GPU / vLLM</small></p>
+        </div>
+        <div class="flow-arrow">→</div>
+        <div class="flow-step">
+          <div class="flow-step-num">3</div>
+          <p>够 → START<br><small>直接开跑</small></p>
+        </div>
+        <div class="flow-arrow">→</div>
+        <div class="flow-step">
+          <div class="flow-step-num">4</div>
+          <p>不够 → QUEUE<br><small>排队等轮到</small></p>
+        </div>
+      </div>
+
+      <p>排队不是惩罚，而是<span class="term" data-definition="轮转（Round Robin）= 大家轮流来：不管任务大小，都按先后顺序公平分配资源，避免有人一直插队。">轮转</span>——资源一空出来就轮到你。看真实代码：每个<span class="term" data-definition="Run = 系统里对「一次任务」的正式称呼。每次提交都会生成一个 Run，带着唯一编号和当前状态。">Run</span> 出生时，状态先被盖成 QUEUED：</p>
+
+      <div class="translation-block animate-in">
+        <div class="translation-code">
+          <span class="translation-label">CODE</span>
+          <pre><code><span class="code-line">    <span class="code-function">createQueuedRun</span>(input : StartRunInput) : AgentRun {</span>
+<span class="code-line">        <span class="code-keyword">const</span> runId = crypto.<span class="code-function">randomUUID</span>(); </span>
+<span class="code-line">        <span class="code-keyword">const</span> timestamp = <span class="code-keyword">new</span> <span class="code-function">Date</span>().<span class="code-function">toISOString</span>();</span>
+<span class="code-line">        <span class="code-keyword">const</span> controlBinding = <span class="code-keyword">this</span>.controlBindingResolver?.<span class="code-function">resolve</span>(input);</span>
+<span class="code-line"></span>
+<span class="code-line">        <span class="code-comment">// 创建真实的 AgentRun</span></span>
+<span class="code-line">        <span class="code-keyword">const</span> run : AgentRun = {</span>
+<span class="code-line">            id:runId,</span>
+<span class="code-line">            tenantId:input.tenantId,</span>
+<span class="code-line">            harnessSessionId:input.harnessSessionId,</span>
+<span class="code-line">            status : <span class="code-string">"QUEUED"</span>,</span></code></pre>
+        </div>
+        <div class="translation-english">
+          <span class="translation-label">PLAIN ENGLISH</span>
+          <div class="translation-lines">
+            <p class="tl">先生成一个全世界唯一的任务编号（UUID）。</p>
+            <p class="tl">记下当前时刻，作为任务的出生时间。</p>
+            <p class="tl">问一下调度器：这个任务该用哪套模板和实例。</p>
+            <p class="tl">接下来组装一个真正的 Run 对象。</p>
+            <p class="tl">编号、租户、会话一一塞进去。</p>
+            <p class="tl">关键一行：状态先盖成「QUEUED（排队中）」——而不是抢跑。</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="callout callout-accent">
+        <div class="callout-icon">💡</div>
+        <div class="callout-content">
+          <strong class="callout-title">任务状态 ≠ 事件历史</strong>
+          <p>「现在是什么」和「发生过什么」是两套记录：<span class="term" data-definition="状态（Status）= 任务「现在是什么」：排队中、运行中、已完成、失败……像快递的当前节点。">状态</span>只存当前这一个点；<span class="term" data-definition="事件（Event）= 任务「发生过什么」：一条条带时间戳的记录，像快递的全程轨迹。">事件</span>则是一条条带时间戳的完整轨迹。出问题时，永远先问「发生过什么」。</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ── SCREEN 04 · 隔离执行 + 群聊 ──────────────────────── -->
+    <section class="screen animate-in">
+      <h2 class="screen-heading">在隔离工作间里执行</h2>
+      <p>每个任务都在独立的 <span class="term" data-definition="Sandbox（沙盒）= 给每个任务单独开的一间「隔离工作间」：任务在里面随便折腾，但影响不到外面，也碰不到别人。">Sandbox</span>（<span class="term" data-definition="容器（Container）= 一种轻量级「打包好的小电脑」：里面装好任务需要的环境，启动快、相互隔离。">容器</span>，默认 <span class="term" data-definition="gVisor = Google 开源的容器安全层，给容器多加一道「隐形围墙」：里面的程序以为在用真电脑，其实处处被监管。">gVisor</span>/<span class="term" data-definition="runsc = gVisor 的命令行工具名，系统用它启动被加固的容器。默认就选它。">runsc</span>）里执行。</p>
+      <p>它只能看到自己的 <span class="term" data-definition="Workspace = 分配给某个任务的工作文件夹，相当于「你的办公桌」。任务只能看到自己桌上的文件。">Workspace</span>，默认不能上<span class="term" data-definition="外网 = 局域网之外、连接整个互联网的网络。默认断开外网，任务就不能偷偷往外发数据。">外网</span>，也碰不到别人的文件。</p>
+
+      <div class="badge-list">
+        <div class="badge-item">
+          <code class="badge-code">独立容器</code>
+          <span class="badge-desc">每个任务一间小电脑，互不串门</span>
+        </div>
+        <div class="badge-item">
+          <code class="badge-code">只挂载自己的 Workspace</code>
+          <span class="badge-desc">桌上只有自己的文件</span>
+        </div>
+        <div class="badge-item">
+          <code class="badge-code">默认断网</code>
+          <span class="badge-desc">不能偷偷往外发数据</span>
+        </div>
+      </div>
+
+      <p>把一次任务从头到尾的「对话」摊开看，四个角色是这样配合的：</p>
+
+      <div class="chat-window" id="chat-module1">
+        <div class="chat-messages">
+          <div class="chat-message" data-msg="0" data-sender="user" style="display:none">
+            <div class="chat-avatar" style="background: var(--color-actor-1)">你</div>
+            <div class="chat-bubble">
+              <span class="chat-sender" style="color: var(--color-actor-1)">你 · User</span>
+              <p>帮我改一份 README，改成中英双语，再跑一遍测试。</p>
+            </div>
+          </div>
+          <div class="chat-message" data-msg="1" data-sender="control" style="display:none">
+            <div class="chat-avatar" style="background: var(--color-actor-2)">控</div>
+            <div class="chat-bubble">
+              <span class="chat-sender" style="color: var(--color-actor-2)">控制面 · Control</span>
+              <p>新任务 r-2049 来了，先验密钥、登记入册。Sandbox，给它开一间隔离工作间。</p>
+            </div>
+          </div>
+          <div class="chat-message" data-msg="2" data-sender="sandbox" style="display:none">
+            <div class="chat-avatar" style="background: var(--color-actor-3)">沙</div>
+            <div class="chat-bubble">
+              <span class="chat-sender" style="color: var(--color-actor-3)">Sandbox</span>
+              <p>工作间就绪：只挂载它自己的 workspace，外网默认不通。</p>
+            </div>
+          </div>
+          <div class="chat-message" data-msg="3" data-sender="control" style="display:none">
+            <div class="chat-avatar" style="background: var(--color-actor-2)">控</div>
+            <div class="chat-bubble">
+              <span class="chat-sender" style="color: var(--color-actor-2)">控制面 · Control</span>
+              <p>轮到你了，Pi。任务说明和工作间都已备好，开工吧。</p>
+            </div>
+          </div>
+          <div class="chat-message" data-msg="4" data-sender="pi" style="display:none">
+            <div class="chat-avatar" style="background: var(--color-actor-4)">Pi</div>
+            <div class="chat-bubble">
+              <span class="chat-sender" style="color: var(--color-actor-4)">Pi · Agent</span>
+              <p>好。先读 README，改完跑 npm test，每步都用工具。</p>
+            </div>
+          </div>
+          <div class="chat-message" data-msg="5" data-sender="sandbox" style="display:none">
+            <div class="chat-avatar" style="background: var(--color-actor-3)">沙</div>
+            <div class="chat-bubble">
+              <span class="chat-sender" style="color: var(--color-actor-3)">Sandbox</span>
+              <p>bash 已执行，测试全绿。改动已存成<span class="term" data-definition="快照（Snapshot）= 某个时刻文件的完整拷贝，用来前后对比改动。">快照</span>。</p>
+            </div>
+          </div>
+          <div class="chat-message" data-msg="6" data-sender="pi" style="display:none">
+            <div class="chat-avatar" style="background: var(--color-actor-4)">Pi</div>
+            <div class="chat-bubble">
+              <span class="chat-sender" style="color: var(--color-actor-4)">Pi · Agent</span>
+              <p>完成。输出最终回答，附上文件改动 Diff。</p>
+            </div>
+          </div>
+          <div class="chat-message" data-msg="7" data-sender="control" style="display:none">
+            <div class="chat-avatar" style="background: var(--color-actor-2)">控</div>
+            <div class="chat-bubble">
+              <span class="chat-sender" style="color: var(--color-actor-2)">控制面 · Control</span>
+              <p>收据已开。回答、Diff 和一个 Artifact，都交到你手上。</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="chat-typing" id="chat-typing-module1" style="display:none">
+          <div class="chat-avatar" id="chat-module1-typing-avatar">?</div>
+          <div class="chat-typing-dots">
+            <span class="typing-dot"></span>
+            <span class="typing-dot"></span>
+            <span class="typing-dot"></span>
+          </div>
+        </div>
+
+        <div class="chat-controls">
+          <button class="btn chat-next-btn">下一条</button>
+          <button class="btn chat-all-btn">全部播放</button>
+          <button class="btn chat-reset-btn">重播</button>
+          <span class="chat-progress"></span>
+        </div>
+      </div>
+    </section>
+
+    <!-- ── SCREEN 05 · 工具和副作用被记账 ───────────────────── -->
+    <section class="screen animate-in">
+      <h2 class="screen-heading">每个动作都被记账</h2>
+      <p><span class="term" data-definition="工具（Tool）= AI 手里能调用的「技能」，比如读文件 read、改文件 write、跑命令 bash。AI 动脑，工具动手。">工具</span>调用会产生<span class="term" data-definition="副作用（Side Effect）= 任务执行过程中对外界产生的影响，比如改了一个文件、删了一行字。系统要把每笔副作用都记下来。">副作用</span>，所以系统先记「准备执行」，再执行，再存结果——像开一张带复写联的收据。</p>
+
+      <div class="step-cards">
+        <div class="step-card">
+          <div class="step-num">1</div>
+          <div class="step-body">
+            <strong>记录「准备执行」</strong>
+            <p>AI 说要调 write 了，账本先落一笔。</p>
+          </div>
+        </div>
+        <div class="step-card">
+          <div class="step-num">2</div>
+          <div class="step-body">
+            <strong>真正执行</strong>
+            <p>工具动手，文件被改写。</p>
+          </div>
+        </div>
+        <div class="step-card">
+          <div class="step-num">3</div>
+          <div class="step-body">
+            <strong>存下结果与审计</strong>
+            <p>结果归档，收据入账，事后随时可查。</p>
+          </div>
+        </div>
+      </div>
+
+      <p>真实代码里，「开收据」就是往审计账本里 record 一条：</p>
+
+      <div class="translation-block animate-in">
+        <div class="translation-code">
+          <span class="translation-label">CODE</span>
+          <pre><code><span class="code-line">        <span class="code-keyword">this</span>.accessControl?.auditStore?.<span class="code-function">record</span>({</span>
+<span class="code-line">            action, outcome,</span>
+<span class="code-line">            subjectId: principal?.subjectId ?? <span class="code-keyword">null</span>,</span>
+<span class="code-line">            tenantId: principal?.tenantId ?? <span class="code-keyword">null</span>,</span>
+<span class="code-line">            resourceType: <span class="code-string">"HTTP_REQUEST"</span>,</span>
+<span class="code-line">            resourceId: <span class="code-keyword">null</span>,</span>
+<span class="code-line">            reason,</span>
+<span class="code-line">        });</span></code></pre>
+        </div>
+        <div class="translation-english">
+          <span class="translation-label">PLAIN ENGLISH</span>
+          <div class="translation-lines">
+            <p class="tl">往审计账本里记一条。</p>
+            <p class="tl">谁（subjectId）、哪个租户（tenantId）、什么动作、结果如何。</p>
+            <p class="tl">资源类型是 HTTP_REQUEST，编号为空，再附上原因。</p>
+            <p class="tl">一笔收据就此入账，事后随时可查。</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ── SCREEN 06 · 你拿到结果 + 全旅程 + 小测 ───────────── -->
+    <section class="screen animate-in">
+      <h2 class="screen-heading">你拿到结果</h2>
+      <p>任务跑完，你拿到的不只是一句话，而是三样东西：</p>
+
+      <div class="pattern-cards stagger-children">
+        <div class="pattern-card animate-in" style="border-top: 3px solid var(--color-actor-1)">
+          <div class="pattern-icon" style="background: var(--color-actor-1)">💬</div>
+          <h4 class="pattern-title">最终回答</h4>
+          <p class="pattern-desc">Pi 对你那段话的完整答复，直接可读。</p>
+        </div>
+        <div class="pattern-card animate-in" style="border-top: 3px solid var(--color-actor-5)">
+          <div class="pattern-icon" style="background: var(--color-actor-5)">📝</div>
+          <h4 class="pattern-title">文件改动 Diff</h4>
+          <p class="pattern-desc"><span class="term" data-definition="Diff = 文件改动清单：改前是什么样、改后是什么样，一行行对照着给你看。">Diff</span> 就是改动清单——改前改后逐行对照。</p>
+        </div>
+        <div class="pattern-card animate-in" style="border-top: 3px solid var(--color-actor-3)">
+          <div class="pattern-icon" style="background: var(--color-actor-3)">📦</div>
+          <h4 class="pattern-title">可下载的 Artifact</h4>
+          <p class="pattern-desc"><span class="term" data-definition="Artifact = 任务产出、可以下载的文件，比如生成的安装包、图片、报告。">Artifact</span> 是任务产出的文件，点一下就能下载。</p>
+        </div>
+      </div>
+
+      <p>把整条路再走一遍——这就是一次任务的完整旅程：</p>
+
+      <div class="flow-animation" data-steps='[
+        {"highlight":"flow-actor-1","label":"你在聊天框里喊了一句：改 README、跑测试。这只是一次 HTTP 请求。"},
+        {"highlight":"flow-actor-2","label":"控制面先验密钥、记审计，再看资源够不够","packet":true,"from":"actor-1","to":"actor-2"},
+        {"highlight":"flow-actor-3","label":"资源紧张，任务先进队列排队，轮转保证公平","packet":true,"from":"actor-2","to":"actor-3"},
+        {"highlight":"flow-actor-4","label":"轮到你了：控制面启动一间隔离的 Sandbox 工作间","packet":true,"from":"actor-3","to":"actor-4"},
+        {"highlight":"flow-actor-5","label":"Pi 走进工作间：读文件、改文件、跑测试","packet":true,"from":"actor-4","to":"actor-5"},
+        {"highlight":"flow-actor-5","label":"每一次工具调用，都被记进审计账本"},
+        {"highlight":"flow-actor-6","label":"回答 + 文件 Diff + Artifact 打包交回给你","packet":true,"from":"actor-5","to":"actor-6"}
+      ]'>
+        <div class="flow-actors">
+          <div class="flow-actor" id="flow-actor-1">
+            <div class="flow-actor-icon">📨</div>
+            <span>你提交</span>
+          </div>
+          <div class="flow-actor" id="flow-actor-2">
+            <div class="flow-actor-icon">🛂</div>
+            <span>控制面</span>
+          </div>
+          <div class="flow-actor" id="flow-actor-3">
+            <div class="flow-actor-icon">🕐</div>
+            <span>队列</span>
+          </div>
+          <div class="flow-actor" id="flow-actor-4">
+            <div class="flow-actor-icon">📦</div>
+            <span>Sandbox</span>
+          </div>
+          <div class="flow-actor" id="flow-actor-5">
+            <div class="flow-actor-icon">🤖</div>
+            <span>Pi Agent</span>
+          </div>
+          <div class="flow-actor" id="flow-actor-6">
+            <div class="flow-actor-icon">🎁</div>
+            <span>结果</span>
+          </div>
+        </div>
+
+        <div class="flow-packet" id="flow-packet"></div>
+        <div class="flow-step-label" id="flow-label">点「下一步」开始旅程</div>
+
+        <div class="flow-controls">
+          <button class="btn flow-next-btn">下一步</button>
+          <button class="btn flow-reset-btn">重播</button>
+          <span class="flow-progress"></span>
+        </div>
+      </div>
+
+      <div class="quiz-container" id="quiz-module1">
+        <h3 class="quiz-question">小试身手——三个场景题</h3>
+
+        <div class="quiz-question-block"
+             data-correct="option-b"
+             data-explanation-right="正是——系统会先看 CPU、GPU、vLLM 的资源，不够就把任务放队列排队，而不是抢跑。排队的任务是「正常等待」，不是被拒。"
+             data-explanation-wrong="再想想：密钥错了你会直接收到 401 的报错，而这里只是告诉你「排队中」。真正的原因通常和资源有关——系统先体检资源再决定开跑还是等待。">
+          <h4 class="quiz-question">你提交了一个任务，几秒后系统告诉你「排队中」。最可能发生了什么？</h4>
+          <div class="quiz-options">
+            <button class="quiz-option" data-value="option-a" onclick="selectOption(this)">
+              <div class="quiz-option-radio"></div>
+              <span>你的请求被拒绝了</span>
+            </button>
+            <button class="quiz-option" data-value="option-b" onclick="selectOption(this)">
+              <div class="quiz-option-radio"></div>
+              <span>当前 GPU / vLLM 资源被其他任务占满，系统选择让你等</span>
+            </button>
+            <button class="quiz-option" data-value="option-c" onclick="selectOption(this)">
+              <div class="quiz-option-radio"></div>
+              <span>任务已经偷偷跑完了</span>
+            </button>
+          </div>
+          <div class="quiz-feedback"></div>
+        </div>
+
+        <div class="quiz-question-block"
+             data-correct="option-a"
+             data-explanation-right="对——每个任务都在自己独立的 Sandbox 里，只挂载自己的 Workspace，默认断网，文件互不可见。这就是多租户系统敢让任务并排跑的原因。"
+             data-explanation-wrong="别急，再想想隔离的含义：如果任务 A 能读到任务 B 的文件，那隔离就形同虚设了。每个任务的工作间都是独立开门的。">
+          <h4 class="quiz-question">你和同事同时提交了两个任务。同事的任务会看到你任务里的文件吗？</h4>
+          <div class="quiz-options">
+            <button class="quiz-option" data-value="option-a" onclick="selectOption(this)">
+              <div class="quiz-option-radio"></div>
+              <span>不会——每个任务在自己独立的 Sandbox 和 Workspace 里，互不可见</span>
+            </button>
+            <button class="quiz-option" data-value="option-b" onclick="selectOption(this)">
+              <div class="quiz-option-radio"></div>
+              <span>会——大家在同一台机器上，文件都是共享的</span>
+            </button>
+            <button class="quiz-option" data-value="option-c" onclick="selectOption(this)">
+              <div class="quiz-option-radio"></div>
+              <span>只有跑得快的那个任务能看到</span>
+            </button>
+          </div>
+          <div class="quiz-feedback"></div>
+        </div>
+
+        <div class="quiz-question-block"
+             data-correct="option-b"
+             data-explanation-right="没错——一次任务的交付物是三件套：最终回答、文件改动 Diff、可下载的 Artifact。Diff 让你一眼看清 AI 改了什么，Artifact 让你直接拿到产物。"
+             data-explanation-wrong="还差一点：如果只有回答，你怎么知道它到底改了哪些文件、改得对不对？任务结束时你会同时拿到回答、改动清单（Diff）和可以下载的文件（Artifact）。">
+          <h4 class="quiz-question">任务跑完后，除了 AI 的回答，你通常还能拿到什么？</h4>
+          <div class="quiz-options">
+            <button class="quiz-option" data-value="option-a" onclick="selectOption(this)">
+              <div class="quiz-option-radio"></div>
+              <span>只有一段回答文字</span>
+            </button>
+            <button class="quiz-option" data-value="option-b" onclick="selectOption(this)">
+              <div class="quiz-option-radio"></div>
+              <span>文件改动 Diff 和可下载的 Artifact</span>
+            </button>
+            <button class="quiz-option" data-value="option-c" onclick="selectOption(this)">
+              <div class="quiz-option-radio"></div>
+              <span>别人的任务记录</span>
+            </button>
+          </div>
+          <div class="quiz-feedback"></div>
+        </div>
+
+        <button class="btn quiz-check-btn" onclick="checkQuiz('quiz-module1')">检查答案</button>
+        <button class="btn quiz-reset-btn" onclick="resetQuiz('quiz-module1')">再试一次</button>
+      </div>
+
+      <p>下一章，我们近距离看看这些主角——控制面、Sandbox、Pi 和队列，看看它们各自是怎么工作的。</p>
+    </section>
+
+  </div>
+</section>

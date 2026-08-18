@@ -1,0 +1,478 @@
+<section class="module" id="module-4" style="background: var(--color-bg)">
+  <div class="module-content">
+
+    <header class="module-header animate-in">
+      <span class="module-number">04</span>
+      <h1 class="module-title">外面的世界</h1>
+      <p class="module-subtitle">模型、沙箱和 GPU——你的任务真正「活」的地方，大多在这台电脑之外。</p>
+    </header>
+
+    <div class="module-body">
+
+      <!-- ═══════════════ SCREEN 1 — 模型住在外面 ═══════════════ -->
+      <section class="screen animate-in">
+        <h2 class="screen-heading">模型住在外面</h2>
+
+        <p>前几讲，我们一直在系统内部转圈。这一讲推开门——你的任务真正「活」的地方，大多在你电脑之外。</p>
+
+        <p>把
+          <span class="term" data-definition="经过海量数据训练、能理解和生成文字的 AI 程序。在这门课里它住在外面的公司里，你的电脑上只有寄出去的『请柬』和收回来的『回信』。">模型</span>
+          想象成一家「随时可调用的外部专家公司」：你把
+          <span class="term" data-definition="你寄给外部公司的『请柬』——包含你的问题、你的身份和要求的格式。">请求</span>
+          写成请柬，送到它门口（
+          <span class="term" data-definition="API 窗口的具体地址，类似『xx路xx号』，例如 https://api.openai.com/v1/chat/completions。">端点</span>
+          ），它回一封
+          <span class="term" data-definition="外部公司寄回来的『回信』——模型的答案。">响应</span>
+          。你的代码从不需要知道专家住在哪、怎么思考——模型不在本机，任务照样能跑。</p>
+
+        <p>Pi 是连接它的
+          <span class="term" data-definition="让 Agent 循环真正转起来的程序骨架。本课程中，Pi 就是这个骨架。">Agent Runtime</span>
+          ：
+          <span class="term" data-definition="Agent 的『想→做→看』循环：想下一步，调用工具，看结果，再想。">Agent loop</span>
+          和
+          <span class="term" data-definition="Agent 不亲自跑代码，而是『点名』要用哪个工具，由宿主程序替它执行——模型只给出调用凭证。">工具调用</span>
+          跑在你这一侧，模型回答从外面回来。</p>
+
+        <div class="arch-diagram animate-in">
+          <div class="arch-zone">
+            <h4 class="arch-zone-label">内部控制面 · 我们的代码（本机）</h4>
+            <div class="arch-component" data-desc="你的 Agent 的大脑：决定下一步做什么、调用哪个工具，把请求发给外部模型，再把回答变成行动。Agent loop 就住在这里。">
+              <div class="arch-icon">🧭</div>
+              <span>Pi Agent Runtime</span>
+            </div>
+            <div class="arch-component" data-desc="每次任务开始前，它看一眼『共享电表』（资源快照），然后盖章：START 放行，或 QUEUE 排队。">
+              <div class="arch-icon">📋</div>
+              <span>资源准入服务</span>
+            </div>
+            <div class="arch-component" data-desc="负责搭『一次性隔离工作间』：创建容器、注入安全参数、验货 runtime、任务结束后整个拆除。">
+              <div class="arch-icon">🧱</div>
+              <span>Sandbox 管理器</span>
+            </div>
+          </div>
+          <div class="arch-zone">
+            <h4 class="arch-zone-label">外部世界 · 我们调用但不拥有</h4>
+            <div class="arch-component" data-desc="一家外面的 AI 公司。你按它门口的格式（OpenAI 兼容 API）写请求，它回答案。模型不在这台电脑上。">
+              <div class="arch-icon">🧠</div>
+              <span>模型专家公司（OpenAI 兼容 API）</span>
+            </div>
+            <div class="arch-component" data-desc="真正让容器跑起来的引擎。gVisor 像安检员，每个系统调用都被拦下来检查。沙箱的隔离在这里兑现。">
+              <div class="arch-icon">🐳</div>
+              <span>Docker + gVisor runtime</span>
+            </div>
+            <div class="arch-component" data-desc="整栋楼共用的『电表』。多租户共享显存和带宽，读数紧张时新任务要排队。">
+              <div class="arch-icon">⚡</div>
+              <span>GPU 机房（A6000）</span>
+            </div>
+          </div>
+          <div class="arch-description" id="arch-desc-4">点击任意组件，看它在「外面世界」里的角色。</div>
+        </div>
+
+        <p>注意那条虚线：里面是你的代码，外面是你调用的世界。而
+          <span class="term" data-definition="把任务关在一个隔离区里运行的整套机制——容器、运行时和各种限制的总称。">沙箱</span>
+          正站在边界上，替你把外面的危险挡住。</p>
+      </section>
+
+      <!-- ═══════════════ SCREEN 2 — 沙箱：真的隔离 ═══════════════ -->
+      <section class="screen animate-in">
+        <h2 class="screen-heading">沙箱：真的隔离，不是假装</h2>
+
+        <p>沙箱不是纸面承诺——它真的是一台
+          <span class="term" data-definition="把程序连同它需要的文件打包进一个『隔离小盒子』。盒子里的程序以为自己独占一台电脑。">容器</span>
+          。每个任务都会被请进一间「一次性隔离工作间」：只挂进它自己那份材料（workspace），墙是只读的，没有网线，没有管理员钥匙。</p>
+
+        <p>盒子的模板叫
+          <span class="term" data-definition="容器的『模板图纸+食材包』：一份只读的模板，容器从它复制启动。">镜像</span>
+          ，创建、查看盒子靠
+          <span class="term" data-definition="最常用的容器引擎，负责创建、启动、查看容器。">Docker</span>
+          ；而真正让盒子跑起来的引擎叫
+          <span class="term" data-definition="真正让容器跑起来的引擎。本课程候选：runsc（gVisor）和 runc。">runtime</span>
+          。</p>
+
+        <div class="badge-list stagger-children animate-in">
+          <div class="badge-item">
+            <code class="badge-code">development</code>
+            <span class="badge-desc">本地调试专用：不做隔离，可联网。它从不是多租户生产档。</span>
+          </div>
+          <div class="badge-item">
+            <code class="badge-code">default</code>
+            <span class="badge-desc">默认生产档：
+              <span class="term" data-definition="gVisor 的启动程序名。配置里写 runsc，就是指用 gVisor 这套安检流程。">runsc</span>
+              （
+              <span class="term" data-definition="谷歌开源的『安全翻译官』运行时：每个系统调用都被拦下来检查，像过安检。">gVisor</span>
+              ），只读 + 断网。</span>
+          </div>
+          <div class="badge-item">
+            <code class="badge-code">restricted-egress</code>
+            <span class="badge-desc">受控出口档：预留，尚未接入代理，当前拒绝直连公网。</span>
+          </div>
+          <div class="badge-item">
+            <code class="badge-code">strict</code>
+            <span class="badge-desc">最严档：预留，必须路由到独立
+              <span class="term" data-definition="超轻量虚拟机：隔离更强、开销更小，预留给最严格的档位。">microVM</span>
+              Provider。</span>
+          </div>
+        </div>
+
+        <p>这些档位叫
+          <span class="term" data-definition="隔离档位配置。本系统有 development / default / restricted-egress / strict 四档。">profile</span>
+          。下面这份施工图纸，把工作间的每项硬性要求编译成 Docker 能听懂的参数——这是真实代码里的原样片段：</p>
+
+        <div class="translation-block animate-in">
+          <div class="translation-code">
+            <span class="translation-label">CODE</span>
+            <pre><code>
+<span class="code-line">        <span class="code-keyword">const</span> args: string[] = [</span>
+<span class="code-line">            <span class="code-string">"run"</span>, <span class="code-string">"--detach"</span>, <span class="code-string">"--rm"</span>, <span class="code-string">"--name"</span>, name,</span>
+<span class="code-line">            <span class="code-string">"--user"</span>, <span class="code-string">`${this.config.userId}:${this.config.userId}`</span>,</span>
+<span class="code-line">            <span class="code-string">"--read-only"</span>, <span class="code-string">"--cap-drop"</span>, <span class="code-string">"ALL"</span>,</span>
+<span class="code-line">            <span class="code-string">"--security-opt"</span>, <span class="code-string">"no-new-privileges"</span>, <span class="code-string">"--pids-limit"</span>, <span class="code-string">"128"</span>,</span>
+<span class="code-line">            <span class="code-string">"--workdir"</span>, <span class="code-string">"/workspace"</span>, <span class="code-string">"--mount"</span>,</span>
+<span class="code-line">            <span class="code-string">`type=bind,src=${workspacePath},dst=/workspace`</span>,</span>
+<span class="code-line">            <span class="code-string">"--tmpfs"</span>, <span class="code-string">"/tmp:rw,noexec,nosuid,size=64m"</span>,</span>
+<span class="code-line">            <span class="code-string">"--network"</span>, networkMode <span class="code-operator">===</span> <span class="code-string">"none"</span> <span class="code-operator">?</span> <span class="code-string">"none"</span> <span class="code-operator">:</span> <span class="code-string">"bridge"</span>,</span>
+<span class="code-line">        ];</span>
+</code></pre>
+          </div>
+          <div class="translation-english">
+            <span class="translation-label">大白话</span>
+            <div class="translation-lines">
+              <p class="tl">开始建工作间：后台运行、任务结束时自动整个拆除、名字用这次任务的。</p>
+              <p class="tl">用普通用户身份进去——不是管理员，没有钥匙。</p>
+              <p class="tl">墙是
+                <span class="term" data-definition="只能读不能改——像贴了封条的墙。">只读</span>
+                的；把
+                <span class="term" data-definition="Linux 给程序发放的『特权清单』。cap-drop ALL = 把清单撕得一张不剩。">特权清单</span>
+                直接撕光（cap-drop ALL）。</p>
+              <p class="tl">禁止再申请任何新特权；最多同时跑 128 个
+                <span class="term" data-definition="正在运行的程序实例。电脑里每个运行中的程序都有一个编号（PID）。">进程</span>
+                （pids-limit 128）。</p>
+              <p class="tl">工作目录固定为 /workspace——也就是挂进来的材料箱。</p>
+              <p class="tl">把宿主电脑上的工作区文件夹「插」进来当 U 盘（
+                <span class="term" data-definition="把宿主机的一个文件夹『插』进容器当 U 盘用。任务的工作区就是这样进沙箱的。">bind mount</span>
+                ），只有这一份。</p>
+              <p class="tl">临时目录放内存盘（
+                <span class="term" data-definition="内存盘：临时文件放内存里，容器一结束就消失。">tmpfs</span>
+                ）：能写，但禁止执行、禁止挂载，限 64MB。</p>
+              <p class="tl">网络：
+                <span class="term" data-definition="不插网线。沙箱里没有网卡，出不去也进不来。">network none</span>
+                ——工作间没有网线，出不去也进不来。</p>
+            </div>
+          </div>
+        </div>
+
+        <p>每一条参数都在回答同一个问题：如果攻击者使坏，他能碰到的东西有多小？答案被压到只剩「他自己那份材料」。</p>
+      </section>
+
+      <!-- ═══════════════ SCREEN 3 — 配置 ≠ 事实 ═══════════════ -->
+      <section class="screen animate-in">
+        <h2 class="screen-heading">配置 ≠ 事实：先验货，再开工</h2>
+
+        <p>施工图纸说「用防弹玻璃」。但你不亲手摸一摸，怎么知道装上去的不是普通玻璃？</p>
+
+        <p>所以每次沙箱启动后，系统会用
+          <span class="term" data-definition="docker 的『验货』命令：查一个真实容器实际用的配置，而不是它应该用的配置。">inspect</span>
+          去「验货」：读真实容器上实际生效的 runtime。这一步的意义是——配置只是
+          <span class="term" data-definition="从真实系统里取到的观测结果，用来证明配置确实生效。配置是意图，证据是事实。">证据</span>
+          要验证的「意图」，而不是事实本身。</p>
+
+        <div class="callout callout-warning animate-in">
+          <div class="callout-icon">🛡️</div>
+          <div class="callout-content">
+            <strong class="callout-title">防御不静默降级（fail closed）</strong>
+            <p>配置写 runsc，就绝不允许
+              <span class="term" data-definition="传统默认的容器运行时：更快，但『安检』弱很多。">runc</span>
+              悄悄顶上。
+              <span class="term" data-definition="系统悄悄用更弱的配置顶替，还不告诉你。本系统对此零容忍。">静默降级</span>
+              是敌人；隔离是承诺，承诺必须被检查——inspect 对不上就
+              <span class="term" data-definition="默认拒绝：查不清或对不上就拒绝执行，而不是放行。">fail closed</span>
+              。宁可任务不跑，也不假装安全。</p>
+          </div>
+        </div>
+
+        <p>这段真实代码就是「验货」本身——DockerRunscRuntimeAdapter 每次启动后都这么做：</p>
+
+        <div class="translation-block animate-in">
+          <div class="translation-code">
+            <span class="translation-label">CODE</span>
+            <pre><code>
+<span class="code-line">        <span class="code-keyword">const</span> result <span class="code-operator">=</span> <span class="code-keyword">await</span> commands.<span class="code-function">run</span>([</span>
+<span class="code-line">            docker, <span class="code-string">"inspect"</span>, <span class="code-string">"--format"</span>, <span class="code-string">"{{.HostConfig.Runtime}}"</span>, containerName,</span>
+<span class="code-line">        ]);</span>
+<span class="code-line">        <span class="code-keyword">const</span> observedRuntime <span class="code-operator">=</span> result.stdout.<span class="code-function">trim</span>() <span class="code-operator">||</span> <span class="code-keyword">null</span>;</span>
+<span class="code-line">        <span class="code-keyword">const</span> verified <span class="code-operator">=</span> result.exitCode <span class="code-operator">===</span> <span class="code-number">0</span> <span class="code-operator">&amp;&amp;</span> observedRuntime <span class="code-operator">===</span> this.runtime;</span>
+</code></pre>
+          </div>
+          <div class="translation-english">
+            <span class="translation-label">大白话</span>
+            <div class="translation-lines">
+              <p class="tl">向 Docker 发一个验货请求：读取这个真实容器的 HostConfig.Runtime 字段——它记录「实际用的是哪个 runtime」。</p>
+              <p class="tl">把读到的值前后空白清干净，这就是「事实」里的 runtime 名字。</p>
+              <p class="tl">只有当命令成功返回、且事实确实等于我们要求的 runsc，才盖上「已验证」的章。</p>
+            </div>
+          </div>
+        </div>
+
+        <p>事实与意图一致，任务才准开工；不一致，直接 fail closed。这套代码同时在沙箱一侧的 OciSandboxSpecCompiler 里再拦一道：profile 必须配 runsc，否则抛错拒绝执行。</p>
+      </section>
+
+      <!-- ═══════════════ SCREEN 4 — 共享电表 ═══════════════ -->
+      <section class="screen animate-in">
+        <h2 class="screen-heading">共享电表：GPU 与显存</h2>
+
+        <p>还记得前几讲的
+          <span class="term" data-definition="显卡：擅长把海量简单运算并行处理，跑模型的主力硬件。">GPU</span>
+          吗？整栋楼的人共用一块「电表」——多租户共享
+          <span class="term" data-definition="GPU 自带的工作内存。模型必须装进显存才能跑；一层楼的人共享一块『电表』，谁占得多，别人就排队。">显存</span>
+          和带宽。</p>
+
+        <p>于是任务开始前，系统先「读电表」：
+          <span class="term" data-definition="负责『读电表』的代码：定期采集资源数据，产出资源快照。">观察者</span>
+          采集
+          <span class="term" data-definition="某个瞬间资源状态的『体检报告』，是准入判断的输入。">资源快照</span>
+          ，再送进
+          <span class="term" data-definition="任务开始前的安检门：隔离对不对？资源够不够？不过不放行。">准入</span>
+          服务，由策略盖章：放行（START）或排队（QUEUE）。</p>
+
+        <p>这是真实策略代码里的一个分支——资源极度紧张时怎么办：</p>
+
+        <div class="translation-block animate-in">
+          <div class="translation-code">
+            <span class="translation-label">CODE</span>
+            <pre><code>
+<span class="code-line">            <span class="code-keyword">case</span> <span class="code-string">"CRITICAL"</span>:</span>
+<span class="code-line">                <span class="code-keyword">return</span> this.<span class="code-function">createDecision</span>(</span>
+<span class="code-line">                    input,</span>
+<span class="code-line">                    <span class="code-string">"QUEUE"</span>,</span>
+<span class="code-line">                    <span class="code-string">"RESOURCE_CRITICAL"</span>,</span>
+<span class="code-line">                );</span>
+</code></pre>
+          </div>
+          <div class="translation-english">
+            <span class="translation-label">大白话</span>
+            <div class="translation-lines">
+              <p class="tl">当电表读数进入「红色警戒」（CRITICAL）时……</p>
+              <p class="tl">策略给出决定：</p>
+              <p class="tl">这个任务先
+                <span class="term" data-definition="任务进入等待名单，等资源空出来再开始——像医院排队叫号。">QUEUE</span>
+                （排队），</p>
+              <p class="tl">原因登记为 RESOURCE_CRITICAL：资源极度紧张。</p>
+              <p class="tl">绝不硬跑，也绝不悄悄降低标准。</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="badge-list stagger-children animate-in">
+          <div class="badge-item">
+            <code class="badge-code">START</code>
+            <span class="badge-desc">RESOURCE_NORMAL —— 电表正常，放行。</span>
+          </div>
+          <div class="badge-item">
+            <code class="badge-code">START</code>
+            <span class="badge-desc">RESOURCE_BUSY_TENANT_AVAILABLE —— 忙，但本租户还有名额。</span>
+          </div>
+          <div class="badge-item">
+            <code class="badge-code">QUEUE</code>
+            <span class="badge-desc">RESOURCE_CRITICAL —— 极度紧张，排队。</span>
+          </div>
+          <div class="badge-item">
+            <code class="badge-code">QUEUE</code>
+            <span class="badge-desc">RESOURCE_UNKNOWN —— 读数失败、不确定，排队。</span>
+          </div>
+          <div class="badge-item">
+            <code class="badge-code">QUEUE</code>
+            <span class="badge-desc">GLOBAL_CONCURRENCY_LIMIT —— 全局并发（同时跑的任务数）满了。</span>
+          </div>
+          <div class="badge-item">
+            <code class="badge-code">QUEUE</code>
+            <span class="badge-desc">RESOURCE_BUSY_TENANT_LIMIT —— 本
+              <span class="term" data-definition="使用这套系统的团队/客户。多租户 = 多个团队挤在同一台机器上，共享一块『电表』。">租户</span>
+              已有任务在跑，先让位。</span>
+          </div>
+          <div class="badge-item">
+            <code class="badge-code">QUEUE</code>
+            <span class="badge-desc">RESOURCE_OBSERVATION_FAILED —— 连电表都读不到，宁可排队也不盲跑。</span>
+          </div>
+        </div>
+
+        <div class="callout callout-info animate-in">
+          <div class="callout-icon">🔍</div>
+          <div class="callout-content">
+            <strong class="callout-title">诚实边界：显存准入是「目标」，不是「已完成」</strong>
+            <p>本演示用的是外部模型 API，没有接
+              <span class="term" data-definition="在 GPU 上高效跑模型的开源服务，会定期报告显存用量、排队请求数等数字。">vLLM</span>
+              的
+              <span class="term" data-definition="系统定期报出来的『体检数字』，如显存用量、排队请求数。">metrics</span>
+              ，也没有
+              <span class="term" data-definition="显卡状态查询命令，能读到每张卡用了几成显存。">nvidia-smi</span>
+              的真实读数。上面这套 START/QUEUE 逻辑是真实代码，但「显存感知调度」要在装有真实 GPU（如 A6000）的机器上、接上真实观察数据，才算验证过。</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- ═══════════════ SCREEN 5 — 攻击与验证 ═══════════════ -->
+      <section class="screen animate-in">
+        <h2 class="screen-heading">隔离不是写出来的，是打出来的</h2>
+
+        <p>这些不是纸面推演——真机上对 runsc 沙箱跑过一轮攻击测试。每一路攻击都被挡在沙箱里，全部 PASS。</p>
+
+        <div class="pattern-cards stagger-children animate-in">
+          <div class="pattern-card" style="border-top: 3px solid var(--color-actor-1)">
+            <div class="pattern-icon" style="background: var(--color-actor-1)">🧱</div>
+            <h4 class="pattern-title">跨租户文件 / Secret</h4>
+            <p class="pattern-desc">想读别的租户的 workspace 或
+              <span class="term" data-definition="密钥类敏感信息，比如 API key。它绝不能离开沙箱。">Secret</span>
+              ？根文件系统只读、唯一挂载只有自己那份材料——PASS。</p>
+          </div>
+          <div class="pattern-card" style="border-top: 3px solid var(--color-actor-2)">
+            <div class="pattern-icon" style="background: var(--color-actor-2)">🗺️</div>
+            <h4 class="pattern-title">宿主路径</h4>
+            <p class="pattern-desc">想摸
+              <span class="term" data-definition="跑着所有容器的那台物理电脑。">宿主</span>
+              机上的文件？特权清单撕光、禁止新特权，逃逸窗口被焊死——PASS。</p>
+          </div>
+          <div class="pattern-card" style="border-top: 3px solid var(--color-actor-3)">
+            <div class="pattern-icon" style="background: var(--color-actor-3)">🌐</div>
+            <h4 class="pattern-title">网络</h4>
+            <p class="pattern-desc">network none：沙箱没有网卡，出不去也进不来，想外传数据没门——PASS。</p>
+          </div>
+          <div class="pattern-card" style="border-top: 3px solid var(--color-actor-4)">
+            <div class="pattern-icon" style="background: var(--color-actor-4)">🧵</div>
+            <h4 class="pattern-title">PID / tmpfs</h4>
+            <p class="pattern-desc">最多 128 个进程、/tmp 禁止执行程序，想藏后门难上加难——PASS。</p>
+          </div>
+          <div class="pattern-card" style="border-top: 3px solid var(--color-actor-5)">
+            <div class="pattern-icon" style="background: var(--color-actor-5)">💀</div>
+            <h4 class="pattern-title">沙箱被杀 → LOST</h4>
+            <p class="pattern-desc">攻击把沙箱打死？任务标记
+              <span class="term" data-definition="任务状态之一：沙箱被打死、结果无法确认时标记为丢失，而不是假装成功。">LOST</span>
+              （丢失），绝不伪装成功——PASS。</p>
+          </div>
+        </div>
+
+        <p>真正拦住攻击的，是 gVisor 那个「安检员」——每个
+          <span class="term" data-definition="程序请操作系统办事的『窗口』，比如读写文件、开网络连接。gVisor 会逐个检查这些窗口。">系统调用</span>
+          都被拦下来检查。外面世界的危险，到此为止。</p>
+      </section>
+
+      <!-- ═══════════════ SCREEN 6 — 应用题 ═══════════════ -->
+      <section class="screen animate-in">
+        <h2 class="screen-heading">把知识用起来</h2>
+
+        <p>四个应用题。别背答案，想想你会怎么决策。</p>
+
+        <div class="quiz-container" id="quiz-module4">
+
+          <div class="quiz-question-block"
+               data-correct="option-b"
+               data-explanation-right="完全正确——配置是「意图」，inspect 是「事实」。一旦引擎悄悄用了 runc，事实与意图不符，系统必须发现并 fail closed，绝不假装隔离成功。"
+               data-explanation-wrong="不是这样。想想「图纸」和「验房」的区别：再查一次不是为了多一条日志，而是为了防「悄悄降级」。">
+            <h3 class="quiz-question">Q1 · 配置里明明写了 runsc，为什么还要用 docker inspect 再确认一次？</h3>
+            <div class="quiz-options">
+              <button class="quiz-option" data-value="option-a" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>为了让日志更好看，多一条记录而已</span>
+              </button>
+              <button class="quiz-option" data-value="option-b" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>配置是意图，inspect 是事实；万一实际用了 runc，必须发现并拒绝，而不是假装隔离成功</span>
+              </button>
+              <button class="quiz-option" data-value="option-c" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>因为 inspect 能让容器启动得更快</span>
+              </button>
+              <button class="quiz-option" data-value="option-d" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>为了确认镜像是不是最新版本</span>
+              </button>
+            </div>
+            <div class="quiz-feedback"></div>
+          </div>
+
+          <div class="quiz-question-block"
+               data-correct="option-b"
+               data-explanation-right="对。根文件系统只读、特权全部丢弃、网络断开，唯一挂进来的只有自己那份 workspace——想摸别人的文件，路全被堵死了。"
+               data-explanation-wrong="再想想工作间的墙：沙箱只挂进自己那份材料，别的租户的 workspace 根本不在这个房间里，想读也无从读起。">
+            <h3 class="quiz-question">Q2 · 一个租户的沙箱里，能读到另一个租户 workspace 里的文件吗？</h3>
+            <div class="quiz-options">
+              <button class="quiz-option" data-value="option-a" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>能，因为所有租户共享同一个 /workspace 目录</span>
+              </button>
+              <button class="quiz-option" data-value="option-b" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>不能——只读根文件系统、特权全丢、网络断开，唯一挂载进来的只有自己那份 workspace</span>
+              </button>
+              <button class="quiz-option" data-value="option-c" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>能，只要对方也装了 Docker</span>
+              </button>
+              <button class="quiz-option" data-value="option-d" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>不能，因为容器名字是唯一的</span>
+              </button>
+            </div>
+            <div class="quiz-feedback"></div>
+          </div>
+
+          <div class="quiz-question-block"
+               data-correct="option-b"
+               data-explanation-right="正是。压力 CRITICAL 时策略返回 QUEUE——先排队，不硬跑，也不悄悄降低标准。这正是「共享电表」的逻辑。"
+               data-explanation-wrong="注意真实代码里 CRITICAL 分支写的动作：QUEUE。这套系统宁可排队，也不硬闯红灯或悄悄降级。">
+            <h3 class="quiz-question">Q3 · 电表读数进入红色警戒（CRITICAL）时，新任务会怎样？</h3>
+            <div class="quiz-options">
+              <button class="quiz-option" data-value="option-a" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>START，硬着头皮跑，越快越好</span>
+              </button>
+              <button class="quiz-option" data-value="option-b" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>QUEUE，先排队等资源缓解</span>
+              </button>
+              <button class="quiz-option" data-value="option-c" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>静默降级，悄悄换一个更小的模型跑</span>
+              </button>
+              <button class="quiz-option" data-value="option-d" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>直接杀掉一个旧任务腾位置</span>
+              </button>
+            </div>
+            <div class="quiz-feedback"></div>
+          </div>
+
+          <div class="quiz-question-block"
+               data-correct="option-a"
+               data-explanation-right="对。真实的显存观察需要 vLLM/Prometheus 指标和 nvidia-smi 的真实读数——也就是说，要一台装有真实 GPU（如 A6000）的机器，把观察者接到真实数据上，才算验证。"
+               data-explanation-wrong="再想想「电表读数」从哪来：没有真实 GPU 和真实指标，准入逻辑再对也只是纸上谈兵。诚实标注边界，本身就是工程素养。">
+            <h3 class="quiz-question">Q4 · 你想真实验证「显存感知准入」有效，还需要什么？</h3>
+            <div class="quiz-options">
+              <button class="quiz-option" data-value="option-a" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>一台有真实 GPU（如 A6000）的机器，并接上真实的显存指标数据</span>
+              </button>
+              <button class="quiz-option" data-value="option-b" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>只要把代码里的注释写得更详细一点</span>
+              </button>
+              <button class="quiz-option" data-value="option-c" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>只要在本机多开几个终端窗口就行</span>
+              </button>
+              <button class="quiz-option" data-value="option-d" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>用 AI 生成一张截图当作证据</span>
+              </button>
+            </div>
+            <div class="quiz-feedback"></div>
+          </div>
+
+          <button class="quiz-check-btn" onclick="checkQuiz('quiz-module4')">检查答案</button>
+          <button class="quiz-reset-btn" onclick="resetQuiz('quiz-module4')">重新作答</button>
+        </div>
+
+        <p>下一讲，我们回到系统内部，看那些让这一切跑得聪明、跑得稳的机制。</p>
+      </section>
+
+    </div>
+  </div>
+</section>
