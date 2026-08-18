@@ -109,7 +109,7 @@ async function benchmarkRuntime(
 
             const ioStarted = performance.now();
             const io = await provider.execute(handle.id, [
-                "sh", "-lc", "cat /workspace/input.txt >/tmp/input-copy && dd if=/dev/zero of=/tmp/io-test bs=1m count=8 2>/dev/null",
+                "sh", "-lc", "cat /workspace/input.txt >/tmp/input-copy && dd if=/dev/zero of=/tmp/io-test bs=1M count=8 2>/dev/null",
             ]);
             ioMs.push(performance.now() - ioStarted);
             if (io.exitCode !== 0) throw new Error(`io workload failed: ${io.stderr}`);

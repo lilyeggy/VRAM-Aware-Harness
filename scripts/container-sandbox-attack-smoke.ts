@@ -81,8 +81,10 @@ try {
         "sh", "-lc", "i=0; while [ $i -lt 1000 ]; do sleep 1 & i=$((i+1)); done; wait",
     ]);
     assert(pressure.exitCode !== 0 || pressure.stderr.length > 0, "PID 耗尽没有返回受限结果");
+    // busybox dd 只接受大写单位（bs=1M）。128 MiB 超过 64 MiB tmpfs，
+    // 必须由 ENOSPC 限制失败，而不是由参数错误失败。
     const fill = await provider.execute(sandboxA, [
-        "sh", "-lc", "dd if=/dev/zero of=/tmp/fill bs=1m count=128 2>/dev/null",
+        "sh", "-lc", "dd if=/dev/zero of=/tmp/fill bs=1M count=128 2>/dev/null",
     ]);
     assert(fill.exitCode !== 0, "tmpfs 资源耗尽没有被限制");
 
