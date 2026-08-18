@@ -107,6 +107,9 @@ nohup bash /root/load2.sh 120 1500 > /root/load3.out 2>&1 &   # 120 并发长生
 
 - 验收：ECS 采样出现 `RESOURCE_CRITICAL/QUEUE` 且由真实 /metrics 驱动。
 - 停止省计费：GPU 机 `pkill -f completions`（停压测）；如需省费可停 vllm / 隧道 / 释放实例。
+
+> **当前状态（2026-08-18，实测已执行）**：GPU 机上的 vLLM serve、反连隧道（`ssh -R 18000`）、压测进程均已停止（端口 8000 关闭、显存回落 0/15360 MiB，ECS 侧隧道 `code=000`）。
+> 注意：进程停了 ≠ 实例停止计费。AutoDL/GPUSsam 这类按“实例开通”扣费，需在平台控制台**关机或释放实例**才能真正停止计费（释放会清掉已装环境/模型，下次按本文档重装）。ECS 控制面保持不变，随时可按本文档在 GPU 侧复现。
 - 诚实边界：strict microVM、显存 MiB 绝对公平份额仍缺对应证据；这是真实 vLLM 压力的真机闭合，不是生产级声明。
 
 ## 7. 相关文件
