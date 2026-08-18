@@ -687,4 +687,66 @@ export const migrations: readonly SchemaMigration[] = [
                 CHECK (json_valid(runtime_evidence_json));
         `,
     },
+    {
+        version: 14,
+        name: "allow_tenant_budget_reason_code",
+        up: `
+            -- Rebuild policy_decisions so the reason_code CHECK also accepts the
+            -- tenant-budget layer's TENANT_BUDGET_EXCEEDED (clone + copy is the
+            -- SQLite way to change a CHECK).
+            CREATE TABLE policy_decisions_v14 (
+                decision_id TEXT PRIMARY KEY,
+                run_id TEXT NOT NULL,
+                action TEXT NOT NULL CHECK (
+                    action IN ('START', 'QUEUE')
+                ),
+                reason_code TEXT NOT NULL CHECK (
+                    reason_code IN (
+                        'RESOURCE_NORMAL',
+                        'GLOBAL_CONCURRENCY_LIMIT',
+                        'RESOURCE_BUSY_TENANT_AVAILABLE',
+                        'RESOURCE_BUSY_TENANT_LIMIT',
+                        'RESOURCE_CRITICAL',
+                        'RESOURCE_UNKNOWN',
+                        'RESOURCE_OBSERVATION_FAILED',
+                        'TENANT_BUDGET_EXCEEDED'
+                    )
+                ),
+                resource_snapshot_id TEXT,
+                pressure TEXT NOT NULL CHECK (
+                    pressure IN ('NORMAL', 'BUSY', 'CRITICAL', 'UNKNOWN')
+                ),
+                observation_failure_reason TEXT CHECK (
+                    observation_failure_reason IS NULL
+                    OR observation_failure_reason IN (
+                        'TIMEOUT', 'UNAVAILABLE', 'INVALID_RESPONSE'
+                    )
+                ),
+                decided_at TEXT NOT NULL,
+                FOREIGN KEY (run_id) REFERENCES agent_runs(id),
+                FOREIGN KEY (resource_snapshot_id) REFERENCES resource_snapshots(snapshot_id),
+                CHECK (
+                    (
+                        reason_code = 'RESOURCE_OBSERVATION_FAILED'
+                        AND resource_snapshot_id IS NULL
+                        AND pressure = 'UNKNOWN'
+                        AND action = 'QUEUE'
+                        AND observation_failure_reason IS NOT NULL
+                    )
+                    OR (
+                        reason_code <> 'RESOURCE_OBSERVATION_FAILED'
+                        AND resource_snapshot_id IS NOT NULL
+                        AND observation_failure_reason IS NULL
+                    )
+                )
+            );
+            INSERT INTO policy_decisions_v14
+                SELECT decision_id, run_id, action, reason_code,
+                    resource_snapshot_id, pressure,
+                    observation_failure_reason, decided_at
+                FROM policy_decisions;
+            DROP TABLE policy_decisions;
+            ALTER TABLE policy_decisions_v14 RENAME TO policy_decisions;
+        `,
+    },
 ];
