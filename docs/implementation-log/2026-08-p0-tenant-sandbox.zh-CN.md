@@ -245,3 +245,16 @@ Kata/Firecracker 尚无本项目 Provider，因此没有伪造 benchmark 结果�
 ### 2026-08-17：全仓库交互课程页面已补齐
 
 新增 `docs/repository-course.zh-CN.html`，将现有 `complete-project-detail-course.zh-CN.md`、README、ADR 0009、路线图、P0 实施记录和当前源码入口整合为无需构建依赖的网页课程。页面包含：一次 Run 的 HTTP → Principal → Workspace → Queue/Admission → Attempt/Policy → Sandbox → Pi/ToolGateway → Diff/Artifact 调用链；模块化源码地图；Run/Attempt 生命周期；P0.5 runtime profile 对照；测试/真机证据边界；Linux 部署入口；面试追问速答。页面明确 `ManagedLocal`、runsc 真机待验证和 strict Provider 未实现等边界，不把交互图当作安全证据。
+
+### 2026-08-18：Linux 真机 Sandbox 验收第一轮已通过（ECS 8 vCPU / 32 GiB）
+
+在阿里云 ECS（Ubuntu 24.04.4，x86_64，8 vCPU/30 GiB 可用，Docker 29.7.2，runsc release-20260810.0，无 /dev/kvm）上完成了第一轮真机验收，原始环境与结果保存在服务器 `/data/harness/benchmarks/`（`environment.txt`、`benchmark-2026-08-18.json`）：
+
+- `bun run test`：204 pass / 0 fail / 792 expect，全绿；
+- `smoke:container`：PASS，确认 `runsc_runtime_evidence`、non-root UID、Workspace 写入、只读 RootFS、默认无网络；
+- `smoke:container:attacks`：PASS，确认跨 Tenant Workspace/Secret 不可见、宿主路径不可见、路径穿越失败、默认网络外连失败、PID 与 tmpfs 限制生效、直接 `docker rm --force` 后 Sandbox 收敛为 LOST；
+- `benchmark:sandbox`：runc 与 runsc 均 PASS，runsc 冷启动 P50 163ms（runc 134ms，比值 1.22），命令往返 P50 33ms（runc 40ms，比值 0.83），I/O P50 43ms（持平），cleanup P50 64ms。该数据只描述此 ECS 环境，不泛化为 A6000 或生产结论；
+- HTTP 闭环：`/health`、创建 Workspace、提交 Run（QUEUED→COMPLETED）、策略决策 `START/RESOURCE_NORMAL`、输出 `finalText` 全部成功；
+- 修复：busybox `dd` 只接受大写单位，`bs=1m` 会导致 benchmark 的 I/O workload 与攻击 smoke 的 tmpfs 检查假阳性；改为 `bs=1M` 后验证为真阳性（128 MiB > 64 MiB tmpfs 由 ENOSPC 限制）。
+
+仍不能声称：没有 `/dev/kvm`，Kata/Firecracker strict 仍未做；A6000/vLLM 的 GPU 准入与真实 Pi→模型链路仍待 GPU 主机；跨架构性能结论不做。
