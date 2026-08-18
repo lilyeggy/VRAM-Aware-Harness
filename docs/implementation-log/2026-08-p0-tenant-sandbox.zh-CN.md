@@ -314,3 +314,21 @@ Kata/Firecracker 尚无本项目 Provider，因此没有伪造 benchmark 结果�
 如何接入控制面（opt-in）：在组装 `ResourceAdmissionService` 时把 `new BudgetAwareExecutionPolicy(deterministic, new LedgerBudgetUsage(ledger, budgets, capacity, weights))` 作为其 `policy` 传入即可，`ResourceAdmissionService`、`DeterministicExecutionPolicy`、`TenantRunScheduler` 均无需改动。
 
 诚实的边界：账本单位是抽象 unit，可折算 CPU/内存/Latency；**真实显存（vLLM metrics）维度的准入仍需 A6000**；核算账本目前是内存实现，后续可换持久化 store。
+
+### 2026-08-18：第 5 条真机闭合 —— 真实 GPU/vLLM 压力驱动准入（不再是 Fake）
+
+此前的资源观察器要么是 Fake NORMAL（外部模型无 vLLM metrics），要么根本没有真机 GPU。这条记录把「共享 GPU 压力真实改变执行、公平性可查询可复现」从“缺真机证据”变成“真机验证通过”。
+
+**GPU 侧（AutoDL/GPUSsam T4 16G，按量）**：
+- 环境：Tesla T4 16G，CUDA 13 driver；vllm **0.7.3** + torch 2.5.1 + transformers 4.48.3 + tokenizers 0.21.0（解决 vllm/tf/tokenizers 三环版本拉扯；补一个 sitecustomize 垫片，因为 transformers 4.48 的 slow tokenizer 缺 vllm 需要的 all_special_tokens_extended）；
+- 模型 Qwen2.5-7B-AWQ 下载 5.2G，vllm serve（`--gpu-memory-utilization 0.9`，监听 0.0.0.0:8000）；`/health`、`/metrics` 200，**真实推理返回文本**，压测时 KV-cache 用量与 running 请求真实爬升。
+
+**指标版本适配**：vLLM>=0.7 把 KV-cache 指标改名 `vllm:gpu_cache_usage_perc`（旧版 kv_cache_usage_perc）。`VllmResourceObserver.parseVllmMetrics` 改为 `kv_cache_usage_perc` 回退到 `gpu_cache_usage_perc`（兼容新旧），++2 测试。
+
+**ECS 闭环（真实 observer，非 Fake）**：
+- 隧道：GPU 机用 ECS 私钥反连 `ssh -R 18000:localhost:8000 ecs-user@47.111.83.126`，ECS 用 `http://localhost:18000/metrics` 即可拉到 GPU 真实指标；
+- `scripts/e2e-gpu-pressure.ts`：ECS 上以【真实】`VllmResourceObserver` + `ResourceAdmissionService` 采样；GPU 机灌 120 并发真实生成请求 → 采样到 `running=120, kv=62~65%` → `pressure=CRITICAL → action=QUEUE → reasonCode=RESOURCE_CRITICAL`，决策真实写入 SQLite。
+
+**验收**：git 跟踪测试 236 → 238 全绿。
+
+**诚实边界**：这是真实 vLLM metrics 驱动的 GPU 压力→准入（非 Fake），但只验证了资源的 running/kv-cache 压力路径；显存 MiB 维度经 nvidia-smi（本机 T4 可读），block 调度与超大并发下的绝对公平份额仍属估算；按量 GPU 已停压测以控成本。

@@ -89,7 +89,12 @@ export function parseVllmMetrics(
     const kvCacheUsageFraction = maxMetric(
         text,
         "vllm:kv_cache_usage_perc",
-    );
+    )
+        ?? maxMetric(
+            text,
+            // vLLM >= 0.7 renamed KV-cache usage to gpu_cache_usage_perc.
+            "vllm:gpu_cache_usage_perc",
+        );
     const promptTokensTotal = sumMetric(
         text,
         "vllm:prompt_tokens_total",

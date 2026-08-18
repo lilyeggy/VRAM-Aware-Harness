@@ -71,3 +71,29 @@ test("拒绝越界 KV 比例和非法请求数量", () => {
         "vllm:num_requests_waiting 必须是非负整数",
     );
 });
+
+test("兼容 vLLM>=0.7 的 gpu_cache_usage_perc（无旧版 kv_cache 时回退）", () => {
+    const metrics = `
+        # HELP vllm:num_requests_running running
+        vllm:num_requests_running{model_name="m"} 2
+        vllm:num_requests_waiting{model_name="m"} 5
+        vllm:gpu_cache_usage_perc{model_name="m"} 0.81
+        vllm:prompt_tokens_total 100
+        vllm:generation_tokens_total 200
+    `;
+    expect(parseVllmMetrics(metrics)).toEqual({
+        runningRequests: 2,
+        waitingRequests: 5,
+        kvCacheUsagePercent: 81,
+        promptTokensTotal: 100,
+        generationTokensTotal: 200,
+    });
+});
+
+test("新版 gpu_cache_usage_perc 的多标签取最大值", () => {
+    const metrics = `
+        vllm:gpu_cache_usage_perc{model_name="a"} 0.3
+        vllm:gpu_cache_usage_perc{model_name="b"} 0.9
+    `;
+    expect(parseVllmMetrics(metrics).kvCacheUsagePercent).toBe(90);
+});
