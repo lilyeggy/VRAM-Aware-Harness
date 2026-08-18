@@ -281,3 +281,19 @@ Kata/Firecracker 尚无本项目 Provider，因此没有伪造 benchmark 结果�
 真机实证（ECS）：注入一个反映真实 inspect（requested=runsc、observed=runsc、verified）的证据 + default profile 编译 spec 后，报告整体 **PASS**；环境指纹如实捕捉（linux kernel 6.8、**无 KVM**、docker 29.7.2、runc 1.4.3、runsc release-20260810.0），spec 指纹 `2f04d7312cd51595`，microVM 项如实标记为「无 KVM，仅作为 strict 演进方向，不声明已通过」。
 
 仍不能声称：Kata/Firecracker strict 没有 KVM 证据；显存准入待 A6000；该 PASS 是证据闭环的自检基准，不是攻击面清零的承诺。
+
+### 2026-08-18：证据三元组 v1（策略意图 ↔ 编译产物 ↔ 观测事实）
+
+在证据闭环基础上落地方向 A 的第一块：把一次隔离执行的「意图—产物—事实」绑定成一个可审计、可重算的三元组，形成「策略 → 沙箱安全边界 → 运行验证」的关联链。新增 `src/evidence/`：
+
+- `policy-boundary-fingerprint.ts`：对影响隔离边界的策略字段（sandboxProfile / workspaceRoots / allowNetwork / allowProcess / allowedSecrets / resourceLimits）生成确定性指纹；**刻意排除 id/runId/tenantId/createdAt 等业务身份字段**——该指纹描述「要求了什么边界」，而非「哪个请求恰好带着它」；
+- `isolation-triple.ts`：`IsolationTriple{policyFingerprint, specFingerprint, runtimeEvidence}` + `buildIsolationTriple` + `verifyIsolationTriple`。fail-closed——runtime 未被 inspect 证实、观测 runtime ≠ 请求 runtime、或「重编译的 spec 指纹与记录不一致（策略/编译漂移）」任一出现即整体不一致；
+- 用真实 `OciSandboxSpecCompiler` 的绑定测试：同一策略两次编译 → spec 指纹相同、重算校验一致；被限制（cpu/mem）的策略编译出的 spec 指纹与默认不同。
+
+报告脚本 `scripts/isolation-evidence-report.ts` 新增可选 `HARNESS_EVIDENCE_POLICY_JSON`，输出 isolationTriple / tripleConsistent / tripleNotes。
+
+测试：`tests/evidence/isolation-triple.test.ts` 9 例；全部证据测试 22 例，git 跟踪测试 217 → 226 全绿。
+
+真机实证（ECS）：policy（default、`/srv/workspaces/tenant`、禁网、限 secret）+ spec + runsc 已验证证据 注入后，报告整体 **PASS**，`tripleConsistent=true`（policy 指纹 `5e6b2ddf2efed2a3`、spec 指纹 `2f04d7312cd51595`、inspect 证实 runsc）。
+
+仍不能声称：三元组自洽只证明「隔离边界可追溯」，不表示攻击面为零；Kata/Firecracker strict 与 A6000 显存准入仍需对应真机。

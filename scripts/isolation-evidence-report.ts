@@ -3,6 +3,7 @@ import { existsSync } from "node:fs";
 import { release as osRelease } from "node:os";
 
 import type { SandboxRuntimeEvidence, SandboxSpec } from "../src/sandbox/sandbox-profile.ts";
+import type { EffectivePolicySnapshot } from "../src/policies/effective-policy.ts";
 import {
     fingerprintSandboxSpec,
 } from "../src/evidence/sandbox-spec-fingerprint.ts";
@@ -14,6 +15,10 @@ import {
     runEvidenceChecks,
     type IsolationEvidence,
 } from "../src/evidence/isolation-evidence.ts";
+import {
+    buildIsolationTriple,
+    verifyIsolationTriple,
+} from "../src/evidence/isolation-triple.ts";
 
 /**
  * Isolation evidence report (regression gate).
@@ -24,6 +29,7 @@ import {
  *
  *   HARNESS_EVIDENCE_RUNTIME_EVIDENCE_JSON   optional SandboxRuntimeEvidence JSON
  *   HARNESS_EVIDENCE_SPEC_JSON               optional compiled SandboxSpec JSON
+ *   HARNESS_EVIDENCE_POLICY_JSON             optional EffectivePolicySnapshot JSON
  *
  * Exit: 0 = PASS/WARN, 1 = FAIL (fail-closed regression gate).
  */
@@ -83,6 +89,15 @@ const spec: SandboxSpec | null =
     readOptionalJson<SandboxSpec>("HARNESS_EVIDENCE_SPEC_JSON");
 const specFingerprint = spec === null ? null : fingerprintSandboxSpec(spec);
 
+const policy: EffectivePolicySnapshot | null =
+    readOptionalJson<EffectivePolicySnapshot>("HARNESS_EVIDENCE_POLICY_JSON");
+
+// Evidence triple: intent(policy) <-> product(spec) <-> fact(runtime).
+const triple = policy !== null && spec !== null
+    ? buildIsolationTriple({ policy, specFingerprint, runtimeEvidence })
+    : null;
+const tripleVerdict = triple === null ? null : verifyIsolationTriple(triple);
+
 const evidence: IsolationEvidence = {
     runtimeEvidence,
     specFingerprint,
@@ -97,6 +112,10 @@ const output = {
     environment,
     runtimeEvidence,
     specFingerprint,
+    policyFingerprint: triple?.policyFingerprint ?? null,
+    isolationTriple: triple,
+    tripleConsistent: tripleVerdict?.consistent ?? null,
+    tripleNotes: tripleVerdict?.notes ?? [],
     checks: report.checks,
 };
 
