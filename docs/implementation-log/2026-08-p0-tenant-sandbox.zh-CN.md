@@ -258,3 +258,11 @@ Kata/Firecracker 尚无本项目 Provider，因此没有伪造 benchmark 结果�
 - 修复：busybox `dd` 只接受大写单位，`bs=1m` 会导致 benchmark 的 I/O workload 与攻击 smoke 的 tmpfs 检查假阳性；改为 `bs=1M` 后验证为真阳性（128 MiB > 64 MiB tmpfs 由 ENOSPC 限制）。
 
 仍不能声称：没有 `/dev/kvm`，Kata/Firecracker strict 仍未做；A6000/vLLM 的 GPU 准入与真实 Pi→模型链路仍待 GPU 主机；跨架构性能结论不做。
+
+### 2026-08-18：真实 Pi + 外部模型 + runsc Sandbox 端到端已跑通
+
+新增 `scripts/server-model-api-demo.ts`：复用现有 `startHarnessProcess`，注入一个明确的 Fake 资源观察器（NORMAL）后，在服务器启动真实 Pi + 外部 OpenAI 兼容模型 + runsc Sandbox。外部模型 API（opencode/deepseek-v4-flash）不暴露 vLLM `/metrics`，因此默认 VllmResourceObserver 会让所有任务卡在 RESOURCE_UNKNOWN（fail-closed）；这个注入是有意且明确标注的演示，不作为 VRAM 准入的真机证据。
+
+真机验证（ECS，opencode/deepseek-v4-flash）：提交一个要求“创建并读取 hello-real-pi.txt”的任务后，Run 事件时间线完整反映了真实 Agent 循环：RUN_CREATED→RUN_STARTED→MODEL_STARTED(provider=opencode, model=deepseek-v4-flash)→MODEL_COMPLETED(stopReason=toolUse, 2186/171 tokens)→TOOL_STARTED(write)→TOOL_COMPLETED→MODEL_STARTED→MODEL_COMPLETED→TOOL_STARTED(read)→TOOL_COMPLETED→MODEL_STARTED→MODEL_COMPLETED→RUN_COMPLETED。模型真实生成 write/read 工具调用，工具在 runsc Sandbox 的 Workspace 中实际创建文件 `hello-real-pi.txt`（29 字节），workspace-diff 捕获 added 项，服务器文件内容确认为 `Hello from real Pi over runsc`，最终文本正确总结。
+
+这证明：真实模型与 Pi 的模型—工具循环、PiAdapter 到 ToolGateway 的工具治理、以及工具经 runsc Sandbox 命令边界在 Workspace 落盘，都在真机闭环。仍不能声称的边界：资源观察器是 Fake（VRAM/GPU 准入仍待 A6000）；Kata/Firecracker strict 仍待 KVM；外部模型的计费元数据以端点返回为准。
