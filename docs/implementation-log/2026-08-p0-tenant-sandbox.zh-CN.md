@@ -266,3 +266,18 @@ Kata/Firecracker 尚无本项目 Provider，因此没有伪造 benchmark 结果�
 真机验证（ECS，opencode/deepseek-v4-flash）：提交一个要求“创建并读取 hello-real-pi.txt”的任务后，Run 事件时间线完整反映了真实 Agent 循环：RUN_CREATED→RUN_STARTED→MODEL_STARTED(provider=opencode, model=deepseek-v4-flash)→MODEL_COMPLETED(stopReason=toolUse, 2186/171 tokens)→TOOL_STARTED(write)→TOOL_COMPLETED→MODEL_STARTED→MODEL_COMPLETED→TOOL_STARTED(read)→TOOL_COMPLETED→MODEL_STARTED→MODEL_COMPLETED→RUN_COMPLETED。模型真实生成 write/read 工具调用，工具在 runsc Sandbox 的 Workspace 中实际创建文件 `hello-real-pi.txt`（29 字节），workspace-diff 捕获 added 项，服务器文件内容确认为 `Hello from real Pi over runsc`，最终文本正确总结。
 
 这证明：真实模型与 Pi 的模型—工具循环、PiAdapter 到 ToolGateway 的工具治理、以及工具经 runsc Sandbox 命令边界在 Workspace 落盘，都在真机闭环。仍不能声称的边界：资源观察器是 Fake（VRAM/GPU 准入仍待 A6000）；Kata/Firecracker strict 仍待 KVM；外部模型的计费元数据以端点返回为准。
+
+### 2026-08-18：隔离证据闭环 v1（Evidence Loop）落地
+
+从「多租户 agent 管理调研」的差异化结论出发，把「可验证隔离证据」固化为地基（方向 C，为后续策略编译 A 与租户资源账本 B 提供底座）。新增独立 `src/evidence/` 模块，不动控制面主流程：
+
+- `sandbox-spec-fingerprint.ts`：对编译出的隔离边界（profile/runtime/hardening/资源限制/secret 名单）生成确定性 sha-256 指纹，**实例路径无关**（隔离策略相同则指纹相同），作为「编译产物可追溯、可复现」的最小载体；
+- `environment-fingerprint.ts`：运行环境指纹（内核/KVM 设备/CPU 虚拟化标志/docker/runsc/runc 版本），让证据可回放、可抽检时可还原上下文；
+- `isolation-evidence.ts`：断言/回归引擎，fail-closed——「目标 runtime 必须被 Docker inspect 证实（非仅配置声明）」「观测 runtime 必须等于请求 runtime」任一不满足即 FAIL；缺 spec 指纹降级 WARN；**microVM（strict）门槛作为 INFO 如实标注，永不因无 KVM 而冒充通过**；
+- `scripts/isolation-evidence-report.ts`：真机可回放报告（隔离回归门禁），FAIL 时退出码 1。
+
+测试：新增 `tests/evidence/isolation-evidence.test.ts` 13 例（指纹确定性/稳定性、资源变化敏感性、fail-closed、WARN 降级、KVM 措辞不影响判定）。git 跟踪测试 204 → 217 全绿（失败 4 例均来自未跟踪的外部目录，与本仓库无关）。
+
+真机实证（ECS）：注入一个反映真实 inspect（requested=runsc、observed=runsc、verified）的证据 + default profile 编译 spec 后，报告整体 **PASS**；环境指纹如实捕捉（linux kernel 6.8、**无 KVM**、docker 29.7.2、runc 1.4.3、runsc release-20260810.0），spec 指纹 `2f04d7312cd51595`，microVM 项如实标记为「无 KVM，仅作为 strict 演进方向，不声明已通过」。
+
+仍不能声称：Kata/Firecracker strict 没有 KVM 证据；显存准入待 A6000；该 PASS 是证据闭环的自检基准，不是攻击面清零的承诺。
