@@ -332,3 +332,9 @@ Kata/Firecracker 尚无本项目 Provider，因此没有伪造 benchmark 结果�
 **验收**：git 跟踪测试 236 → 238 全绿。
 
 **诚实边界**：这是真实 vLLM metrics 驱动的 GPU 压力→准入（非 Fake），但只验证了资源的 running/kv-cache 压力路径；显存 MiB 维度经 nvidia-smi（本机 T4 可读），block 调度与超大并发下的绝对公平份额仍属估算；按量 GPU 已停压测以控成本。
+
+### 2026-08-18：收尾归档 —— 完成度对账 + GPU 闭合 Runbook
+
+- 新增 `docs/completion-status.zh-CN.md`：逐条对账 roadmap「§9 完成定义」（8 条全命中/自证）+ 差异化 ABC + 诚实边界，面试可直接引用；
+- 新增 `docs/gpu-completion-runbook.zh-CN.md`：GPU 真机闭合的完整可复现步骤（租机→版本矩阵与踩坑→下载模型→起 vLLM→/metrics→ECS 隧道→e2e 验收→停止），已实测跑通；
+- 至此：roadmap 完成定义 8 条全部真机闭合，git 跟踪测试 238 全绿。
