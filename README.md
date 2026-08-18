@@ -390,6 +390,7 @@ docs/adr/         # 架构决策记录
 - [Stage 1–2 控制面实现与学习笔记](docs/stage1-stage2-control-plane-learning-notes.zh-CN.md)：按真实调用链讲解 Instance、Attempt、Capability、有效策略、ToolGateway、Sandbox 与 Secret 边界。
 - [Stage 1–2 控制面源码精读指南](docs/stage1-stage2-code-reading-guide.zh-CN.md)：严格按 Capability → Instance → Attempt → 兼容控制面 → Policy → 编排器 → Tool → Sandbox → PiAdapter → 端到端测试的顺序，逐段解释关键代码、连接关系和不变量。
 - [完整项目细节课程](docs/complete-project-detail-course.zh-CN.md)：从系统语言、进程启动和 Stage 0 可靠执行底座开始，以一个 Run 贯穿 HTTP、SQLite、资源准入、公平队列、工具副作用、恢复、Stage 1–2 控制面、Pi 和 Sandbox；包含逐方法推演、事务/竞态分析、失败矩阵、测试地图、调试课和自测题。
+- [全仓库交互课程](docs/repository-course.zh-CN.html)：将当前源码、产品对象、真实调用链、Sandbox runtime profiles、测试证据、部署边界和面试追问整合为一个无需构建的网页课程。
 - [一周 MVP 实施手册](ONE_WEEK_HARNESS_MVP_GUIDE.zh-CN.md)：已完成 MVP 的学习、设计和验收记录，不再承载后续路线。
 - [当前完整 Harness 系统剖面与技术审视](docs/current-harness-system-review.zh-CN.html)：交互讲解现有模块、正常/阻塞/恢复/副作用流程，以及走向多租户 Agent 任务服务仍需补齐的产品能力。
 - [Agent 系统三层全景](docs/agent-system-three-plane-atlas.zh-CN.html)：对比 DeepResearch 行为系统、多租户 Agent 任务服务与 Polar Learning Plane，说明三类项目各自的用户价值、内部技术重点和跨层契约。

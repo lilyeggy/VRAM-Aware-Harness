@@ -241,3 +241,7 @@ Kata/Firecracker 尚无本项目 Provider，因此没有伪造 benchmark 结果�
 - `deploy/harness.service.example`：以 `harness` 用户运行 Harness，容器 UID 建议与服务用户 UID 对齐，避免把 Workspace 放宽到 `777` 或让 Harness 以 root 运行。
 
 本次没有新增云端 Workspace 存储；当前 Workspace 仍是服务端受管目录，服务会按 `workspaceId + tenantId` 自动创建，不需要服务器管理员手工创建 Tenant 目录。对象存储、跨机器同步和长期 snapshot 仍不是本项目面试版的前置条件。当前环境只能通过 `bash -n` 和 `tsc --noEmit` 验证脚本/类型，Ubuntu Docker/runsc 真机 preflight 仍待租到服务器后执行。
+
+### 2026-08-17：全仓库交互课程页面已补齐
+
+新增 `docs/repository-course.zh-CN.html`，将现有 `complete-project-detail-course.zh-CN.md`、README、ADR 0009、路线图、P0 实施记录和当前源码入口整合为无需构建依赖的网页课程。页面包含：一次 Run 的 HTTP → Principal → Workspace → Queue/Admission → Attempt/Policy → Sandbox → Pi/ToolGateway → Diff/Artifact 调用链；模块化源码地图；Run/Attempt 生命周期；P0.5 runtime profile 对照；测试/真机证据边界；Linux 部署入口；面试追问速答。页面明确 `ManagedLocal`、runsc 真机待验证和 strict Provider 未实现等边界，不把交互图当作安全证据。

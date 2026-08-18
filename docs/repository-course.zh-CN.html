@@ -1,0 +1,353 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="description" content="VRAM-Aware Harness 全仓库交互课程：多租户 Agent 任务服务、执行控制面、Sandbox、Pi Runtime、恢复和验证证据。" />
+<title>VRAM-Aware Harness · 全仓库交互课程</title>
+<style>
+:root {
+  --bg: #07111f;
+  --surface: #0d1b2d;
+  --surface-2: #12253d;
+  --surface-3: #193451;
+  --line: #294866;
+  --ink: #eff7ff;
+  --muted: #9fb2c8;
+  --faint: #6f879f;
+  --cyan: #59ded2;
+  --blue: #79b7ff;
+  --violet: #c19aff;
+  --amber: #ffd166;
+  --red: #ff8c9b;
+  --green: #8be6a7;
+  --shadow: 0 22px 70px rgba(0,0,0,.28);
+  --sans: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  --mono: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+}
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body {
+  margin: 0; color: var(--ink); background:
+    radial-gradient(circle at 10% -10%, rgba(89,222,210,.15), transparent 31rem),
+    radial-gradient(circle at 90% 5%, rgba(121,183,255,.16), transparent 34rem),
+    linear-gradient(180deg, #091726, var(--bg) 42%, #040a12);
+  font-family: var(--sans); line-height: 1.58;
+}
+body::before { content:""; position:fixed; inset:0; pointer-events:none; z-index:-1; opacity:.25;
+  background-image:linear-gradient(rgba(100,150,190,.12) 1px,transparent 1px),linear-gradient(90deg,rgba(100,150,190,.12) 1px,transparent 1px); background-size:42px 42px; mask-image:linear-gradient(to bottom,#000,transparent 80%); }
+a { color: inherit; }
+button, input { font: inherit; }
+button { cursor:pointer; color:inherit; }
+.shell { width:min(1400px,calc(100% - 34px)); margin:auto; padding-bottom:70px; }
+.topbar { position:sticky; top:0; z-index:20; border-bottom:1px solid var(--line); background:rgba(4,10,18,.84); backdrop-filter:blur(18px); }
+.topbar-inner { min-height:58px; width:min(1400px,calc(100% - 34px)); margin:auto; display:flex; align-items:center; justify-content:space-between; gap:20px; }
+.brand { display:flex; align-items:center; gap:10px; text-decoration:none; font-weight:800; white-space:nowrap; }
+.mark { width:28px; height:28px; display:grid; place-items:center; border:1px solid var(--cyan); border-radius:8px; color:var(--cyan); font:12px var(--mono); background:rgba(89,222,210,.1); }
+.nav { display:flex; gap:18px; overflow:auto; scrollbar-width:none; }
+.nav::-webkit-scrollbar { display:none; }
+.nav a { color:var(--muted); font-size:13px; text-decoration:none; white-space:nowrap; }
+.nav a:hover { color:var(--cyan); }
+.hero { padding:62px 0 32px; display:grid; grid-template-columns:minmax(0,1.3fr) minmax(300px,.7fr); gap:22px; align-items:stretch; }
+.kicker { color:var(--cyan); font:700 12px var(--mono); letter-spacing:.13em; text-transform:uppercase; }
+h1 { margin:9px 0 13px; max-width:900px; font-size:clamp(32px,5vw,66px); line-height:1.03; letter-spacing:-.055em; }
+.lead { max-width:850px; margin:0; color:var(--muted); font-size:17px; }
+.hero-note { border:1px solid rgba(255,209,102,.42); background:rgba(255,209,102,.08); color:#f8df9d; border-radius:16px; padding:20px; align-self:end; }
+.hero-note strong { color:#fff; display:block; margin-bottom:7px; }
+.stats { display:grid; grid-template-columns:repeat(4,1fr); gap:12px; margin-bottom:22px; }
+.stat { border:1px solid var(--line); border-radius:14px; background:rgba(13,27,45,.8); padding:16px; }
+.stat b { display:block; color:var(--cyan); font-size:25px; }
+.stat span { color:var(--muted); font-size:12px; }
+.toolbar { display:flex; flex-wrap:wrap; gap:10px; align-items:center; padding:12px; border:1px solid var(--line); border-radius:14px; background:rgba(8,18,31,.78); margin-bottom:20px; }
+.toolbar button, .chip { border:1px solid #395b7d; border-radius:999px; padding:8px 13px; background:#0b1a2c; color:#c7d9ec; font-size:13px; }
+.toolbar button:hover, .toolbar button.active, .chip.active { background:#eaf6ff; color:#071525; border-color:#eaf6ff; }
+.search { min-width:230px; flex:1; border:1px solid #395b7d; border-radius:999px; padding:9px 14px; color:var(--ink); background:#071423; outline:none; }
+.search:focus { border-color:var(--cyan); box-shadow:0 0 0 3px rgba(89,222,210,.13); }
+.section { margin-top:38px; scroll-margin-top:78px; }
+.section-head { display:flex; justify-content:space-between; align-items:end; gap:18px; margin-bottom:14px; }
+.section-head h2 { margin:0; font-size:25px; letter-spacing:-.025em; }
+.section-head p { margin:0; color:var(--muted); max-width:700px; font-size:13px; }
+.panel { border:1px solid var(--line); border-radius:18px; background:rgba(13,27,45,.86); box-shadow:var(--shadow); }
+.flow-wrap { padding:20px; overflow:auto; }
+.flow { display:flex; align-items:stretch; gap:0; min-width:1110px; }
+.flow-node { width:150px; min-height:105px; border:1px solid #3a5c7c; border-radius:13px; padding:13px; background:linear-gradient(145deg,#173350,#0e2035); transition:.2s; }
+.flow-node:hover, .flow-node.active { border-color:var(--cyan); transform:translateY(-3px); box-shadow:0 0 0 1px var(--cyan),0 14px 35px rgba(0,0,0,.2); }
+.flow-node small { color:var(--cyan); font:10px var(--mono); }
+.flow-node strong { display:block; margin:6px 0 4px; font-size:14px; }
+.flow-node span { color:var(--muted); font-size:11px; }
+.flow-arrow { width:30px; align-self:center; height:2px; position:relative; background:#527491; flex:0 0 30px; }
+.flow-arrow::after { content:""; position:absolute; right:-1px; top:-4px; border-left:8px solid #527491; border-top:5px solid transparent; border-bottom:5px solid transparent; }
+.flow-arrow.active { background:#fff; box-shadow:0 0 12px var(--cyan); }
+.flow-arrow.active::after { border-left-color:#fff; }
+.trace-detail { margin-top:14px; padding:18px 20px; border-left:4px solid var(--cyan); background:rgba(89,222,210,.07); border-radius:12px; }
+.trace-detail .label { color:var(--cyan); font:700 11px var(--mono); letter-spacing:.1em; }
+.trace-detail h3 { margin:5px 0 6px; font-size:20px; }
+.trace-detail p { margin:0; color:#c7d5e4; font-size:13px; }
+.trace-detail code { color:#d7c2ff; font-family:var(--mono); }
+.course-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:14px; }
+.module { border:1px solid var(--line); border-radius:15px; padding:18px; background:linear-gradient(145deg,rgba(25,52,81,.88),rgba(11,25,42,.9)); transition:.2s; }
+.module:hover { transform:translateY(-3px); border-color:#6085a8; }
+.module.hidden { display:none; }
+.module-top { display:flex; justify-content:space-between; gap:10px; align-items:start; }
+.module-num { color:var(--cyan); font:700 11px var(--mono); }
+.module h3 { margin:6px 0 8px; font-size:17px; }
+.module p { margin:0 0 12px; color:var(--muted); font-size:13px; }
+.module ul { margin:0 0 14px; padding-left:18px; color:#cbd9e7; font-size:12px; }
+.module li { margin:4px 0; }
+.module-links { display:flex; flex-wrap:wrap; gap:6px; }
+.module-links a { color:#a9cbf2; font:11px var(--mono); text-decoration:none; border:1px solid #335575; border-radius:6px; padding:4px 6px; }
+.module-links a:hover { color:#071525; background:#d9eeff; }
+.coverage { display:grid; grid-template-columns:1.15fr .85fr; gap:16px; }
+.coverage-panel { padding:20px; }
+.coverage-list { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; }
+.coverage-item { border:1px solid #345573; border-radius:9px; padding:10px; background:rgba(18,37,61,.8); }
+.coverage-item b { display:block; color:#d5e8fb; font:13px var(--mono); }
+.coverage-item span { color:var(--muted); font-size:11px; }
+.coverage-item[data-state="done"] { border-left:3px solid var(--green); }
+.coverage-item[data-state="verify"] { border-left:3px solid var(--amber); }
+.coverage-item[data-state="reserved"] { border-left:3px solid var(--violet); }
+.coverage-legend { display:flex; gap:12px; flex-wrap:wrap; margin-top:15px; color:var(--muted); font-size:12px; }
+.coverage-legend i { display:inline-block; width:8px; height:8px; margin-right:5px; border-radius:50%; background:var(--c); }
+.timeline { padding:20px; }
+.timeline-grid { display:grid; grid-template-columns:repeat(8,1fr); gap:0; overflow:auto; }
+.timeline-step { min-width:125px; position:relative; padding:14px 10px 10px; border-top:2px solid #426580; }
+.timeline-step::before { content:""; position:absolute; top:-7px; left:10px; width:10px; height:10px; border-radius:50%; background:var(--blue); box-shadow:0 0 0 4px rgba(121,183,255,.12); }
+.timeline-step strong { display:block; font-size:13px; }
+.timeline-step span { color:var(--muted); font-size:11px; }
+.timeline-step button { margin-top:10px; border:0; padding:0; color:var(--cyan); background:none; font:11px var(--mono); }
+.lifecycle { display:grid; grid-template-columns:repeat(6,1fr); gap:0; padding:20px; overflow:auto; }
+.state { min-width:130px; text-align:center; padding:12px 7px; border:1px solid #405f7d; background:rgba(25,52,81,.7); }
+.state:first-child { border-radius:10px 0 0 10px; }
+.state:last-child { border-radius:0 10px 10px 0; }
+.state b { display:block; color:var(--cyan); font:13px var(--mono); }
+.state span { color:var(--muted); font-size:11px; }
+.state-arrow { min-width:25px; display:grid; place-items:center; color:#6f92b0; background:#0b1b2d; }
+.matrix { width:100%; border-collapse:collapse; font-size:13px; }
+.matrix th, .matrix td { padding:12px 13px; border-bottom:1px solid var(--line); text-align:left; vertical-align:top; }
+.matrix th { color:#bcd5ee; background:rgba(25,52,81,.55); }
+.matrix td { color:var(--muted); }
+.matrix td:first-child { color:var(--ink); font-weight:700; }
+.good { color:var(--green)!important; } .warn { color:var(--amber)!important; } .bad { color:var(--red)!important; }
+.interview { display:grid; grid-template-columns:repeat(2,1fr); gap:14px; }
+.qa { border:1px solid var(--line); border-radius:14px; background:rgba(13,27,45,.8); overflow:hidden; }
+.qa button { width:100%; border:0; border-radius:0; padding:15px 17px; text-align:left; background:transparent; color:var(--ink); font-weight:700; }
+.qa button::after { content:"＋"; float:right; color:var(--cyan); }
+.qa.open button::after { content:"－"; }
+.qa .answer { display:none; padding:0 17px 16px; color:var(--muted); font-size:13px; }
+.qa.open .answer { display:block; }
+.code { border:1px solid #2d4f70; border-radius:10px; padding:14px; color:#cce6ff; background:#06101c; font:12px/1.65 var(--mono); overflow:auto; white-space:pre-wrap; }
+.boundary { display:grid; grid-template-columns:1fr 1fr 1fr; gap:12px; }
+.boundary-card { padding:17px; border-radius:13px; border:1px solid var(--line); background:rgba(13,27,45,.8); }
+.boundary-card h3 { margin:0 0 8px; font-size:16px; }
+.boundary-card p { margin:0; color:var(--muted); font-size:13px; }
+.footer { margin-top:46px; padding-top:20px; border-top:1px solid var(--line); color:var(--faint); font-size:12px; display:flex; justify-content:space-between; gap:15px; flex-wrap:wrap; }
+@media(max-width:1000px) { .hero { grid-template-columns:1fr; } .course-grid { grid-template-columns:repeat(2,1fr); } .coverage { grid-template-columns:1fr; } .boundary { grid-template-columns:1fr; } }
+@media(max-width:650px) { .shell,.topbar-inner { width:calc(100% - 20px); } .stats { grid-template-columns:repeat(2,1fr); } .course-grid,.interview { grid-template-columns:1fr; } .coverage-list { grid-template-columns:repeat(2,1fr); } h1 { font-size:39px; } .nav { display:none; } }
+</style>
+</head>
+<body>
+<header class="topbar"><div class="topbar-inner">
+  <a class="brand" href="#top"><span class="mark">VH</span> VRAM-Aware Harness · 全仓库课程</a>
+  <nav class="nav"><a href="#flow">调用链</a><a href="#modules">课程目录</a><a href="#coverage">仓库地图</a><a href="#evidence">证据与边界</a><a href="../README.md">README</a></nav>
+</div></header>
+<main class="shell" id="top">
+  <section class="hero">
+    <div>
+      <div class="kicker">Repository Course · 2026</div>
+      <h1>把一次 Agent 任务，讲透整个仓库。</h1>
+      <p class="lead">这不是另一个 Agent Loop，也不是“显存高就排队”的资源过滤器。VRAM-Aware Harness 是一个面向团队的多租户 Agent 任务服务：它把可信 Tenant、受管 Workspace、任务编排、真实 Sandbox、工具副作用、故障恢复和用户结果连接成一条可追踪调用链。</p>
+    </div>
+    <aside class="hero-note"><strong>先记住一句话</strong>Pi/vLLM 负责 Agent loop 与模型推理；Harness 负责谁能执行、在哪执行、何时执行、失败后能否安全继续，以及用户最终得到什么。<br><br><span>当前状态：控制面与 Workspace MVP 已完成；Linux Docker/runsc、A6000 和 strict microVM 仍需真机证据。</span></aside>
+  </section>
+  <section class="stats" aria-label="课程摘要">
+    <div class="stat"><b>③</b><span>核心：Environment / Sandbox</span></div>
+    <div class="stat"><b>④</b><span>核心：Execution / Orchestration</span></div>
+    <div class="stat"><b>1 Run</b><span>贯穿 HTTP → SQLite → Pi → Sandbox</span></div>
+    <div class="stat"><b>Fail closed</b><span>不把未验证能力说成安全保证</span></div>
+  </section>
+  <div class="toolbar" aria-label="课程工具">
+    <button class="active" data-filter="all">全部模块</button><button data-filter="product">产品闭环</button><button data-filter="control">执行控制面</button><button data-filter="sandbox">Sandbox</button><button data-filter="runtime">Runtime / Tool</button><button data-filter="evidence">测试与证据</button>
+    <input class="search" id="module-search" placeholder="搜索模块、符号或文件，例如 SandboxProvider" />
+  </div>
+
+  <section class="section" id="flow">
+    <div class="section-head"><div><h2>先沿一条真实调用链走一遍</h2><p>点击节点查看它的责任、代码入口和下一个消费者。下方不是抽象平台图，而是当前仓库的真实边界。</p></div></div>
+    <div class="panel flow-wrap">
+      <div class="flow" id="flow-nodes">
+        <button class="flow-node active" data-flow="request"><small>01 HTTP</small><strong>RequestPrincipal</strong><span>API Key → Tenant / scope</span></button><i class="flow-arrow active"></i>
+        <button class="flow-node" data-flow="workspace"><small>02 DATA</small><strong>WorkspaceService</strong><span>workspaceId → managed root</span></button><i class="flow-arrow"></i>
+        <button class="flow-node" data-flow="run"><small>03 RUN</small><strong>RunService</strong><span>Run / Attempt / events</span></button><i class="flow-arrow"></i>
+        <button class="flow-node" data-flow="queue"><small>04 CONTROL</small><strong>Queue + Admission</strong><span>fairness + GPU pressure</span></button><i class="flow-arrow"></i>
+        <button class="flow-node" data-flow="managed"><small>05 BIND</small><strong>ManagedAgentRuntime</strong><span>policy + capability + sandbox</span></button><i class="flow-arrow"></i>
+        <button class="flow-node" data-flow="sandbox"><small>06 ENV</small><strong>SandboxProvider</strong><span>runsc / managed-local</span></button><i class="flow-arrow"></i>
+        <button class="flow-node" data-flow="pi"><small>07 AGENT</small><strong>PiAdapter</strong><span>model + tool events</span></button><i class="flow-arrow"></i>
+        <button class="flow-node" data-flow="tool"><small>08 EFFECT</small><strong>ToolGateway</strong><span>policy + checkpoint</span></button><i class="flow-arrow"></i>
+        <button class="flow-node" data-flow="result"><small>09 RESULT</small><strong>Diff / Artifact</strong><span>用户交付物 + 审计</span></button>
+      </div>
+      <div class="trace-detail" id="flow-detail"><div class="label">CURRENT TRACE · HTTP</div><h3>身份不是请求体里的 tenantId</h3><p>入口由 <code>HarnessHttpApi.requirePrincipal()</code> 验证 API Key，得到 <code>RequestPrincipal { subjectId, tenantId, scopes }</code>。之后所有 Workspace、Run、Event 和 Artifact 查询都以 Principal 派生的 Tenant 为边界。</p></div>
+    </div>
+  </section>
+
+  <section class="section" id="modules">
+    <div class="section-head"><div><h2>课程目录：从语言到真机证据</h2><p>建议按顺序学习；每张卡都给出“为什么存在”、真实入口和应观察的测试证据。</p></div></div>
+    <div class="course-grid" id="module-grid"></div>
+  </section>
+
+  <section class="section" id="lifecycle">
+    <div class="section-head"><div><h2>一个 Run 的生命周期</h2><p>状态快照不是事件流；Attempt 不是 Run；Sandbox 销毁也不等于 Workspace 删除。</p></div></div>
+    <div class="panel lifecycle">
+      <div class="state"><b>QUEUED</b><span>身份与队列等待</span></div><div class="state-arrow">→</div>
+      <div class="state"><b>RUNNING</b><span>Attempt + Sandbox ACTIVE</span></div><div class="state-arrow">→</div>
+      <div class="state"><b>WAITING_TOOL</b><span>副作用边界</span></div><div class="state-arrow">→</div>
+      <div class="state"><b>COMPLETED</b><span>回答 + Diff + Artifact</span></div><div class="state-arrow">/</div>
+      <div class="state"><b>INTERRUPTED</b><span>可恢复或人工确认</span></div><div class="state-arrow">/</div>
+      <div class="state"><b>FAILED</b><span>原因与证据收敛</span></div>
+    </div>
+    <div class="panel" style="margin-top:14px;padding:20px"><div class="timeline-grid" id="timeline-grid"></div><div class="trace-detail" id="timeline-detail" style="margin-top:16px"><div class="label">STEP 01 · CREATE</div><h3>先持久化意图，再启动外部 Runtime</h3><p>RunStore 保存状态，AttemptStore 保存一次实际尝试。任何后续失败都必须能回答：任务是谁提交的、使用了哪个策略、是否创建 Sandbox、工具副作用是否已经发生。</p></div></div>
+  </section>
+
+  <section class="section" id="coverage">
+    <div class="section-head"><div><h2>仓库地图：每个目录负责什么</h2><p>这张地图帮助你从文件名回到系统责任。绿色是当前实现，黄色是需要 Linux/外部证据，紫色是刻意预留的边界。</p></div></div>
+    <div class="coverage">
+      <div class="panel coverage-panel"><div class="coverage-list" id="coverage-list"></div><div class="coverage-legend"><span><i style="--c:var(--green)"></i>已实现</span><span><i style="--c:var(--amber)"></i>代码已有，真机待证</span><span><i style="--c:var(--violet)"></i>Provider/能力预留</span></div></div>
+      <div class="panel coverage-panel"><h3 style="margin-top:0">按阅读目的选择入口</h3><div class="code">想理解产品：README.md → ADR 0009 → roadmap
+想理解一次任务：src/http → src/runs → src/scheduling
+想理解恢复：src/tools → src/checkpoints → src/runs
+想理解 Sandbox：src/sandbox → src/runtime/managed-agent-runtime.ts
+想理解策略：src/policies → src/runtime/managed-agent-runtime.ts
+想看用户结果：src/workspaces/run-workspace-result.ts
+想看真机验收：scripts/server-preflight.sh
+  → scripts/container-sandbox-attack-smoke.ts
+  → scripts/sandbox-runtime-benchmark.ts</div></div>
+    </div>
+  </section>
+
+  <section class="section" id="sandbox">
+    <div class="section-head"><div><h2>Sandbox 运行时分级</h2><p>OCI/Docker 是镜像与生命周期接口；runtime 才决定实际执行边界。配置值不等于事实，必须用 inspect/Provider evidence 证明。</p></div></div>
+    <div class="panel" style="overflow:auto"><table class="matrix"><thead><tr><th>Profile</th><th>实际 Provider</th><th>能保证什么</th><th>不能宣称什么</th></tr></thead><tbody>
+      <tr><td>development</td><td>ManagedLocal</td><td class="warn">开发/测试生命周期；保留现有 Fake 路径</td><td class="bad">不是真实多租户执行隔离</td></tr>
+      <tr><td>default</td><td>Container + runsc</td><td>OCI 参数、非 root、只读 RootFS、网络/PID/资源边界；inspect 必须观察 runsc</td><td class="warn">没有 Linux Docker/runsc 输出前，不能声称真机隔离通过</td></tr>
+      <tr><td>restricted-egress</td><td>Container + runsc</td><td>当前仍默认无网络</td><td class="bad">尚未接入 egress proxy，不能开放任意公网</td></tr>
+      <tr><td>strict</td><td>预留 Kata/Firecracker/托管 microVM Provider</td><td>路由合同和 fail-closed 行为</td><td class="bad">当前没有自研 VMM，也没有真实 strict Provider</td></tr>
+    </tbody></table></div>
+  </section>
+
+  <section class="section" id="evidence">
+    <div class="section-head"><div><h2>证据地图：测试证明什么</h2><p>面试时不要把 fake、数据库配置和真机隔离混在一句话里。每个结论都要绑定对应证据。</p></div></div>
+    <div class="panel" style="overflow:auto"><table class="matrix"><thead><tr><th>结论</th><th>代码 / 测试入口</th><th>当前边界</th></tr></thead><tbody>
+      <tr><td>Tenant 不能伪造</td><td><code>src/auth</code>；<code>tests/http/tenant-boundary.test.ts</code></td><td class="good">确定性 HTTP/API Key 证据</td></tr>
+      <tr><td>Workspace 不接受任意宿主路径</td><td><code>WorkspaceService</code>；Workspace HTTP 测试</td><td class="good">服务端 root 映射；仍是服务器本地目录</td></tr>
+      <tr><td>runsc 不能静默回退</td><td><code>DockerRunscRuntimeAdapter</code>；<code>tests/sandbox/sandbox-runtime-profile.test.ts</code></td><td class="warn">fake inspect 已验证；Linux daemon 待执行</td></tr>
+      <tr><td>Pi 工具走 Sandbox 命令边界</td><td><code>PiAdapter</code>；<code>Pi ToolGateway</code> 测试</td><td class="good">命令映射已覆盖；兼容性仍需真机任务</td></tr>
+      <tr><td>Sandbox LOST 收敛</td><td><code>ContainerSandboxProvider.markLost()</code>；Stage 2 集成测试</td><td class="warn">fake Docker/生命周期链已验证；真实 kill 待执行</td></tr>
+      <tr><td>runc/runsc 哪个更适合</td><td><code>bun run benchmark:sandbox</code></td><td class="warn">必须在 Linux 同镜像/同资源策略下测；当前没有结果</td></tr>
+    </tbody></table></div>
+  </section>
+
+  <section class="section" id="deployment">
+    <div class="section-head"><div><h2>部署与验收课</h2><p>当前推荐 CPU Linux Server 做控制面/Sandbox 验证；A6000 只在需要真实 vLLM/VRAM admission 时接入。当前容器云实例不能替代完整 Linux VM。</p></div></div>
+    <div class="boundary">
+      <div class="boundary-card"><h3 style="color:var(--cyan)">服务器前置</h3><p><code>Ubuntu x86_64</code>、root/sudo、rootful Docker、可安装 runsc；需要 Kata/Firecracker 时再确认 <code>/dev/kvm</code>。</p></div>
+      <div class="boundary-card"><h3 style="color:var(--amber)">外部 Model API</h3><p>模型不是 Harness 核心。Pi 通过 OpenAI-compatible endpoint 运行；外部 API 没有 vLLM metrics 时不能伪造 VRAM 证据。</p></div>
+      <div class="boundary-card"><h3 style="color:var(--violet)">真机入口</h3><p><code>preflight:server</code> → <code>smoke:container:attacks</code> → <code>benchmark:sandbox</code>。PASS 输出保存原始配置与结果。</p></div>
+    </div>
+    <div class="panel" style="margin-top:14px;padding:20px"><div class="code"># Linux Server deployment gate
+bun install
+bun run typecheck
+bun run test
+bun run preflight:server
+
+# Real Sandbox evidence
+bun run smoke:container
+bun run smoke:container:attacks
+bun run benchmark:sandbox</div></div>
+  </section>
+
+  <section class="section" id="interview">
+    <div class="section-head"><div><h2>面试追问速答</h2><p>点击问题展开。回答必须回到代码符号和证据，不把历史方案说成当前承诺。</p></div></div>
+    <div class="interview" id="qa-list"></div>
+  </section>
+
+  <footer class="footer"><span>课程来源：当前仓库代码、README、ADR 0009、路线图、P0 实施记录与完整项目细节课程。</span><span>最后更新：P0.5 runtime profiles + Linux server preflight 之后。</span></footer>
+</main>
+<script>
+const flowDetails = {
+  request: ['CURRENT TRACE · HTTP','身份不是请求体里的 tenantId','入口由 <code>HarnessHttpApi.requirePrincipal()</code> 验证 API Key，得到 <code>RequestPrincipal { subjectId, tenantId, scopes }</code>。之后所有 Workspace、Run、Event 和 Artifact 查询都以 Principal 派生的 Tenant 为边界。'],
+  workspace: ['CURRENT TRACE · WORKSPACE','Workspace 是受管资源，不是客户端路径','<code>WorkspaceService.create()</code> 在 <code>HARNESS_WORKSPACE_ROOT/&lt;tenant&gt;/&lt;uuid&gt;</code> 下创建目录。HTTP 只接受 <code>workspaceId</code>；Container Provider 最终只把该目录挂载到 <code>/workspace</code>。'],
+  run: ['CURRENT TRACE · RUN / ATTEMPT','Run 是用户任务，Attempt 是一次实际执行','<code>RunService</code> 持久化 Run 状态与事件；<code>RunAttemptStore</code> 为 START/RESUME 建立实际尝试。不能只看一个数据库终态，要同时看事件、Attempt、ToolExecution 和 Checkpoint。'],
+  queue: ['CURRENT TRACE · ADMISSION','资源事实改变 START/QUEUE，但不绕过硬边界','<code>ResourceObserver</code> 产出 Snapshot，<code>ResourceAdmissionService</code> 调用确定性策略，<code>TenantRunScheduler</code> 负责 Tenant 内 FIFO、Tenant 间 round-robin。'],
+  managed: ['CURRENT TRACE · CONTROL BINDING','ManagedAgentRuntime 是 Stage 1/2 的收敛点','它在 Runtime 前固定 Template/Instance/Capability/EffectivePolicy，创建 Attempt，再创建 Sandbox；Sandbox ACTIVE 后才调用 inner Runtime。'],
+  sandbox: ['CURRENT TRACE · ENVIRONMENT','SandboxProvider 是可替换生命周期合同','development 只用于 ManagedLocal；default/restricted-egress 通过 OCI compiler + runsc adapter；strict 目前只路由到显式 unavailable Provider，绝不静默降级。'],
+  pi: ['CURRENT TRACE · BEHAVIOR','Pi 提供 Agent loop，Harness 不重写模型—工具循环','<code>PiAdapter</code> 把 Run、Session、ToolGateway 和 SandboxExecutor 接到 Pi SDK。模型请求是可替换的 OpenAI-compatible API 依赖。'],
+  tool: ['CURRENT TRACE · SIDE EFFECT','策略允许不等于副作用已经安全完成','<code>ToolGateway</code> 先做 policy guard，再持久化 PREPARED；成功结果形成 Checkpoint；UNKNOWN_EFFECT 恢复时进入人工处理而不是盲目重放。'],
+  result: ['CURRENT TRACE · USER RESULT','COMPLETED 不是用户最终需要的全部','<code>RunWorkspaceResultCoordinator</code> 生成 BEFORE/AFTER Diff，<code>RunArtifactStore</code> 固化已验证文件。用户得到回答、文件变化和 Artifact，内部事件作为解释证据。']
+};
+const modules = [
+  {n:'01',cat:'product',title:'系统语言：Behavior / Control / Infrastructure',desc:'先分清模型行为、Harness 控制面和真实执行环境，避免把 Agent Loop、资源调度和 Sandbox 混成一层。',items:['Command / Event / State / Decision','为什么 State 和 Event 必须同时存在','当前范围与明确非目标'],links:[['README.md','../README.md'],['ADR 0009','adr/0009-build-a-multi-tenant-agent-task-service.md'],['完整课程','complete-project-detail-course.zh-CN.md']]},
+  {n:'02',cat:'product control',title:'HTTP、Principal 与 Tenant 边界',desc:'从一个 Bearer API Key 开始，追到所有外部资源查询为什么以认证 Tenant 收口。',items:['ApiCredentialStore：只存 digest','RequestPrincipal 与 scopes','IDOR 统一 404 与访问审计'],links:[['HarnessHttpApi','../src/http/harness-http-api.ts'],['ApiCredentialStore','../src/auth/api-credential-store.ts'],['Tenant tests','../tests/http/tenant-boundary.test.ts']]},
+  {n:'03',cat:'product sandbox',title:'Workspace：用户项目如何变成受管目录',desc:'Workspace 是用户可理解的产品对象，Sandbox 只是某次 Attempt 获得的执行环境。',items:['workspaceId 不等于宿主路径','Tenant root 与路径穿越保护','Workspace snapshot / Diff / Artifact'],links:[['WorkspaceService','../src/workspaces/workspace-service.ts'],['Snapshot','../src/workspaces/workspace-snapshot.ts'],['ArtifactStore','../src/workspaces/run-artifact-store.ts']]},
+  {n:'04',cat:'control',title:'Run / Attempt 状态与 SQLite 事实',desc:'一次用户任务如何被持久化、产生事件、绑定控制面版本，并在重启后继续解释。',items:['Run 是用户任务，Attempt 是执行尝试','状态快照与追加式事件','migration、CAS、dedupe key'],links:[['Run state','../src/runs/run-state-machine.ts'],['RunStore','../src/runs/runstore.ts'],['AttemptStore','../src/runs/run-attempt-store.ts'],['Migrations','../src/storage/migrations.ts']]},
+  {n:'05',cat:'control',title:'资源观测、准入与 Tenant 公平队列',desc:'显存/请求/KV 指标只决定什么时候启动；调度器仍需要租户公平和全局硬上限。',items:['ResourceSnapshot → PolicyDecision','CRITICAL/UNKNOWN 的背压','Tenant FIFO + round-robin + single-flight'],links:[['Observer','../src/resources/resource-observer.ts'],['Admission','../src/resources/resource-admission-service.ts'],['Queue','../src/scheduling/run-queue-coordinator.ts'],['Tests','../tests/integration/day7-recovery-resource.e2e.test.ts']]},
+  {n:'06',cat:'runtime',title:'PiAdapter 与 RuntimeEventBridge',desc:'Harness 不重新实现模型—工具循环，只把 Pi SDK 的事件、Session 和工具调用适配成稳定合同。',items:['AgentRuntime 的 start/resume/interrupt','runtime session 与 RunId 隔离','事件去重、usage 和时间线'],links:[['AgentRuntime','../src/runtime/agent-runtime.ts'],['PiAdapter','../src/runtime/pi-adapter.ts'],['Event bridge','../src/events/runtime-event-bridge.ts'],['Contract tests','../tests/runtime']]},
+  {n:'07',cat:'runtime control',title:'ToolGateway：副作用先于恢复',desc:'工具执行是可靠性核心：先记录意图，再执行，再保存确定结果和 Checkpoint。',items:['READ_ONLY / IDEMPOTENT_WRITE / UNKNOWN_EFFECT','PREPARED 防止不确定副作用自动重放','Policy guard 与真实 invoke 的顺序'],links:[['ToolGateway','../src/tools/tool-gateway.ts'],['ToolExecution','../src/tools/tool-execution.ts'],['Checkpoint','../src/checkpoints/checkpoint-store.ts'],['Recovery','../src/checkpoints/recovery-service.ts']]},
+  {n:'08',cat:'control sandbox',title:'Template / Instance / Capability / Effective Policy',desc:'新 Run 固定执行版本、能力和五层策略交集，拒绝把可变配置偷偷带入恢复。',items:['Template version 不可变','Capability validation fail closed','Policy snapshot 贯穿 Attempt 与 Tool'],links:[['Templates','../src/templates'],['Capabilities','../src/runtime/runtime-capability.ts'],['Policy','../src/policies/effective-policy.ts'],['Managed runtime','../src/runtime/managed-agent-runtime.ts']]},
+  {n:'09',cat:'sandbox',title:'Sandbox 生命周期与 Pi 工具命令边界',desc:'Container 不是一条孤立的 docker run；它必须和 Attempt、Instance、ToolExecutor、LOST 收敛在一起。',items:['每 Attempt 一个 Sandbox','docker exec --workdir /workspace','容器丢失 → LOST → Attempt/Run 收敛'],links:[['Provider contract','../src/sandbox/sandbox-provider.ts'],['Container','../src/sandbox/container-sandbox-provider.ts'],['Pi tools','../src/runtime/pi-tool-gateway.ts'],['LOST test','../tests/integration/stage1-stage2-control-plane.e2e.test.ts']]},
+  {n:'10',cat:'sandbox evidence',title:'P0.5：OCI compiler 与 runsc adapter',desc:'OCI 是镜像/生命周期接口，runtime adapter 负责证明实际执行边界。',items:['default/restricted-egress/strict','runsc inspect evidence','不支持能力 fail closed，不回退 runc'],links:[['Sandbox profile','../src/sandbox/sandbox-profile.ts'],['OCI compiler','../src/sandbox/oci-sandbox-spec.ts'],['Runtime adapter','../src/sandbox/container-runtime-adapter.ts'],['Router','../src/sandbox/sandbox-provider-router.ts']]},
+  {n:'11',cat:'product',title:'用户结果：输出、Diff 与 Artifact',desc:'用户需要的是可以使用的修改结果，而不是一行 COMPLETED。',items:['text_delta → RunOutputStore','BEFORE/AFTER manifest','hash 验证、symlink 拒绝、Artifact 固化'],links:[['Output','../src/runs/run-output-store.ts'],['Result coordinator','../src/workspaces/run-workspace-result.ts'],['Dashboard','../src/http/harness-dashboard.ts']]},
+  {n:'12',cat:'evidence',title:'HTTP、Console 与 Demo',desc:'最小产品界面通过正式 API 展示任务历史、输出、Diff 和终态 Artifact；Fake Demo 不冒充 Docker/GPU 证据。',items:['同源 Task Console','demo:console 的证据边界','HTTP process smoke'],links:[['HTTP API','../src/http/harness-http-api.ts'],['Demo','../src/demo/task-console-demo.ts'],['Smoke','../scripts/day7-http-smoke.ts']]},
+  {n:'13',cat:'evidence sandbox',title:'真机验收与 Runtime Benchmark',desc:'没有 Linux Docker/runsc 输出时，安全结论只能标记为未验证。',items:['server-preflight：环境门','攻击 smoke：文件/Secret/网络/资源/LOST','runc vs runsc：冷启动、exec、I/O、cleanup'],links:[['Preflight','../scripts/server-preflight.sh'],['Attack smoke','../scripts/container-sandbox-attack-smoke.ts'],['Benchmark','../scripts/sandbox-runtime-benchmark.ts'],['Runbook','sandbox-runtime-benchmark-runbook.zh-CN.md']]},
+  {n:'14',cat:'evidence',title:'部署边界与诚实表述',desc:'面试版部署使用 Ubuntu Server + rootful Docker + 外部 Model API；不把容器云/Jupyter Pod 当完整 Sandbox 主机。',items:['Workspace 数据目录和容器 UID','systemd 服务用户','A6000 只负责真实 vLLM/VRAM 证据'],links:[['Deployment runbook','linux-server-deployment-runbook.zh-CN.md'],['Service unit','../deploy/harness.service.example'],['Implementation log','implementation-log/2026-08-p0-tenant-sandbox.zh-CN.md']]}
+];
+const coverage = [
+ ['app','Composition Root、配置、生命周期','done'],['auth','API Key / Principal','done'],['audit','访问允许/拒绝审计','done'],['checkpoints','恢复边界与执行器','done'],['control-plane','旧入口到默认 Pi 控制绑定','done'],['events','Runtime → RunEvent','done'],['http','API、Server、Console','done'],['instances','Instance 状态与租户绑定','done'],['policies','五层交集与 Tool policy','done'],['resources','GPU/vLLM observer 与准入','done'],['runtime','Pi、Managed wrapper、Tool adapter','done'],['sandbox','ManagedLocal、OCI、runsc、Router','verify'],['scheduling','公平队列、slot、drain','done'],['sessions','Harness Session / Runtime ref','done'],['storage','SQLite migrations / opener','done'],['templates','不可变 TemplateVersion','done'],['tools','副作用与持久化结果','done'],['workspaces','受管 Workspace / Diff / Artifact','done'],['runs','Run / Attempt / Output','done'],['spikes','真实 Pi + vLLM 实验','verify'],['demo','Day 7 / Console 演示','done'],['strict Provider','Kata/Firecracker 接口位置','reserved'],['tests','确定性、组件、HTTP、E2E','done']
+];
+const timeline = [
+ ['01 · CREATE','HTTP 创建 Run；RunStore 写入 QUEUED','src/runs/run-service.ts'],['02 · AUTH','Principal 派生 Tenant；Workspace 资源收口','src/http/harness-http-api.ts'],['03 · ADMIT','Observer 产 Snapshot；Policy 决定 START/QUEUE','src/resources/'],['04 · ATTEMPT','创建 Attempt，固定 Template/Capability/Policy','src/runtime/managed-agent-runtime.ts'],['05 · SANDBOX','创建 Sandbox；ACTIVE 后才运行 Pi','src/sandbox/'],['06 · TOOL','Pi 工具经过 Gateway、policy、checkpoint','src/tools/'],['07 · RESULT','输出、Diff、Artifact 写入持久事实','src/workspaces/'],['08 · RECOVER','LOST/重启/副作用不确定时安全收敛','src/checkpoints/']
+];
+const qas = [
+ ['为什么不自己实现 Agent Loop？','Pi 已经提供模型—工具循环、Session 和 Runtime 事件。Harness 的差异化是身份、策略、Sandbox、资源准入、恢复和结果交付；重复实现 Loop 会削弱执行控制面的边界。'],
+ ['为什么 Tenant 不能来自请求体？','请求体中的 tenantId 是不可信输入。ApiCredentialStore 从 API Key 摘要派生 RequestPrincipal，HTTP 资源访问使用 Principal.tenantId；跨 Tenant 查询统一 404，避免 IDOR 泄露。'],
+ ['Docker 和 runsc 的关系是什么？','Docker 负责 OCI 镜像、mount 和生命周期入口；default profile 通过 --runtime runsc 选择 gVisor。docker inspect 必须观察到 runsc，否则清理并 FAILED，不能静默回退到 runc。'],
+ ['为什么有 Run 和 Attempt 两个对象？','Run 是用户看到的一次任务；Attempt 是一次实际 START/RESUME 执行。恢复、失败 Sandbox、能力拒绝都需要留下新的尝试事实，而不是覆盖用户任务。'],
+ ['PREPARED 为什么不能直接重放？','PREPARED 只证明执行意图已落盘，不能证明外部副作用有没有发生。READ_ONLY 可安全重放，确定的幂等写入按策略处理，UNKNOWN_EFFECT 必须进入人工审查。'],
+ ['当前是否是生产级隔离？','不是。当前代码已经有 Docker 参数、runsc adapter、攻击 smoke 和 runtime evidence，但没有 Linux Docker/runsc 真机输出前，不能声称 gVisor 实际隔离已通过；也没有 strict microVM Provider。'],
+ ['模型是不是项目核心？','不是。模型通过可替换的 OpenAI-compatible API 接入，Pi 负责 Agent loop。A6000/vLLM 只用于真实 VRAM admission 和端到端证据，Harness 核心仍是多租户任务服务。'],
+ ['为什么任务完成还要 Diff/Artifact？','COMPLETED 只表示执行状态。用户真正需要的是最终回答、文件变化和可下载交付物；Artifact 复制前校验 hash、拒绝 symlink，避免当前 Workspace 后续变化污染历史结果。']
+];
+function renderModules() {
+  const grid = document.getElementById('module-grid');
+  grid.innerHTML = modules.map(m => `<article class="module" data-cat="${m.cat}" data-text="${[m.title,m.desc,...m.items,...m.links.flat()].join(' ').toLowerCase()}"><div class="module-top"><span class="module-num">CHAPTER ${m.n}</span><span class="chip">${m.cat.split(' ').join(' · ')}</span></div><h3>${m.title}</h3><p>${m.desc}</p><ul>${m.items.map(x=>`<li>${x}</li>`).join('')}</ul><div class="module-links">${m.links.map(([name,href])=>`<a href="${href}">${name}</a>`).join('')}</div></article>`).join('');
+}
+function renderCoverage() {
+  document.getElementById('coverage-list').innerHTML = coverage.map(([name,desc,state])=>`<div class="coverage-item" data-state="${state}"><b>${name}</b><span>${desc}</span></div>`).join('');
+}
+function renderTimeline() {
+  document.getElementById('timeline-grid').innerHTML = timeline.map((t,i)=>`<div class="timeline-step"><strong>${t[0]}</strong><span>${t[1]}</span><br><button type="button" data-timeline="${i}">${t[2]}</button></div>`).join('');
+}
+function renderQA() {
+  document.getElementById('qa-list').innerHTML = qas.map(([q,a])=>`<div class="qa"><button type="button">${q}</button><div class="answer">${a}</div></div>`).join('');
+}
+function setFlow(key) {
+  const data = flowDetails[key]; if (!data) return;
+  document.querySelectorAll('.flow-node').forEach(n=>n.classList.toggle('active', n.dataset.flow===key));
+  const nodeIndex = [...document.querySelectorAll('.flow-node')].findIndex(n=>n.dataset.flow===key);
+  document.querySelectorAll('.flow-arrow').forEach((a,i)=>a.classList.toggle('active', i < nodeIndex));
+  const d=document.getElementById('flow-detail'); d.innerHTML=`<div class="label">${data[0]}</div><h3>${data[1]}</h3><p>${data[2]}</p>`;
+}
+function setTimeline(i) {
+  const t=timeline[i]; document.getElementById('timeline-detail').innerHTML=`<div class="label">${t[0]}</div><h3>${t[1]}</h3><p>代码入口：<code>${t[2]}</code>。沿此入口继续向下阅读，可以看到当前事实在哪里创建、由谁消费、何时持久化，以及失败时应该留下什么状态。</p>`;
+}
+renderModules(); renderCoverage(); renderTimeline(); renderQA();
+document.querySelectorAll('.flow-node').forEach(n=>n.addEventListener('click',()=>setFlow(n.dataset.flow)));
+document.querySelectorAll('[data-timeline]').forEach(b=>b.addEventListener('click',()=>setTimeline(Number(b.dataset.timeline))));
+document.querySelectorAll('.qa button').forEach(b=>b.addEventListener('click',()=>b.parentElement.classList.toggle('open')));
+document.querySelectorAll('[data-filter]').forEach(b=>b.addEventListener('click',()=>{
+  document.querySelectorAll('[data-filter]').forEach(x=>x.classList.toggle('active',x===b)); const f=b.dataset.filter;
+  document.querySelectorAll('.module').forEach(m=>m.classList.toggle('hidden', f!=='all' && !m.dataset.cat.split(' ').includes(f)));
+}));
+document.getElementById('module-search').addEventListener('input', e=>{
+  const q=e.target.value.trim().toLowerCase(); document.querySelectorAll('.module').forEach(m=>m.classList.toggle('hidden',q && !m.dataset.text.includes(q)));
+});
+</script>
+</body>
+</html>
