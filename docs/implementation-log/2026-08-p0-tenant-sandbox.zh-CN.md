@@ -338,3 +338,23 @@ Kata/Firecracker 尚无本项目 Provider，因此没有伪造 benchmark 结果�
 - 新增 `docs/completion-status.zh-CN.md`：逐条对账 roadmap「§9 完成定义」（8 条全命中/自证）+ 差异化 ABC + 诚实边界，面试可直接引用；
 - 新增 `docs/gpu-completion-runbook.zh-CN.md`：GPU 真机闭合的完整可复现步骤（租机→版本矩阵与踩坑→下载模型→起 vLLM→/metrics→ECS 隧道→e2e 验收→停止），已实测跑通；
 - 至此：roadmap 完成定义 8 条全部真机闭合，git 跟踪测试 238 全绿。
+
+### 2026-08-19：差异化深化 —— 方向A 执行质量评测闭环 + 方向B 观测驾驶舱
+
+背景：能力闭环（可靠执行）已成，面向 agent infra 岗位深化「可度量 + 可看见」。方向 C（LLM 网关/多模型路由）记录为秋招后候选（README/roadmap），暂不做。
+
+**方向 A：执行质量评测闭环（Eval）**
+- 指标对齐行业标准：真实浏览器调研 OpenTelemetry GenAI 语义约定 + Langfuse/LangSmith，确认行业核心维度为 token usage / cost / latency / quality / volume / error；
+- 关键发现：Pi `model_completed` 事件已带完整 usage（input/output/cacheRead/cacheWrite/reasoning/total + cost），**对齐行业标准零新增采集**；
+- 特有护城河指标：背压触发率、排队 reasonCode 分布、副作用危险拦截率、无人值守率、KV cache 命中率、完成度（Diff/Artifact/finalText）；
+- `src/eval/execution-metrics.ts` 三层指标模型（单任务/聚合/资源准入）；`src/eval/evaluation-aggregator.ts` 纯读取现有落库数据计算；`scripts/eval-report.ts` 一键出报告；6 个新测试全绿。
+
+**方向 B：观测驾驶舱（把指标「看见」）**
+- `GET /eval`：暴露 A 的评测指标 JSON（无认证模式全量；有认证按租户隔离）；
+- `GET /observe`：自包含观测页 `src/http/harness-observe-page.ts`，渲染执行质量/完成度/工具副作用治理/资源准入背压/排队原因/任务明细，3s 自动刷新；不影响现有任务操作台 `/`；
+- 注入：`create-harness-application` 装配 `EvaluationAggregator` 传入 `HarnessHttpApi` 新增的第 4 个可选参数（**不动** `HarnessApplication` 位置参数构造，向后兼容）；
+- 真机浏览器验证渲染：16 指标卡 + 完成度进度条 + 背压指标全部上屏。
+
+**验收**：git 跟踪测试 238 → 244 全绿；提交 `1c441bc`(A) / `cb8f175`(B)。
+
+**下一步候选**：观测驾驶舱部署为常驻服务（需恢复/确认 ECS）；方向 C LLM 网关；多任务真实评测数据积累。
