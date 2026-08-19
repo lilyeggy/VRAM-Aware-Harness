@@ -138,9 +138,18 @@ export class HarnessHttpApi {
                         const tenantFilter =
                             url.searchParams.get("tenant") ?? undefined;
                         const runs = this.evaluation.listRunMetrics(tenantFilter);
+                        const tenants = this.evaluation.listTenants();
+                        // 每个租户各自的指标，供观测页画租户对比图。
+                        const perTenant = tenants.map((t) => ({
+                            tenant: t,
+                            summary: this.evaluation.summarize(
+                                this.evaluation.listRunMetrics(t),
+                            ),
+                        }));
                         return jsonResponse({
                             scope: tenantFilter ?? "all-tenants",
-                            tenants: this.evaluation.listTenants(),
+                            tenants,
+                            perTenant,
                             executionQuality: this.evaluation.summarize(runs),
                             resourceAdmission:
                                 this.evaluation.computeResourceEvaluation(
