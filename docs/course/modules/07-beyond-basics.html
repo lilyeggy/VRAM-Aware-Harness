@@ -1,0 +1,165 @@
+<section class="module" id="module-7" style="background: var(--color-bg-warm)">
+  <div class="module-content">
+    <header class="module-header animate-in">
+      <span class="module-number">07</span>
+      <h1 class="module-title">从可用，到可度量、可观测、可路由</h1>
+      <p class="module-subtitle">基础能力跑通之后，一个 Agent 服务还要回答三个问题：跑得好不好？能不能一眼看见？模型调用靠不靠谱？这三个方向把项目从 demo 推向了可面试的 agent infra。</p>
+    </header>
+
+    <div class="module-body">
+
+      <!-- ══════════════ SCREEN 1 · 评测闭环 ══════════════ -->
+      <section class="screen animate-in">
+        <h2 class="screen-heading">A · 执行质量评测闭环：跑完不是终点</h2>
+
+        <p>任务跑完了，系统该怎么知道自己「跑得好不好」？如果只看「有没有输出」，很多隐患会被掩盖：排队是不是太频繁？模型成本花在哪？有没有危险工具被放行？Cache 命中率有没有下降？</p>
+
+        <p>方向 A 做了一件事：<b>把已经落库的数据重新算一遍指标</b>。既然模型调用事件、工具执行、资源准入决策、Diff、Artifact、输出片段都已经写进数据库，评测就不需要再额外埋点采集，直接读现有表即可。</p>
+
+        <div class="pattern-cards stagger-children">
+          <div class="pattern-card animate-in" style="border-top: 3px solid var(--color-actor-3)">
+            <div class="pattern-icon" style="background: var(--color-actor-3)">📊</div>
+            <h4 class="pattern-title">行业标配</h4>
+            <p class="pattern-desc">Token、成本、延迟 P95、成功率、完成度——证明「我懂 agent infra 的常规指标」。</p>
+          </div>
+          <div class="pattern-card animate-in" style="border-top: 3px solid var(--color-actor-4)">
+            <div class="pattern-icon" style="background: var(--color-actor-4)">🛡️</div>
+            <h4 class="pattern-title">护城河</h4>
+            <p class="pattern-desc">背压触发率、无人值守率、危险拦截率、cache 命中率——这些是控制面独有的。</p>
+          </div>
+          <div class="pattern-card animate-in" style="border-top: 3px solid var(--color-actor-1)">
+            <div class="pattern-icon" style="background: var(--color-actor-1)">🧮</div>
+            <h4 class="pattern-title">聚合器</h4>
+            <p class="pattern-desc"><code>EvaluationAggregator</code> 纯读取现有表，零新增采集。</p>
+          </div>
+        </div>
+
+        <div class="callout callout-info">
+          <div class="callout-icon">📈</div>
+          <div class="callout-content">
+            <strong class="callout-title">面试可讲</strong>
+            <p>「我没自己造一套采集，而是复用了 Pi 已经发出的 <code>model_completed</code> 事件，对齐 OpenTelemetry GenAI Semantic Convention。这样既保证指标准确，又避免侵入 agent 执行路径。」</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- ══════════════ SCREEN 2 · 观测驾驶舱 ══════════════ -->
+      <section class="screen animate-in">
+        <h2 class="screen-heading">B · 观测驾驶舱：一眼看见执行质量</h2>
+
+        <p>指标算出来了，还要让人一眼看懂。方向 B 做了一个独立的观测页 <code>/observe</code>：它和任务操作台 <code>/</code> 完全解耦，只读，不会误触任务。数据来自同一个 <code>GET /eval</code> 端点，支持按租户过滤。</p>
+
+        <p>关键设计是「用图表说话，而不是堆数字卡片」：</p>
+
+        <div class="icon-rows stagger-children">
+          <div class="icon-row animate-in">
+            <div class="icon-circle" style="background: var(--color-actor-2)">🍩</div>
+            <div>
+              <strong>任务状态环形图</strong>
+              <p>COMPLETED / FAILED / RUNNING / QUEUED 的占比，中心显示任务总数。</p>
+            </div>
+          </div>
+          <div class="icon-row animate-in">
+            <div class="icon-circle" style="background: var(--color-actor-5)">📶</div>
+            <div>
+              <strong>租户对比条形</strong>
+              <p>各租户的任务规模 + 成功率横向对比，立刻看出哪个租户质量差。</p>
+            </div>
+          </div>
+          <div class="icon-row animate-in">
+            <div class="icon-circle" style="background: var(--color-actor-3)">🌊</div>
+            <div>
+              <strong>资源背压堆叠条</strong>
+              <p>START 和 QUEUE 的比例，叠加背压触发率 / 观测失败率。</p>
+            </div>
+          </div>
+          <div class="icon-row animate-in">
+            <div class="icon-circle" style="background: var(--color-actor-1)">📋</div>
+            <div>
+              <strong>任务明细表</strong>
+              <p>租户徽章、状态徽章、Token、成本、排队耗时、危险拦截数。</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="callout callout-info">
+          <div class="callout-icon">👁️</div>
+          <div class="callout-content">
+            <strong class="callout-title">面试可讲</strong>
+            <p>「观测页走独立路由 /observe，不动现有任务操作台。注入走 HarnessHttpApi 的可选参数，没有改 HarnessApplication 的构造。这是最小侵入原则：观测只是旁路，不能影响主链路。」</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- ══════════════ SCREEN 3 · LLM 网关 ══════════════ -->
+      <section class="screen animate-in">
+        <h2 class="screen-heading">C · LLM 网关：让模型调用也能 failover</h2>
+
+        <p>Pi 调模型时，原本是直接连到 <code>.pi/spike/models.json</code> 里写的 <code>baseUrl</code>。这个地址一旦不可用，任务就失败。方向 C 在 Pi 和真实模型后端之间加了一个 OpenAI 兼容的<b>模型调用代理</b>。</p>
+
+        <div class="flow-steps animate-in">
+          <div class="flow-step">
+            <div class="flow-step-num">1</div>
+            <p>Pi 发 OpenAI 请求</p>
+          </div>
+          <div class="flow-arrow">→</div>
+          <div class="flow-step">
+            <div class="flow-step-num">2</div>
+            <p>网关按 model 查路由表</p>
+          </div>
+          <div class="flow-arrow">→</div>
+          <div class="flow-step">
+            <div class="flow-step-num">3</div>
+            <p>主后端失败 → 自动回退</p>
+          </div>
+          <div class="flow-arrow">→</div>
+          <div class="flow-step">
+            <div class="flow-step-num">4</div>
+            <p>连续失败 → 熔断跳过</p>
+          </div>
+          <div class="flow-arrow">→</div>
+          <div class="flow-step">
+            <div class="flow-step-num">5</div>
+            <p>记录 RouteDecision</p>
+          </div>
+        </div>
+
+        <p>网关只做模型调用层的可靠性，<b>Agent 和控制面都不变</b>。接入方式只是把 models.json 的 <code>baseUrl</code> 从直连 vllm 改成控制面地址；网关再根据 <code>LLM_BACKENDS</code> 环境变量转发到真实后端。</p>
+
+        <div class="callout callout-info">
+          <div class="callout-icon">🔌</div>
+          <div class="callout-content">
+            <strong class="callout-title">面试可讲</strong>
+            <p>「我没有动 agent 逻辑，只做了一个 OpenAI 兼容代理。它支持主备回退和熔断，并把每次路由决策记下来。未来还可以和资源准入联动：当 vllm 压力过大时，主动把流量切到云端。」</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- ══════════════ SCREEN 4 · 三个方向的共同点 ══════════════ -->
+      <section class="screen animate-in">
+        <h2 class="screen-heading">A / B / C 的共同设计原则</h2>
+
+        <div class="pattern-cards stagger-children">
+          <div class="pattern-card animate-in" style="border-top: 3px solid var(--color-actor-1)">
+            <div class="pattern-icon" style="background: var(--color-actor-1)">🔒</div>
+            <h4 class="pattern-title">不动控制面主链路</h4>
+            <p class="pattern-desc">Eval 只读取落库数据，观测页是独立旁路，网关只代理模型调用接口。</p>
+          </div>
+          <div class="pattern-card animate-in" style="border-top: 3px solid var(--color-actor-2)">
+            <div class="pattern-icon" style="background: var(--color-actor-2)">🧩</div>
+            <h4 class="pattern-title">优先复用现有抽象</h4>
+            <p class="pattern-desc">复用 Pi 已有事件、复用 policy_decisions 决策台账思路、复用 HarnessHttpApi 注入。</p>
+          </div>
+          <div class="pattern-card animate-in" style="border-top: 3px solid var(--color-actor-3)">
+            <div class="pattern-icon" style="background: var(--color-actor-3)">📐</div>
+            <h4 class="pattern-title">面试价值</h4>
+            <p class="pattern-desc">每个方向都能独立讲：指标设计、数据可视化、可靠性工程——三个 agent infra 核心话题。</p>
+          </div>
+        </div>
+
+        <p>到这里，项目不再只是一个「能跑任务」的多租户服务，而是一个可以度量、可以看见、可以 fail-over 的 agent 基础设施雏形。</p>
+      </section>
+
+    </div>
+  </div>
+</section>
