@@ -25,7 +25,9 @@ import type { RunOutputChunk } from "../runs/run-output-store.ts";
 import type { WorkspaceDiff } from "../workspaces/workspace-snapshot.ts";
 import type { RunArtifact } from "../workspaces/run-artifact-store.ts";
 import type { AccessAuditStore } from "../audit/access-audit-store.ts";
+import type { EvaluationAggregator } from "../eval/evaluation-aggregator.ts";
 import { dashboardResponse } from "./harness-dashboard.ts";
+import { observePageResponse } from "./harness-observe-page.ts";
 
 export interface HarnessHttpApplication {
     isStarted():boolean;
@@ -74,6 +76,7 @@ export class HarnessHttpApi {
         private readonly application:HarnessHttpApplication,
         private readonly checkpointLookup:CheckpointLookup,
         private readonly accessControl?:HttpAccessControl,
+        private readonly evaluation?:EvaluationAggregator,
     ) {}
 
     async fetch(request:Request):Promise<Response> {
@@ -124,6 +127,37 @@ export class HarnessHttpApi {
                 }
                 case "audit":
                     return this.listAuditEvents(request);
+                case "observe":
+                    return observePageResponse();
+                case "eval": {
+                    if (this.evaluation === undefined) {
+                        throw new HttpError(503, "评测能力未启用");
+                    }
+                    // 无认证模式（本地/演示）返回全量；有认证则按租户隔离。
+                    if (this.accessControl === undefined) {
+                        const all = this.evaluation.listRunMetrics();
+                        return jsonResponse({
+                            scope: "all-tenants",
+                            executionQuality: this.evaluation.summarize(all),
+                            resourceAdmission:
+                                this.evaluation.computeResourceEvaluation(),
+                            runs: all,
+                        });
+                    }
+                    const principal =
+                        this.requirePrincipal(request, "tasks:read");
+                    const runs =
+                        this.evaluation.listRunMetrics(principal.tenantId);
+                    return jsonResponse({
+                        scope: principal.tenantId,
+                        executionQuality: this.evaluation.summarize(runs),
+                        resourceAdmission:
+                            this.evaluation.computeResourceEvaluation(
+                                principal.tenantId,
+                            ),
+                        runs,
+                    });
+                }
             }
         }
 

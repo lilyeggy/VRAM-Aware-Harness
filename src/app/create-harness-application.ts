@@ -75,6 +75,7 @@ import {
     TenantRunScheduler,
 } from "../scheduling/tenant-run-scheduler.ts";
 import { openHarnessDatabase } from "../storage/database.ts";
+import { EvaluationAggregator } from "../eval/evaluation-aggregator.ts";
 import { HarnessTemplateStore } from "../templates/harness-template-store.ts";
 import { ToolExecutionStore } from "../tools/tool-execution-store.ts";
 import { ToolGateway } from "../tools/tool-gateway.ts";
@@ -295,6 +296,7 @@ export async function createHarnessApplication(
         runOutputStore,
         workspaceResultCoordinator,
     );
+    const evaluationAggregator = new EvaluationAggregator(database);
     const httpApi = new HarnessHttpApi(
         application,
         checkpointStore,
@@ -303,6 +305,7 @@ export async function createHarnessApplication(
             workspaceService,
             auditStore: accessAuditStore,
         },
+        evaluationAggregator,
     );
 
     let closed = false;
