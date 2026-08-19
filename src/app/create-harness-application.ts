@@ -76,6 +76,8 @@ import {
 } from "../scheduling/tenant-run-scheduler.ts";
 import { openHarnessDatabase } from "../storage/database.ts";
 import { EvaluationAggregator } from "../eval/evaluation-aggregator.ts";
+import { ModelRouter } from "../llm-gateway/model-router.ts";
+import { LlmGateway } from "../llm-gateway/llm-gateway.ts";
 import { HarnessTemplateStore } from "../templates/harness-template-store.ts";
 import { ToolExecutionStore } from "../tools/tool-execution-store.ts";
 import { ToolGateway } from "../tools/tool-gateway.ts";
@@ -297,6 +299,10 @@ export async function createHarnessApplication(
         workspaceResultCoordinator,
     );
     const evaluationAggregator = new EvaluationAggregator(database);
+    // 方向 C：LLM 网关（仅当配置了后端时启用）。
+    const llmGateway = config.llmBackends.length > 0
+        ? new LlmGateway(new ModelRouter(config.llmBackends))
+        : undefined;
     const httpApi = new HarnessHttpApi(
         application,
         checkpointStore,
@@ -306,6 +312,7 @@ export async function createHarnessApplication(
             auditStore: accessAuditStore,
         },
         evaluationAggregator,
+        llmGateway,
     );
 
     let closed = false;

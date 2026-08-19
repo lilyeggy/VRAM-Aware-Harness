@@ -4,6 +4,7 @@ import type {
     ResourceThresholds,
 } from "../resources/resource-classifier.ts";
 import type { SandboxProfile } from "../sandbox/sandbox-profile.ts";
+import type { LlmBackend } from "../llm-gateway/model-router.ts";
 
 export interface HarnessConfig {
     databasePath:string;
@@ -31,6 +32,8 @@ export interface HarnessConfig {
     maxActiveRuns:number;
     maxActiveRunsPerTenant:number;
     pumpIntervalMs:number;
+    /** 方向 C：LLM 网关后端列表（空数组=网关未启用）。 */
+    llmBackends:LlmBackend[];
 }
 
 export type HarnessEnvironment = Record<string,string | undefined>;
@@ -120,6 +123,8 @@ export function loadHarnessConfig(
         piAuthPath:environment.PI_AUTH_PATH === undefined
             ? undefined
             : resolve(cwd, environment.PI_AUTH_PATH),
+
+        llmBackends:parseLlmBackends(environment.LLM_BACKENDS),
 
         vllmMetricsUrl:environment.VLLM_METRICS_URL
             ?? metricsUrlFromBaseUrl(vllmBaseUrl),
@@ -291,6 +296,36 @@ function loadSandboxProfile(
         throw new Error(`HARNESS_SANDBOX_PROFILE 不支持：${profile}`);
     }
     return profile;
+}
+
+function parseLlmBackends(raw:string | undefined):LlmBackend[] {
+    if (raw === undefined || raw.trim() === "") {
+        return [];
+    }
+    let parsed:unknown;
+    try {
+        parsed = JSON.parse(raw);
+    } catch {
+        throw new Error("LLM_BACKENDS 不是合法 JSON");
+    }
+    if (!Array.isArray(parsed)) {
+        throw new Error("LLM_BACKENDS 必须是 JSON 数组");
+    }
+    return parsed.map((item, index) => {
+        const b = item as Partial<LlmBackend>;
+        if (!b?.id || !b?.baseUrl || !b?.model || !b?.logicalModel) {
+            throw new Error(
+                `LLM_BACKENDS[${index}] 缺少 id/baseUrl/model/logicalModel`,
+            );
+        }
+        return {
+            id:b.id,
+            baseUrl:b.baseUrl,
+            apiKey:b.apiKey,
+            model:b.model,
+            logicalModel:b.logicalModel,
+        };
+    });
 }
 
 function loadSandboxRuntime(

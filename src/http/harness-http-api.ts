@@ -26,6 +26,7 @@ import type { WorkspaceDiff } from "../workspaces/workspace-snapshot.ts";
 import type { RunArtifact } from "../workspaces/run-artifact-store.ts";
 import type { AccessAuditStore } from "../audit/access-audit-store.ts";
 import type { EvaluationAggregator } from "../eval/evaluation-aggregator.ts";
+import type { LlmGateway } from "../llm-gateway/llm-gateway.ts";
 import { dashboardResponse } from "./harness-dashboard.ts";
 import { observePageResponse } from "./harness-observe-page.ts";
 
@@ -77,6 +78,7 @@ export class HarnessHttpApi {
         private readonly checkpointLookup:CheckpointLookup,
         private readonly accessControl?:HttpAccessControl,
         private readonly evaluation?:EvaluationAggregator,
+        private readonly llmGateway?:LlmGateway,
     ) {}
 
     async fetch(request:Request):Promise<Response> {
@@ -190,6 +192,37 @@ export class HarnessHttpApi {
             && segments[0] === "runs"
         ) {
             return this.submitRun(request);
+        }
+
+        // 方向 C：LLM 网关——OpenAI 兼容模型路由入口。
+        if (
+            request.method === "POST"
+            && segments.length === 3
+            && segments[0] === "v1"
+            && segments[1] === "chat"
+            && segments[2] === "completions"
+        ) {
+            if (this.llmGateway === undefined) {
+                throw new HttpError(503, "LLM 网关未启用");
+            }
+            return this.llmGateway.handleChatCompletions(request);
+        }
+
+        // 方向 C：LLM 网关路由统计与近期决策（观测用）。
+        if (
+            request.method === "GET"
+            && segments.length === 2
+            && segments[0] === "llm-gateway"
+            && segments[1] === "stats"
+        ) {
+            if (this.llmGateway === undefined) {
+                throw new HttpError(503, "LLM 网关未启用");
+            }
+            return jsonResponse({
+                enabled:true,
+                ...this.llmGateway.router.stats(),
+                recentDecisions:this.llmGateway.router.recentDecisions(50),
+            });
         }
 
         if (
