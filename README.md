@@ -33,7 +33,8 @@ Workspace、提交 Agent 任务、查看执行过程和文件修改，并中断�
 | 已完成深化 | Template、Instance、Capability、Effective Policy 与最小 Sandbox 已进入 Pi 主路径 | 保留，不继续平台化扩张 |
 | 当前产品深化 | 可信身份、Tenant Workspace、真实 Sandbox、任务结果与最小用户界面 | 当前唯一主线 |
 | 真实验收 | A6000、多租户隔离攻击、故障恢复、公平调度和用户端到端流程 | 必须提供可复现证据 |
-| 秋招后候选 | 第二 Runtime、多 Worker/K8s、异构资源池、vLLM 深化 | 只按目标岗位和真实数据选择 |
+| 下一步深化（agent infra 差异化，进行中） | Agent 执行质量评测闭环（Eval）+ 观测治理驾驶舱 | 面向 agent infra 的「可度量 + 可看见」能力 |
+| 秋招后候选 | 第二 Runtime、多 Worker/K8s、异构资源池、vLLM 深化、LLM 网关/模型路由治理 | 只按目标岗位和真实数据选择 |
 
 多租户是用户、项目、数据、权限、资源和审计归属的一等边界。第一版不会建设复杂
 组织管理、企业 SSO 或计费，但必须提供可信身份、Tenant-scoped 数据访问以及文件、

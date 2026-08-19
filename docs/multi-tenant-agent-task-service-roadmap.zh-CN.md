@@ -274,7 +274,8 @@ Tenant A 和 B 分别登录并创建同名 Workspace
 - 通用 MCP/RAG/Memory/Workflow/Eval 平台；
 - 企业 SSO、复杂 RBAC、计费和组织管理；
 - MicroVM 与任意网络白名单；
-- 自研推理引擎或无数据支撑的 vLLM 深度调度。
+- 自研推理引擎或无数据支撑的 vLLM 深度调度；
+- LLM 网关 / 多模型路由治理（记为未来候选，当前不做；与「共享本地 vLLM」定位有张力）。
 
 ## 9. 完成定义
 
