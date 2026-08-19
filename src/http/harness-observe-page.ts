@@ -1,8 +1,8 @@
 /**
- * 方向 B：观测驾驶舱页面（产品级 dashboard 布局）。
+ * 方向 B：观测驾驶舱页面（产品级 dashboard，单页布局）。
  *
  * 自包含只读观测视图（独立页 /observe，不影响任务操作台 /）：
- * 左侧深色导航 + 主区浅色，用「图表」而非「数字卡堆叠」呈现：
+ * 顶部精简导航条（品牌 + 多租户切换 + Live），内容居中、以图表为主体：
  * 任务状态环形图、租户对比条形、完成度条、资源背压分布条。
  * 数据来自 GET /eval（支持 ?tenant=），3s 自动刷新。
  */
@@ -14,34 +14,21 @@ const OBSERVE_HTML = `<!DOCTYPE html>
   --bg:#f5f6f8; --card:#ffffff; --line:#e6e8eb; --line2:#eef0f3;
   --txt:#101828; --dim:#667085; --faint:#98a2b3;
   --accent:#4f46e5; --accent2:#7c9eff;
-  --ok:#12b76a; --warn:#f79009; --bad:#f04438; --info:#2e90fa; --purple:#a78bfa; --grey:#94a3b8;
-  --sidebar:#0f172a; --sb-txt:#cbd5e1; --sb-dim:#64748b;
+  --ok:#12b76a; --warn:#f79009; --bad:#f04438; --info:#2e90fa;
   --shadow:0 1px 2px rgba(16,24,40,.06),0 1px 3px rgba(16,24,40,.08);
 }
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--txt);font:14px/1.55 -apple-system,BlinkMacSystemFont,"Inter","PingFang SC","Microsoft YaHei",sans-serif;-webkit-font-smoothing:antialiased}
 
-/* ---------- 侧边导航 ---------- */
-.sidebar{position:fixed;left:0;top:0;bottom:0;width:232px;background:var(--sidebar);color:var(--sb-txt);display:flex;flex-direction:column;padding:22px 16px;z-index:20}
-.sb-brand{display:flex;align-items:center;gap:11px;padding:0 8px 22px;border-bottom:1px solid rgba(255,255,255,.08)}
-.logo{width:34px;height:34px;border-radius:9px;background:linear-gradient(135deg,var(--accent),var(--accent2));display:flex;align-items:center;justify-content:center;color:#fff;font-size:16px;flex:none}
-.sb-name{font-weight:700;font-size:14px;color:#fff;letter-spacing:-.01em}
-.sb-sub{font-size:11px;color:var(--sb-dim)}
-.sb-nav{margin-top:18px;display:flex;flex-direction:column;gap:2px}
-.nav-label{font-size:11px;color:var(--sb-dim);text-transform:uppercase;letter-spacing:.1em;padding:14px 12px 6px}
-.navitem{display:flex;align-items:center;gap:11px;padding:9px 12px;border-radius:8px;color:var(--sb-txt);text-decoration:none;font-size:13.5px;transition:background .15s}
-.navitem:hover{background:rgba(255,255,255,.06);color:#fff}
-.navitem.active{background:rgba(124,158,255,.16);color:#fff;font-weight:600}
-.navitem .ico{width:17px;text-align:center;opacity:.85}
-.sb-foot{margin-top:auto;padding:14px 8px 0;border-top:1px solid rgba(255,255,255,.08);font-size:11px;color:var(--sb-dim)}
-
-/* ---------- 主区 ---------- */
-.main{margin-left:232px;min-height:100vh}
-.topbar{position:sticky;top:0;z-index:10;background:rgba(245,246,248,.85);backdrop-filter:blur(8px);border-bottom:1px solid var(--line);padding:16px 32px;display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap}
-.topbar h1{font-size:19px;font-weight:700;letter-spacing:-.02em;margin:0}
-.topbar .meta{font-size:12.5px;color:var(--dim);margin-top:2px}
+/* ---------- 顶部导航条 ---------- */
+.topnav{position:sticky;top:0;z-index:20;background:rgba(255,255,255,.88);backdrop-filter:blur(10px);border-bottom:1px solid var(--line)}
+.tn-inner{max-width:1220px;margin:0 auto;padding:13px 30px;display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap}
+.brand{display:flex;align-items:center;gap:11px}
+.logo{width:32px;height:32px;border-radius:9px;background:linear-gradient(135deg,var(--accent),var(--accent2));display:flex;align-items:center;justify-content:center;color:#fff;font-size:15px;box-shadow:var(--shadow)}
+.t1{font-weight:700;font-size:15px;letter-spacing:-.01em}
+.t2{font-size:11.5px;color:var(--dim)}
 .navright{display:flex;align-items:center;gap:14px}
-.segwrap{display:flex;background:#e7eaef;border-radius:9px;padding:3px;gap:2px;max-width:44vw;overflow:auto}
+.segwrap{display:flex;background:#e7eaef;border-radius:9px;padding:3px;gap:2px;max-width:46vw;overflow:auto}
 .seg{border:0;background:transparent;color:var(--dim);font:inherit;font-size:13px;padding:6px 14px;border-radius:7px;cursor:pointer;white-space:nowrap;transition:all .15s}
 .seg:hover{color:var(--txt)}
 .seg.on{background:#fff;color:var(--txt);font-weight:600;box-shadow:0 1px 2px rgba(16,24,40,.14)}
@@ -49,28 +36,33 @@ body{margin:0;background:var(--bg);color:var(--txt);font:14px/1.55 -apple-system
 .pulse{width:8px;height:8px;border-radius:50%;background:var(--ok);animation:pl 2s infinite}
 @keyframes pl{0%{box-shadow:0 0 0 0 rgba(18,183,106,.4)}70%{box-shadow:0 0 0 7px rgba(18,183,106,0)}100%{box-shadow:0 0 0 0 rgba(18,183,106,0)}}
 
-.content{padding:26px 32px 64px}
-section{margin-bottom:34px}
+/* ---------- 内容 ---------- */
+.content{max-width:1220px;margin:0 auto;padding:26px 30px 64px}
+.pagehead{display:flex;align-items:baseline;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:20px}
+.pagehead h1{font-size:22px;font-weight:700;letter-spacing:-.02em;margin:0}
+.meta{font-size:13px;color:var(--dim)}
+section{margin-bottom:30px}
 .sec-h{font-size:12px;font-weight:600;color:var(--faint);text-transform:uppercase;letter-spacing:.1em;margin:0 0 14px}
 
 /* Hero KPI */
 .hero{display:grid;grid-template-columns:repeat(4,1fr);gap:16px}
-.kpi{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:20px 22px;box-shadow:var(--shadow);position:relative;overflow:hidden}
+.kpi{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:20px 22px;box-shadow:var(--shadow);position:relative;overflow:hidden;transition:transform .12s,box-shadow .12s}
+.kpi:hover{transform:translateY(-2px);box-shadow:0 6px 16px rgba(16,24,40,.1)}
 .kpi::before{content:'';position:absolute;left:0;top:0;bottom:0;width:4px;background:var(--accent)}
 .kpi.ok::before{background:var(--ok)}.kpi.warn::before{background:var(--warn)}.kpi.bad::before{background:var(--bad)}
 .kpi .lb{font-size:13px;color:var(--dim);font-weight:500}
-.kpi .vl{font-size:34px;font-weight:700;letter-spacing:-.03em;margin-top:8px;font-variant-numeric:tabular-nums}
+.kpi .vl{font-size:33px;font-weight:700;letter-spacing:-.03em;margin-top:8px;font-variant-numeric:tabular-nums}
 .kpi .vl.ok{color:var(--ok)}.kpi .vl.warn{color:var(--warn)}.kpi .vl.bad{color:var(--bad)}.kpi .vl.accent{color:var(--accent)}
 .kpi .ft{font-size:12px;color:var(--faint);margin-top:4px}
 
 /* 图表卡片 */
 .charts{display:grid;grid-template-columns:1fr 1fr;gap:16px}
 .card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:20px 22px;box-shadow:var(--shadow)}
-.card .ch{font-size:14px;font-weight:600;margin-bottom:4px}
-.card .cs{font-size:12px;color:var(--faint);margin-bottom:14px}
-.donutwrap{display:flex;align-items:center;gap:22px}
+.card .ch{font-size:14px;font-weight:600;margin-bottom:3px}
+.card .cs{font-size:12px;color:var(--faint);margin-bottom:16px}
+.donutwrap{display:flex;align-items:center;gap:24px}
 .donutrel{position:relative;width:150px;height:150px;flex:none}
-.donut{width:150px;height:150px;transform:rotate(0deg)}
+.donut{width:150px;height:150px}
 .donut circle{transition:stroke-dasharray .5s}
 .dc{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center}
 .dc .n{font-size:26px;font-weight:700;font-variant-numeric:tabular-nums}
@@ -84,23 +76,18 @@ section{margin-bottom:34px}
 .track{flex:1;height:9px;background:var(--line2);border-radius:6px;overflow:hidden}
 .fill{height:100%;background:linear-gradient(90deg,var(--accent),var(--accent2));border-radius:6px;transition:width .5s}
 .bar b{width:58px;text-align:right;font-size:13px;font-variant-numeric:tabular-nums}
-.trow{display:flex;align-items:center;gap:12px;margin:12px 0}
+.trow{display:flex;align-items:center;gap:12px;margin:13px 0}
 .tname{width:82px;font-size:13px;color:var(--dim);font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .trow b{width:130px;text-align:right;font-size:12.5px;color:var(--dim);font-variant-numeric:tabular-nums;font-weight:500}
 .stack{display:flex;height:12px;border-radius:7px;overflow:hidden;background:var(--line2)}
 .stack .st{transition:width .5s}.stack .st.ok{background:var(--ok)}.stack .st.warn{background:var(--warn)}
-.stacklg{display:flex;gap:18px;margin-top:10px;font-size:13px;color:var(--dim)}
+.stacklg{display:flex;gap:18px;margin-top:11px;font-size:13px;color:var(--dim)}
 .stacklg .dot{display:inline-block;width:9px;height:9px;border-radius:3px;margin-right:6px}
-.minirow{display:flex;gap:26px;margin-top:14px;flex-wrap:wrap}
-.mini{font-size:13px;color:var(--dim)}
+.minirow{display:flex;gap:28px;margin-top:16px;flex-wrap:wrap}
+.mini{font-size:12.5px;color:var(--dim)}
 .mini b{display:block;font-size:20px;font-weight:700;color:var(--txt);font-variant-numeric:tabular-nums}
 .mini b.warn{color:var(--warn)}.mini b.bad{color:var(--bad)}
 .tag{display:inline-block;background:#f2f4f7;border:1px solid var(--line);color:var(--dim);border-radius:20px;padding:3px 11px;margin:5px 7px 0 0;font-size:12px;font-variant-numeric:tabular-nums}
-
-/* 规模与延迟细条 */
-.strip{background:var(--card);border:1px solid var(--line);border-radius:16px;box-shadow:var(--shadow);padding:16px 24px;display:flex;gap:40px;flex-wrap:wrap}
-.strip .it .l{font-size:12px;color:var(--faint)}
-.strip .it .v{font-size:20px;font-weight:700;font-variant-numeric:tabular-nums;margin-top:2px}
 
 /* 副作用小卡 */
 .grid4{display:grid;grid-template-columns:repeat(4,1fr);gap:16px}
@@ -121,69 +108,54 @@ tbody tr:hover{background:#fafbfc}
 .tid{display:inline-block;padding:2px 9px;border-radius:6px;background:#eef2ff;color:var(--accent);font-size:12px;font-weight:600}
 .err{margin:0 0 16px;padding:13px 16px;background:#fef3f2;border:1px solid #fecdca;color:var(--bad);border-radius:10px;font-size:13px}
 .empty{color:var(--faint);text-align:center;padding:24px}
-@media(max-width:980px){.sidebar{display:none}.main{margin-left:0}.hero,.charts,.grid4{grid-template-columns:1fr 1fr}}
+@media(max-width:980px){.hero,.charts,.grid4{grid-template-columns:1fr 1fr}}
+@media(max-width:640px){.hero,.charts,.grid4{grid-template-columns:1fr}}
 </style></head><body>
 
-<aside class="sidebar">
-  <div class="sb-brand"><span class="logo">◆</span><div><div class="sb-name">VRAM-Aware Harness</div><div class="sb-sub">多租户 Agent 控制面</div></div></div>
-  <nav class="sb-nav">
-    <div class="nav-label">观测</div>
-    <a class="navitem active" href="#overview"><span class="ico">▦</span>总览</a>
-    <a class="navitem" href="#quality"><span class="ico">◎</span>执行质量</a>
-    <a class="navitem" href="#tenants"><span class="ico">⬡</span>租户对比</a>
-    <a class="navitem" href="#resource"><span class="ico">⚡</span>资源与背压</a>
-    <a class="navitem" href="#runs"><span class="ico">≣</span>任务明细</a>
-  </nav>
-  <div class="sb-foot">可度量 · 可看见<br>Agent 执行观测驾驶舱</div>
-</aside>
+<header class="topnav"><div class="tn-inner">
+  <div class="brand"><span class="logo">◆</span><div><div class="t1">VRAM-Aware Harness</div><div class="t2">多租户 Agent 观测驾驶舱</div></div></div>
+  <div class="navright"><div class="segwrap" id="tenantSwitch"></div><span class="live"><span class="pulse"></span>Live</span></div>
+</div></header>
 
-<div class="main">
-  <div class="topbar">
-    <div><h1>总览</h1><div class="meta" id="scope">加载中…</div></div>
-    <div class="navright"><div class="segwrap" id="tenantSwitch"></div><span class="live"><span class="pulse"></span>Live</span></div>
-  </div>
+<main class="content">
+  <div class="pagehead"><h1>执行观测总览</h1><div class="meta" id="scope">加载中…</div></div>
+  <div id="err"></div>
 
-  <div class="content">
-    <div id="err"></div>
+  <section><div class="hero" id="hero"></div></section>
 
-    <section id="overview">
-      <div class="hero" id="hero"></div>
-    </section>
-
-    <section id="quality">
-      <div class="charts">
-        <div class="card"><div class="ch">任务状态分布</div><div class="cs">各终态任务占比</div>
-          <div class="donutwrap"><div class="donutrel" id="donut"></div><div class="legend" id="legend"></div></div>
-        </div>
-        <div class="card"><div class="ch">完成度</div><div class="cs">任务是否产出可用结果</div>
-          <div id="completion"></div>
-          <div class="minirow" id="miniStats"></div>
-        </div>
-        <div class="card" id="tenants"><div class="ch">租户对比</div><div class="cs">各租户任务规模与成功率</div>
-          <div id="tenantBars"></div>
-        </div>
-        <div class="card" id="resource"><div class="ch">资源准入与背压</div><div class="cs">START / QUEUE 与背压健康度</div>
-          <div id="resStack"></div>
-          <div class="minirow" id="resMini"></div>
-          <div id="reasons" style="margin-top:12px"></div>
-        </div>
+  <section>
+    <div class="charts">
+      <div class="card"><div class="ch">任务状态分布</div><div class="cs">各终态任务占比</div>
+        <div class="donutwrap"><div class="donutrel" id="donut"></div><div class="legend" id="legend"></div></div>
       </div>
-    </section>
+      <div class="card"><div class="ch">完成度</div><div class="cs">任务是否产出可用结果</div>
+        <div id="completion"></div>
+        <div class="minirow" id="miniStats"></div>
+      </div>
+      <div class="card"><div class="ch">租户对比</div><div class="cs">各租户任务规模与成功率</div>
+        <div id="tenantBars"></div>
+      </div>
+      <div class="card"><div class="ch">资源准入与背压</div><div class="cs">START / QUEUE 与背压健康度</div>
+        <div id="resStack"></div>
+        <div class="minirow" id="resMini"></div>
+        <div id="reasons" style="margin-top:12px"></div>
+      </div>
+    </div>
+  </section>
 
-    <section>
-      <div class="sec-h">工具副作用治理</div>
-      <div class="grid4" id="tools"></div>
-    </section>
+  <section>
+    <div class="sec-h">工具副作用治理</div>
+    <div class="grid4" id="tools"></div>
+  </section>
 
-    <section id="runs">
-      <div class="sec-h">任务明细</div>
-      <div class="card tabcard"><table>
-        <thead><tr><th>租户</th><th>Run</th><th>状态</th><th>尝试</th><th>排队</th><th>耗时</th><th>工具</th><th>危险拦截</th><th>Token</th><th>成本</th></tr></thead>
-        <tbody id="runRows"></tbody>
-      </table></div>
-    </section>
-  </div>
-</div>
+  <section>
+    <div class="sec-h">任务明细</div>
+    <div class="card tabcard"><table>
+      <thead><tr><th>租户</th><th>Run</th><th>状态</th><th>尝试</th><th>排队</th><th>耗时</th><th>工具</th><th>危险拦截</th><th>Token</th><th>成本</th></tr></thead>
+      <tbody id="runRows"></tbody>
+    </table></div>
+  </section>
+</main>
 
 <script>
 function $(id){return document.getElementById(id)}
