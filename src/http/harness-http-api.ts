@@ -133,15 +133,20 @@ export class HarnessHttpApi {
                     if (this.evaluation === undefined) {
                         throw new HttpError(503, "评测能力未启用");
                     }
-                    // 无认证模式（本地/演示）返回全量；有认证则按租户隔离。
+                    // 无认证模式（本地/演示）可用 ?tenant= 过滤；有认证则按租户隔离。
                     if (this.accessControl === undefined) {
-                        const all = this.evaluation.listRunMetrics();
+                        const tenantFilter =
+                            url.searchParams.get("tenant") ?? undefined;
+                        const runs = this.evaluation.listRunMetrics(tenantFilter);
                         return jsonResponse({
-                            scope: "all-tenants",
-                            executionQuality: this.evaluation.summarize(all),
+                            scope: tenantFilter ?? "all-tenants",
+                            tenants: this.evaluation.listTenants(),
+                            executionQuality: this.evaluation.summarize(runs),
                             resourceAdmission:
-                                this.evaluation.computeResourceEvaluation(),
-                            runs: all,
+                                this.evaluation.computeResourceEvaluation(
+                                    tenantFilter,
+                                ),
+                            runs,
                         });
                     }
                     const principal =
@@ -150,6 +155,7 @@ export class HarnessHttpApi {
                         this.evaluation.listRunMetrics(principal.tenantId);
                     return jsonResponse({
                         scope: principal.tenantId,
+                        tenants: [principal.tenantId],
                         executionQuality: this.evaluation.summarize(runs),
                         resourceAdmission:
                             this.evaluation.computeResourceEvaluation(

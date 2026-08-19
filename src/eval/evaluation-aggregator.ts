@@ -345,6 +345,17 @@ export class EvaluationAggregator {
         };
     }
 
+    /** 所有出现过的租户（供观测页租户切换）。 */
+    listTenants(): string[] {
+        return this.db
+            .query<{ tenant_id: string }, Record<string, never>>(
+                `SELECT DISTINCT tenant_id FROM agent_runs
+                 ORDER BY tenant_id ASC`,
+            )
+            .all({})
+            .map((row) => row.tenant_id);
+    }
+
     private exists(sql: string, runId: string): boolean {
         return (
             this.db
