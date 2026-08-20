@@ -205,6 +205,9 @@ export class HarnessHttpApi {
             if (this.llmGateway === undefined) {
                 throw new HttpError(503, "LLM 网关未启用");
             }
+            // 方向 C 的便利门也走统一身份主干：任何调用方都必须先证明自己是谁。
+            // 无 accessControl（纯单测/演示）时降级为 legacy Principal，与其它路由一致。
+            this.requirePrincipal(request, "models:generate");
             return this.llmGateway.handleChatCompletions(request);
         }
 
@@ -218,6 +221,7 @@ export class HarnessHttpApi {
             if (this.llmGateway === undefined) {
                 throw new HttpError(503, "LLM 网关未启用");
             }
+            this.requirePrincipal(request, "models:observe");
             return jsonResponse({
                 enabled:true,
                 ...this.llmGateway.router.stats(),

@@ -296,6 +296,95 @@ test("最小 HTTP API 覆盖提交、查询、中断、恢复、队列、资源�
     });
 });
 
+test("LLM 网关入口走统一身份主干：无 key 401、作用域不足 403、合法放行", async () => {
+    // 构造带 accessControl 的 API，LLM 网关启用。
+    const app: HarnessHttpApplication = {
+        isStarted: () => true,
+        submitRun: () => createRun(),
+        getRun: () => null,
+        getRunsForTenant: () => [],
+        getRunEvents: () => [],
+        getRunOutput: () => ({ chunks: [], finalText: "" }),
+        getRunWorkspaceDiff: () => null,
+        getRunArtifacts: () => [],
+        getRunArtifact: async () => null,
+        getRunDecisions: () => [],
+        getQueue: () => [],
+        observeResources: async () => ({ ok: false as const, observedAt: timestamp, attemptedSources: ["FAKE" as const], reason: "UNAVAILABLE" as const, message: "x" }),
+        interruptRun: async () => createRun(),
+        resumeRun: () => createRun(),
+    };
+
+    // 用一个极薄的假网关后端响应，验证鉴权拦截发生在路由真正转发之前。
+    const { ModelRouter } = await import("../../src/llm-gateway/model-router.ts");
+    const fakeRouter = new ModelRouter([]);
+    let threwForward = false;
+    const fakeGateway = {
+        handleChatCompletions: async () => {
+            threwForward = true;
+            return new Response(JSON.stringify({ choices: [] }), { status: 200 });
+        },
+        router: fakeRouter,
+    };
+
+    const build = (scopes: string[], keyOk: boolean) => new HarnessHttpApi(
+        app,
+        { get: () => null },
+        {
+            authenticate: (raw) => keyOk
+                ? { subjectId: "u-a", tenantId: "tenant-a", scopes }
+                : null,
+            workspaceService: {} as never,
+        },
+        undefined,
+        fakeGateway as never,
+    );
+
+    const chatUrl = "http://h/v1/chat/completions";
+    const payload = { model: "qwen", messages: [{ role: "user", content: "hi" }] };
+    const chat = (api: HarnessHttpApi, head: Record<string,string>) => api.fetch(new Request(
+        chatUrl,
+        { method: "POST", headers: { "content-type": "application/json", ...head }, body: JSON.stringify(payload) },
+    ));
+
+    // 1) 完全没带 key → 401，且不会转发到网关
+    threwForward = false;
+    const noKey = await build(["*"], true).fetch(new Request(
+        chatUrl,
+        { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(payload) },
+    ));
+    expect(noKey.status).toBe(401);
+    expect(threwForward).toBe(false);
+
+    // 2) key 无效 → 401
+    threwForward = false;
+    const badKey = await chat(build(["models:generate"], false), { authorization: "Bearer bad" });
+    expect(badKey.status).toBe(401);
+    expect(threwForward).toBe(false);
+
+    // 3) key 有效但缺 models:generate 作用域 → 403
+    threwForward = false;
+    const noScope = await chat(build(["tasks:read"], true), { authorization: "Bearer good" });
+    expect(noScope.status).toBe(403);
+    expect(threwForward).toBe(false);
+
+    // 4) key 有效且具备作用域 → 200，并真正转发到网关
+    threwForward = false;
+    const ok = await chat(build(["models:generate"], true), { authorization: "Bearer good" });
+    expect(ok.status).toBe(200);
+    expect(threwForward).toBe(true);
+
+    // 5) 网关统计端点同样要求鉴权
+    threwForward = false;
+    const statsNoKey = await build(["models:observe"], true).fetch(new Request("http://h/llm-gateway/stats"));
+    expect(statsNoKey.status).toBe(401);
+    const statsOk = await build(["models:observe"], true).fetch(new Request(
+        "http://h/llm-gateway/stats",
+        { headers: { authorization: "Bearer good" } },
+    ));
+    expect(statsOk.status).toBe(200);
+});
+
 test("HTTP API 为无效输入和不存在的资源返回稳定错误", async () => {
     const { api } = createApi();
 
