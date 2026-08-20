@@ -16,7 +16,7 @@
 | 7 | 用户拿到最终回答+Diff/Artifact | ✅ 真机 | workspace diff 捕获 + Artifact store + 最终文本 |
 | 8 | README 明确保证/威胁模型/非目标 | ✅ | roadmap §5.3/§8/§9 + README |
 
-## 2. 差异化三块（面试可深挖的亮点）
+## 2. P0.5 阶段差异化三块（面试可深挖的亮点）
 
 | 编号 | 能力 | 状态 | 证据 |
 |---|---|---|---|
@@ -24,19 +24,29 @@
 | A | 证据三元组：策略意图↔编译边界↔观测事实 | ✅ 真机 | `src/evidence/isolation-triple.ts`（真机 tripleConsistent=true） |
 | B | 租户资源预算 + Fair-Share + 核算账本 | ✅ 真机 | `src/resources/{tenant-budget,resource-ledger,budget-aware-policy}.ts`、`scripts/server-budget-control.ts`（TENANT_BUDGET_EXCEEDED 落库） |
 
-## 3. 质量与测试
+## 3. P0.5 之后差异化深化（A/B/C 方向）
 
-- git 跟踪测试 **238 全绿，0 fail**（204 基底 → 证据 13 → 三元组 9 → 预算 10 → GPU 指标兼容 2）。
+| 编号 | 能力 | 状态 | 证据 |
+|---|---|---|---|
+| A | 执行质量评测闭环（Eval） | ✅ mock + 单测 | `src/eval/evaluation-aggregator.ts`、`scripts/eval-report.ts`、`tests/eval/evaluation-aggregator.test.ts`；读取已有落库数据，零新增采集 |
+| B | 观测驾驶舱（Observe） | ✅ mock + 单测 | `src/http/harness-observe-page.ts`、`tests/eval/evaluation-aggregator.test.ts`；独立 `/observe` 只读页，多租户切换 |
+| C | LLM 路由网关（LLM Gateway） | ✅ 第一步完成 | `src/llm-gateway/*.ts`、`tests/llm-gateway/llm-gateway.test.ts`；OpenAI 兼容代理、主备回退、熔断、决策记录；agent 与控制面均不变 |
+
+## 4. 质量与测试
+
+- git 跟踪测试 **254 全绿，0 fail**（204 基底 → 证据 13 → 三元组 9 → 预算 10 → GPU 指标兼容 2 → Eval 6 → LLM 网关 10）。
+- A/B/C 三个方向均至少完成第一步并通过测试。
 - 真机证据链：隔离攻击（runsc 9 项）、性能 benchmark（runc vs runsc 1.22x 冷启动）、真实 Pi 端到端、租户预算落库、真实 GPU 压力→QUEUE。
 
-## 4. 诚实边界（陈述时不越界）
+## 5. 诚实边界（陈述时不越界）
 
 - **strict/microVM（Kata、Firecracker）**：无 KVM 环境，未实现、未声明通过（`UnavailableStrictSandboxProvider` fail-closed）。
 - **显存 MiB 维度**：本机 T4 经 nvidia-smi 可读；准入走 vLLM 的 running/kv-cache 压力路径（真实），块调度与超大并发下的绝对公平份额仍属估算。
-- **不是生产级**：单机、无 K8s/多机/高可用、无计费/SSO——均属 roadmap「§8 当前不做」。
+- **不是生产级**：单机、无 K8s/多机/高可用、无计费/SSO。
+- **LLM 网关**：当前完成第一步（代理/回退/熔断/记录），第二步（Pi 真实调用经网关）尚未完成；决策记录为内存环形缓冲，未持久化。
 - 外部 OpenAI 兼容模型的 demo 用 Fake observer 是**有意标注**，非 VRAM 证据；真机证据来自本份文档所述真实 vLLM 链路。
 
-## 5. 结论
+## 6. 结论
 
 作为**里程碑 + 差异化 + 面试展示**：完成，且有真机背书（roadmap 完成定义 8 条全部命中/自证）。
 作为**生产级产品**：未完成——但那不在本项目定义内。
