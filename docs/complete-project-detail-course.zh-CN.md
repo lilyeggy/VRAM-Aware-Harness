@@ -1,9 +1,12 @@
 # VRAM-Aware Harness 完整项目细节课程
 
-> **定位说明（2026-08-12）**：本文用于学习和解释现有实现，不定义当前开发优先级。
+> **定位说明（2026-08-12 起稿，2026-08-19 更新）**：本文用于学习和解释现有实现，不定义当前开发优先级。
 > 文中 Claude Adapter、异构 ResourcePool 和大型控制面章节保留为历史设计材料；
 > 当前唯一实施路线见
 > [多租户 Agent 任务服务路线图](multi-tenant-agent-task-service-roadmap.zh-CN.md)。
+> 2026-08-12 之后的 P0.5 真机验收、Eval/Observe/LLM Gateway 三个差异化方向、
+> 完成定义闭合及面试准备指南，见本文第八部分与
+> [实现日志](implementation-log/2026-08-p0-tenant-sandbox.zh-CN.md)。
 
 > 目标：读完后，你不只是能复述架构图，而是能够从任意一个 HTTP 请求、数据库行、
 > RuntimeEvent 或失败日志出发，沿真实代码定位它的创建者、消费者、状态变化、事务
@@ -3305,3 +3308,166 @@ API 的 409 是领域冲突或未分类内部错误的统一当前映射；它�
 
 当你能从任意失败现象反向沿这十条性质定位到具体 Store、状态机、Decision 和测试时，
 才算真正具备这个项目的细节级理解。
+
+---
+
+# 第八部分：2026-08-12 之后的差异化深化与验证
+
+> 时间范围：2026-08-12 至 2026-08-19  
+> 本章补充 8.12 之后发生的关键进展：P0.5 真机验收闭合、执行质量评测闭环（A）、观测驾驶舱（B）、LLM 路由网关（C），以及完成定义 8 条全部闭合。  
+> 更详细的推进记录见 [实现日志](implementation-log/2026-08-p0-tenant-sandbox.zh-CN.md)。
+
+## 第 22 章：P0.5 沙箱分级与 ECS 真机验收
+
+### 22.1 沙箱分级
+
+P0.5 的验收结论不是"绝对安全"，而是**清楚知道每一级隔离能防什么、不能防什么**：
+
+| 等级 | 隔离手段 | 能防什么 | 不能防什么 |
+|---|---|---|---|
+| P0 | 无沙箱 | 无法保证 | 所有侧信道/越界风险 |
+| P0.5 | runsc gVisor + 默认 seccomp | 文件/网络/进程隔离；9 项攻击冒烟通过 | 共享 Linux 内核漏洞；严格 VM 级隔离 |
+| P1 | Kata/Firecracker | 独立内核 | 需要 KVM、成本高、启动慢 |
+
+选择 P0.5 是因为面试项目预算和人力有限，而 runsc 用户态内核足以演示**"共享内核 vs 独立内核"**的设计决策。
+
+### 22.2 真机验证
+
+- ECS 真机运行 runsc 默认沙箱。
+- `scripts/container-sandbox-attack-smoke.ts` 9 项攻击全部 PASS。
+- 诚实边界：没有 KVM 不得声称 strict 隔离；攻击脚本覆盖常见越界场景，但不是安全审计。
+
+---
+
+## 第 23 章：GPU 真机验证与资源背压终态
+
+### 23.1 验证环境
+
+- GPU：NVIDIA Tesla T4
+- vLLM：0.7.3
+- 任务并发：120 并发压测
+- 观测指标：vLLM `/metrics` + `nvidia-smi`
+
+### 23.2 结论
+
+- 压力达到阈值后，资源分类器进入 `CRITICAL`，执行策略触发 `QUEUE`。
+- 新任务被落库排队，而不是盲目启动导致 OOM。
+- GPU 服务器停止 vllm 进程后，**实例仍在运行 = 计费风险**（已提醒平台侧关机/释放）。
+
+---
+
+## 第 24 章：A · 执行质量评测闭环
+
+### 24.1 为什么做
+
+任务能跑不代表跑得好。需要回答：
+
+- 成功率、完成度、平均 token、成本；
+- 背压触发率（是不是排队太多）；
+- 无人值守率（是不是动不动就人工确认）；
+- cache 命中率（模型调用是否有重复浪费）；
+- 危险拦截率（危险工具是否被正确拦下）。
+
+### 24.2 怎么做
+
+- `src/eval/evaluation-aggregator.ts` 读取已有落库数据，**零新增采集**。
+- 指标分两层：行业标配 + 控制面护城河。
+- `scripts/eval-report.ts` 输出文本报表；`GET /eval` 输出 JSON 供驾驶舱消费。
+
+### 24.3 面试可讲
+
+> "我没有为了评测而加采集，而是复用 Pi 已经发出的事件。指标对齐 OpenTelemetry GenAI Semantic Convention，既保证准确，又不侵入 agent 执行路径。"
+
+---
+
+## 第 25 章：B · 观测驾驶舱
+
+### 25.1 设计
+
+- 独立页面 `/observe`，和任务操作台 `/` 解耦。
+- 只读，不触发任务。
+- 多租户切换。
+- 数据来自 `GET /eval`。
+
+### 25.2 可视化
+
+- 任务状态环形图（donut chart）
+- 完成度渐变条
+- 租户对比条形图
+- 资源背压堆叠条
+- 任务明细表（状态徽章、Token、成本、排队耗时、危险拦截数）
+
+### 25.3 面试可讲
+
+> "观测页是旁路，不是控制台。它走 `HarnessHttpApi` 的可选参数注入，没有改 `HarnessApplication` 的构造。符合最小侵入原则。"
+
+---
+
+## 第 26 章：C · LLM 路由网关
+
+### 26.1 问题
+
+Pi 直接读 `.pi/spike/models.json` 的 `baseUrl` 连到 vLLM / OpenCode。后端单点故障时任务直接失败；也没有后端压力联动路由。
+
+### 26.2 方案
+
+在 Pi 和真实模型后端之间加一个 **OpenAI 兼容代理**：
+
+- `src/llm-gateway/llm-gateway.ts`：暴露 `POST /v1/chat/completions`。
+- `src/llm-gateway/model-router.ts`：逻辑模型 → 真实后端映射；主备回退；熔断；聚合统计。
+- `src/http/harness-http-api.ts`：内嵌网关路由与 `GET /llm-gateway/stats`。
+
+### 26.3 回退语义
+
+- **回退**：网络错 / 超时 / 429 / 5xx。
+- **不回退**：4xx 非 429（请求本身问题，回退无意义）。
+- **熔断**：某后端连续失败达阈值，冷却期内直接跳过。
+
+### 26.4 决策记录
+
+每次请求记录 `RouteDecision`：选了谁、试了谁、是否回退、延迟、HTTP 状态、成败。这与 `policy_decisions` 的决策台账思路一致。
+
+### 26.5 接入方式
+
+- **Agent 不变**。
+- 控制面调度 / 沙箱 / 工具治理不变。
+- 只改 `models.json` 的 `baseUrl` 指向控制面地址。
+- 网关根据 `LLM_BACKENDS` 环境变量转发到真实后端。
+
+### 26.6 诚实边界
+
+- 当前是**第一步**：网关逻辑已完成，mock 后端 10 测试全绿 + 端到端冒烟通过。
+- **第二步尚未完成**：未把 Pi 真实模型调用经网关路由。
+- 决策记录目前是**内存环形缓冲**，未持久化到数据库。
+- **不是生产级多活网关**，是面试项目内的可靠性设计决策。
+
+---
+
+## 第 27 章：完成定义全部闭合
+
+[多租户 Agent 任务服务路线图](multi-tenant-agent-task-service-roadmap.zh-CN.md) 中的完成定义 8 条已闭合：
+
+1. P0.5 Sandbox 分级方案 + 真机验收（runsc 默认，9 项攻击 PASS）。
+2. GPU 资源准入真机验证（T4 + vLLM 0.7.3，120 并发 → CRITICAL → QUEUE）。
+3. 副作用感知执行与恢复闭环（ToolEffect / Checkpoint / RecoveryDecision）。
+4. 多租户权限与隔离（Tenant → Workspace → API Key 作用域）。
+5. 工具治理与可解释证据（ToolPolicyDecision / policy_decisions）。
+6. 可观测与审计（RunEvent / policy_decisions / Eval / Observe）。
+7. 课程网站与面试话术（docs/course/ + interview-prep-guide）。
+8. 差异化方向 A/B/C 至少落地第一步（A ✅ B ✅ C ✅ 第一步）。
+
+---
+
+## 第 28 章：文档同步与建议阅读顺序
+
+- 新增 `docs/interview-prep-guide.zh-CN.md`：30 分钟 / 2 小时 / 半天三种面试准备路线、话术模板、诚实边界、量化数字表。
+- 课程网站新增 `module-7`：可度量、可观测、可路由。
+- 建议阅读顺序：
+  1. `README.md`
+  2. `docs/interview-prep-guide.zh-CN.md`
+  3. 本文第八部分
+  4. `docs/implementation-log/2026-08-p0-tenant-sandbox.zh-CN.md`
+
+---
+
+**结课十条仍然适用**。第八部分是在十条基础上的三个延伸：评测、观测、网关路由，以及 P0.5 与 GPU 的真机验收证据。
