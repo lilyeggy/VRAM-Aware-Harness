@@ -1,5 +1,12 @@
 # VRAM-Aware Agent Harness
 
+> **读项目从这里开始 👇 先看这份图：**
+> - 快速读懂整个项目：**[docs/project-handbook.zh-CN.md](docs/project-handbook.zh-CN.md)**（唯一技术主文档）
+> - 面试准备：**[docs/interview-prep-guide.zh-CN.md](docs/interview-prep-guide.zh-CN.md)**
+> - 完成度对账：**[docs/completion-status.zh-CN.md](docs/completion-status.zh-CN.md)**
+> - 对外展示：`docs/course/index.html`（课程网站）
+> - 历史/中间产物已归档到 `docs/archive/`，不必通读。
+
 一个支持团队共享本地大模型的**多租户 Agent 任务服务**。用户可以为项目创建独立
 Workspace、提交 Agent 任务、查看执行过程和文件修改，并中断或恢复任务；系统在
 后台为每次执行分配受 Tenant 策略约束的隔离环境，根据 GPU 与 vLLM 状态公平调度，
@@ -84,9 +91,9 @@ Attempt 是 Run 的一次实际执行。当前已完成 API Key 派生 Tenant、
 本项目只保存可靠执行所需的上下文版本、成本、权限和恢复事实。
 
 Day 1–7 的可靠执行合同见
-[ADR 0006](docs/adr/0006-narrow-mvp-to-recovery-and-resource-admission.md)；当前定位见
-[ADR 0009](docs/adr/0009-build-a-multi-tenant-agent-task-service.md)；当前唯一实施入口是
-[多租户 Agent 任务服务路线图](docs/multi-tenant-agent-task-service-roadmap.zh-CN.md)。
+[ADR 0006](docs/archive/adr/0006-narrow-mvp-to-recovery-and-resource-admission.md)；当前定位见
+[ADR 0009](docs/archive/adr/0009-build-a-multi-tenant-agent-task-service.md)；当前唯一实施入口是
+[多租户 Agent 任务服务路线图](docs/archive/multi-tenant-agent-task-service-roadmap.zh-CN.md)。
 ADR 0007、ADR 0008 及其路线图保留为历史方案，不代表当前产品承诺。
 
 ## 模型与推理环境基线
@@ -103,7 +110,7 @@ Qwen3.5-9B 用于主要集成验证。真实模型测试先限制在 16K 上下�
 部署配置中，不能进入 Harness 业务服务。
 
 详细决策见
-[ADR 0005](docs/adr/0005-use-replaceable-models-and-extensible-vllm.md)。
+[ADR 0005](docs/archive/adr/0005-use-replaceable-models-and-extensible-vllm.md)。
 
 ## 已完成的 Day 1–7 MVP
 
@@ -193,9 +200,9 @@ AdmissionContext
   → 合法则执行；超时、越界或不可用则走 Deterministic Fallback
 ```
 
-详细边界见 [ADR 0006](docs/adr/0006-narrow-mvp-to-recovery-and-resource-admission.md)；
+详细边界见 [ADR 0006](docs/archive/adr/0006-narrow-mvp-to-recovery-and-resource-admission.md)；
 Agentic Policy 仅作为候选研究路线，见
-[ADR 0003](docs/adr/0003-guarded-agentic-resource-scheduling.md)。
+[ADR 0003](docs/archive/adr/0003-guarded-agentic-resource-scheduling.md)。
 
 ## 当前进度
 
@@ -224,7 +231,7 @@ Agentic Policy 仅作为候选研究路线，见
 | Claude / 异构 ResourcePool | 已暂停 | 不进入秋招前主线 |
 
 本轮逐项设计、攻击测试与后续缺口见
-[P0 实施记录](docs/implementation-log/2026-08-p0-tenant-sandbox.zh-CN.md)。
+[P0 实施记录](docs/archive/implementation-log/2026-08-p0-tenant-sandbox.zh-CN.md)。
 
 Day 1–7 的本地工程闭环已经完成：Pi Runtime 边界、AgentRun 持久化、事件桥接、
 ToolGateway、Checkpoint、安全恢复、ResourceObserver 与 ExecutionPolicy 均已
@@ -370,49 +377,49 @@ src/
 
 scripts/          # HTTP smoke 等可执行验收入口
 tests/            # 单元、组件、应用、HTTP 与端到端集成测试
-docs/adr/         # 架构决策记录
+docs/archive/adr/         # 架构决策记录
 ```
 
 ### 旧原型的状态
 
 自研 `AgentLoop`、内存 `ContextManager`、直接调用 vLLM 的 `LLMClient`、Output Validator、旧 System Prompt 以及 `src/kv/*` 实验代码已于 2026-07-22 删除。新的源码入口只导出 Harness 自己的 Runtime 抽象；具体 Agent Loop 由 Pi 提供。
 
-删除理由和影响见 [ADR 0002](docs/adr/0002-remove-legacy-agent-prototype.md)。Git 历史仍可用于回顾旧实现，但它们不再参与构建、测试或后续开发。
+删除理由和影响见 [ADR 0002](docs/archive/adr/0002-remove-legacy-agent-prototype.md)。Git 历史仍可用于回顾旧实现，但它们不再参与构建、测试或后续开发。
 
 ## 文档导航
 
-- [多租户 Agent 任务服务路线图](docs/multi-tenant-agent-task-service-roadmap.zh-CN.md)：当前唯一产品实施入口，覆盖身份、Workspace、真实 Sandbox、编排恢复与用户结果闭环。
-- [Agent Infra 面试演示 Runbook](docs/interview-demo-runbook.zh-CN.md)：三分钟演示、代码锚点、追问速答与诚实边界。
-- [Sandbox Runtime 对比实验手册](docs/sandbox-runtime-benchmark-runbook.zh-CN.md)：在真实 Linux Docker 环境比较 runc/runsc，并为 Kata/Firecracker Provider 预留同一实验方法。
-- [Linux Server 部署手册](docs/linux-server-deployment-runbook.zh-CN.md)：租到 CPU 服务器后配置 Docker/runsc、外部 Model API、Workspace 和 systemd。
-- [历史秋招面试项目路线图](docs/interview-project-roadmap.zh-CN.md)：保留 A6000、故障演示和 Benchmark 等证据设计，不再定义产品形态。
-- [历史异构 Harness 控制面路线图](docs/heterogeneous-harness-control-plane-roadmap.zh-CN.md)：已暂停，仅保留为秋招后的演进参考。
-- [Stage 0 MVP 基线与核心契约](docs/stage0-mvp-baseline.zh-CN.md)：记录进入 Stage 1 前不可破坏的 schema、状态、恢复、资源和调度语义。
-- [Stage 1–2 控制面实现与学习笔记](docs/stage1-stage2-control-plane-learning-notes.zh-CN.md)：按真实调用链讲解 Instance、Attempt、Capability、有效策略、ToolGateway、Sandbox 与 Secret 边界。
-- [Stage 1–2 控制面源码精读指南](docs/stage1-stage2-code-reading-guide.zh-CN.md)：严格按 Capability → Instance → Attempt → 兼容控制面 → Policy → 编排器 → Tool → Sandbox → PiAdapter → 端到端测试的顺序，逐段解释关键代码、连接关系和不变量。
-- [完整项目细节课程](docs/complete-project-detail-course.zh-CN.md)：从系统语言、进程启动和 Stage 0 可靠执行底座开始，以一个 Run 贯穿 HTTP、SQLite、资源准入、公平队列、工具副作用、恢复、Stage 1–2 控制面、Pi 和 Sandbox；包含逐方法推演、事务/竞态分析、失败矩阵、测试地图、调试课和自测题。
-- [全仓库交互课程](docs/repository-course.zh-CN.html)：将当前源码、产品对象、真实调用链、Sandbox runtime profiles、测试证据、部署边界和面试追问整合为一个无需构建的网页课程。
+- [多租户 Agent 任务服务路线图](docs/archive/multi-tenant-agent-task-service-roadmap.zh-CN.md)：当前唯一产品实施入口，覆盖身份、Workspace、真实 Sandbox、编排恢复与用户结果闭环。
+- [Agent Infra 面试演示 Runbook](docs/archive/interview-demo-runbook.zh-CN.md)：三分钟演示、代码锚点、追问速答与诚实边界。
+- [Sandbox Runtime 对比实验手册](docs/archive/sandbox-runtime-benchmark-runbook.zh-CN.md)：在真实 Linux Docker 环境比较 runc/runsc，并为 Kata/Firecracker Provider 预留同一实验方法。
+- [Linux Server 部署手册](docs/archive/linux-server-deployment-runbook.zh-CN.md)：租到 CPU 服务器后配置 Docker/runsc、外部 Model API、Workspace 和 systemd。
+- [历史秋招面试项目路线图](docs/archive/interview-project-roadmap.zh-CN.md)：保留 A6000、故障演示和 Benchmark 等证据设计，不再定义产品形态。
+- [历史异构 Harness 控制面路线图](docs/archive/heterogeneous-harness-control-plane-roadmap.zh-CN.md)：已暂停，仅保留为秋招后的演进参考。
+- [Stage 0 MVP 基线与核心契约](docs/archive/stage0-mvp-baseline.zh-CN.md)：记录进入 Stage 1 前不可破坏的 schema、状态、恢复、资源和调度语义。
+- [Stage 1–2 控制面实现与学习笔记](docs/archive/stage1-stage2-control-plane-learning-notes.zh-CN.md)：按真实调用链讲解 Instance、Attempt、Capability、有效策略、ToolGateway、Sandbox 与 Secret 边界。
+- [Stage 1–2 控制面源码精读指南](docs/archive/stage1-stage2-code-reading-guide.zh-CN.md)：严格按 Capability → Instance → Attempt → 兼容控制面 → Policy → 编排器 → Tool → Sandbox → PiAdapter → 端到端测试的顺序，逐段解释关键代码、连接关系和不变量。
+- [完整项目细节课程](docs/archive/complete-project-detail-course.zh-CN.md)：从系统语言、进程启动和 Stage 0 可靠执行底座开始，以一个 Run 贯穿 HTTP、SQLite、资源准入、公平队列、工具副作用、恢复、Stage 1–2 控制面、Pi 和 Sandbox；包含逐方法推演、事务/竞态分析、失败矩阵、测试地图、调试课和自测题。
+- [全仓库交互课程](docs/archive/repository-course.zh-CN.html)：将当前源码、产品对象、真实调用链、Sandbox runtime profiles、测试证据、部署边界和面试追问整合为一个无需构建的网页课程。
 - [从代码生成的教学课程](docs/course/index.html)：面向非技术学习者的六章交互式课程，讲解这个多租户 Agent 任务服务如何把隔离 Sandbox 与执行控制面连成一次真实任务；含动画、代码↔白话对照、测验与词表。用 `bun run course:open` 在本地打开。
 - [一周 MVP 实施手册](ONE_WEEK_HARNESS_MVP_GUIDE.zh-CN.md)：已完成 MVP 的学习、设计和验收记录，不再承载后续路线。
-- [当前完整 Harness 系统剖面与技术审视](docs/current-harness-system-review.zh-CN.html)：交互讲解现有模块、正常/阻塞/恢复/副作用流程，以及走向多租户 Agent 任务服务仍需补齐的产品能力。
-- [Agent 系统三层全景](docs/agent-system-three-plane-atlas.zh-CN.html)：对比 DeepResearch 行为系统、多租户 Agent 任务服务与 Polar Learning Plane，说明三类项目各自的用户价值、内部技术重点和跨层契约。
-- [多租户 Agent 任务服务技术架构图谱](docs/multi-tenant-agent-harness-atlas.zh-CN.html)：对比 Codex Cloud、GitHub Copilot Cloud Agent、OpenHands Agent Server、AWS AgentCore、Microsoft Foundry 与本项目，重点拆解用户任务、Tenant、Workspace、隔离环境、恢复、公平队列和模型资源层。
-- [真实 Agent Harness 架构图谱](docs/real-agent-harness-architecture-atlas.zh-CN.html)：以 Claude Code、Hermes Agent、Codex CLI、Gemini CLI、OpenCode、OpenHands 与 Pi 为主角，交互拆解完整 Harness 的执行链路、责任边界和架构取舍，并与 SDK、模型、持久化底座明确分层。
-- [Agent Harness 工程地图：从系统思维到底层机制](docs/agent-harness-engineering-foundations.zh-CN.html)：抛开具体项目，从软件工程承诺与 Agent 系统全景，逐层拆到生命周期、事件、队列和状态机，并对比 OpenAI Agents SDK、LangGraph、Google ADK、Microsoft Agent Framework、Temporal、OpenHands、Letta 与 Anthropic Managed Agents 的真实架构。
-- [工程基础交互讲解](docs/harness-foundations-interactive.zh-CN.html)：从 Command、Fact、State、Policy、Runtime Adapter 等根概念理解 Harness 为什么需要这些层。
-- [交互式架构讲解](docs/harness-architecture-explainer.zh-CN.html)：从一次用户任务理解 HarnessSession、AgentRun、PiAgentSession、PiAdapter 与资源策略的边界。
-- [ADR 0001：使用 Pi 作为 Agent Runtime](docs/adr/0001-use-pi-as-agent-runtime.md)：为什么不继续扩展自研 Agent Loop。
-- [ADR 0002：删除旧自研 Agent 原型](docs/adr/0002-remove-legacy-agent-prototype.md)：为什么旧实现不再与 Pi 主路径并存。
-- [ADR 0003：受硬约束保护的 Agentic 资源调度](docs/adr/0003-guarded-agentic-resource-scheduling.md)：为什么先建立确定性基线，再让 Scheduling Agent 在 Guardrails 内参与调度。
-- [ADR 0004：将多租户作为一等控制面边界](docs/adr/0004-multi-tenancy-as-first-class-boundary.md)：为什么 Tenant 必须贯穿身份、数据、工具、资源、公平性与审计，而不是后加字段。
-- [ADR 0005：采用可替换模型与可扩展 vLLM 推理层](docs/adr/0005-use-replaceable-models-and-extensible-vllm.md)：为什么使用 A6000 + Qwen3.5-4B/9B 双层验证，并把 vLLM 源码改造分级推进。
-- [ADR 0006：收紧 MVP 到安全恢复与资源准入](docs/adr/0006-narrow-mvp-to-recovery-and-resource-admission.md)：记录 Day 1–7 为什么先以两个 Tenant 验证公平性，并用真实闭环与基线指标定义完成标准。
-- [ADR 0007：异构 Harness 控制面历史方案](docs/adr/0007-evolve-to-heterogeneous-harness-control-plane.md)：保留 Template、Instance、Capability 等设计来源，但不再是当前路线。
-- [ADR 0008：收敛为单机多租户面试项目（已取代）](docs/adr/0008-focus-on-single-node-multi-tenant-interview-project.md)：保留其“多租户、暂停异构”的历史决策，不再定义当前产品。
-- [ADR 0009：构建多租户 Agent 任务服务](docs/adr/0009-build-a-multi-tenant-agent-task-service.md)：当前产品定义、③④层技术边界与完成标准。
-- [Day 7 A6000 对照实验手册](docs/day7-a6000-baseline-runbook.zh-CN.md)：在真实 Pi/vLLM 服务器上复现实验并填写结果，不把 Fake 结果误写成性能结论。
-- [Agent–Inference 联合调度研究规划](docs/harness-implementation-plan.zh-CN.md)：早期架构背景与候选研究材料，不覆盖 ADR 0009 和当前产品路线图的优先级。
-- [Agentic RL 规划](docs/agentic-rl-project-plan.zh-CN.md)：独立研究方向，不属于当前 Harness MVP。
+- [当前完整 Harness 系统剖面与技术审视](docs/archive/current-harness-system-review.zh-CN.html)：交互讲解现有模块、正常/阻塞/恢复/副作用流程，以及走向多租户 Agent 任务服务仍需补齐的产品能力。
+- [Agent 系统三层全景](docs/archive/agent-system-three-plane-atlas.zh-CN.html)：对比 DeepResearch 行为系统、多租户 Agent 任务服务与 Polar Learning Plane，说明三类项目各自的用户价值、内部技术重点和跨层契约。
+- [多租户 Agent 任务服务技术架构图谱](docs/archive/multi-tenant-agent-harness-atlas.zh-CN.html)：对比 Codex Cloud、GitHub Copilot Cloud Agent、OpenHands Agent Server、AWS AgentCore、Microsoft Foundry 与本项目，重点拆解用户任务、Tenant、Workspace、隔离环境、恢复、公平队列和模型资源层。
+- [真实 Agent Harness 架构图谱](docs/archive/real-agent-harness-architecture-atlas.zh-CN.html)：以 Claude Code、Hermes Agent、Codex CLI、Gemini CLI、OpenCode、OpenHands 与 Pi 为主角，交互拆解完整 Harness 的执行链路、责任边界和架构取舍，并与 SDK、模型、持久化底座明确分层。
+- [Agent Harness 工程地图：从系统思维到底层机制](docs/archive/agent-harness-engineering-foundations.zh-CN.html)：抛开具体项目，从软件工程承诺与 Agent 系统全景，逐层拆到生命周期、事件、队列和状态机，并对比 OpenAI Agents SDK、LangGraph、Google ADK、Microsoft Agent Framework、Temporal、OpenHands、Letta 与 Anthropic Managed Agents 的真实架构。
+- [工程基础交互讲解](docs/archive/harness-foundations-interactive.zh-CN.html)：从 Command、Fact、State、Policy、Runtime Adapter 等根概念理解 Harness 为什么需要这些层。
+- [交互式架构讲解](docs/archive/harness-architecture-explainer.zh-CN.html)：从一次用户任务理解 HarnessSession、AgentRun、PiAgentSession、PiAdapter 与资源策略的边界。
+- [ADR 0001：使用 Pi 作为 Agent Runtime](docs/archive/adr/0001-use-pi-as-agent-runtime.md)：为什么不继续扩展自研 Agent Loop。
+- [ADR 0002：删除旧自研 Agent 原型](docs/archive/adr/0002-remove-legacy-agent-prototype.md)：为什么旧实现不再与 Pi 主路径并存。
+- [ADR 0003：受硬约束保护的 Agentic 资源调度](docs/archive/adr/0003-guarded-agentic-resource-scheduling.md)：为什么先建立确定性基线，再让 Scheduling Agent 在 Guardrails 内参与调度。
+- [ADR 0004：将多租户作为一等控制面边界](docs/archive/adr/0004-multi-tenancy-as-first-class-boundary.md)：为什么 Tenant 必须贯穿身份、数据、工具、资源、公平性与审计，而不是后加字段。
+- [ADR 0005：采用可替换模型与可扩展 vLLM 推理层](docs/archive/adr/0005-use-replaceable-models-and-extensible-vllm.md)：为什么使用 A6000 + Qwen3.5-4B/9B 双层验证，并把 vLLM 源码改造分级推进。
+- [ADR 0006：收紧 MVP 到安全恢复与资源准入](docs/archive/adr/0006-narrow-mvp-to-recovery-and-resource-admission.md)：记录 Day 1–7 为什么先以两个 Tenant 验证公平性，并用真实闭环与基线指标定义完成标准。
+- [ADR 0007：异构 Harness 控制面历史方案](docs/archive/adr/0007-evolve-to-heterogeneous-harness-control-plane.md)：保留 Template、Instance、Capability 等设计来源，但不再是当前路线。
+- [ADR 0008：收敛为单机多租户面试项目（已取代）](docs/archive/adr/0008-focus-on-single-node-multi-tenant-interview-project.md)：保留其“多租户、暂停异构”的历史决策，不再定义当前产品。
+- [ADR 0009：构建多租户 Agent 任务服务](docs/archive/adr/0009-build-a-multi-tenant-agent-task-service.md)：当前产品定义、③④层技术边界与完成标准。
+- [Day 7 A6000 对照实验手册](docs/archive/day7-a6000-baseline-runbook.zh-CN.md)：在真实 Pi/vLLM 服务器上复现实验并填写结果，不把 Fake 结果误写成性能结论。
+- [Agent–Inference 联合调度研究规划](docs/archive/harness-implementation-plan.zh-CN.md)：早期架构背景与候选研究材料，不覆盖 ADR 0009 和当前产品路线图的优先级。
+- [Agentic RL 规划](docs/archive/agentic-rl-project-plan.zh-CN.md)：独立研究方向，不属于当前 Harness MVP。
 
 ## 学习协作约定
 

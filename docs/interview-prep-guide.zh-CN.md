@@ -8,16 +8,14 @@
 
 | 类别 | 主要文档 | 用途 | 面试引用方式 |
 |---|---|---|---|
-| **项目门面** | `README.md` | 一句话定位 + 分层能力表 + 关键数字 | 30 秒自我介绍从这里来 |
-| **课程网站** | `docs/course/index.html` | 把系统讲给外行/HR/非技术面试官听 | 可发链接，或照着它的结构讲 |
-| **完整讲解稿** | `docs/complete-project-detail-course.zh-CN.md` | 项目全貌、数据流、四个系统难题 | 技术面试官深挖时从这里抽细节 |
-| **架构决策** | `docs/adr/0009-*.md` | 为什么做多租户 Agent 任务服务、为什么选 runsc | 被问"为什么"时引用 |
-| **完成状态** | `docs/completion-status.zh-CN.md` | 哪些做了、哪些没做、诚实边界 | 被问"项目做到什么程度"时引用 |
-| **路线图** | `docs/multi-tenant-agent-task-service-roadmap.zh-CN.md` | P0/P0.5/P1 规划和当前位置 | 被问"下一步做什么"时引用 |
-| **真机验证** | `docs/gpu-completion-runbook.zh-CN.md` | GPU T4 + vLLM 120 并发验证 | 量化数字来源 |
-| **真机验证** | `docs/sandbox-runtime-benchmark-runbook.zh-CN.md` | runsc 攻击冒烟/基准测试 | 隔离证据来源 |
-| **面试演练** | `docs/interview-demo-runbook.zh-CN.md` | 怎么用这个项目讲面试 | 直接看面试话术 |
-| **实施日志** | `docs/implementation-log/2026-08-*.md` | 每天推进记录、关键 commit | 证明持续投入 |
+| **✅ 唯一技术主文档** | `docs/project-handbook.zh-CN.md` | 项目定位、数据对象链、四个系统难题、真机证据、A/B/C、诚实边界 | **主要从这里深挖** |
+| **✅ 项目门面** | `README.md` | 一句话定位 + 分层能力表 + 关键数字 | 30 秒自我介绍从这里来 |
+| **✅ 课程网站** | `docs/course/index.html` | 把系统讲给外行/HR/非技术面试官听 | 可发链接，或照着它的结构讲 |
+| **✅ 完成状态** | `docs/completion-status.zh-CN.md` | 哪些做了、哪些没做、诚实边界 | 被问"项目做到什么程度"时引用 |
+| 深挖版（archive，可选） | `docs/archive/complete-project-detail-course.zh-CN.md` | 主文档的超详版：逐方法/事务/失败矩阵 | 需要非常细的源码级追问时才翻 |
+| 架构决策（archive） | `docs/archive/adr/0009-*.md` | 为什么做多租户 Agent 任务服务、为什么选 runsc | 被问"为什么"时引用 |
+| 真机验证（archive） | `docs/archive/gpu-completion-runbook.zh-CN.md` 等 | GPU T4 + vLLM 120 并发、runsc 攻击冒烟 | 量化数字来源 |
+| 实施日志（archive） | `docs/archive/implementation-log/2026-08-*.md` | 每天推进记录、关键 commit | 证明持续投入时有需要再查 |
 
 ---
 
@@ -38,7 +36,7 @@
    - 只看图和标题，不用读每一行。
    - 记住"一次任务的一生"：Tenant → Workspace → Session → Run → Attempt → Sandbox → ToolExecution → Result/Diff/Artifact。
 
-3. **看 `docs/interview-demo-runbook.zh-CN.md`**（10 分钟）
+3. **看 `docs/archive/interview-demo-runbook.zh-CN.md`**（10 分钟）
    - 这是现成的面试话术，直接照搬或改编。
 
 4. **看 `docs/completion-status.zh-CN.md` 的诚实边界部分**（5 分钟）
@@ -51,21 +49,21 @@
 1. **读 `README.md` 全文**（15 分钟）
    - 理解系统边界：控制面做什么、不做什么；Pi 做什么；沙箱做什么。
 
-2. **读 `docs/complete-project-detail-course.zh-CN.md` 的"一次任务的一生"和"四个系统难题"**（20 分钟）
+2. **读 `docs/archive/complete-project-detail-course.zh-CN.md` 的"一次任务的一生"和"四个系统难题"**（20 分钟）
    - 这是项目最精华的讲解稿。
    - 重点看：副作用治理、资源准入、工具治理、可解释决策。
 
 3. **选一个你最想聊的方向深挖（三选一）**（30 分钟）
    - **方向 1 副作用治理/恢复**：看 `src/checkpoints/` 源码 + `docs/course/module-6.html`。
    - **方向 2 资源准入/背压**：看 `src/resources/` + `docs/course/module-5.html`。
-   - **方向 3 沙箱隔离**：看 `docs/sandbox-isolation-evaluation.zh-CN.md` + `docs/sandbox-runtime-benchmark-runbook.zh-CN.md`。
+   - **方向 3 沙箱隔离**：看 `docs/archive/sandbox-isolation-evaluation.zh-CN.md` + `docs/archive/sandbox-runtime-benchmark-runbook.zh-CN.md`。
 
 4. **看 A/B/C 差异化方向**（20 分钟）
    - A：`src/eval/` + `scripts/eval-report.ts`
    - B：`src/http/harness-observe-page.ts` + 课程 `docs/course/modules/07-beyond-basics.html`
    - C：`src/llm-gateway/` + `.env.example` 中 `LLM_BACKENDS` 配置
 
-5. **看 `docs/interview-demo-runbook.zh-CN.md` 整理自己的话术**（15 分钟）
+5. **看 `docs/archive/interview-demo-runbook.zh-CN.md` 整理自己的话术**（15 分钟）
    - 用自己的话复述一遍，不要背原文。
 
 ### 路线 C：半天深挖版（目标大厂/核心岗位）
@@ -73,15 +71,15 @@
 目标：面试官问到哪一层都能答，且能主动引导话题。
 
 1. **按路线 B 走一遍**（2 小时）
-2. **加读 ADR**：`docs/adr/0009-*.md`（20 分钟）
+2. **加读 ADR**：`docs/archive/adr/0009-*.md`（20 分钟）
    - 重点看"决策"和"替代方案"，学习如何回答"你为什么这样设计"。
 3. **加读真机验证 runbook**（30 分钟）
-   - `docs/gpu-completion-runbook.zh-CN.md`
-   - `docs/sandbox-runtime-benchmark-runbook.zh-CN.md`
+   - `docs/archive/gpu-completion-runbook.zh-CN.md`
+   - `docs/archive/sandbox-runtime-benchmark-runbook.zh-CN.md`
    - 记住具体数字：9 项攻击、1.22x、120 并发、CRITICAL→QUEUE。
 4. **加读源码一个完整链路**（1 小时）
    - 推荐链路：HTTP 提交任务 → 资源准入 → 调度 → 沙箱执行 → 工具副作用记账 → recovery。
-   - 对照 `docs/complete-project-detail-course.zh-CN.md` 看源码。
+   - 对照 `docs/archive/complete-project-detail-course.zh-CN.md` 看源码。
 5. **做模拟面试**：自己录 5 分钟视频讲项目，然后回看哪里卡壳。
 
 ---
@@ -89,7 +87,7 @@
 ## 三、按面试问题的文档索引
 
 ### 问题 1："介绍一下你的项目"（必问）
-- **直接引用**：`README.md` 开头 + `docs/interview-demo-runbook.zh-CN.md`
+- **直接引用**：`README.md` 开头 + `docs/archive/interview-demo-runbook.zh-CN.md`
 - **推荐结构**：
   1. 一句话定位（多租户 Agent 任务控制面）
   2. 解决什么问题（四个系统难题）
@@ -98,27 +96,27 @@
   5. 差异化（A/B/C 三个方向）
 
 ### 问题 2："为什么用 runsc/gVisor，而不是自己写沙箱？"
-- **引用**：`docs/adr/0009-*.md` + `docs/sandbox-isolation-evaluation.zh-CN.md`
+- **引用**：`docs/archive/adr/0009-*.md` + `docs/archive/sandbox-isolation-evaluation.zh-CN.md`
 - **回答要点**：
   - 不做自研 runtime（预算/人力/安全责任都不够）。
   - 亮点在上层三环：策略边界编译、租户资源管控、可验证证据。
   - 诚实边界：没有 KVM 就不能声称 strict VM 隔离通过。
 
 ### 问题 3："资源准入怎么做？背压怎么触发？"
-- **引用**：`docs/complete-project-detail-course.zh-CN.md` 资源准入部分 + `src/resources/resource-admission-service.ts`
+- **引用**：`docs/archive/complete-project-detail-course.zh-CN.md` 资源准入部分 + `src/resources/resource-admission-service.ts`
 - **回答要点**：
   - vLLM metrics → ResourceSnapshot → 分类（NORMAL/WARNING/CRITICAL）→ policy_decisions（START/QUEUE）。
   - fail-closed：观测失败默认 QUEUE，不盲跑。
 
 ### 问题 4："任务崩溃了怎么恢复？"
-- **引用**：`docs/complete-project-detail-course.zh-CN.md` 恢复部分 + `src/checkpoints/recovery-decision.ts`
+- **引用**：`docs/archive/complete-project-detail-course.zh-CN.md` 恢复部分 + `src/checkpoints/recovery-decision.ts`
 - **回答要点**：
   - ToolEffect 三分类：READ_ONLY / IDEMPOTENT_WRITE / UNKNOWN。
   - 只有 PREPARED + READ_ONLY 才能自动重放。
   - Checkpoint 是稳定引用，不是内存 dump。
 
 ### 问题 5："多租户怎么隔离？"
-- **引用**：`docs/multi-tenant-agent-management-research.zh-CN.md` + `src/auth/` + `src/scheduling/tenant-run-scheduler.ts`
+- **引用**：`docs/archive/multi-tenant-agent-management-research.zh-CN.md` + `src/auth/` + `src/scheduling/tenant-run-scheduler.ts`
 - **回答要点**：
   - API Key → principal → tenant 作用域。
   - 运行隔离：workspace 独立、沙箱独立、预算独立。
@@ -174,10 +172,10 @@
 | 数字 | 来源文档 | 用法 |
 |---|---|---|
 | 254 tests pass / 0 fail | `bun test` 输出 | 证明基础功能稳定 |
-| 9 项攻击冒烟 PASS | `docs/sandbox-runtime-benchmark-runbook.zh-CN.md` | 证明沙箱隔离有效 |
-| 120 并发 → CRITICAL → QUEUE | `docs/gpu-completion-runbook.zh-CN.md` | 证明资源背压真实有效 |
-| runsc 1.22x 开销 | `docs/sandbox-runtime-benchmark-runbook.zh-CN.md` | 证明隔离开销可接受 |
-| vLLM 0.7.3 | `docs/gpu-completion-runbook.zh-CN.md` | 真实技术栈 |
+| 9 项攻击冒烟 PASS | `docs/archive/sandbox-runtime-benchmark-runbook.zh-CN.md` | 证明沙箱隔离有效 |
+| 120 并发 → CRITICAL → QUEUE | `docs/archive/gpu-completion-runbook.zh-CN.md` | 证明资源背压真实有效 |
+| runsc 1.22x 开销 | `docs/archive/sandbox-runtime-benchmark-runbook.zh-CN.md` | 证明隔离开销可接受 |
+| vLLM 0.7.3 | `docs/archive/gpu-completion-runbook.zh-CN.md` | 真实技术栈 |
 
 ---
 
@@ -186,5 +184,5 @@
 1. **不要试图把整本书讲完**。面试官只关心你能讲清楚 1-2 个点。
 2. **优先讲"我为什么这样设计"，而不是"我实现了什么功能"**。
 3. **诚实是护城河**。主动说出"这不是生产级"比被追问出来要好得多。
-4. **把 `docs/interview-demo-runbook.zh-CN.md` 读三遍**，它是现成的话术库。
+4. **把 `docs/archive/interview-demo-runbook.zh-CN.md` 读三遍**，它是现成的话术库。
 5. **准备一个问题反问**："您团队里的 agent infra 目前最大的痛点是隔离、调度、观测还是模型路由？"——把面试官的兴趣点引导到你最强的方向。
