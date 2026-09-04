@@ -28,7 +28,10 @@ import {
     type ToolGatewayExecutor,
 } from "./pi-tool-gateway.ts";
 import { createPiCapabilityProfile } from "./runtime-capability.ts";
-import type { SandboxCommandExecutor } from "../sandbox/sandbox-provider.ts";
+import type {
+    SandboxCommandExecutor,
+    SandboxEnforcementCapabilities,
+} from "../sandbox/sandbox-provider.ts";
 
 export interface PiAdapterConfig{
     provider:string;
@@ -147,6 +150,7 @@ export class PiAdapter implements AgentRuntime{
             config.tools,
             request.execution?.policySnapshotId,
             request.execution?.sandboxId,
+            request.execution?.sandboxEnforcement,
         );
         const resourceLoader = request.execution === undefined
             ? undefined
@@ -155,14 +159,23 @@ export class PiAdapter implements AgentRuntime{
                 request.execution.runtimeConfig.skills,
             );
 
-        // 创建 pi agent session
+        // 首条消息创建 Pi Session；同一 HarnessSession 的后续 Run 打开
+        // 已持久化的 Session，从而保留模型对话历史。
+        const sessionManager = request.run.runtimeSessionRef === null
+            || request.run.runtimeSessionRef === undefined
+            ? SessionManager.create(request.run.workspacePath)
+            : SessionManager.open(
+                request.run.runtimeSessionRef,
+                undefined,
+                request.run.workspacePath,
+            );
         const {session} = await createAgentSession({
             cwd:request.run.workspacePath,
             modelRuntime:this.modelRuntime,
             model,
             tools:[...config.tools],
             customTools,
-            sessionManager:SessionManager.create(request.run.workspacePath),
+            sessionManager,
             ...(resourceLoader === undefined ? {} : { resourceLoader }),
             // 创建一个可以持久化 Pi 对话历史的 SessionManager。
         })
@@ -437,6 +450,7 @@ export class PiAdapter implements AgentRuntime{
             config.tools,
             request.execution?.policySnapshotId,
             request.execution?.sandboxId,
+            request.execution?.sandboxEnforcement,
         );
         const resourceLoader = request.execution === undefined
             ? undefined
@@ -690,6 +704,7 @@ export class PiAdapter implements AgentRuntime{
         toolNames: readonly string[],
         policySnapshotId?: string,
         sandboxId?: string,
+        sandboxEnforcement?: SandboxEnforcementCapabilities,
     ) {
         return createGatewayPiTools(
             toolNames,
@@ -700,6 +715,7 @@ export class PiAdapter implements AgentRuntime{
                 workspacePath,
                 getPolicySnapshotId: () => policySnapshotId,
                 getSandboxId: () => sandboxId,
+                getSandboxEnforcement: () => sandboxEnforcement,
                 getRuntimeSessionRef: () => {
                     const runtimeSessionRef =
                         runtimeSessionRefHolder.current;

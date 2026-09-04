@@ -63,6 +63,8 @@ export function toQueueReasonCode(
             return "RESOURCE_UNKNOWN";
         case "RESOURCE_OBSERVATION_FAILED":
             return "RESOURCE_OBSERVATION_FAILED";
+        case "TENANT_BUDGET_EXCEEDED":
+            return "TENANT_BUDGET_EXCEEDED";
         case "RESOURCE_NORMAL":
         case "RESOURCE_BUSY_TENANT_AVAILABLE":
             throw new Error(
@@ -90,6 +92,7 @@ export class RunQueueCoordinator  {
         this.scheduler.enqueue({
             runId:run.id,
             tenantId:run.tenantId,
+            sessionId:run.harnessSessionId,
         })
 
         // 返回 Queued Run
@@ -104,6 +107,7 @@ export class RunQueueCoordinator  {
         this.scheduler.enqueue({
             runId:run.id,
             tenantId:run.tenantId,
+            sessionId:run.harnessSessionId,
         });
 
         return run;
@@ -153,6 +157,7 @@ export class RunQueueCoordinator  {
             this.scheduler.enqueue({
                 runId : queuedRun.runId,
                 tenantId : queuedRun.tenantId,
+                ...(queuedRun.sessionId === undefined ? {} : { sessionId: queuedRun.sessionId }),
                 reasonCode : "RESOURCE_OBSERVATION_FAILED",
                 enqueuedAt : queuedRun.enqueuedAt,
             });
@@ -171,6 +176,7 @@ export class RunQueueCoordinator  {
             this.scheduler.enqueue({
                 runId:queuedRun.runId,
                 tenantId:queuedRun.tenantId,
+                ...(queuedRun.sessionId === undefined ? {} : { sessionId: queuedRun.sessionId }),
                 reasonCode,
                 enqueuedAt:queuedRun.enqueuedAt,
             });
@@ -343,6 +349,7 @@ export class RunQueueCoordinator  {
             this.scheduler.enqueue({
                 runId:run.id,
                 tenantId:run.tenantId,
+                sessionId:run.harnessSessionId,
             });
         } catch (error) {
             this.pendingResumeByRunId.delete(run.id);

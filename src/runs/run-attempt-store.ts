@@ -50,6 +50,10 @@ export class RunAttemptStore {
         `).all({ runId });
     }
 
+    getBySandboxId(sandboxId: string): RunAttempt | null {
+        return this.queryOne("sandbox_id = $value", sandboxId);
+    }
+
     nextAttemptNumber(runId: string): number {
         const row = this.db.query<{ nextNumber: number }, { runId: string }>(`
             SELECT COALESCE(MAX(attempt_number), 0) + 1 AS nextNumber

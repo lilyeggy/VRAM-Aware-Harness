@@ -1,0 +1,252 @@
+<section class="module" id="module-10" style="background: var(--color-bg)">
+  <div class="module-content">
+    <header class="module-header animate-in">
+      <span class="module-number">10</span>
+      <h1 class="module-title">vLLM 推理引擎原理 · Harness 视角</h1>
+      <p class="module-subtitle">2026 秋招 AI Infra 的绝对核心考点。"你天天调 vLLM，它内部怎么工作？"——这一页让你扛住十分钟追问。</p>
+    </header>
+
+    <div class="module-body">
+
+      <section class="screen animate-in">
+        <h2 class="screen-heading">一次请求在引擎里的一生</h2>
+        <p>点击下一步，看一个请求穿过 vLLM 引擎的完整旅程——注意第 4 步和第 5 步的本质区别，它是后面所有优化的根源：</p>
+        <div class="flow-animation" data-steps='[
+  {"highlight":"flow-actor-28","packet":true,"from":"actor-28","to":"actor-29","label":"用户请求到达：OpenAI 兼容 API 收到 prompt，Tokenizer 把文本切成 token 序列"},
+  {"highlight":"flow-actor-30","label":"Scheduler 决定这一步迭代谁上场：新请求做 Prefill，还是老请求继续 Decode —— 这是 continuous batching 的核心决策点"},
+  {"highlight":"flow-actor-31","packet":true,"from":"actor-30","to":"actor-31","label":"Prefill 阶段：整段 prompt 一次并行算完，生成第一个 token 并填满 KV Cache —— 计算密集型"},
+  {"highlight":"flow-actor-32","packet":true,"from":"actor-31","to":"actor-32","label":"Decode 阶段：每步只算一个 token，但要读全部历史 KV Cache —— 显存带宽密集型"},
+  {"highlight":"flow-actor-33","label":"KV Cache 按块分配在显存里：每生成一个 token 追加一块，序列越长占得越多"},
+  {"highlight":"flow-actor-28","packet":true,"from":"actor-32","to":"actor-28","label":"token 流式返回给客户端；同时 /metrics 更新 running、waiting、cache 使用率"}
+]'>
+          <div class="flow-actors">
+            <div class="flow-actor" id="flow-actor-28">
+              <div class="flow-actor-icon" style="border-color: #6B6560; background: #EFEAE3">👤</div>
+              <span>客户端<br>API 请求</span>
+            </div>
+            <div class="flow-actor" id="flow-actor-29">
+              <div class="flow-actor-icon" style="border-color: #2A7B9B; background: #E4F2F7">✂️</div>
+              <span>Tokenizer<br>分词器</span>
+            </div>
+            <div class="flow-actor" id="flow-actor-30">
+              <div class="flow-actor-icon" style="border-color: #D94F30; background: #FDEEE9">🎫</div>
+              <span>Scheduler<br>调度器</span>
+            </div>
+            <div class="flow-actor" id="flow-actor-31">
+              <div class="flow-actor-icon" style="border-color: #7B6DAA; background: #EFEBF7">📚</div>
+              <span>Prefill<br>预填充</span>
+            </div>
+            <div class="flow-actor" id="flow-actor-32">
+              <div class="flow-actor-icon" style="border-color: #D4A843; background: #FDF5E0">🖊️</div>
+              <span>Decode<br>逐 token 解码</span>
+            </div>
+            <div class="flow-actor" id="flow-actor-33">
+              <div class="flow-actor-icon" style="border-color: #2D8B55; background: #E8F5EE">🧊</div>
+              <span>KV Cache<br>显存块</span>
+            </div>
+          </div>
+
+          <div class="flow-packet" id="flow-packet"></div>
+
+          <div class="flow-step-label" id="flow-label">点击「Next Step」开始</div>
+
+          <div class="flow-controls">
+            <button class="btn flow-next-btn">下一步</button>
+            <button class="btn flow-reset-btn">重新开始</button>
+            <span class="flow-progress"></span>
+          </div>
+        </div>
+        <div class="callout callout-accent">
+          <div class="callout-icon">💡</div>
+          <div class="callout-content">
+            <strong class="callout-title">一切优化都源于这个不对称</strong>
+            <p><strong>Prefill 是计算密集型</strong>（整段并行算，GPU 算力打满）；<strong>Decode 是显存带宽密集型</strong>（每步只算 1 个 token 却要读全部 KV Cache，算力闲着等数据）。PD 分离、Chunked Prefill、量化……全是在处理这对矛盾。</p>
+          </div>
+        </div>
+      </section>
+
+      <section class="screen animate-in">
+        <h2 class="screen-heading">PagedAttention：给 KV Cache 装上"虚拟内存"</h2>
+        <p>传统做法按序列最大长度<strong>预分配连续显存</strong>——内部碎片高达 60-80%。vLLM 的答案是借鉴操作系统分页：</p>
+        <div class="pattern-cards stagger-children">
+          <div class="pattern-card animate-in" style="border-top: 3px solid var(--color-accent)">
+            <div class="pattern-icon" style="background: var(--color-accent)">🧩</div>
+            <h4 class="pattern-title">逻辑块 + 物理块 + 块表</h4>
+            <p class="pattern-desc">每个序列的逻辑 KV 分成固定大小块（如 16 token/块），按需映射到物理块——类比虚拟内存页表</p>
+          </div>
+          <div class="pattern-card animate-in" style="border-top: 3px solid var(--color-actor-2)">
+            <div class="pattern-icon" style="background: var(--color-actor-2)">📉</div>
+            <h4 class="pattern-title">碎片几乎归零</h4>
+            <p class="pattern-desc">内部碎片 &lt; 一个块；没有外部碎片——省下的显存换成更大 batch，吞吐提升数倍</p>
+          </div>
+          <div class="pattern-card animate-in" style="border-top: 3px solid var(--color-actor-4)">
+            <div class="pattern-icon" style="background: var(--color-actor-4)">🔗</div>
+            <h4 class="pattern-title">前缀共享 / 写时复制</h4>
+            <p class="pattern-desc">相同前缀（system prompt）的序列共享物理块；需要分叉时才复制——Prefix Caching 的底层基础</p>
+          </div>
+        </div>
+        <div class="callout callout-info">
+          <div class="callout-icon">🧷</div>
+          <div class="callout-content">
+            <strong class="callout-title">面试金句</strong>
+            <p>"PagedAttention 解决的是 KV Cache 显存的<strong>内外部碎片</strong>问题：外部碎片来自连续分配找不到大块空地，内部碎片来自按 max_len 预留却只用了一半。分页之后显存利用率从 ~40% 提到接近满载。"</p>
+          </div>
+        </div>
+      </section>
+
+      <section class="screen animate-in">
+        <h2 class="screen-heading">Continuous Batching 与 Scheduler 抢占（同花顺真题）</h2>
+        <p>Static batching 要等一整批里最长的序列跑完才能换下一批——GPU 大量空转。<span class="term" data-definition="Continuous Batching（迭代级调度）：每完成一步解码就检查队列，有位置就立刻插入新请求，而不是等整批结束。出自 Orca 论文，是所有现代推理引擎的标配。">Continuous Batching</span> 把调度粒度从"批"降到"迭代"。</p>
+        <p>而显存被挤爆时就要<span class="term" data-definition="抢占（Preemption）：显存不足时把某些已运行请求的 KV Cache 踢出去，腾地方给更重要的请求。被踢的请求稍后重算或换回。">抢占</span>。vLLM 0.7.x（本项目真机实测版本）中，调度器位于 <code style="font-family:var(--font-mono)">vllm/core/scheduler/scheduler.py</code>，两种抢占模式：</p>
+        <div class="icon-rows">
+          <div class="icon-row">
+            <div class="icon-circle" style="background: var(--color-actor-1)">♻️</div>
+            <div>
+              <strong>_preempt_by_recompute（重算式）</strong>
+              <p>直接丢弃该请求的全部 KV Cache，释放显存；请求回到等待队首，之后重新 Prefill。代价是重复计算，但实现简单、不占额外内存。</p>
+            </div>
+          </div>
+          <div class="icon-row">
+            <div class="icon-circle" style="background: var(--color-actor-2)">💾</div>
+            <div>
+              <strong>_preempt_by_swapped（换出式）</strong>
+              <p>KV Cache 块搬到 CPU 内存，恢复时再搬回来。省重算但 PCIe 来回搬运慢，且 CPU 侧要有 swap 空间。</p>
+            </div>
+          </div>
+          <div class="icon-row">
+            <div class="icon-circle" style="background: var(--color-actor-3)">⚖️</div>
+            <div>
+              <strong>抢谁？默认抢最新的</strong>
+              <p>vLLM 默认抢占最近到达的请求（它重算成本最低）。这就是同花顺二面"抢占策略代码在哪"的标准答案骨架——答出文件路径 + 两个函数名 + 抢谁的原则。</p>
+            </div>
+          </div>
+        </div>
+        <div class="callout callout-warning">
+          <div class="callout-icon">🛡️</div>
+          <div class="callout-content">
+            <strong class="callout-title">Harness 视角的边界（必背口径）</strong>
+            <p>"我们能够修改自己的 vLLM fork，但源码权限不等于立即重写 Scheduler。第一阶段优先使用标准 API、usage 和 Metrics……只有基线数据证明存在收益时才进入 priority、KV Events、offload 或 Agent-aware scheduling。"——这是 ADR 0005 的原文口径，既证明你懂内部，又证明你有克制。</p>
+          </div>
+        </div>
+      </section>
+
+      <section class="screen animate-in">
+        <h2 class="screen-heading">PD 分离与量化（百度 / 阿里真题）</h2>
+        <p><strong>PD 分离（Prefill-Decode Disaggregation）</strong>：把 Prefill 和 Decode 放到不同的 GPU 实例池，中间只传 KV Cache。为什么必须分？混布时 Prefill 的长计算会<strong>阻塞正在 Decode 的请求</strong>——首 token 延迟（TTFT）和后续 token 间隔（ITL）互相拖累。记法：<code style="font-family:var(--font-mono)">XpYd</code>（如 4p8d = 4 卡做 Prefill、8 卡做 Decode）。业界参照：Mooncake（Kimi 的 KVCache 中心化分离架构）、DistServe、Splitwise。</p>
+        <p><strong>KV Cache 量化为什么 FP8 和 INT8 并存？（阿里 PAI 二面原题）</strong></p>
+        <div class="badge-list">
+          <div class="badge-item"><code class="badge-code">FP8 (E4M3/E5M2)</code><span class="badge-desc">动态范围大、格式与浮点乘加天然兼容，Hopper/Ada 硬件原生支持——精度保持好、迁移成本低</span></div>
+          <div class="badge-item"><code class="badge-code">INT8</code><span class="badge-desc">需要校准和平滑处理激活异常值，但在无 FP8 硬件的旧卡（A100/A6000！）上仍是主力</span></div>
+          <div class="badge-item"><code class="badge-code">并存的原因</code><span class="badge-desc">不同硬件代际 + 不同精度敏感场景的组合问题，不是一个最优解通吃——答出"硬件约束决定工程选型"就赢了</span></div>
+        </div>
+        <div class="translation-block">
+          <div class="translation-code">
+            <span class="translation-label">CODE · 本项目 src/resources/vllm-resource-observer.ts</span>
+            <pre><code><span class="code-line"><span class="code-keyword">const</span> kvCacheUsageFraction = <span class="code-function">maxMetric</span>(text, <span class="code-string">"vllm:kv_cache_usage_perc"</span>)</span>
+<span class="code-line">    ?? <span class="code-function">maxMetric</span>(</span>
+<span class="code-line">        <span class="code-comment">// vLLM &gt;= 0.7 renamed KV-cache usage to gpu_cache_usage_perc.</span></span>
+<span class="code-line">        <span class="code-string">"vllm:gpu_cache_usage_perc"</span>,</span>
+<span class="code-line">    );</span></code></pre>
+          </div>
+          <div class="translation-english">
+            <span class="translation-label">白话翻译</span>
+            <div class="translation-lines">
+              <p class="tl">这四行就是"Harness 懂引擎"的直接证据：我们读的 kv_cache_usage_perc 正是 PagedAttention 物理块分配器的水位线。</p>
+              <p class="tl">vLLM 0.7 改了指标名，解析器两个都认——跟着上游演进而不断裂，这正是真机 T4 实验踩出来的兼容性。</p>
+              <p class="tl">取 max 不取平均：多实例时看最挤的那个——压力信号不能被平均值稀释。</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="screen animate-in">
+        <h2 class="screen-heading">指标 ↔ 引擎内部状态对照表</h2>
+        <p>面试官问"你的资源感知到底感知了什么"，这张表把项目观测的每个指标钉到引擎机制上：</p>
+        <table style="width:100%;border-collapse:collapse;font-size:var(--text-sm)">
+          <tr style="border-bottom:2px solid var(--color-border)">
+            <th style="text-align:left;padding:var(--space-2)">项目读取的指标</th><th style="text-align:left;padding:var(--space-2)">引擎内部对应</th><th style="text-align:left;padding:var(--space-2)">Harness 用它做什么</th>
+          </tr>
+          <tr style="border-bottom:1px solid var(--color-border-light)"><td style="padding:var(--space-2)"><code style="font-family:var(--font-mono)">num_requests_running</code></td><td style="padding:var(--space-2)">continuous batching 当前批内的活跃序列数</td><td rowspan="3" style="padding:var(--space-2)">ResourceSnapshot 四组压力信号 → classifyResource → START/QUEUE 准入决策；CRITICAL 时新任务排队背压</td></tr>
+          <tr style="border-bottom:1px solid var(--color-border-light)"><td style="padding:var(--space-2)"><code style="font-family:var(--font-mono)">num_requests_waiting</code></td><td style="padding:var(--space-2)">waiting 队列长度（含被抢占换出的）</td></tr>
+          <tr style="border-bottom:1px solid var(--color-border-light)"><td style="padding:var(--space-2)"><code style="font-family:var(--font-mono)">gpu/kv_cache_usage_perc</code></td><td style="padding:var(--space-2)">PagedAttention 物理块分配器水位</td></tr>
+          <tr style="border-bottom:1px solid var(--color-border-light)"><td style="padding:var(--space-2)"><code style="font-family:var(--font-mono)">prompt/generation_tokens_total</code></td><td style="padding:var(--space-2)">Counter 型累计量（重启归零）</td><td style="padding:var(--space-2)">两次观测求差得 token 吞吐速率，归零保护返回 null</td></tr>
+          <tr><td style="padding:var(--space-2)">nvidia-smi 显存/利用率</td><td style="padding:var(--space-2)">GPU 物理事实（含非推理占用）</td><td style="padding:var(--space-2)">双源交叉验证，单源失败可降级</td></tr>
+        </table>
+
+        <div class="quiz-container" id="quiz-module-10">
+          <div class="quiz-question-block"
+               data-correct="option-b"
+               data-explanation-right="完全正确！Prefill 一次并行处理整个 prompt，瓶颈在算力；Decode 每步只产出一个 token 却要把全部 KV Cache 从显存读一遍，瓶颈在带宽。PD 分离正是让两类卡各干擅长的事。"
+               data-explanation-wrong="反过来想想哪个阶段要反复读巨大的 KV Cache：Decode 每出一个字都要读完所有历史。它是带宽饿鬼，不是算力饕餮。">
+            <h3 class="quiz-question">场景题：面试官问"为什么说 Prefill 是计算密集型、Decode 是带宽密集型？"最佳回答是？</h3>
+            <div class="quiz-options">
+              <button class="quiz-option" data-value="option-a" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>Prefill 处理长文本所以费带宽，Decode 一步一个 token 所以费算力</span>
+              </button>
+              <button class="quiz-option" data-value="option-b" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>Prefill 整段 prompt 并行矩阵乘，GPU 算力打满；Decode 每步只算 1 个 token 但要读全部历史 KV Cache，卡在显存带宽上</span>
+              </button>
+              <button class="quiz-option" data-value="option-c" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>两者都是计算密集型，只是批次大小不同</span>
+              </button>
+            </div>
+            <div class="quiz-feedback"></div>
+          </div>
+
+          <div class="quiz-question-block"
+               data-correct="option-a"
+               data-explanation-right="正确！recompute 简单、无额外内存但重复计算；swap 保住计算结果但要 PCIe 搬运和 CPU 内存。vLLM 默认对最新请求抢占——它的重算成本最低。"
+               data-explanation-wrong="两种模式各有明确取舍：一个是时间换空间（重算），一个是空间换时间（换出）。想想各自适合什么硬件条件。">
+            <h3 class="quiz-question">vLLM 显存不足触发抢占时，_preempt_by_recompute 和 _preempt_by_swapped 的核心取舍是什么？</h3>
+            <div class="quiz-options">
+              <button class="quiz-option" data-value="option-a" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>recompute 丢弃 KV 之后重新 Prefill（时间换空间）；swap 把 KV 搬去 CPU 内存（空间换时间，PCIe 往返有成本）</span>
+              </button>
+              <button class="quiz-option" data-value="option-b" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>recompute 是 bug 兜底逻辑，正常都用 swap</span>
+              </button>
+              <button class="quiz-option" data-value="option-c" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>两者完全等价，只是函数命名不同</span>
+              </button>
+            </div>
+            <div class="quiz-feedback"></div>
+          </div>
+
+          <div class="quiz-question-block"
+               data-correct="option-c"
+               data-explanation-right="完全正确！这是阿里 PAI 的原题考点：FP8 靠新硬件的原生支持与浮点格式兼容性赢精度，INT8 靠普适性守旧卡。'选型由硬件代际与场景共同决定'才是满分答案。"
+               data-explanation-wrong="如果 FP8 全面优于 INT8 就不会'并存'了——题目本身就暗示两者各有领地。想想 A6000/A100 这类没有 FP8 张量核心的卡怎么办。">
+            <h3 class="quiz-question">为什么生产环境里 FP8 和 INT8 的 KV Cache 量化长期并存，而不是 FP8 全面取代 INT8？</h3>
+            <div class="quiz-options">
+              <button class="quiz-option" data-value="option-a" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>INT8 更精确，用于质量敏感场景；FP8 只用于实验</span>
+              </button>
+              <button class="quiz-option" data-value="option-b" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>纯历史遗留，新版本已全部切到 FP8</span>
+              </button>
+              <button class="quiz-option" data-value="option-c" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>FP8 动态范围大且新卡原生支持、精度保持好；INT8 无需 FP8 硬件、在 A100/A6000 等旧卡上仍是主力——硬件代际决定选型</span>
+              </button>
+            </div>
+            <div class="quiz-feedback"></div>
+          </div>
+
+          <button class="quiz-check-btn" onclick="checkQuiz('quiz-module-10')">检查答案</button>
+          <button class="quiz-reset-btn" onclick="resetQuiz('quiz-module-10')">再试一次</button>
+        </div>
+
+        <p style="margin-top:var(--space-8)"><strong>下一模块</strong>：往下钻完了，现在向上对接——把项目翻译成面试官口中的"Harness Engineering"话语体系。</p>
+      </section>
+
+    </div>
+  </div>
+</section>

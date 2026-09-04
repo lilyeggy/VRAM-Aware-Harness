@@ -749,4 +749,90 @@ export const migrations: readonly SchemaMigration[] = [
             ALTER TABLE policy_decisions_v14 RENAME TO policy_decisions;
         `,
     },
+    {
+        version: 15,
+        name: "drop_tenant_user_subject_id",
+        up: `
+            -- tenant = 用户（产品决定）：subjectId 与 tenantId 一一对应，冗余去除。
+            -- SQLite 改列用“建新表→复制→删旧→改名”，保留原约束与索引。
+
+            -- api_credentials：去掉 subject_id
+            CREATE TABLE api_credentials_v15 (
+                id TEXT PRIMARY KEY,
+                key_digest TEXT NOT NULL UNIQUE,
+                tenant_id TEXT NOT NULL,
+                scopes_json TEXT NOT NULL CHECK (json_valid(scopes_json)),
+                created_at TEXT NOT NULL,
+                revoked_at TEXT
+            );
+            INSERT INTO api_credentials_v15 (id, key_digest, tenant_id, scopes_json, created_at, revoked_at)
+                SELECT id, key_digest, tenant_id, scopes_json, created_at, revoked_at
+                FROM api_credentials;
+            DROP TABLE api_credentials;
+            ALTER TABLE api_credentials_v15 RENAME TO api_credentials;
+            CREATE INDEX idx_api_credentials_tenant
+                ON api_credentials(tenant_id, revoked_at);
+
+            -- access_audit_events：去掉 subject_id
+            CREATE TABLE access_audit_events_v15 (
+                id TEXT PRIMARY KEY,
+                timestamp TEXT NOT NULL,
+                action TEXT NOT NULL,
+                outcome TEXT NOT NULL CHECK (outcome IN ('ALLOW', 'DENY')),
+                tenant_id TEXT,
+                resource_type TEXT,
+                resource_id TEXT,
+                reason TEXT NOT NULL
+            );
+            INSERT INTO access_audit_events_v15 (id, timestamp, action, outcome, tenant_id, resource_type, resource_id, reason)
+                SELECT id, timestamp, action, outcome, tenant_id, resource_type, resource_id, reason
+                FROM access_audit_events;
+            DROP TABLE access_audit_events;
+            ALTER TABLE access_audit_events_v15 RENAME TO access_audit_events;
+            CREATE INDEX idx_access_audit_tenant_timestamp
+                ON access_audit_events(tenant_id, timestamp);
+        `,
+    },
+    {
+        version: 16,
+        name: "create_users_and_sessions",
+        up: `
+            CREATE TABLE users (
+                id TEXT PRIMARY KEY,
+                email TEXT NOT NULL UNIQUE,
+                password_hash TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            );
+            CREATE TABLE user_sessions (
+                id TEXT PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                token_digest TEXT NOT NULL UNIQUE,
+                created_at TEXT NOT NULL,
+                expires_at TEXT NOT NULL,
+                revoked_at TEXT,
+                FOREIGN KEY (user_id) REFERENCES users(id)
+            );
+            CREATE INDEX idx_user_sessions_token
+                ON user_sessions(token_digest, revoked_at, expires_at);
+        `,
+    },
+    {
+        version: 17,
+        name: "create_workspace_conversations",
+        up: `
+            -- Conversation 是用户可见的持续对话；HarnessSession 仍是 Runtime 绑定。
+            -- 两者共享 ID，但 Conversation 可以在第一个 Run 之前创建。
+            CREATE TABLE conversations (
+                id TEXT PRIMARY KEY,
+                tenant_id TEXT NOT NULL,
+                workspace_id TEXT NOT NULL,
+                title TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                FOREIGN KEY (workspace_id) REFERENCES workspaces(id)
+            );
+            CREATE INDEX idx_conversations_workspace_updated
+                ON conversations(tenant_id, workspace_id, updated_at DESC);
+        `,
+    },
 ];

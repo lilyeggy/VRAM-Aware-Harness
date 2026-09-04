@@ -80,7 +80,7 @@ function percentile(
         sorted.length - 1,
         Math.ceil((p / 100) * sorted.length) - 1,
     );
-    return sorted[Math.max(0, index)];
+    return sorted[Math.max(0, index)] ?? null;
 }
 
 function average(values: readonly number[]): number | null {

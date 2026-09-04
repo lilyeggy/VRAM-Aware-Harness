@@ -93,6 +93,9 @@ function createApi() {
         getRunsForTenant(tenantId) {
             return tenantId === currentRun.tenantId ? [currentRun] : [];
         },
+        getAgentsForTenant() {
+            return [];
+        },
         getRunEvents(runId) {
             return runId === currentRun.id ? [event] : [];
         },
@@ -172,8 +175,8 @@ test("最小 HTTP API 覆盖提交、查询、中断、恢复、队列、资源�
     const consoleResponse = await api.fetch(new Request("http://harness.local/"));
     expect(consoleResponse.status).toBe(200);
     const consoleHtml = await consoleResponse.text();
-    expect(consoleHtml).toContain("TASK CONSOLE");
-    expect(consoleHtml).toContain("提交任务，看到它如何结束。");
+    expect(consoleHtml).toContain("Agent Harbor");
+    expect(consoleHtml).toContain("多 Agent 执行工作台");
     expect(consoleHtml).not.toContain("\\\\u63D0\\\\u4EA4");
 
     const healthResponse = await api.fetch(new Request(
@@ -187,6 +190,13 @@ test("最小 HTTP API 覆盖提交、查询、中断、恢复、队列、资源�
         ok:true,
         started:true,
     });
+    const readyResponse = await api.fetch(new Request("http://harness.local/ready"));
+    expect(readyResponse.status).toBe(200);
+    expect(await jsonBody<{ ready:boolean }>(readyResponse)).toEqual({ ready:true });
+
+    const agentsResponse = await api.fetch(new Request("http://harness.local/agents"));
+    expect(agentsResponse.status).toBe(200);
+    expect(await jsonBody<{ agents:unknown[] }>(agentsResponse)).toEqual({ agents:[] });
 
     const submitResponse = await api.fetch(new Request(
         "http://harness.local/runs",
@@ -332,7 +342,7 @@ test("LLM 网关入口走统一身份主干：无 key 401、作用域不足 403�
         { get: () => null },
         {
             authenticate: (raw) => keyOk
-                ? { subjectId: "u-a", tenantId: "tenant-a", scopes }
+                ? { tenantId: "tenant-a", scopes }
                 : null,
             workspaceService: {} as never,
         },

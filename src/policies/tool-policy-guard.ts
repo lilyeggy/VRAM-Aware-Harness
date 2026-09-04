@@ -25,19 +25,26 @@ export class PersistentToolPolicyGuard implements ToolPolicyGuard {
             && !snapshot.allowedTools.includes(input.toolName)
         ) {
             denial = `策略不允许工具：${input.toolName}`;
-        } else if (
-            input.toolName === "bash"
-            && (
-                !snapshot.allowProcess
-                || !snapshot.allowNetwork
-                || snapshot.workspaceRoots !== null
-            )
-        ) {
-            denial = !snapshot.allowProcess
-                ? "策略禁止工具启动进程"
-                : !snapshot.allowNetwork
-                    ? "无法证明 bash 命令不访问网络，按策略拒绝"
-                    : "MANAGED_LOCAL 无法证明 bash 不越过 Workspace，按策略拒绝";
+        } else if (input.toolName === "bash") {
+            const enforcement = input.sandboxEnforcement;
+            if (!snapshot.allowProcess) {
+                denial = "策略禁止工具启动进程";
+            } else if (
+                !snapshot.allowNetwork
+                && enforcement?.networkPolicyEnforced !== true
+            ) {
+                denial = "执行环境无法落实禁网策略，拒绝 bash";
+            } else if (
+                snapshot.workspaceRoots !== null
+                && enforcement?.filesystemIsolation !== true
+            ) {
+                denial = "执行环境无法隔离 Workspace，拒绝 bash";
+            } else if (
+                enforcement?.toolExecutionBoundary === "SANDBOX"
+                && enforcement.processIsolation !== true
+            ) {
+                denial = "Sandbox 未提供进程隔离，拒绝 bash";
+            }
         } else {
             const path = toolPath(input.arguments, input.workspacePath);
             if (

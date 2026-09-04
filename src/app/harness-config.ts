@@ -32,6 +32,8 @@ export interface HarnessConfig {
     maxActiveRuns:number;
     maxActiveRunsPerTenant:number;
     pumpIntervalMs:number;
+    executionTimeoutMs?:number;
+    interruptGraceMs?:number;
     /** 方向 C：LLM 网关后端列表（空数组=网关未启用）。 */
     llmBackends:LlmBackend[];
 }
@@ -183,6 +185,16 @@ export function loadHarnessConfig(
             environment,
             "HARNESS_PUMP_INTERVAL_MS",
             1_000,
+        ),
+        executionTimeoutMs:positiveInteger(
+            environment,
+            "HARNESS_EXECUTION_TIMEOUT_MS",
+            30 * 60_000,
+        ),
+        interruptGraceMs:positiveInteger(
+            environment,
+            "HARNESS_INTERRUPT_GRACE_MS",
+            10_000,
         ),
     };
 }

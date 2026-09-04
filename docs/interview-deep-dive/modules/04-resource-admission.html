@@ -1,0 +1,308 @@
+<section class="module" id="module-4" style="background: var(--color-bg)">
+  <div class="module-content">
+    <header class="module-header animate-in">
+      <span class="module-number">04</span>
+      <h1 class="module-title">资源准入与背压</h1>
+      <p class="module-subtitle">120 个并发打进 T4 时，新任务是 START 还是 QUEUE？——先看仪表盘，再下决策，每次决策都落库。</p>
+    </header>
+
+    <div class="module-body">
+
+      <section class="screen animate-in">
+        <h2 class="screen-heading">匝道红绿灯：不是不让走，是现在上去谁都快不了</h2>
+        <p>高速主路（GPU + <span class="term" data-definition="vLLM 是高性能大模型推理引擎，提供 OpenAI 兼容 API。它把多个请求批量拼在一起跑满 GPU，但容量打满后新请求只能等待。">vLLM</span>）已经堵死时，匝道灯变红让新车排队。这不是拒绝服务，而是<span class="term" data-definition="背压（backpressure）指下游资源饱和时，上游主动放缓或暂缓接收新请求，防止系统整体崩溃的机制。">背压</span>——保护已经在上路的所有车都能到达。</p>
+        <p>传感器坏了怎么办？这个系统的回答是：<strong>灯默认常红（fail-closed）</strong>，绝不猜"应该没事"。</p>
+        <div class="flow-steps">
+          <div class="flow-step">
+            <div class="flow-step-num">1</div>
+            <p><strong>观测</strong> — 双源并行采集 vLLM /metrics 与 nvidia-smi</p>
+          </div>
+          <div class="flow-arrow">→</div>
+          <div class="flow-step">
+            <div class="flow-step-num">2</div>
+            <p><strong>分类</strong> — 四组阈值判定 NORMAL / BUSY / CRITICAL / UNKNOWN</p>
+          </div>
+          <div class="flow-arrow">→</div>
+          <div class="flow-step">
+            <div class="flow-step-num">3</div>
+            <p><strong>决策</strong> — START 或 QUEUE + reasonCode，同事务落库</p>
+          </div>
+        </div>
+        <div class="callout callout-accent">
+          <div class="callout-icon">💡</div>
+          <div class="callout-content">
+            <strong class="callout-title">为什么是三段式？</strong>
+            <p>观测、分类、决策各自是纯逻辑/可注入依赖的小模块，可以独立单测、独立失败、独立替换。"显存高就排队"人人会做；面试官想听的是每一层的细节和失败路径。</p>
+          </div>
+        </div>
+      </section>
+
+      <section class="screen animate-in">
+        <h2 class="screen-heading">观测层：双源并行，单源失败可降级</h2>
+        <p>VllmResourceObserver 用 <code style="font-family:var(--font-mono)">Promise.all</code> 同时拉两个数据源——避免最坏情况下串行等待两次 timeout。<strong>一个源挂了不整体失败</strong>；只有双源全挂才返回 ok:false。快照字段允许 null——只有所有压力信号都不可用才算 UNKNOWN。</p>
+        <div class="pattern-cards stagger-children">
+          <div class="pattern-card animate-in" style="border-top: 3px solid var(--color-actor-1)">
+            <div class="pattern-icon" style="background: var(--color-actor-1)">📊</div>
+            <h4 class="pattern-title">vLLM /metrics</h4>
+            <p class="pattern-desc">running / waiting 请求数、KV cache 使用率、prompt/generation token 累计 Counter</p>
+          </div>
+          <div class="pattern-card animate-in" style="border-top: 3px solid var(--color-actor-4)">
+            <div class="pattern-icon" style="background: var(--color-actor-4)">🖥️</div>
+            <h4 class="pattern-title">nvidia-smi CSV</h4>
+            <p class="pattern-desc">显存 total/used/free、利用率。多 GPU 显存<strong>求和</strong>、利用率取<strong>最大值</strong></p>
+          </div>
+        </div>
+        <div class="callout callout-info">
+          <div class="callout-icon">🔍</div>
+          <div class="callout-content">
+            <strong class="callout-title">Prometheus 解析的两个反直觉规则</strong>
+            <p>同一指标可能因 model_name 标签出现多行：请求数和 Token <span class="term" data-definition="Counter 是只增不减的累计计数器（如总请求数）；Gauge 是可升可降的瞬时值（如当前排队数）。两种指标的聚合方式不同。">Counter</span> 代表总工作量 → <strong>求和</strong>；<span class="term" data-definition="KV cache 是推理引擎为每个请求缓存的注意力键值对，显存大头。使用率高意味着引擎接近容量上限。">KV cache</span> 代表压力 → <strong>取最大值</strong>，因为平均值会掩盖高压实例。另外 vLLM ≥0.7 把 kv_cache_usage_perc 改名 gpu_cache_usage_perc——解析器两个名字都认。</p>
+          </div>
+        </div>
+        <p>Token 速率怎么算？<span class="term" data-definition="速率不能从单个点读出，要两次观测取差值除以时间。这是监控系统的常识：Counter 只能算增量。">Counter 型指标</span>需要两次观测算差值；vLLM 重启后 Counter 归零（current &lt; previous）→ 返回 null，<strong>绝不给假速率</strong>。</p>
+      </section>
+
+      <section class="screen animate-in">
+        <h2 class="screen-heading">决策矩阵：压力越大，越保守</h2>
+        <p>DeterministicExecutionPolicy 的 decide() 就一张四行决策表——注意 BUSY 分支里那条"每租户最多一个在跑"的规则，它是压力之下公平性的最后防线。</p>
+        <div class="translation-block">
+          <div class="translation-code">
+            <span class="translation-label">CODE · src/resources/execution-policy.ts</span>
+            <pre><code><span class="code-line"><span class="code-keyword">const</span> pressure = input.classification.pressure;</span>
+<span class="code-line"><span class="code-keyword">switch</span>(pressure){</span>
+<span class="code-line">    <span class="code-keyword">case</span> <span class="code-string">"CRITICAL"</span>:</span>
+<span class="code-line">        <span class="code-keyword">return</span> <span class="code-variable">this</span>.<span class="code-function">createDecision</span>(input, <span class="code-string">"QUEUE"</span>, <span class="code-string">"RESOURCE_CRITICAL"</span>);</span>
+<span class="code-line">    <span class="code-keyword">case</span> <span class="code-string">"UNKNOWN"</span>:</span>
+<span class="code-line">        <span class="code-keyword">return</span> <span class="code-variable">this</span>.<span class="code-function">createDecision</span>(input, <span class="code-string">"QUEUE"</span>, <span class="code-string">"RESOURCE_UNKNOWN"</span>);</span>
+<span class="code-line">    <span class="code-keyword">case</span> <span class="code-string">"BUSY"</span>:</span>
+<span class="code-line">        <span class="code-keyword">if</span> (input.activeRunCount &gt;= <span class="code-variable">this</span>.config.maxActiveRuns) {</span>
+<span class="code-line">            <span class="code-keyword">return</span> <span class="code-variable">this</span>.<span class="code-function">createDecision</span>(input, <span class="code-string">"QUEUE"</span>, <span class="code-string">"GLOBAL_CONCURRENCY_LIMIT"</span>);</span>
+<span class="code-line">        }</span>
+<span class="code-line">        <span class="code-keyword">if</span> (input.activeTenantRunCount &gt; <span class="code-number">0</span>) {</span>
+<span class="code-line">            <span class="code-keyword">return</span> <span class="code-variable">this</span>.<span class="code-function">createDecision</span>(input, <span class="code-string">"QUEUE"</span>, <span class="code-string">"RESOURCE_BUSY_TENANT_LIMIT"</span>);</span>
+<span class="code-line">        }</span>
+<span class="code-line">        <span class="code-keyword">return</span> <span class="code-variable">this</span>.<span class="code-function">createDecision</span>(input, <span class="code-string">"START"</span>, <span class="code-string">"RESOURCE_BUSY_TENANT_AVAILABLE"</span>);</span>
+<span class="code-line">    <span class="code-keyword">case</span> <span class="code-string">"NORMAL"</span>:</span>
+<span class="code-line">        <span class="code-keyword">if</span> (input.activeRunCount &gt;= <span class="code-variable">this</span>.config.maxActiveRuns) {</span>
+<span class="code-line">            <span class="code-keyword">return</span> <span class="code-variable">this</span>.<span class="code-function">createDecision</span>(input, <span class="code-string">"QUEUE"</span>, <span class="code-string">"GLOBAL_CONCURRENCY_LIMIT"</span>);</span>
+<span class="code-line">        }</span>
+<span class="code-line">        <span class="code-keyword">return</span> <span class="code-variable">this</span>.<span class="code-function">createDecision</span>(input, <span class="code-string">"START"</span>, <span class="code-string">"RESOURCE_NORMAL"</span>);</span>
+<span class="code-line">}</span></code></pre>
+          </div>
+          <div class="translation-english">
+            <span class="translation-label">白话翻译</span>
+            <div class="translation-lines">
+              <p class="tl">取出分类器给出的压力等级。</p>
+              <p class="tl">CRITICAL（临界）：没得商量，排队。</p>
+              <p class="tl">UNKNOWN（看不清）：也排队——看不清就是危险，不是机会。</p>
+              <p class="tl">BUSY（繁忙）：先看全局并发是否已达上限，满了就排。</p>
+              <p class="tl">全局还有空位时再看租户：这个租户已有任务在跑？那也排队——繁忙时段每租户最多占一席，防止一家独占余量。</p>
+              <p class="tl">租户还没有任务在跑才放行 START。</p>
+              <p class="tl">NORMAL（正常）：只受全局并发上限约束，有空位就 START。</p>
+              <p class="tl">每个决策都带 reasonCode——事后能回答"为什么当时没让我跑"。</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="screen animate-in">
+        <h2 class="screen-heading">fail-closed 现场：观测失败 = QUEUE，并且照样落库</h2>
+        <p>这一段是整个模块的灵魂：<strong>"看不见"本身也是被审计的事实</strong>。不伪造快照、不放行、不静默——决策记录里 snapshot 为 null 并写明失败原因，数据库 CHECK 约束（migration v4）双重保证这个语义。</p>
+        <div class="translation-block">
+          <div class="translation-code">
+            <span class="translation-label">CODE · src/resources/resource-admission-service.ts</span>
+            <pre><code><span class="code-line"><span class="code-keyword">const</span> observation = <span class="code-keyword">await</span> <span class="code-variable">this</span>.observer.<span class="code-function">observe</span>();</span>
+<span class="code-line"><span class="code-comment">// 观测失败的情况下</span></span>
+<span class="code-line"><span class="code-keyword">if</span> (!observation.ok){</span>
+<span class="code-line">    <span class="code-keyword">const</span> decision : PolicyDecision = {</span>
+<span class="code-line">        decisionId:<span class="code-variable">crypto</span>.<span class="code-function">randomUUID</span>(),</span>
+<span class="code-line">        runId:request.runId,</span>
+<span class="code-line">        action:<span class="code-string">"QUEUE"</span>,</span>
+<span class="code-line">        reasonCode:<span class="code-string">"RESOURCE_OBSERVATION_FAILED"</span>,</span>
+<span class="code-line">        resourceSnapshotId:<span class="code-keyword">null</span>,</span>
+<span class="code-line">        pressure:<span class="code-string">"UNKNOWN"</span>,</span>
+<span class="code-line">        observationFailureReason:observation.reason,</span>
+<span class="code-line">        decidedAt:<span class="code-keyword">new</span> <span class="code-function">Date</span>().<span class="code-function">toISOString</span>(),</span>
+<span class="code-line">    };</span>
+<span class="code-line"></span>
+<span class="code-line">    <span class="code-variable">this</span>.decisionRecorder.<span class="code-function">save</span>(decision, <span class="code-keyword">null</span>);</span>
+<span class="code-line"></span>
+<span class="code-line">    <span class="code-keyword">return</span> { observation, classification:<span class="code-keyword">null</span>, decision }</span>
+<span class="code-line">}</span></code></pre>
+          </div>
+          <div class="translation-english">
+            <span class="translation-label">白话翻译</span>
+            <div class="translation-lines">
+              <p class="tl">向观测器要一次真实资源快照。</p>
+              <p class="tl">观测失败了——两个数据源都没给出可信信号。</p>
+              <p class="tl">构造一个决策对象：动作是排队……</p>
+              <p class="tl">原因码明确写着 RESOURCE_OBSERVATION_FAILED，不是模糊的"出错了"。</p>
+              <p class="tl">快照 ID 为 null——我们没有数据，就不假装有数据。</p>
+              <p class="tl">压力记 UNKNOWN，并把具体失败原因（超时？HTTP 错误？格式非法？）原样带上。</p>
+              <p class="tl">关键一步：这次"失败的准入"照样写入决策台账。审计员事后能看到每一次 QUEUE 的理由。</p>
+              <p class="tl">返回给调用方，上层据此释放 slot 并重新入队。</p>
+            </div>
+          </div>
+        </div>
+        <div class="callout callout-accent">
+          <div class="callout-icon">💡</div>
+          <div class="callout-content">
+            <strong class="callout-title">fail-closed vs fail-open</strong>
+            <p>安全系统从"不允许"起步逐条放行，而不是从"全允许"收窄。这条哲学在课程里出现了四次：观测失败→QUEUE、副作用未知→人工确认、能力缺失→REJECTED、runtime 证据不符→删容器。面试时主动把这四条串起来讲，就是"设计一致性"的最佳证明。</p>
+          </div>
+        </div>
+      </section>
+
+      <section class="screen animate-in">
+        <h2 class="screen-heading">完整管线动画：一次准入的一生</h2>
+        <p>点击"下一步"，看一个 Run 从被 claim 到获得判决的全过程——注意第 8 步：QUEUE 的 Run 会 release 后重新入队，并保留原来的排队时间。</p>
+        <div class="flow-animation" data-steps='[
+  {"highlight":"flow-actor-12","label":"调度器 claimNext 取出一个等待中的 Run，占用一个并发 slot"},
+  {"highlight":"flow-actor-13","packet":true,"from":"actor-12","to":"actor-13","label":"并行观测：vLLM /metrics 与 nvidia-smi 同时采集，单源失败可降级"},
+  {"highlight":"flow-actor-14","packet":true,"from":"actor-13","to":"actor-14","label":"生成 ResourceSnapshot，交给分类器"},
+  {"highlight":"flow-actor-14","label":"四组阈值判定：任一指标到 critical 即升级 —— 本轮判定为 BUSY，原因 KV_CACHE_BUSY"},
+  {"highlight":"flow-actor-15","packet":true,"from":"actor-14","to":"actor-15","label":"分类结果 + 全局与租户并发上下文进入策略层"},
+  {"highlight":"flow-actor-15","label":"策略判定：BUSY 且该租户已有任务在跑 —— QUEUE，原因 RESOURCE_BUSY_TENANT_LIMIT"},
+  {"highlight":"flow-actor-16","packet":true,"from":"actor-15","to":"actor-16","label":"决策与资源快照同事务写入 policy_decisions —— 排队也有据可查"},
+  {"highlight":"flow-actor-12","packet":true,"from":"actor-16","to":"actor-12","label":"release 释放 slot 后重新入队，保留原 enqueuedAt —— 公平不被惩罚"},
+  {"highlight":"flow-actor-12","label":"资源恢复后下一轮 drain 会再次叫到它 —— 这次可能是 START"}
+]'>
+          <div class="flow-actors">
+            <div class="flow-actor" id="flow-actor-12">
+              <div class="flow-actor-icon" style="border-color: #D94F30; background: #FDEEE9">🎫</div>
+              <span>调度器</span>
+            </div>
+            <div class="flow-actor" id="flow-actor-13">
+              <div class="flow-actor-icon" style="border-color: #2A7B9B; background: #E4F2F7">📡</div>
+              <span>观测器<br>vLLM+GPU</span>
+            </div>
+            <div class="flow-actor" id="flow-actor-14">
+              <div class="flow-actor-icon" style="border-color: #7B6DAA; background: #EFEBF7">🌡️</div>
+              <span>分类器</span>
+            </div>
+            <div class="flow-actor" id="flow-actor-15">
+              <div class="flow-actor-icon" style="border-color: #D4A843; background: #FDF5E0">⚖️</div>
+              <span>执行策略</span>
+            </div>
+            <div class="flow-actor" id="flow-actor-16">
+              <div class="flow-actor-icon" style="border-color: #2D8B55; background: #E8F5EE">🗄️</div>
+              <span>决策台账<br>SQLite</span>
+            </div>
+          </div>
+
+          <div class="flow-packet" id="flow-packet"></div>
+
+          <div class="flow-step-label" id="flow-label">点击「Next Step」开始</div>
+
+          <div class="flow-controls">
+            <button class="btn flow-next-btn">下一步</button>
+            <button class="btn flow-reset-btn">重新开始</button>
+            <span class="flow-progress"></span>
+          </div>
+        </div>
+      </section>
+
+      <section class="screen animate-in">
+        <h2 class="screen-heading">加分项：预算装饰器与真机证据</h2>
+        <p>基础策略之上还有一个<span class="term" data-definition="装饰器模式：在不修改原函数/类的前提下，包一层增强逻辑。这里 BudgetAwarePolicy 包住原策略，只在它说 START 时追加预算检查。">装饰器</span> BudgetAwarePolicy：原策略说 START 之后，再查租户账本（ResourceLedger 的 commit/settle 模型）和公平份额 <code style="font-family:var(--font-mono)">floor(capacity × weight / totalWeight)</code>，超了就降级 QUEUE + TENANT_BUDGET_EXCEEDED。</p>
+        <div class="icon-rows">
+          <div class="icon-row">
+            <div class="icon-circle" style="background: var(--color-actor-2)">💰</div>
+            <div>
+              <strong>调度尊重"已消耗量"，不只是"在跑几个"</strong>
+              <p>每个 running attempt 先 commit 占用单位、退出时 settle 结算——账本同时驱动公平份额准入和事后计费审计。</p>
+            </div>
+          </div>
+          <div class="icon-row">
+            <div class="icon-circle" style="background: var(--color-actor-4)">🧪</div>
+            <div>
+              <strong>真机证据：T4 120 并发背压实验</strong>
+              <p>AutoDL Tesla T4 16G + vLLM 0.7.3，120 并发压测 → running=120、kv≈62% → CRITICAL → 新任务 QUEUE 落库（scripts/e2e-gpu-pressure.ts）。</p>
+            </div>
+          </div>
+          <div class="icon-row">
+            <div class="icon-circle" style="background: var(--color-actor-3)">⚠️</div>
+            <div>
+              <strong>诚实边界</strong>
+              <p>准入走 running/kv-cache 压力路径（真实），但块调度与超大并发下的绝对公平份额仍属估算——面试时主动说这句。</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="quiz-container" id="quiz-module-4">
+          <div class="quiz-question-block"
+               data-correct="option-c"
+               data-explanation-right="完全正确！单源失败时可降级——nvidia-smi 正常就能用 GPU 信号继续分类和决策，不会浪费可用信号。只有双源全挂才 RESOURCE_OBSERVATION_FAILED → QUEUE。"
+               data-explanation-wrong="回忆一下降级语义：VllmResourceObserver 用 Promise.all 并行采集两个源，单源失败只是该字段为 null，整体不一定失败。只有所有压力信号都不可用时才是观测失败。">
+            <h3 class="quiz-question">场景题：某天 vLLM 进程卡死，/metrics 请求 504 超时；但 nvidia-smi 工作正常。这时提交的新任务会遇到什么？</h3>
+            <div class="quiz-options">
+              <button class="quiz-option" data-value="option-a" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>直接 RESOURCE_OBSERVATION_FAILED，强制 QUEUE</span>
+              </button>
+              <button class="quiz-option" data-value="option-b" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>系统崩溃，Run 停留在 QUEUED 直到人工干预</span>
+              </button>
+              <button class="quiz-option" data-value="option-c" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>降级为只用 GPU 信号分类决策——显存正常则照常 START</span>
+              </button>
+            </div>
+            <div class="quiz-feedback"></div>
+          </div>
+
+          <div class="quiz-question-block"
+               data-correct="option-b"
+               data-explanation-right="没错！请求数和 Token Counter 是加法意义上的总量，多实例求和才等于总工作量；而 KV cache 使用率衡量的是'最挤的那个实例有多挤'，平均值会掩盖高压实例，所以取 max。"
+               data-explanation-wrong="想想这两个指标的语义差异：一个是'总工作量'（越多越忙），一个是'压力水位'（最高的那个决定风险）。不同的语义应该对应不同的聚合方式。">
+            <h3 class="quiz-question">解析 Prometheus 文本时，为什么 num_requests_running 多行求和，而 kv_cache_usage_perc 却取最大值？</h3>
+            <div class="quiz-options">
+              <button class="quiz-option" data-value="option-a" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>历史兼容原因，vLLM 0.7 改了指标定义</span>
+              </button>
+              <button class="quiz-option" data-value="option-b" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>请求数代表总工作量所以要累加；cache 是压力信号，取 max 避免平均掩盖高压实例</span>
+              </button>
+              <button class="quiz-option" data-value="option-c" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>百分比天然不能相加，超过 100% 没有意义</span>
+              </button>
+            </div>
+            <div class="quiz-feedback"></div>
+          </div>
+
+          <div class="quiz-question-block"
+               data-correct="option-a"
+               data-explanation-right="正是！Counter 归零意味着时间窗内的差值是负数——它不代表真实的吞吐。宁可返回 null 让上层知道'这个速率不可信'，也不能编造数字。这和 fail-closed 是同一个价值观。"
+               data-explanation-wrong="恰恰相反——这个项目对不可信数据的处理方式是不产出数据。回想观测失败时的处理：不伪造 Snapshot，同样也不伪造速率。">
+            <h3 class="quiz-question">vLLM 重启后第一次计算 token 速率，得到的是 null 而不是一个很小的数。为什么这样设计？</h3>
+            <div class="quiz-options">
+              <button class="quiz-option" data-value="option-a" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>Counter 归零使差值为负，区间不可信——宁缺毋假</span>
+              </button>
+              <button class="quiz-option" data-value="option-b" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>第一次观测还没预热完成，缓存尚未生效</span>
+              </button>
+              <button class="quiz-option" data-value="option-c" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>这是个 bug，正确做法是用上一次的历史速率补齐</span>
+              </button>
+            </div>
+            <div class="quiz-feedback"></div>
+          </div>
+
+          <button class="quiz-check-btn" onclick="checkQuiz('quiz-module-4')">检查答案</button>
+          <button class="quiz-reset-btn" onclick="resetQuiz('quiz-module-4')">再试一次</button>
+        </div>
+
+        <p style="margin-top:var(--space-8)"><strong>下一模块</strong>：QUEUE 之后谁先被叫到号？公平队列的数据结构与时序正确性，比算法本身更容易出 bug。</p>
+      </section>
+
+    </div>
+  </div>
+</section>

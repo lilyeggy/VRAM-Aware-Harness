@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>VRAM-Aware Agent Harness · 面试深挖手册</title>
+
+  <!-- Google Fonts: Bricolage Grotesque · DM Sans · JetBrains Mono -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600;12..96,700;12..96,800&family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400;1,9..40,500&family=JetBrains+Mono:wght@400;500;600&family=Noto+Sans+SC:wght@400;500;700&display=swap" rel="stylesheet">
+
+  <link rel="stylesheet" href="styles.css">
+
+  <style>
+    :root {
+      --color-accent:       #2A7B9B;
+      --color-accent-hover: #1F6280;
+      --color-accent-light: #E4F2F7;
+      --color-accent-muted: #5A9DB8;
+      --font-body: 'DM Sans', 'Noto Sans SC', -apple-system, sans-serif;
+      --font-display: 'Bricolage Grotesque', 'Noto Sans SC', Georgia, serif;
+    }
+  </style>
+
+  <script src="main.js" defer></script>
+</head>
+<body>
+
+  <nav class="nav" id="nav">
+    <div class="progress-bar" id="progress-bar" role="progressbar" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100"></div>
+    <div class="nav-inner">
+      <span class="nav-title">VRAM-Aware Harness · 面试深挖</span>
+      <div class="nav-dots" id="nav-dots" role="tablist">
+        <button class="nav-dot" data-target="module-1" data-tooltip="01 定位与全局图景" role="tab" aria-label="Module 1"></button>
+        <button class="nav-dot" data-target="module-2" data-tooltip="02 一次任务的一生" role="tab" aria-label="Module 2"></button>
+        <button class="nav-dot" data-target="module-3" data-tooltip="03 副作用与恢复" role="tab" aria-label="Module 3"></button>
+        <button class="nav-dot" data-target="module-4" data-tooltip="04 资源准入与背压" role="tab" aria-label="Module 4"></button>
+        <button class="nav-dot" data-target="module-5" data-tooltip="05 公平调度" role="tab" aria-label="Module 5"></button>
+        <button class="nav-dot" data-target="module-6" data-tooltip="06 身份与防串" role="tab" aria-label="Module 6"></button>
+        <button class="nav-dot" data-target="module-7" data-tooltip="07 策略与沙箱" role="tab" aria-label="Module 7"></button>
+        <button class="nav-dot" data-target="module-8" data-tooltip="08 差异化 A/B/C" role="tab" aria-label="Module 8"></button>
+        <button class="nav-dot" data-target="module-9" data-tooltip="09 证据与追问弹药库" role="tab" aria-label="Module 9"></button>
+        <button class="nav-dot" data-target="module-10" data-tooltip="10 vLLM 引擎原理" role="tab" aria-label="Module 10"></button>
+        <button class="nav-dot" data-target="module-11" data-tooltip="11 Harness 话语映射" role="tab" aria-label="Module 11"></button>
+        <button class="nav-dot" data-target="module-12" data-tooltip="12 框架横评" role="tab" aria-label="Module 12"></button>
+        <button class="nav-dot" data-target="module-13" data-tooltip="13 系统设计工坊" role="tab" aria-label="Module 13"></button>
+        <button class="nav-dot" data-target="module-14" data-tooltip="14 八股补充包" role="tab" aria-label="Module 14"></button>
+      </div>
+    </div>
+  </nav>
+
+  <main id="main">
+    <!-- modules/*.html content is assembled here by build.sh -->

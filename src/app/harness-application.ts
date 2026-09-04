@@ -34,6 +34,11 @@ import type {
     ResumeRunInput,
     StartRunInput,
 }   from "../runs/run-service.ts";
+import type { HarnessInstance } from "../instances/harness-instance.ts";
+import type { HarnessInstanceStore } from "../instances/harness-instance-store.ts";
+import type { Conversation } from "../conversations/conversation.ts";
+import { createConversation } from "../conversations/conversation.ts";
+import type { ConversationStore } from "../conversations/conversation-store.ts";
 
 
 export interface StartupRecoveryCoordinator {
@@ -50,6 +55,7 @@ export interface StartupRecoveryCoordinator {
 export class HarnessApplication {
     private started = false;
     private startPromise : Promise<void> | null = null;
+    private stopPromise : Promise<void> | null = null;
 
     constructor(
         private readonly coordinator: RunQueueCoordinator,
@@ -61,6 +67,8 @@ export class HarnessApplication {
         private readonly startupRecovery:StartupRecoveryCoordinator,
         private readonly runOutputStore?: RunOutputStore,
         private readonly workspaceResults?: RunWorkspaceResultCoordinator,
+        private readonly instanceStore?: HarnessInstanceStore,
+        private readonly conversationStore?: ConversationStore,
     ) {}
 
     private async startOnce() : Promise<void> {
@@ -87,6 +95,7 @@ export class HarnessApplication {
     }
 
     async stop() : Promise<void> {
+        if (this.stopPromise !== null) return this.stopPromise;
         if (this.startPromise !== null){
             await this.startPromise;
         }
@@ -95,8 +104,23 @@ export class HarnessApplication {
             return;
         }
 
-        this.queuePump.stop();
         this.started = false;
+        this.queuePump.stop();
+        this.stopPromise = (async () => {
+            const activeRuns = this.runStore.listActiveRuns();
+            const results = await Promise.allSettled(
+                activeRuns.map((run) => this.coordinator.interrupt(run.id)),
+            );
+            const failures = results.filter((result) => result.status === "rejected");
+            if (failures.length > 0) {
+                throw new Error(`安全关闭时有 ${failures.length} 个 Run 无法中断`);
+            }
+        })();
+        try {
+            await this.stopPromise;
+        } finally {
+            this.stopPromise = null;
+        }
     }
 
     isStarted() : boolean {
@@ -137,6 +161,39 @@ export class HarnessApplication {
 
     getRunsForTenant(tenantId: string): AgentRun[] {
         return this.runStore.listForTenant(tenantId);
+    }
+
+    createConversation(input: {
+        tenantId: string;
+        workspaceId: string;
+        title?: string;
+    }): Conversation {
+        if (this.conversationStore === undefined) {
+            throw new Error("对话服务未启用");
+        }
+        const conversation = createConversation(input);
+        this.conversationStore.create(conversation);
+        return conversation;
+    }
+
+    getConversation(id: string, tenantId: string): Conversation | null {
+        return this.conversationStore?.getForTenant(id, tenantId) ?? null;
+    }
+
+    getConversationsForWorkspace(tenantId: string, workspaceId: string): Conversation[] {
+        return this.conversationStore?.listForWorkspace(tenantId, workspaceId) ?? [];
+    }
+
+    getRunsForConversation(tenantId: string, conversationId: string): AgentRun[] {
+        return this.runStore.listForSession(tenantId, conversationId);
+    }
+
+    touchConversation(id: string, tenantId: string): void {
+        this.conversationStore?.touch(id, tenantId);
+    }
+
+    getAgentsForTenant(tenantId: string): HarnessInstance[] {
+        return this.instanceStore?.listForTenant(tenantId) ?? [];
     }
 
     getRunEvents(runId:string):RunEvent[] {

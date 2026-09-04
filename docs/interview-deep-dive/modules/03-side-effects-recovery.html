@@ -1,0 +1,478 @@
+<section class="module" id="module-3" style="background: var(--color-bg-warm)">
+  <div class="module-content">
+    <header class="module-header animate-in">
+      <span class="module-number">03</span>
+      <h1 class="module-title">副作用记账与崩溃恢复</h1>
+      <p class="module-subtitle">Agent 不是聊天机器人——它的 bash 会真删文件。进程在工具执行到一半时崩溃，重启后这个工具该重放吗？</p>
+    </header>
+
+    <div class="module-body">
+
+      <!-- ═══ Screen 1：支票双联存根隐喻 ═══ -->
+      <section class="screen animate-in">
+        <h2 class="screen-heading">隐喻：支票双联存根</h2>
+        <p>出纳每动一笔钱都要留底：先把「我准备转 500 元」的存根压在玻璃板下，转账成功后再盖「已完成」章。银行倒闭重启后，看到只有存根没有章的交易怎么办？答案藏在四步流程里：</p>
+
+        <div class="step-cards">
+          <div class="step-card animate-in">
+            <div class="step-num">1</div>
+            <div class="step-body"><strong>写存根：PREPARED</strong><p>动手前先把意图持久化——「我准备执行这个工具」。此刻什么都没改变，但账上已经有了这一笔。</p></div>
+          </div>
+          <div class="step-card animate-in">
+            <div class="step-num">2</div>
+            <div class="step-body"><strong>盖章：SUCCEEDED</strong><p>真实执行完成后，结果与检查点在同一个事务里落库。从此这笔调用有了不可抵赖的最终结论。</p></div>
+          </div>
+          <div class="step-card animate-in">
+            <div class="step-num">3</div>
+            <div class="step-body"><strong>重启盘点：发现无章存根</strong><p>银行（进程）倒闭重启后，扫描账本：那些只有 PREPARED 没有 SUCCEEDED 的「<span class="term" data-definition="孤儿记录（orphan）：父动作中断后遗留的半成品记录——这里有存根、没结论，是恢复流程的全部工作对象。">孤儿存根</span>」就是全部疑点。</p></div>
+          </div>
+          <div class="step-card animate-in">
+            <div class="step-num">4</div>
+            <div class="step-body"><strong>分类处置：绝不盲目重转</strong><p>纯查询（READ_ONLY）就安全重做；说不清影响的（UNKNOWN）就冻结等人工。宁可慢，不可错。</p></div>
+          </div>
+        </div>
+
+        <div class="callout callout-info">
+          <div class="callout-icon">🏛️</div>
+          <div class="callout-content">
+            <strong class="callout-title">这不是新发明：双复写（Write-Ahead Intent）</strong>
+            <p>「先持久化意图，再执行，最后确认」正是数据库 <span class="term" data-definition="WAL（Write-Ahead Logging，预写日志）：数据库先把改动意图写入日志，再改数据本身——崩溃后靠日志恢复真相。">WAL</span>（预写日志）与分布式事务 <span class="term" data-definition="2PC（Two-Phase Commit，两阶段提交）：先问所有参与者「能不能提交」，得到一致答复后再统一提交——同样是先立字据后办事。">2PC</span>（两阶段提交）的共同思想。你的 Agent Harness 和 PostgreSQL 用的是同一个直觉。</p>
+          </div>
+        </div>
+
+        <h2 class="screen-heading" style="margin-top: var(--space-10)">两个三元组：整个机制的数据模型</h2>
+        <div class="badge-list">
+          <div class="badge-item"><code class="badge-code">ToolEffect · READ_ONLY</code><span class="badge-desc">只读不改世界——重放一万次也无害</span></div>
+          <div class="badge-item"><code class="badge-code">ToolEffect · IDEMPOTENT_WRITE</code><span class="badge-desc">声称<span class="term" data-definition="幂等（idempotent）：同一操作做一次和做一万次效果相同——前提是对方系统配合去重。">幂等</span>的写——注意是「声称」，后面有它的大戏</span></div>
+          <div class="badge-item"><code class="badge-code">ToolEffect · UNKNOWN_EFFECT</code><span class="badge-desc">说不清影响——bash 脚本、发邮件都在这里，默认嫌疑犯</span></div>
+          <div class="badge-item"><code class="badge-code">Status · PREPARED</code><span class="badge-desc">存根已写，动作未发——崩溃恢复最关心的状态</span></div>
+          <div class="badge-item"><code class="badge-code">Status · SUCCEEDED / FAILED</code><span class="badge-desc">已有终局结论的调用，重启后无需任何处置</span></div>
+        </div>
+      </section>
+
+      <!-- ═══ Screen 2：canAutomaticallyReplay ═══ -->
+      <section class="screen animate-in">
+        <h2 class="screen-heading">核心决策函数：谁能自动重放？</h2>
+        <p>恢复安全性的核心不是 <span class="term" data-definition="Checkpoint（检查点）：崩溃前留下的稳定引用，记录『执行到哪了、从哪继续』——不是内存快照，而是一对坐标。">Checkpoint</span> 本身，而是<strong><span class="term" data-definition="副作用：对外部世界的持久改变——写文件、发邮件、删目录。能否安全地重做一件事，完全取决于它的副作用是什么。">副作用</span>分类</strong>。整个系统的安全边界浓缩在下面这一个函数里——注意 IDEMPOTENT_WRITE 的下场：</p>
+
+        <div class="translation-block animate-in">
+          <div class="translation-code">
+            <span class="translation-label">CODE · src/tools/tool-execution.ts</span>
+            <pre><code><span class="code-line"><span class="code-keyword">export type</span> ToolEffect = </span>
+<span class="code-line">    | <span class="code-string">"READ_ONLY"</span></span>
+<span class="code-line">    | <span class="code-string">"IDEMPOTENT_WRITE"</span></span>
+<span class="code-line">    | <span class="code-string">"UNKNOWN_EFFECT"</span>;</span>
+<span class="code-line"> </span>
+<span class="code-line"><span class="code-keyword">export type</span> ToolExecutionStatus = </span>
+<span class="code-line">    | <span class="code-string">"PREPARED"</span></span>
+<span class="code-line">    | <span class="code-string">"SUCCEEDED"</span></span>
+<span class="code-line">    | <span class="code-string">"FAILED"</span>;</span>
+<span class="code-line"> </span>
+<span class="code-line"><span class="code-keyword">export function</span> <span class="code-function">canAutomaticallyReplay</span>(</span>
+<span class="code-line">    status:ToolExecutionStatus,</span>
+<span class="code-line">    effect:ToolEffect,</span>
+<span class="code-line">):<span class="code-keyword">boolean</span>{</span>
+<span class="code-line">    <span class="code-keyword">if</span> (status !== <span class="code-string">"PREPARED"</span>){</span>
+<span class="code-line">        <span class="code-keyword">return</span> <span class="code-keyword">false</span>;</span>
+<span class="code-line">    }</span>
+<span class="code-line"> </span>
+<span class="code-line">    <span class="code-keyword">switch</span>(effect){</span>
+<span class="code-line">        <span class="code-keyword">case</span> <span class="code-string">"READ_ONLY"</span>:</span>
+<span class="code-line">            <span class="code-keyword">return</span> <span class="code-keyword">true</span>;</span>
+<span class="code-line">        <span class="code-keyword">case</span> <span class="code-string">"IDEMPOTENT_WRITE"</span>:</span>
+<span class="code-line">            <span class="code-comment">// “写入被声明为幂等”本身不足以证明外部系统会使用稳定幂等键。</span></span>
+<span class="code-line">            <span class="code-comment">// 在 ToolExecution 持久化并校验真实幂等证据前保持 fail closed。</span></span>
+<span class="code-line">            <span class="code-keyword">return</span> <span class="code-keyword">false</span>;</span>
+<span class="code-line">        <span class="code-keyword">case</span> <span class="code-string">"UNKNOWN_EFFECT"</span>:</span>
+<span class="code-line">            <span class="code-keyword">return</span> <span class="code-keyword">false</span>;</span>
+<span class="code-line">    }</span>
+<span class="code-line">}</span></code></pre>
+          </div>
+          <div class="translation-english">
+            <span class="translation-label">白话</span>
+            <div class="translation-lines">
+              <p class="tl">先定义效果三分法：只读、声称幂等的写、说不清的写。类型即文档——三种可能穷尽，没有第四种。</p>
+              <p class="tl">执行状态也是三态：存根（PREPARED）、成功、失败。两个三元组组合出全部审计场景。</p>
+              <p class="tl">决策函数登场：输入「停在哪个状态 + 属于哪类效果」，输出一个布尔值——能不能不经人批准直接重放。</p>
+              <p class="tl">第一道闸：只有 PREPARED 才考虑重放。SUCCEEDED 有结果缓存可直接返回，FAILED 有错误结论——都不是「待处理」。</p>
+              <p class="tl">READ_ONLY 是唯一绿灯：读操作不改变世界，重放天然无害。</p>
+              <p class="tl">全场最精彩的一行：IDEMPOTENT_WRITE 也是红灯！注释给出了理由——「写入被声明为幂等」只是工具作者的口头声明，不是证据。</p>
+              <p class="tl">外部系统是否真的用稳定幂等键去重，控制面无法验证；在拿到持久化的真实幂等证据之前，保持 fail closed——不确定就拒绝。</p>
+              <p class="tl">UNKNOWN 更不用说：连影响都描述不清的操作，绝不允许机器擅自重来。</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="callout callout-accent">
+          <div class="callout-icon">💡</div>
+          <div class="callout-content">
+            <strong class="callout-title">面试金句：声明 ≠ 证据</strong>
+            <p>「写入被声明为幂等」本身不足以证明外部系统会使用稳定幂等键。恢复安全性靠的不是乐观假设，而是<strong>把不确定当成危险</strong>——这就是 <span class="term" data-definition="fail-closed（失效即关闭）：不确定时选择拒绝并转人工，而不是赌一把放行。代价是偶尔多等人，换来的是绝不误伤外部世界。">fail-closed</span> 与 fail-open 的分野。</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- ═══ Screen 3：execute 主流程 ═══ -->
+      <section class="screen animate-in">
+        <h2 class="screen-heading">ToolGateway.execute：顺序就是安全</h2>
+        <p>所有工具调用的必经之路。盯住顺序：<strong>策略检查 → 查历史 → PREPARED 落库 → 最后才 invokeTool</strong>。每换一次顺序，都会打开一种新的漏洞。</p>
+
+        <div class="translation-block animate-in">
+          <div class="translation-code">
+            <span class="translation-label">CODE · src/tools/tool-gateway.ts（节选）</span>
+            <pre><code><span class="code-line">    <span class="code-keyword">async execute</span>(</span>
+<span class="code-line">        input:ExecuteToolInput,</span>
+<span class="code-line">        invokeTool:() =&gt; <span class="code-property">Promise&lt;unknown&gt;</span>,</span>
+<span class="code-line">    ) : <span class="code-property">Promise&lt;unknown&gt;</span>{</span>
+<span class="code-line">        <span class="code-comment">// 策略检查必须发生在 PREPARED 写入和真实副作用之前。</span></span>
+<span class="code-line">        <span class="code-keyword">this</span>.policyGuard?.<span class="code-function">assertAllowed</span>(input);</span>
+<span class="code-line"> </span>
+<span class="code-line">        <span class="code-keyword">const</span> history = <span class="code-keyword">this</span>.store.<span class="code-function">getByToolCall</span>(runId,toolCallId);</span>
+<span class="code-line">        <span class="code-keyword">let</span> preparedExecution : ToolExecution;</span>
+<span class="code-line"> </span>
+<span class="code-line">        <span class="code-keyword">if</span> (history === <span class="code-keyword">null</span>){</span>
+<span class="code-line">            preparedExecution = {</span>
+<span class="code-line">                <span class="code-property">id</span> : crypto.<span class="code-function">randomUUID</span>(),</span>
+<span class="code-line">                <span class="code-property">runId</span>,</span>
+<span class="code-line">                <span class="code-property">toolCallId</span>,</span>
+<span class="code-line">                <span class="code-property">toolName</span>:input.toolName,</span>
+<span class="code-line">                <span class="code-property">arguments</span>:input.arguments,</span>
+<span class="code-line">                <span class="code-property">effect</span>:input.effect,</span>
+<span class="code-line">                <span class="code-property">status</span>:<span class="code-string">"PREPARED"</span>,</span>
+<span class="code-line">                <span class="code-property">result</span>:null,</span>
+<span class="code-line">                <span class="code-property">errorMessage</span>:null,</span>
+<span class="code-line">                <span class="code-property">createdAt</span>:<span class="code-keyword">new</span> <span class="code-function">Date</span>().<span class="code-function">toISOString</span>(),</span>
+<span class="code-line">                <span class="code-property">finishedAt</span>:null,</span>
+<span class="code-line">            }</span>
+<span class="code-line">            <span class="code-keyword">this</span>.store.<span class="code-function">prepare</span>(preparedExecution);</span>
+<span class="code-line">        } <span class="code-keyword">else</span> {</span>
+<span class="code-line">            <span class="code-keyword">switch</span>(history.status){</span>
+<span class="code-line">                <span class="code-keyword">case</span> <span class="code-string">"SUCCEEDED"</span>:</span>
+<span class="code-line">                    <span class="code-keyword">return</span> history.result;</span>
+<span class="code-line">                <span class="code-keyword">case</span> <span class="code-string">"FAILED"</span>:</span>
+<span class="code-line">                    <span class="code-keyword">throw new Error</span>(<span class="code-string">`工具执行失败:${history.errorMessage}`</span>);</span>
+<span class="code-line">                <span class="code-keyword">case</span> <span class="code-string">"PREPARED"</span>:</span>
+<span class="code-line">                    <span class="code-keyword">if</span> (</span>
+<span class="code-line">                        !<span class="code-function">canAutomaticallyReplay</span>(</span>
+<span class="code-line">                            history.status,</span>
+<span class="code-line">                            history.effect,</span>
+<span class="code-line">                        ))</span>
+<span class="code-line">                        {</span>
+<span class="code-line">                            <span class="code-keyword">throw new Error</span>(</span>
+<span class="code-line">                                <span class="code-string">`不允许自动重放：${history.effect}`</span>,</span>
+<span class="code-line">                            );</span>
+<span class="code-line">                        }</span>
+<span class="code-line">                    <span class="code-comment">// 允许重放时复用原来的执行记录，</span></span>
+<span class="code-line">                    <span class="code-comment">// 不能再次调用 store.prepare()，否则会违反唯一约束。</span></span>
+<span class="code-line">                    preparedExecution = history;</span>
+<span class="code-line">                    <span class="code-keyword">break</span>;                    </span>
+<span class="code-line">            }</span>
+<span class="code-line">        }</span></code></pre>
+          </div>
+          <div class="translation-english">
+            <span class="translation-label">白话</span>
+            <div class="translation-lines">
+              <p class="tl">execute 接收两样东西：要执行什么（input），以及怎么真正执行（invokeTool 回调）——网关掌握流程，Runtime 提供动作。</p>
+              <p class="tl">第一行就是铁律：策略守卫 assertAllowed 必须跑在最前面——在任何记账、更在任何副作用之前。没授权的事，连存根都不配写。</p>
+              <p class="tl">第二步查历史：这个 toolCallId 是否已经有记录了？正常执行这里是空，崩溃恢复时这里就有故事。</p>
+              <p class="tl">无历史 = 全新调用：开始构造完整的执行记录——谁发起的（runId）、调用的是什么（toolName）、参数原样封存。</p>
+              <p class="tl">effect 与 status 一并落库：效果分类是调用方申报、策略审批过的，此刻固化成账面事实。</p>
+              <p class="tl">status 定格为 PREPARED：存根压进玻璃板下，result 还是 null——世界尚未改变。</p>
+              <p class="tl">store.prepare 把存根持久化。从这里开始，「我打算做什么」已经是数据库里不可否认的事实。</p>
+              <p class="tl">有历史的三个分支之一：SUCCEEDED 直接返回缓存的结果——同一次调用重复到达也只执行一次，天然幂等。</p>
+              <p class="tl">分支之二：FAILED 直接抛错并带回当时的错误信息——失败的结论同样不许被静默覆盖。</p>
+              <p class="tl">分支之三：停在 PREPARED 的孤儿存根——问 canAutomaticallyReplay 能否自动重放。</p>
+              <p class="tl">答不了绿灯就抛错冻结，把效果分类写在错误信息里供人工审查——绝不猜。</p>
+              <p class="tl">能重放的细节：复用原来的执行记录对象，绝不能再 store.prepare 一次——同一 toolCallId 的唯一约束会让第二次插入当场爆炸。</p>
+            </div>
+          </div>
+        </div>
+
+        <p style="margin-top: var(--space-8)">把顺序铁律压缩成一条流水线：</p>
+        <div class="flow-steps">
+          <div class="flow-step"><div class="flow-step-num">1</div><p>策略守卫<br><strong>assertAllowed</strong></p></div>
+          <div class="flow-arrow">→</div>
+          <div class="flow-step"><div class="flow-step-num">2</div><p>查历史<br><strong>getByToolCall</strong></p></div>
+          <div class="flow-arrow">→</div>
+          <div class="flow-step"><div class="flow-step-num">3</div><p>写存根<br><strong>prepare 落库</strong></p></div>
+          <div class="flow-arrow">→</div>
+          <div class="flow-step"><div class="flow-step-num">4</div><p>真正执行<br><strong>invokeTool</strong></p></div>
+        </div>
+
+        <div class="pattern-cards" style="margin-top: var(--space-6)">
+          <div class="pattern-card animate-in" style="border-top: 3px solid var(--color-success)">
+            <div class="pattern-icon" style="background: var(--color-success)">♻️</div>
+            <h4 class="pattern-title">SUCCEEDED → 返回缓存</h4>
+            <p class="pattern-desc">已成功的调用直接回放结果，不再触碰外部世界。重试语义被数据库吸收，调用方无感。</p>
+          </div>
+          <div class="pattern-card animate-in" style="border-top: 3px solid var(--color-actor-4)">
+            <div class="pattern-icon" style="background: var(--color-actor-4)">🔒</div>
+            <h4 class="pattern-title">PREPARED → 复用原记录</h4>
+            <p class="pattern-desc">允许重放时沿用旧记录 ID，不能再 prepare——<span class="term" data-definition="唯一约束（unique constraint）：数据库层面禁止某列或列组合出现重复值，冲突写入直接被拒——应用层绕不过去的铁闸。">唯一约束</span>（每 toolCallId 一条）既是防重复插入，更是防账本分叉。</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- ═══ Screen 4：同事务落库与恢复决策 ═══ -->
+      <section class="screen animate-in">
+        <h2 class="screen-heading">崩溃之后：系统如何决定「继续」还是「叫人」</h2>
+        <p>先看成功路径的收尾：结果与检查点<strong>同一个事务</strong>写入。Checkpoint 不是内存 dump，而是一个稳定引用——runtimeSessionRef 加 lastEventSequence，指向「去哪里、从哪条事件继续」。</p>
+
+        <div class="translation-block animate-in">
+          <div class="translation-code">
+            <span class="translation-label">CODE · src/tools/tool-gateway.ts（节选）</span>
+            <pre><code><span class="code-line">        <span class="code-keyword">const</span> checkpoint:Checkpoint = {</span>
+<span class="code-line">            <span class="code-property">id</span>:crypto.<span class="code-function">randomUUID</span>(),</span>
+<span class="code-line">            <span class="code-property">runId</span>:input.runId,</span>
+<span class="code-line">            <span class="code-property">toolExecutionId</span>:preparedExecution.id,</span>
+<span class="code-line">            <span class="code-property">runtimeSessionRef</span>:input.runtimeSessionRef,</span>
+<span class="code-line">            <span class="code-property">lastEventSequence</span>:input.lastEventSequence,</span>
+<span class="code-line">            <span class="code-property">createdAt</span>:finishedAt,</span>
+<span class="code-line">        }</span>
+<span class="code-line"> </span>
+<span class="code-line">        <span class="code-keyword">this</span>.store.<span class="code-function">completeWithCheckpoint</span>(succeededExecution,checkpoint);</span>
+<span class="code-line"> </span>
+<span class="code-line">        <span class="code-keyword">return</span> result;</span></code></pre>
+          </div>
+          <div class="translation-english">
+            <span class="translation-label">白话</span>
+            <div class="translation-lines">
+              <p class="tl">构造检查点：它记录的不是全部状态，而是两个坐标——哪个 Runtime 会话（runtimeSessionRef）、读到第几条事件（lastEventSequence）。</p>
+              <p class="tl">引用而非快照：体积恒定小巧，且天然跟随事件流的版本。</p>
+              <p class="tl">关键方法名说明一切：completeWithCheckpoint——工具结果（SUCCEEDED）与检查点在<strong>同一个事务</strong>里落库。</p>
+              <p class="tl">于是不会出现「结果记了但恢复点丢了」的裂缝：两者要么同时存在，要么同时不存在，崩溃恢复永远面对一致的世界。</p>
+            </div>
+          </div>
+        </div>
+
+        <p style="margin-top: var(--space-8)">重启后的决策大脑是 <code>decideRecovery</code>：输入有效 checkpoint 与所有孤儿存根，输出一个三选一的计划：</p>
+
+        <div class="translation-block animate-in">
+          <div class="translation-code">
+            <span class="translation-label">CODE · src/checkpoints/recovery-decision.ts</span>
+            <pre><code><span class="code-line"><span class="code-keyword">export function</span> <span class="code-function">decideRecovery</span> (</span>
+<span class="code-line">    checkpointId:<span class="code-keyword">string</span>|<span class="code-keyword">null</span>,</span>
+<span class="code-line">    preparedExecution:<span class="code-keyword">readonly</span> ToolExecution[],</span>
+<span class="code-line">):RecoveryDecision{</span>
+<span class="code-line">    <span class="code-keyword">if</span> (checkpointId === <span class="code-keyword">null</span>){</span>
+<span class="code-line">        <span class="code-keyword">const</span> action : RecoveryAction = <span class="code-string">"MANUAL_REVIEW"</span>;</span>
+<span class="code-line">        <span class="code-keyword">const</span> recoveryReason : RecoveryReason= <span class="code-string">"NO_CHECKPOINT"</span>;</span>
+<span class="code-line">        <span class="code-keyword">const</span> execution : RecoveryDecision = {</span>
+<span class="code-line">            <span class="code-property">action</span>:action,</span>
+<span class="code-line">            <span class="code-property">reason</span>:recoveryReason,</span>
+<span class="code-line">            <span class="code-property">blockingToolExecutionId</span>:null,</span>
+<span class="code-line">        }</span>
+<span class="code-line">        <span class="code-keyword">return</span> execution;</span>
+<span class="code-line">    };</span>
+<span class="code-line">    <span class="code-keyword">const</span> unsafeExecution = preparedExecution.<span class="code-function">find</span>(</span>
+<span class="code-line">        (execution) =&gt; !<span class="code-function">canAutomaticallyReplay</span>(</span>
+<span class="code-line">            execution.status,</span>
+<span class="code-line">            execution.effect,</span>
+<span class="code-line">        )</span>
+<span class="code-line">    );</span>
+<span class="code-line"> </span>
+<span class="code-line">    <span class="code-keyword">if</span> (unsafeExecution !== <span class="code-keyword">undefined</span>){</span>
+<span class="code-line">        <span class="code-keyword">return</span> {</span>
+<span class="code-line">            <span class="code-property">action</span>:<span class="code-string">"MANUAL_REVIEW"</span>,</span>
+<span class="code-line">            <span class="code-property">reason</span>:<span class="code-string">"UNSAFE_TOOL_EFFECT"</span>,</span>
+<span class="code-line">            <span class="code-property">blockingToolExecutionId</span>:unsafeExecution.id,</span>
+<span class="code-line">        }</span>
+<span class="code-line">    }</span>
+<span class="code-line"> </span>
+<span class="code-line">    <span class="code-keyword">return</span> {</span>
+<span class="code-line">        <span class="code-property">action</span>:<span class="code-string">"AUTO_RESUME"</span>,</span>
+<span class="code-line">        <span class="code-property">reason</span>:<span class="code-string">"SAFE_CHECKPOINT"</span>,</span>
+<span class="code-line">        <span class="code-property">blockingToolExecutionId</span>:null,</span>
+<span class="code-line">    }</span>
+<span class="code-line">}</span></code></pre>
+          </div>
+          <div class="translation-english">
+            <span class="translation-label">白话</span>
+            <div class="translation-lines">
+              <p class="tl">决策函数签名本身就是文档：给一个 checkpoint 引用加一串孤儿存根，还你一个明确的恢复计划。</p>
+              <p class="tl">情形一：连 checkpoint 都没有——无从知道执行到哪，直接 MANUAL_REVIEW（人工审查），理由 NO_CHECKPOINT 写明。</p>
+              <p class="tl">注意设计取舍：没有恢复点时绝不尝试「从头重跑」——那等于把已发生的副作用再来一遍。</p>
+              <p class="tl">情形二：有 checkpoint，但在孤儿存根里找到任何一个不能自动重放的（回到上一屏的那个函数逐一审问）。</p>
+              <p class="tl">只要有一个可疑分子，整体就冻结：action 仍是 MANUAL_REVIEW，并且精确记录 blockingToolExecutionId——告诉人工「卡在这条记录上」。</p>
+              <p class="tl">一票否决制：AUTO_RESUME 要求所有存根全部干净，而不是大多数干净。</p>
+              <p class="tl">情形三：checkpoint 有效且所有存根都是 READ_ONLY 绿灯——放心 AUTO_RESUME，理由 SAFE_CHECKPOINT。</p>
+              <p class="tl">纯函数、无副作用、可单测：恢复正确性可以被 254 个测试里的用例钉死，而不是靠运维经验。</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ═══ Screen 5：崩溃剧情动画 + 分层注释 ═══ -->
+      <section class="screen animate-in">
+        <h2 class="screen-heading">主视觉：一次工具调用的生与死</h2>
+        <p>九步看完「正常执行 → 崩溃 → 重启决策」的全剧。前三步埋伏笔，第七步剧情反转——留意 SQLite 里有什么、内存里没什么。</p>
+
+        <div class="flow-animation" data-steps='[
+  {"highlight":"flow-actor-8","label":"Pi 发起工具调用：bash rm -rf tmp/scratch —— 这是一个会真实改变世界的操作"},
+  {"highlight":"flow-actor-9","packet":true,"from":"actor-8","to":"actor-9","label":"ToolGateway 先问策略守卫：这个租户允许执行这条命令吗？assertAllowed 必须发生在一切持久化和副作用之前"},
+  {"highlight":"flow-actor-10","packet":true,"from":"actor-9","to":"actor-10","label":"查历史：同一个 toolCallId 在 SQLite 里有没有记录？——这是为崩溃恢复埋下的伏笔"},
+  {"highlight":"flow-actor-10","packet":true,"from":"actor-9","to":"actor-10","label":"没有历史 → 写入 PREPARED 存根：意图先于行动落库，玻璃板下从此有了这一笔"},
+  {"highlight":"flow-actor-11","packet":true,"from":"actor-9","to":"actor-11","label":"真正执行 invokeTool：命令在外部世界产生真实副作用，文件真的没了"},
+  {"highlight":"flow-actor-10","packet":true,"from":"actor-9","to":"actor-10","label":"成功 → SUCCEEDED 结果与 Checkpoint 在同一个事务里落库，账实同步"},
+  {"highlight":"flow-actor-9","label":"剧情转折：进程在这一刻崩溃！内存全丢，唯一幸存的是 SQLite 里的事实"},
+  {"highlight":"flow-actor-10","packet":true,"from":"actor-10","to":"actor-9","label":"重启后 RecoveryService 扫描陈旧的 RUNNING/WAITING_TOOL，修正为 INTERRUPTED，并发现孤儿 PREPARED 记录"},
+  {"highlight":"flow-actor-9","label":"effect 为 UNKNOWN → canAutomaticallyReplay 判 false → decideRecovery 给出 MANUAL_REVIEW：冻结等待人工，绝不盲目重放"}
+]'>
+          <div class="flow-actors">
+            <div class="flow-actor" id="flow-actor-8">
+              <div class="flow-actor-icon" style="border-color: var(--color-actor-2); background: #E4F2F7">🧠</div>
+              <span>Pi（模型）</span>
+            </div>
+            <div class="flow-actor" id="flow-actor-9">
+              <div class="flow-actor-icon" style="border-color: var(--color-actor-1); background: var(--color-accent-light)">🛂</div>
+              <span>ToolGateway</span>
+            </div>
+            <div class="flow-actor" id="flow-actor-10">
+              <div class="flow-actor-icon" style="border-color: var(--color-actor-3); background: #EDEAF6">🗄️</div>
+              <span>ToolExecutionStore（SQLite）</span>
+            </div>
+            <div class="flow-actor" id="flow-actor-11">
+              <div class="flow-actor-icon" style="border-color: var(--color-actor-4); background: #F7F0DC">🌍</div>
+              <span>外部世界（文件系统）</span>
+            </div>
+          </div>
+
+          <div class="flow-packet"></div>
+
+          <div class="flow-step-label">点击「Next Step」开始剧情</div>
+
+          <div class="flow-controls">
+            <button class="btn flow-next-btn">Next Step</button>
+            <button class="btn flow-reset-btn">Restart</button>
+            <span class="flow-progress"></span>
+          </div>
+        </div>
+
+        <p style="margin-top: var(--space-8)">最后一步为什么 RecoveryService 不直接调 runtime.resume？源码里的一段注释就是标准答案：</p>
+
+        <div class="translation-block animate-in">
+          <div class="translation-code">
+            <span class="translation-label">CODE · src/checkpoints/recovery-service.ts</span>
+            <pre><code><span class="code-line"><span class="code-comment"> * 这一层只建立恢复计划，不直接调用 AgentRuntime：</span></span>
+<span class="code-line"><span class="code-comment"> * - 扫描和状态修正是同步、确定性的数据库工作；</span></span>
+<span class="code-line"><span class="code-comment"> * - Runtime resume 是可能失败的外部执行，应由下一层逐个消费计划。</span></span></code></pre>
+          </div>
+          <div class="translation-english">
+            <span class="translation-label">白话</span>
+            <div class="translation-lines">
+              <p class="tl">分层铁律：计划层（RecoveryService）只负责想清楚「该做什么」，执行层（RecoveryExecutor）才负责「去做」。</p>
+              <p class="tl">扫描修正（陈旧 RUNNING → INTERRUPTED，附 PROCESS_RESTART 事件）是确定性的数据库操作——可以批量、可重入、永不部分失败。</p>
+              <p class="tl">而 resume 是可能失败的外部调用，绝不能混进确定层——否则一次失败污染整个扫描批次。</p>
+              <p class="tl">所以 AUTO_RESUME 的计划由下一层逐个调 coordinator.submitResume 消费——重新入队！恢复也要重新过资源准入与公平调度，不许插队。</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ═══ Screen 6：归属校验 + 分类练习 + Quiz + 过渡 ═══ -->
+      <section class="screen animate-in">
+        <h2 class="screen-heading">隐蔽死角：恢复数据的归属校验</h2>
+        <p>恢复是<span class="term" data-definition="多租户（multi-tenant）：多个团队共用一套系统，任何数据、资源与恢复机制都必须严防租户之间串门。">多租户</span>防串最容易漏的一环。如果拿错恢复数据，就会「用 A 租户的 checkpoint 驱动 B 租户的 Run」——所以在重新入队前再做一次绑定校验：</p>
+
+        <div class="translation-block animate-in">
+          <div class="translation-code">
+            <span class="translation-label">CODE · src/runs/run-service.ts · queueResume（节选）</span>
+            <pre><code><span class="code-line">        <span class="code-keyword">if</span> (</span>
+<span class="code-line">            input.checkpoint.runId !== input.runId</span>
+<span class="code-line">            || interruptedRun.checkpointId !== input.checkpoint.id</span>
+<span class="code-line">        ) {</span>
+<span class="code-line">            <span class="code-keyword">throw new Error</span>(</span>
+<span class="code-line">                <span class="code-string">`Checkpoint ${input.checkpoint.id} 不属于当前 Run`</span>,</span>
+<span class="code-line">            );</span>
+<span class="code-line">        }</span></code></pre>
+          </div>
+          <div class="translation-english">
+            <span class="translation-label">白话</span>
+            <div class="translation-lines">
+              <p class="tl">双向绑定校验：checkpoint 必须属于这个 Run，且 Run 当前指向的也必须是这个 checkpoint——两个方向都对得上才放行。</p>
+              <p class="tl">同类绑定还有策略快照 snapshot.runId === input.runId：策略也必须是这个 Run 自己那份，不能借用别家的。</p>
+              <p class="tl">面试加分点：这类「关系完整性」校验不放在 UI 层也不放在 API 层，而是放在业务动作入口——离数据最近的地方最可靠。</p>
+            </div>
+          </div>
+        </div>
+
+        <h2 class="screen-heading" style="margin-top: var(--space-10)">练习：你会给这些工具贴什么标签？</h2>
+        <p>把五个工具行为拖进对应的 ToolEffect 分类框，然后点 Check Matches。提示：想想崩溃后自动重放它的最坏后果。</p>
+
+        <div class="dnd-container" id="dnd-module-3">
+          <div class="dnd-chips">
+            <div class="dnd-chip" draggable="true" data-answer="ro-cat">📖 读文件（cat README.md）</div>
+            <div class="dnd-chip" draggable="true" data-answer="ro-sql">🔍 SELECT 查询</div>
+            <div class="dnd-chip" draggable="true" data-answer="idem-upsert">🔁 幂等写（按固定键 upsert 配置）</div>
+            <div class="dnd-chip" draggable="true" data-answer="unk-mail">📧 发邮件通知</div>
+            <div class="dnd-chip" draggable="true" data-answer="unk-bash">💥 bash 脚本（删文件 / 装依赖）</div>
+          </div>
+          <div class="dnd-zones">
+            <div class="dnd-zone" data-correct="ro-cat,ro-sql">
+              <p class="dnd-zone-label"><strong>READ_ONLY</strong> —— 只读，崩溃后可自动重放</p>
+              <div class="dnd-zone-target">Drop here</div>
+            </div>
+            <div class="dnd-zone" data-correct="idem-upsert">
+              <p class="dnd-zone-label"><strong>IDEMPOTENT_WRITE</strong> —— 声称幂等的写（记住：目前照样不许自动重放！）</p>
+              <div class="dnd-zone-target">Drop here</div>
+            </div>
+            <div class="dnd-zone" data-correct="unk-mail,unk-bash">
+              <p class="dnd-zone-label"><strong>UNKNOWN_EFFECT</strong> —— 影响说不清，冻结等人工</p>
+              <div class="dnd-zone-target">Drop here</div>
+            </div>
+          </div>
+          <button class="btn btn-primary" onclick="checkDnD('dnd-module-3')">Check Matches</button>
+          <button class="btn" onclick="resetDnD('dnd-module-3')">Reset</button>
+        </div>
+
+        <h2 class="screen-heading" style="margin-top: var(--space-10)">终检：三道面试真题</h2>
+        <div class="quiz-container" id="quiz-module-3">
+          <div class="quiz-question-block"
+               data-correct="idem-no"
+               data-explanation-right="满分。这正是 canAutomaticallyReplay 里那条注释的精髓：声明不等于证据。除非未来持久化并校验真实的幂等证据（比如对方确认使用了稳定幂等键），否则一律 fail closed。"
+               data-explanation-wrong="危险的想法——恰恰是这个选项区分了 fail-open 思维和 fail-closed 思维。「声明幂等」只是工具作者的一面之词：外部系统若没用稳定幂等键去重，自动重放就是二次扣款、二次建群。当前实现选择宁可人工介入。">
+            <h3 class="quiz-question">Q1 · 场景题：一个 IDEMPOTENT_WRITE 工具崩溃时停在了 PREPARED。它能被自动重放吗？为什么？</h3>
+            <div class="quiz-options">
+              <button class="quiz-option" data-value="idem-yes" onclick="selectOption(this)"><div class="quiz-option-radio"></div><span>能。既然声明了幂等，重放多少次结果都一样，可以放心自动重放</span></button>
+              <button class="quiz-option" data-value="idem-no" onclick="selectOption(this)"><div class="quiz-option-radio"></div><span>不能。声明不等于证据——外部系统未必真的使用稳定幂等键，在校验真实幂等证据前保持 fail-closed</span></button>
+              <button class="quiz-option" data-value="idem-write-ban" onclick="selectOption(this)"><div class="quiz-option-radio"></div><span>不能。因为规则是一刀切：所有带写入性质的工具都永久禁止自动重放</span></button>
+            </div>
+            <div class="quiz-feedback"></div>
+          </div>
+
+          <div class="quiz-question-block"
+               data-correct="resume-queue"
+               data-explanation-right="完全正确。分层注释写得很清楚：扫描修正是确定性的数据库工作，resume 是可能失败的外部执行；而走 coordinator.submitResume 让恢复任务重新排队——资源准入和公平调度对它一视同仁。"
+               data-explanation-wrong="不是抽象洁癖，也不是 API 缺失。关键在两点：确定性工作与可能失败的外部执行必须分层隔离；更重要的是，恢复的任务必须重新经过资源准入与公平队列——如果 GPU 正忙，它就该像普通任务一样排队，而不是凭「我曾经在跑」插队。">
+            <h3 class="quiz-question">Q2 · 为什么 RecoveryService 不直接调 runtime.resume，而要让 RecoveryExecutor 走 coordinator.submitResume？</h3>
+            <div class="quiz-options">
+              <button class="quiz-option" data-value="resume-style" onclick="selectOption(this)"><div class="quiz-option-radio"></div><span>纯粹的代码风格偏好，少一层间接调用更简洁</span></button>
+              <button class="quiz-option" data-value="resume-queue" onclick="selectOption(this)"><div class="quiz-option-radio"></div><span>因为扫描修正是同步确定的数据库工作，resume 是可能失败的外部执行；重新入队意味着恢复也要重新过资源准入与公平调度，不许带着崩溃前的假设插队</span></button>
+              <button class="quiz-option" data-value="resume-missing" onclick="selectOption(this)"><div class="quiz-option-radio"></div><span>因为 runtime.resume 这个接口根本不存在，只能绕道 coordinator</span></button>
+            </div>
+            <div class="quiz-feedback"></div>
+          </div>
+
+          <div class="quiz-question-block"
+               data-correct="order-corrupt"
+               data-explanation-right="正是。write-ahead 的全部价值就在顺序里：先落库意图，崩溃才有据可查。反过来执行，窗口期内的任何崩溃都制造一笔「查无此账」的悬案——decideRecovery 连它发生过什么都不知道。"
+               data-explanation-wrong="不是风格问题，是正确性问题：副作用先行、存根缺位，意味着存在一段「外部世界已改变但账本空白」的时间窗。此时崩溃，重启后的扫描看不到任何 PREPARED 记录——无法判断该不该补偿，write-ahead 语义彻底失效。至于 C：prepare 在前的代码里靠查历史避免了重复插入，顺序反过来反而不会撞唯一约束。">
+            <h3 class="quiz-question">Q3 · Spot-the-bug 变体：如果把 execute 改成「先 invokeTool 再 store.prepare」，会打开什么漏洞？</h3>
+            <div class="quiz-options">
+              <button class="quiz-option" data-value="order-fine" onclick="selectOption(this)"><div class="quiz-option-radio"></div><span>没什么问题，只是编码风格差异，功能完全等价</span></button>
+              <button class="quiz-option" data-value="order-dup" onclick="selectOption(this)"><div class="quiz-option-radio"></div><span>会导致 store.prepare 因唯一约束冲突而报错，工具再也执行不了</span></button>
+              <button class="quiz-option" data-value="order-corrupt" onclick="selectOption(this)"><div class="quiz-option-radio"></div><span>副作用已经发生但意图还没落库——此刻崩溃则重启后查无此账，无从判断是否该补偿或重放，write-ahead 语义被彻底破坏</span></button>
+            </div>
+            <div class="quiz-feedback"></div>
+          </div>
+
+          <button class="quiz-check-btn" onclick="checkQuiz('quiz-module-3')">Check Answers</button>
+          <button class="quiz-reset-btn" onclick="resetQuiz('quiz-module-3')">Try Again</button>
+        </div>
+
+        <p style="margin-top: var(--space-10)"><strong>最危险的一段拆完了：</strong>从 PREPARED 存根到 decideRecovery 的三岔路口，你已经能完整推演崩溃恢复的每一步。下一模块回到另一个 fail-closed 现场——当资源观测本身失败时，为什么宁可排队也不盲跑，见 <em>Module 4 · 资源感知的准入与背压</em>。</p>
+      </section>
+
+    </div>
+  </div>
+</section>

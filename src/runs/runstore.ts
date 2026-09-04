@@ -194,6 +194,22 @@ export class RunStore {
         `).all({ tenantId, limit }).map((row) => this.runFromRow(row));
     }
 
+    /** Conversation history in message order. */
+    listForSession(tenantId: string, harnessSessionId: string): AgentRun[] {
+        return this.db.query<AgentRunRow, { tenantId: string; harnessSessionId: string }>(`
+            SELECT
+                id, tenant_id AS tenantId, harness_session_id AS harnessSessionId,
+                status, user_input AS userInput, workspace_path AS workspacePath,
+                created_at AS createdAt, updated_at AS updatedAt, started_at AS startedAt,
+                finished_at AS finishedAt, checkpoint_id AS checkpointId,
+                failure_reason AS failureReason, template_version_id AS templateVersionId,
+                harness_instance_id AS harnessInstanceId, run_policy_json AS runPolicyJson
+            FROM agent_runs
+            WHERE tenant_id = $tenantId AND harness_session_id = $harnessSessionId
+            ORDER BY created_at ASC, rowid ASC;
+        `).all({ tenantId, harnessSessionId }).map((row) => this.runFromRow(row));
+    }
+
     /**
      * 服务启动时查找旧进程遗留的活跃 Run。
      *

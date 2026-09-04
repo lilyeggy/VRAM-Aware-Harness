@@ -1,5 +1,4 @@
 export interface RequestPrincipal {
-    readonly subjectId: string;
     readonly tenantId: string;
     readonly scopes: readonly string[];
 }

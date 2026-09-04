@@ -1,0 +1,446 @@
+<section class="module" id="module-2" style="background: var(--color-bg)">
+  <div class="module-content">
+    <header class="module-header animate-in">
+      <span class="module-number">02</span>
+      <h1 class="module-title">一次任务的一生</h1>
+      <p class="module-subtitle">用户点下「提交任务」的那一瞬间，一个 Run 开始了它的一生——从 QUEUED 到 COMPLETED，每一步都被持久化、可回放。</p>
+    </header>
+
+    <div class="module-body">
+
+      <!-- ═══ Screen 1：隐喻 + 数据对象链 ═══ -->
+      <section class="screen animate-in">
+        <h2 class="screen-heading">隐喻：医院手术系统</h2>
+        <p>Tenant 是医院，Workspace 是独立病房，Run 是一台手术，Attempt 是一次实际开刀（手术可能因故重开）。Sandbox 是无菌手术室，ToolExecution 是手术记录单——每动一刀都记，病历永远追加、不可涂改。</p>
+
+        <h2 class="screen-heading" style="margin-top: var(--space-8)">数据对象链：一条线串起所有概念</h2>
+        <div class="flow-steps">
+          <div class="flow-step"><div class="flow-step-num">1</div><p><strong>Tenant</strong></p></div>
+          <div class="flow-arrow">→</div>
+          <div class="flow-step"><div class="flow-step-num">2</div><p><strong>Workspace</strong></p></div>
+          <div class="flow-arrow">→</div>
+          <div class="flow-step"><div class="flow-step-num">3</div><p><strong>Session</strong></p></div>
+          <div class="flow-arrow">→</div>
+          <div class="flow-step"><div class="flow-step-num">4</div><p><strong>Run</strong></p></div>
+          <div class="flow-arrow">→</div>
+          <div class="flow-step"><div class="flow-step-num">5</div><p><strong>Attempt</strong></p></div>
+          <div class="flow-arrow">→</div>
+          <div class="flow-step"><div class="flow-step-num">6</div><p><strong>Sandbox</strong></p></div>
+          <div class="flow-arrow">→</div>
+          <div class="flow-step"><div class="flow-step-num">7</div><p><strong>ToolExecution</strong></p></div>
+          <div class="flow-arrow">→</div>
+          <div class="flow-step"><div class="flow-step-num">8</div><p><strong>Result / Diff / Artifact</strong></p></div>
+        </div>
+
+        <p style="margin-top: var(--space-6)">每个对象都有容易混淆的「近亲」。七张速查卡辨析到位，面试里就不会说错词：</p>
+        <div class="pattern-cards">
+          <div class="pattern-card animate-in" style="border-top: 3px solid var(--color-actor-3)"><h4 class="pattern-title">Tenant</h4><p class="pattern-desc">身份/数据/策略/资源/审计的一等边界。<br><strong>辨析：</strong>来自认证解出的 <span class="term" data-definition="Principal：认证成功后系统内部代表的『你是谁』——后续所有授权决策都以它为准的身份凭证。">Principal</span>，绝非客户端自报。</p></div>
+          <div class="pattern-card animate-in" style="border-top: 3px solid var(--color-actor-3)"><h4 class="pattern-title">Workspace</h4><p class="pattern-desc">租户下受管工作区，目录由服务端生成。<br><strong>辨析：</strong>客户端不能提交宿主机路径——路径是分配的，不是申报的。</p></div>
+          <div class="pattern-card animate-in" style="border-top: 3px solid var(--color-actor-2)"><h4 class="pattern-title">Session</h4><p class="pattern-desc">对话关系，Pi AgentSession 的持久句柄。<br><strong>辨析：</strong>Session ≠ Run——一段对话可以承载多次任务。</p></div>
+          <div class="pattern-card animate-in" style="border-top: 3px solid var(--color-accent)"><h4 class="pattern-title">Run</h4><p class="pattern-desc">一次受控任务。<br><strong>辨析：</strong>被<span class="term" data-definition="状态机（state machine）：对象只能处于有限几个状态之一，每次切换都必须走声明过的合法路径，非法转换直接报错。">状态机</span>管理的一生，本模块的主角。</p></div>
+          <div class="pattern-card animate-in" style="border-top: 3px solid var(--color-accent)"><h4 class="pattern-title">Attempt</h4><p class="pattern-desc">Run 的一次实际执行。<br><strong>辨析：</strong>每次真实执行独立 Attempt——重试不是同一次开刀。</p></div>
+          <div class="pattern-card animate-in" style="border-top: 3px solid var(--color-actor-5)"><h4 class="pattern-title">Sandbox</h4><p class="pattern-desc">每 Attempt 的隔离环境（<span class="term" data-definition="runsc 容器：gVisor 提供的沙箱运行时，用户态内核拦截系统调用，为每个 Attempt 提供一次性无菌环境。">runsc 容器</span>）。<br><strong>辨析：</strong>绝不跨 Attempt 复用——无菌室用完就换。</p></div>
+          <div class="pattern-card animate-in" style="border-top: 3px solid var(--color-actor-4)"><h4 class="pattern-title">ToolExecution</h4><p class="pattern-desc">一次工具调用及副作用记账。<br><strong>辨析：</strong>PREPARED / SUCCEEDED / FAILED 三态，Module 3 深挖。</p></div>
+        </div>
+      </section>
+
+      <!-- ═══ Screen 2：双轨制 ═══ -->
+      <section class="screen animate-in">
+        <h2 class="screen-heading">双轨制：Runtime 是即时的，Run 是持久的</h2>
+        <p>整个可解释性的地基，写在 <code>src/runs/agent-run.ts</code> 开头的一句注释里。设计思想先行，代码只是它的展开：</p>
+
+        <div class="translation-block animate-in">
+          <div class="translation-code">
+            <span class="translation-label">CODE · src/runs/agent-run.ts</span>
+            <pre><code><span class="code-line"><span class="code-comment"> * Runtime 和 Run的最大区别就是 Runtime 是即时的，而 Run 是持久的</span></span>
+<span class="code-line"><span class="code-comment"> * 那么从这个角度看，RuntimeEvent和RunEvent也是同样的区别</span></span>
+<span class="code-line"><span class="code-comment"> * RuntimeEvent是即时的，而 RunEvent 是harness 长期保存的</span></span></code></pre>
+          </div>
+          <div class="translation-english">
+            <span class="translation-label">白话</span>
+            <div class="translation-lines">
+              <p class="tl">Runtime 是「正在发生的执行」：SDK 里的事件转瞬即逝，进程一崩就没了。</p>
+              <p class="tl">所以事件也要分两轨：RuntimeEvent 属于执行的瞬间，RunEvent 属于 Harness 的长期记忆。</p>
+              <p class="tl">面试一句话：底层 SDK 的事实会消失，Harness 把值得保留的部分翻译成自己的业务事实，永久落库。</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="pattern-cards">
+          <div class="pattern-card animate-in" style="border-top: 3px solid var(--color-actor-2)">
+            <div class="pattern-icon" style="background: var(--color-actor-2)">⚡</div>
+            <h4 class="pattern-title">RuntimeEvent · 即时轨</h4>
+            <p class="pattern-desc">存在于 SDK 执行的瞬间：token 流、工具开始/结束。其中 <code>text_delta</code> 这类高频碎片<strong>只用于实时展示，不落库</strong>。</p>
+          </div>
+          <div class="pattern-card animate-in" style="border-top: 3px solid var(--color-accent)">
+            <div class="pattern-icon" style="background: var(--color-accent)">🗄️</div>
+            <h4 class="pattern-title">RunEvent · 持久轨</h4>
+            <p class="pattern-desc">Harness 长期保存的业务事实：RUN_CREATED、TOOL_COMPLETED、策略决策……带 sequence 序号，可完整回放。</p>
+          </div>
+        </div>
+
+        <div class="callout callout-accent">
+          <div class="callout-icon">💡</div>
+          <div class="callout-content">
+            <strong class="callout-title">这就是「<span class="term" data-definition="事件溯源（Event Sourcing）：不只存最终状态，而是把每一次变更都作为不可篡改的事件记录下来，现状可以由事件流完整重放出来。">事件溯源</span>」（Event Sourcing）思想</strong>
+            <p><code>agent_runs</code> 表存「现在是什么状态」，<code>run_events</code> 表存「过去发生过什么」。查询看快照所以快，审计看事件流所以全——两者各司其职，缺一不可。</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- ═══ Screen 3：状态机 ═══ -->
+      <section class="screen animate-in">
+        <h2 class="screen-heading">Run 的六态状态机：合法迁移全在这张表里</h2>
+        <p>状态机是控制面的骨架：<code>src/runs/run-state-machine.ts</code> 用一张字面量表声明所有合法迁移，表里没有的路一概非法。</p>
+
+        <div class="translation-block animate-in">
+          <div class="translation-code">
+            <span class="translation-label">CODE · src/runs/run-state-machine.ts</span>
+            <pre><code><span class="code-line"><span class="code-keyword">const</span> allowedTransitions : <span class="code-property">Record&lt;AgentRunStatus,readonly AgentRunStatus[]&gt;</span>={</span>
+<span class="code-line">    <span class="code-property">QUEUED</span>: [<span class="code-string">"RUNNING"</span>,<span class="code-string">"INTERRUPTED"</span>],</span>
+<span class="code-line">    <span class="code-property">RUNNING</span> : [</span>
+<span class="code-line">        <span class="code-string">"WAITING_TOOL"</span>,</span>
+<span class="code-line">        <span class="code-string">"INTERRUPTED"</span>,</span>
+<span class="code-line">        <span class="code-string">"FAILED"</span>,</span>
+<span class="code-line">        <span class="code-string">"COMPLETED"</span>,</span>
+<span class="code-line">    ],</span>
+<span class="code-line">    <span class="code-property">WAITING_TOOL</span>:[</span>
+<span class="code-line">        <span class="code-string">"RUNNING"</span>,</span>
+<span class="code-line">        <span class="code-string">"INTERRUPTED"</span>,</span>
+<span class="code-line">        <span class="code-string">"FAILED"</span>,</span>
+<span class="code-line">    ],</span>
+<span class="code-line">    <span class="code-property">INTERRUPTED</span>:[</span>
+<span class="code-line">        <span class="code-string">"QUEUED"</span></span>
+<span class="code-line">    ],</span>
+<span class="code-line">    <span class="code-property">COMPLETED</span>:[],</span>
+<span class="code-line">    <span class="code-property">FAILED</span>:[]</span>
+<span class="code-line">}</span>
+<span class="code-line"> </span>
+<span class="code-line"><span class="code-keyword">export</span> <span class="code-keyword">function</span> <span class="code-function">assertValidTransition</span>(</span>
+<span class="code-line">    from : AgentRunStatus,</span>
+<span class="code-line">    to : AgentRunStatus,</span>
+<span class="code-line">): <span class="code-keyword">void</span> {</span>
+<span class="code-line">    <span class="code-keyword">if</span> (!<span class="code-function">canTransition</span>(from,to)){</span>
+<span class="code-line">        <span class="code-keyword">throw</span> <span class="code-keyword">new</span> <span class="code-function">Error</span>(</span>
+<span class="code-line">            <span class="code-string">`非法的 AgentRun 状态转换：${from} -&gt; ${to}`</span></span>
+<span class="code-line">        )</span>
+<span class="code-line">    }</span>
+<span class="code-line">}</span></code></pre>
+          </div>
+          <div class="translation-english">
+            <span class="translation-label">白话</span>
+            <div class="translation-lines">
+              <p class="tl">一张只读的迁移表：每个状态只能去「名单上」的状态，类型系统保证六个状态一个不少。</p>
+              <p class="tl">QUEUED 只有两个出口：过准入变 RUNNING，或者排队期间被打断。</p>
+              <p class="tl">RUNNING 是枢纽：可以等工具、可以被打断、可以失败、可以完成——四种出口只有一种是好结局。</p>
+              <p class="tl">WAITING_TOOL 不能直接 COMPLETED：工具结果回来必须先回 RUNNING 收尾。</p>
+              <p class="tl">最关键的一条：INTERRUPTED 只能回到 QUEUED——为什么不能直接 RUNNING？下面这张图揭晓。</p>
+              <p class="tl">COMPLETED 和 FAILED 的数组是空的：终态就是死路，没有任何代码能把它们改写。</p>
+              <p class="tl">守卫函数：任何非法转换直接抛错，带着「从哪来 → 到哪去」的完整证据。</p>
+              <p class="tl">错误消息用中文写进代码——这个错误是给人看的，而且大概率是开发者自己的 bug。</p>
+            </div>
+          </div>
+        </div>
+
+        <h2 class="screen-heading" style="margin-top: var(--space-10)">交互式状态机：点击状态看「谁能进、谁能出」</h2>
+        <div class="arch-diagram">
+          <div class="arch-zone">
+            <h4 class="arch-zone-label">六个状态 · 点击查看迁移规则</h4>
+            <div class="arch-component" data-desc="QUEUED —— 能进：初始创建，以及 INTERRUPTED 恢复重排。能出：RUNNING（过了准入拿到 slot）或 INTERRUPTED（排队中被取消）。铁律：从 QUEUED 出发必须先经过资源准入决策。">
+              <div class="arch-icon">🟡</div><span>QUEUED</span>
+            </div>
+            <div class="arch-component" data-desc="RUNNING —— 能进：QUEUED。能出：WAITING_TOOL / INTERRUPTED / FAILED / COMPLETED。它是整个状态机的枢纽，四种出口里只有 COMPLETED 是好结局。">
+              <div class="arch-icon">🔵</div><span>RUNNING</span>
+            </div>
+            <div class="arch-component" data-desc="WAITING_TOOL —— 能进：RUNNING。能出：RUNNING（工具返回继续跑）/ INTERRUPTED / FAILED。注意它不能直接 COMPLETED——必须带着工具结果回到 RUNNING 才能收尾。">
+              <div class="arch-icon">🟠</div><span>WAITING_TOOL</span>
+            </div>
+            <div class="arch-component" data-desc="INTERRUPTED —— 能进：QUEUED / RUNNING / WAITING_TOOL 三个非终态。能出：只有 QUEUED！因为恢复也是一次新任务：必须重新过资源准入、重新占 slot，不允许带着崩溃前的资源假设直插 RUNNING。">
+              <div class="arch-icon">🟣</div><span>INTERRUPTED</span>
+            </div>
+            <div class="arch-component" data-desc="COMPLETED —— 终态。能进：仅 RUNNING。能出：无（迁移表里是空数组）。应用层状态机 + SQLite CHECK 约束双保险，谁也改写不了历史。">
+              <div class="arch-icon">🟢</div><span>COMPLETED</span>
+            </div>
+            <div class="arch-component" data-desc="FAILED —— 终态。能进：RUNNING / WAITING_TOOL。能出：无。失败的 Run 不许原地复活——想重来请走 INTERRUPTED → QUEUED 重新排队，接受准入审判。">
+              <div class="arch-icon">🔴</div><span>FAILED</span>
+            </div>
+          </div>
+          <div class="arch-description">点击任意状态卡片，查看它的合法进出</div>
+        </div>
+
+        <p>主干道一眼看完：</p>
+        <div class="flow-steps">
+          <div class="flow-step"><div class="flow-step-num">A</div><p>QUEUED → RUNNING ⇄ WAITING_TOOL → COMPLETED<br>唯一的好结局路线</p></div>
+          <div class="flow-arrow">→</div>
+          <div class="flow-step"><div class="flow-step-num">B</div><p>任何非终态 → INTERRUPTED → QUEUED<br>打断后必须重新排队过准入</p></div>
+        </div>
+
+        <div class="badge-list" style="margin-top: var(--space-6)">
+          <div class="badge-item"><code class="badge-code"><span class="term" data-definition="终态（terminal state）：状态机的死路——进入后没有任何合法出路，历史不可改写。">终态</span> = 空数组</code><span class="badge-desc">COMPLETED / FAILED 无路可走，「结束」是数据结构层面的承诺</span></div>
+          <div class="badge-item"><code class="badge-code">INTERRUPTED → QUEUED</code><span class="badge-desc">恢复也要重新过准入——这条边是 fail-closed 哲学在状态机上的投影</span></div>
+          <div class="badge-item"><code class="badge-code">双层防护</code><span class="badge-desc">应用层 assertValidTransition + SQLite CHECK 约束，绕过应用层的写入同样会被数据库拒绝</span></div>
+        </div>
+      </section>
+
+      <!-- ═══ Screen 4：Run 的诞生 ═══ -->
+      <section class="screen animate-in">
+        <h2 class="screen-heading">Run 的诞生：状态与历史在同一事务里落地</h2>
+        <p><code>createQueuedRun</code> 是每个 Run 的出生证明开具处。注意最后那行 <code>store.create(run, createdEvent)</code>——Run 快照和第一条事件<strong>必须在同一个 SQLite <span class="term" data-definition="事务（transaction）：一组数据库操作要么全部成功、要么全部失败，不存在只完成一半的中间态。">事务</span>里写入</strong>，否则可能出现「状态变了但历史没记」的裂缝。</p>
+
+        <div class="translation-block animate-in">
+          <div class="translation-code">
+            <span class="translation-label">CODE · src/runs/run-service.ts</span>
+            <pre><code><span class="code-line">    <span class="code-function">createQueuedRun</span>(input : StartRunInput) : AgentRun {</span>
+<span class="code-line">        <span class="code-keyword">const</span> runId = crypto.<span class="code-function">randomUUID</span>(); </span>
+<span class="code-line">        <span class="code-keyword">const</span> timestamp = <span class="code-keyword">new</span> <span class="code-function">Date</span>().<span class="code-function">toISOString</span>();</span>
+<span class="code-line">        <span class="code-keyword">const</span> controlBinding = <span class="code-keyword">this</span>.controlBindingResolver?.<span class="code-function">resolve</span>(input);</span>
+<span class="code-line"> </span>
+<span class="code-line">        <span class="code-keyword">const</span> run : AgentRun = {</span>
+<span class="code-line">            <span class="code-property">id</span>:runId,</span>
+<span class="code-line">            <span class="code-property">tenantId</span>:input.tenantId,</span>
+<span class="code-line">            <span class="code-property">harnessSessionId</span>:input.harnessSessionId,</span>
+<span class="code-line">            <span class="code-property">status</span> : <span class="code-string">"QUEUED"</span>,</span>
+<span class="code-line">            <span class="code-property">userInput</span>:input.userInput,</span>
+<span class="code-line">            <span class="code-property">workspacePath</span>:input.workspacePath,</span>
+<span class="code-line">            <span class="code-property">createdAt</span>:timestamp,</span>
+<span class="code-line">            <span class="code-property">updatedAt</span>:timestamp,</span>
+<span class="code-line">            <span class="code-property">startedAt</span>:null,</span>
+<span class="code-line">            <span class="code-property">finishedAt</span>:null,</span>
+<span class="code-line">            <span class="code-property">checkpointId</span>:null,</span>
+<span class="code-line">            <span class="code-property">failureReason</span>:null,</span>
+<span class="code-line">            ...(input.runPolicy === <span class="code-keyword">undefined</span></span>
+<span class="code-line">                ? {}</span>
+<span class="code-line">                : { <span class="code-property">runPolicy</span>: input.runPolicy }),</span>
+<span class="code-line">            ...(controlBinding ?? {}),</span>
+<span class="code-line">        };</span>
+<span class="code-line"> </span>
+<span class="code-line">        <span class="code-keyword">const</span> createdEvent : RunEvent = {</span>
+<span class="code-line">            <span class="code-property">eventId</span>:crypto.<span class="code-function">randomUUID</span>(),</span>
+<span class="code-line">            <span class="code-property">runId</span>,</span>
+<span class="code-line">            <span class="code-property">sequence</span>:<span class="code-number">1</span>,</span>
+<span class="code-line">            <span class="code-property">type</span>:<span class="code-string">"RUN_CREATED"</span>,</span>
+<span class="code-line">            <span class="code-property">timestamp</span>,</span>
+<span class="code-line">            <span class="code-property">payloadVersion</span>:<span class="code-number">1</span>,</span>
+<span class="code-line">            <span class="code-property">payload</span>:{},</span>
+<span class="code-line">        };</span>
+<span class="code-line"> </span>
+<span class="code-line">        <span class="code-keyword">this</span>.store.<span class="code-function">create</span>(run,createdEvent);</span>
+<span class="code-line"> </span>
+<span class="code-line">        <span class="code-keyword">return</span> run;</span>
+<span class="code-line">    }</span></code></pre>
+          </div>
+          <div class="translation-english">
+            <span class="translation-label">白话</span>
+            <div class="translation-lines">
+              <p class="tl">工厂方法入口：调用方只递输入，不许自己拼 Run 对象——构造逻辑集中在一处，谁都造不出畸形 Run。</p>
+              <p class="tl">主键在出生瞬间生成：ID 先于状态存在，之后每一条事件都能引用它。</p>
+              <p class="tl">时间戳取自服务端时钟——客户端时间是不可信输入。</p>
+              <p class="tl">可选链解析控制绑定：把策略上下文附到 Run 上；没配置解析器也不会崩（undefined 安全通过）。</p>
+              <p class="tl">开始构造 Run 快照：前三个字段锁定归属——哪个租户、哪段对话。</p>
+              <p class="tl">起点必须是 QUEUED 而不是 RUNNING：此刻还没过资源准入，谁也无权「出生即执行」。</p>
+              <p class="tl">userInput 与 workspacePath 原样留存：任务当时到底收到了什么，永远可查。</p>
+              <p class="tl">startedAt / finishedAt / checkpointId / failureReason 显式置 null——「未来才填的字段」本身就是 schema 文档。</p>
+              <p class="tl">条件展开：runPolicy 没传就不写这个字段，绝不让 undefined 混进快照污染数据。</p>
+              <p class="tl">同时构造第一条事件 RUN_CREATED——出生证明和本人一起办理。</p>
+              <p class="tl">sequence 从 1 开始：整条事件流的序号原点，回放时靠它校验顺序与完整性。</p>
+              <p class="tl">payloadVersion:1 给事件格式定版本——将来格式演进，老事件依然可以被正确解读。</p>
+              <p class="tl">决定性的一行：Run 与首条事件在<strong>同一个 SQLite 事务</strong>中写入——要么都存在，要么都不存在，不存在「有状态没历史」的中间世界。</p>
+              <p class="tl">返回内存中的快照给调用方，持久化的真相已经落库。</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ═══ Screen 5：端到端流程动画 ═══ -->
+      <section class="screen animate-in">
+        <h2 class="screen-heading">主视觉：一个 Run 的完整旅程</h2>
+        <p>从提交到交付共十步，逐步点击观看数据如何在七个组件之间流动。留意第 3 步和第 9 步——SQLite 各出现两次，状态与事实全程同步落库。</p>
+
+        <div class="flow-animation" data-steps='[
+  {"highlight":"flow-actor-1","label":"用户提交 workspaceId 和 userInput，一个 Run 的一生开始了"},
+  {"highlight":"flow-actor-2","packet":true,"from":"actor-1","to":"actor-2","label":"HTTP 层验证 API Key，从认证解出 Principal —— Tenant 身份来自认证，不可由客户端自报"},
+  {"highlight":"flow-actor-7","packet":true,"from":"actor-2","to":"actor-7","label":"Run 快照 + RUN_CREATED 事件写入同一个 SQLite 事务，状态 QUEUED —— 要么都在，要么都不在"},
+  {"highlight":"flow-actor-3","packet":true,"from":"actor-2","to":"actor-3","label":"RunQueueCoordinator 接管任务，进入等待队列"},
+  {"highlight":"flow-actor-4","packet":true,"from":"actor-3","to":"actor-4","label":"资源准入决策：读 vLLM metrics 与 GPU 状态，判 START 或 QUEUE，policy_decisions 落库"},
+  {"highlight":"flow-actor-5","packet":true,"from":"actor-4","to":"actor-5","label":"调度器 claim 任务并占 slot：Tenant 内 FIFO、Tenant 间 round-robin"},
+  {"highlight":"flow-actor-6","packet":true,"from":"actor-5","to":"actor-6","label":"创建 Attempt 与 runsc 沙箱：只挂载 workspace 目录，环境绝不跨 Attempt 复用"},
+  {"highlight":"flow-actor-6","label":"Pi 在沙箱里思考、调模型、使用工具 —— 行为平面开始工作"},
+  {"highlight":"flow-actor-7","packet":true,"from":"actor-6","to":"actor-7","label":"每次工具调用：先写 PREPARED 存根，授权后执行，SUCCEEDED 结果与 Checkpoint 同事务落库"},
+  {"highlight":"flow-actor-1","packet":true,"from":"actor-6","to":"actor-1","label":"完成后返回最终回答 + 文件 Diff + Artifact，Run 抵达 COMPLETED —— 一生圆满"}
+]'>
+          <div class="flow-actors">
+            <div class="flow-actor" id="flow-actor-1">
+              <div class="flow-actor-icon" style="border-color: #6B6560; background: #EFEAE3">👤</div>
+              <span>用户</span>
+            </div>
+            <div class="flow-actor" id="flow-actor-2">
+              <div class="flow-actor-icon" style="border-color: var(--color-actor-1); background: var(--color-accent-light)">🌐</div>
+              <span>HTTP API</span>
+            </div>
+            <div class="flow-actor" id="flow-actor-3">
+              <div class="flow-actor-icon" style="border-color: var(--color-actor-1); background: var(--color-accent-light)">📥</div>
+              <span>RunQueueCoordinator</span>
+            </div>
+            <div class="flow-actor" id="flow-actor-4">
+              <div class="flow-actor-icon" style="border-color: var(--color-actor-1); background: var(--color-accent-light)">🚦</div>
+              <span>ResourceAdmission</span>
+            </div>
+            <div class="flow-actor" id="flow-actor-5">
+              <div class="flow-actor-icon" style="border-color: var(--color-actor-1); background: var(--color-accent-light)">📋</div>
+              <span>Scheduler</span>
+            </div>
+            <div class="flow-actor" id="flow-actor-6">
+              <div class="flow-actor-icon" style="border-color: var(--color-actor-5); background: var(--color-success-light)">🧠</div>
+              <span>Sandbox + Pi</span>
+            </div>
+            <div class="flow-actor" id="flow-actor-7">
+              <div class="flow-actor-icon" style="border-color: var(--color-actor-3); background: #EDEAF6">🗄️</div>
+              <span>SQLite</span>
+            </div>
+          </div>
+
+          <div class="flow-packet"></div>
+
+          <div class="flow-step-label">点击「Next Step」开始旅程</div>
+
+          <div class="flow-controls">
+            <button class="btn flow-next-btn">Next Step</button>
+            <button class="btn flow-reset-btn">Restart</button>
+            <span class="flow-progress"></span>
+          </div>
+        </div>
+
+        <p>七个角色三种颜色：橙色全是控制平面组件（安排与安保），绿色是行为平面（动脑），紫色是持久化记忆。第 6 步的调度口诀是租户内 <span class="term" data-definition="FIFO（先进先出）：队列内按到达先后排序，先来先服务。">FIFO</span>、租户间 <span class="term" data-definition="round-robin（轮询调度）：多个队列之间轮流各取一个，防止单一租户占满机会饿死别人。">round-robin</span>。颜色本身就在复述 Module 1 的定位。</p>
+      </section>
+
+      <!-- ═══ Screen 6：兜底与幂等 + Quiz + 过渡 ═══ -->
+      <section class="screen animate-in">
+        <h2 class="screen-heading">失败路径的两道保险：finally 兜底与去重键</h2>
+        <p>好结局讲完了，剩下的是工程的大部分：出错时怎么办。第一道保险在 <code>executeQueuedRun</code> 的 finally 块——<strong>无论成败，证据必须保留</strong>。</p>
+
+        <div class="translation-block animate-in">
+          <div class="translation-code">
+            <span class="translation-label">CODE · src/runs/run-service.ts（节选）</span>
+            <pre><code><span class="code-line">        } <span class="code-keyword">catch</span> (error) {</span>
+<span class="code-line">            <span class="code-keyword">this</span>.<span class="code-function">markRuntimeInvocationFailureInterrupted</span>(</span>
+<span class="code-line">                runId,</span>
+<span class="code-line">                error,</span>
+<span class="code-line">                <span class="code-string">"START_FAILED"</span>,</span>
+<span class="code-line">            );</span>
+<span class="code-line">            <span class="code-keyword">throw</span> error;</span>
+<span class="code-line">        } </span>
+<span class="code-line">        <span class="code-keyword">finally</span> {</span>
+<span class="code-line">            <span class="code-function">unsubscribe</span>();</span>
+<span class="code-line">            <span class="code-comment">// Even an interrupted/failed attempt can leave user files behind; preserve that evidence.</span></span>
+<span class="code-line">            <span class="code-keyword">await this</span>.workspaceResults?.<span class="code-function">captureAfter</span>(runId, run.workspacePath);</span>
+<span class="code-line">            <span class="code-keyword">const</span> current = <span class="code-keyword">this</span>.store.<span class="code-function">get</span>(runId);</span>
+<span class="code-line">            <span class="code-keyword">if</span> (current?.status === <span class="code-string">"COMPLETED"</span> || current?.status === <span class="code-string">"FAILED"</span>) {</span>
+<span class="code-line">                <span class="code-keyword">await this</span>.workspaceResults?.<span class="code-function">captureArtifacts</span>(runId, run.workspacePath);</span>
+<span class="code-line">            }</span>
+<span class="code-line">        }</span></code></pre>
+          </div>
+          <div class="translation-english">
+            <span class="translation-label">白话</span>
+            <div class="translation-lines">
+              <p class="tl">启动阶段就炸了？先把 Run 标成 INTERRUPTED（原因 START_FAILED）——绝不让状态停在虚假的 RUNNING 上。</p>
+              <p class="tl">然后原样 rethrow：记录归记录，错误照常向上传播，吞掉异常等于谎报平安。</p>
+              <p class="tl">finally 兜底块：不管上面走的是哪条路，这里的代码都会执行。</p>
+              <p class="tl">第一步先退订事件流——不退订就是监听器泄漏。</p>
+              <p class="tl">注释即设计：中断/失败的执行也会在 workspace 留下用户文件——这些是事实，必须保留证据。</p>
+              <p class="tl">所以失败也要 captureAfter：崩溃前的半成品文件同样是这次 Attempt 的一部分。</p>
+              <p class="tl">但 Artifact 固化更挑剔：只有抵达终态（COMPLETED 或 FAILED）才收集正式交付物。</p>
+              <p class="tl">区分很微妙：证据（evidence）人人有份，交付物（artifact）凭终态领取。</p>
+            </div>
+          </div>
+        </div>
+
+        <p style="margin-top: var(--space-8)">第二道保险在事件桥接层：<strong><span class="term" data-definition="at-least-once 投递：消息机制保证事件至少送达一次，但可能重复送达——消费方必须自己做去重。">at-least-once 投递</span>如何变成<span class="term" data-definition="幂等（idempotent）：同一操作执行一次和执行一万次效果相同，重复消息因此无害。">幂等写入</span></strong>。答案是给「最终结果」一个稳定的去重键。</p>
+
+        <div class="translation-block animate-in">
+          <div class="translation-code">
+            <span class="translation-label">CODE · src/events/runtime-event-bridge.ts（节选）</span>
+            <pre><code><span class="code-line">            <span class="code-keyword">case</span> <span class="code-string">"tool_completed"</span>:</span>
+<span class="code-line">                <span class="code-keyword">return</span> {</span>
+<span class="code-line">                    <span class="code-property">runId</span>: event.runId,</span>
+<span class="code-line">                    <span class="code-property">type</span>: event.isError</span>
+<span class="code-line">                        ? <span class="code-string">"TOOL_FAILED"</span></span>
+<span class="code-line">                        : <span class="code-string">"TOOL_COMPLETED"</span>,</span>
+<span class="code-line">                    <span class="code-property">timestamp</span>: event.timestamp,</span>
+<span class="code-line">                    <span class="code-property">payloadVersion</span>: <span class="code-number">1</span>,</span>
+<span class="code-line"> </span>
+<span class="code-line">                    <span class="code-comment">// 一个工具调用只能拥有一个最终结果。</span></span>
+<span class="code-line">                    <span class="code-comment">// 即使 Runtime 错误地先发成功、后发失败，也使用同一个去重键。</span></span>
+<span class="code-line">                    <span class="code-property">dedupeKey</span>: <span class="code-string">`tool:${event.toolCallId}:finished`</span>,</span>
+<span class="code-line">                    <span class="code-property">payload</span>: {</span>
+<span class="code-line">                        <span class="code-property">toolCallId</span>:event.toolCallId,</span>
+<span class="code-line">                        <span class="code-property">toolName</span>:event.toolName,</span>
+<span class="code-line">                        <span class="code-property">result</span>: event.result,</span>
+<span class="code-line">                        <span class="code-property">isError</span>: event.isError,</span>
+<span class="code-line">                    },</span>
+<span class="code-line">                };</span></code></pre>
+          </div>
+          <div class="translation-english">
+            <span class="translation-label">白话</span>
+            <div class="translation-lines">
+              <p class="tl">这是翻译层：把 SDK 的即时事件（tool_completed）翻译成 Harness 的业务事件（RunEvent）。</p>
+              <p class="tl">成功与失败共用一条「完成」通道，只是 type 不同——工具调用的生命周期终点只有一个语义位置。</p>
+              <p class="tl">去重键的灵魂在模板：<code>tool:{toolCallId}:finished</code>。同一个工具调用，无论 Runtime 发几遍完成事件，键都相同。</p>
+              <p class="tl">数据库层 <code>UNIQUE(run_id, dedupe_key)</code> <span class="term" data-definition="部分唯一索引：只对满足条件的行强制唯一的数据库约束——这里 dedupe_key 非空的行不允许出现重复组合。">部分唯一索引</span>只放行第一条——第二条插入直接被拒。</p>
+              <p class="tl">效果：at-least-once 投递（可能重复送达的消息机制）就此变成幂等写入——重复一万次，结果也只记一次。</p>
+              <p class="tl">连 Runtime 自己犯错（先报成功、后补失败）都被这把锁挡住：第一个到达的事实获胜，且不可覆盖。</p>
+              <p class="tl">对照记忆：text_delta 高频碎片只喂给实时展示、由 outputStore 拼接 finalText，不落库——审计流里只留干净的事实。</p>
+            </div>
+          </div>
+        </div>
+
+        <h2 class="screen-heading" style="margin-top: var(--space-10)">检验：你真的跟上这个 Run 了吗？</h2>
+        <div class="quiz-container" id="quiz-module-2">
+          <div class="quiz-question-block"
+               data-correct="wt-int"
+               data-explanation-right="对。WAITING_TOOL 的合法出口只有三个：回 RUNNING（工具返回）、去 INTERRUPTED、去 FAILED。COMPLETED 必须先经 RUNNING 收尾，QUEUED 则只能从 INTERRUPTED 中转。"
+               data-explanation-wrong="回看迁移表：WAITING_TOOL 不能直达 COMPLETED（得先回 RUNNING 收尾），也不能跳到 QUEUED（排队必须经 INTERRUPTED）。它的出口只有 RUNNING / INTERRUPTED / FAILED。">
+            <h3 class="quiz-question">Q1 · 场景题：Run 正处于 WAITING_TOOL，用户此时请求中断。下列哪个转换是合法的？</h3>
+            <div class="quiz-options">
+              <button class="quiz-option" data-value="wt-done" onclick="selectOption(this)"><div class="quiz-option-radio"></div><span>WAITING_TOOL → COMPLETED</span></button>
+              <button class="quiz-option" data-value="wt-int" onclick="selectOption(this)"><div class="quiz-option-radio"></div><span>WAITING_TOOL → INTERRUPTED</span></button>
+              <button class="quiz-option" data-value="wt-queued" onclick="selectOption(this)"><div class="quiz-option-radio"></div><span>WAITING_TOOL → QUEUED</span></button>
+            </div>
+            <div class="quiz-feedback"></div>
+          </div>
+
+          <div class="quiz-question-block"
+               data-correct="int-admission"
+               data-explanation-right="正是。INTERRUPTED → QUEUED 这一跳的意义就在这里：恢复被视为一次全新任务，GPU 可能早已被别人占满——带着旧假设直插 RUNNING 就是绕过准入，违背 fail-closed。"
+               data-explanation-wrong="不是命名习惯，也不是为了打扰用户。想想崩溃之后 GPU 状态还作数吗？如果允许 INTERRUPTED 直达 RUNNING，恢复的任务就绕过了资源准入——这正是状态机堵死的漏洞。">
+            <h3 class="quiz-question">Q2 · 为什么 INTERRUPTED 只能回到 QUEUED，而不允许直接转回 RUNNING？</h3>
+            <div class="quiz-options">
+              <button class="quiz-option" data-value="int-naming" onclick="selectOption(this)"><div class="quiz-option-radio"></div><span>只是命名习惯，让状态图看起来对称美观</span></button>
+              <button class="quiz-option" data-value="int-admission" onclick="selectOption(this)"><div class="quiz-option-radio"></div><span>因为恢复也是一次新任务：必须重新走资源准入、重新占 slot，不允许带着崩溃前的资源假设插队执行</span></button>
+              <button class="quiz-option" data-value="int-user" onclick="selectOption(this)"><div class="quiz-option-radio"></div><span>为了强制用户重新确认输入，防止误恢复</span></button>
+            </div>
+            <div class="quiz-feedback"></div>
+          </div>
+
+          <div class="quiz-question-block"
+               data-correct="delta-live"
+               data-explanation-right="对。text_delta 属于即时轨：它只喂给实时展示通道，由 outputStore 边收边拼接出 finalText；run_events 只保留最终结果这类业务事实，审计流才不会被每秒几十条的 token 碎片淹没。"
+               data-explanation-wrong="恰恰相反：text_delta 是最高频的碎片事件，落库会用海量噪音淹没审计流。它走实时通道——由 outputStore 在前端拼接成 finalText 展示，落库的只有最终的完整结果。">
+            <h3 class="quiz-question">Q3 · 追踪题：打字机效果的 text_delta 事件为什么不落库？它们去了哪里？</h3>
+            <div class="quiz-options">
+              <button class="quiz-option" data-value="delta-db" onclick="selectOption(this)"><div class="quiz-option-radio"></div><span>其实也写进了 run_events，只是事件类型不同而已</span></button>
+              <button class="quiz-option" data-value="delta-live" onclick="selectOption(this)"><div class="quiz-option-radio"></div><span>它是流式 token 碎片，只用于实时展示——outputStore 边收边拼成 finalText，落库的只有最终结果，避免海量碎片淹没审计流</span></button>
+              <button class="quiz-option" data-value="delta-drop" onclick="selectOption(this)"><div class="quiz-option-radio"></div><span>直接丢弃，不做任何处理，最终文本靠重新生成获得</span></button>
+            </div>
+            <div class="quiz-feedback"></div>
+          </div>
+
+          <button class="quiz-check-btn" onclick="checkQuiz('quiz-module-2')">Check Answers</button>
+          <button class="quiz-reset-btn" onclick="resetQuiz('quiz-module-2')">Try Again</button>
+        </div>
+
+        <p style="margin-top: var(--space-10)"><strong>现在整条生命周期都在你掌握中了。</strong>下一模块深挖链路中最危险的一段——当工具真的改变了外部世界、而进程恰好在此刻崩溃：副作用记账与崩溃恢复，见 <em>Module 3</em>。</p>
+      </section>
+
+    </div>
+  </div>
+</section>

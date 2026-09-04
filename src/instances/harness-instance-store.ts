@@ -32,6 +32,22 @@ export class HarnessInstanceStore {
         `).get({ id });
     }
 
+    listForTenant(tenantId: string): HarnessInstance[] {
+        return this.db.query<HarnessInstance, { tenantId: string }>(`
+            SELECT id, tenant_id AS tenantId,
+                template_version_id AS templateVersionId,
+                capability_profile_id AS capabilityProfileId,
+                runtime_kind AS runtimeKind,
+                desired_state AS desiredState,
+                actual_state AS actualState,
+                failure_reason AS failureReason,
+                created_at AS createdAt, updated_at AS updatedAt
+            FROM harness_instances
+            WHERE tenant_id = $tenantId
+            ORDER BY updated_at DESC, id DESC;
+        `).all({ tenantId });
+    }
+
     update(instance: HarnessInstance, previousActualState: string): void {
         const parameters = { ...instance, previousActualState };
         const result = this.db.query<unknown, typeof parameters>(`

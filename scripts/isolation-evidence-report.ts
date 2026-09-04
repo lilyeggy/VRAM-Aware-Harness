@@ -37,7 +37,7 @@ import {
 function runCmd(command: string): string | null {
     try {
         const out = execSync(command, { encoding: "utf8", timeout: 10_000 });
-        const first = out.trim().split("\n")[0];
+        const first = out.trim().split("\n")[0] ?? "";
         return first.length > 0 ? first : null;
     } catch {
         return null;
@@ -52,7 +52,7 @@ function versionLine(versionOutput: string | null, label: string): string | null
             : /version ([\w.\-]+)/,
     );
     const match = versionOutput.match(re);
-    return match ? match[1] : versionOutput;
+    return match?.[1] ?? versionOutput;
 }
 
 function collectEnvironment() {
@@ -93,7 +93,7 @@ const policy: EffectivePolicySnapshot | null =
     readOptionalJson<EffectivePolicySnapshot>("HARNESS_EVIDENCE_POLICY_JSON");
 
 // Evidence triple: intent(policy) <-> product(spec) <-> fact(runtime).
-const triple = policy !== null && spec !== null
+const triple = policy !== null && spec !== null && specFingerprint !== null
     ? buildIsolationTriple({ policy, specFingerprint, runtimeEvidence })
     : null;
 const tripleVerdict = triple === null ? null : verifyIsolationTriple(triple);

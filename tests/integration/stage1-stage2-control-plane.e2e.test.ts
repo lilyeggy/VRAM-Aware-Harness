@@ -178,6 +178,12 @@ test("Stage 1/2：新 Run 贯穿控制面对象并按 Tenant 编译不同 Pi 权
             (request) => request.run.runId === runB.id,
         );
         expect(requestA?.execution?.runtimeConfig.tools).toEqual(["read"]);
+        expect(requestA?.execution?.sandboxEnforcement).toMatchObject({
+            toolExecutionBoundary: "HOST",
+            filesystemIsolation: false,
+            processIsolation: false,
+            networkPolicyEnforced: false,
+        });
         expect(requestB?.execution?.runtimeConfig.tools).toEqual([
             "read",
             "write",
@@ -365,6 +371,48 @@ test("Stage 2：Sandbox 失联会中断 Run、Attempt 并把 Instance 标记为 
             .toBe("FAILED");
         expect(composition.sandboxStore.get(attempt!.sandboxId!)?.status)
             .toBe("LOST");
+    } finally {
+        await composition.close();
+    }
+});
+
+test("连续对话：后续 Run 将已持久化的 Runtime Session 注入 Adapter", async () => {
+    const baseRuntime = new FakeAgentRuntime();
+    const composition = await createHarnessApplication(config(), {
+        runtime: baseRuntime,
+        resourceObserver: new FakeResourceObserver({
+            ok: true,
+            snapshot: normalSnapshot,
+        }),
+    });
+
+    try {
+        await composition.application.start();
+        const first = composition.application.submitRun({
+            tenantId: "tenant-conversation",
+            harnessSessionId: "conversation-1",
+            userInput: "先分析项目",
+            workspacePath: "/tmp/conversation-workspace",
+        });
+        await composition.queuePump.tick();
+
+        const second = composition.application.submitRun({
+            tenantId: "tenant-conversation",
+            harnessSessionId: "conversation-1",
+            userInput: "继续修复刚才的问题",
+            workspacePath: "/tmp/conversation-workspace",
+        });
+        await composition.queuePump.tick();
+
+        const firstRequest = baseRuntime.startRequests.find(
+            (request) => request.run.runId === first.id,
+        );
+        const secondRequest = baseRuntime.startRequests.find(
+            (request) => request.run.runId === second.id,
+        );
+        expect(firstRequest?.run.runtimeSessionRef).toBeNull();
+        expect(secondRequest?.run.runtimeSessionRef)
+            .toBe(`fake-session-${first.id}`);
     } finally {
         await composition.close();
     }

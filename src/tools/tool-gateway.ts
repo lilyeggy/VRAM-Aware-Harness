@@ -11,6 +11,7 @@ import {
 } from "./tool-execution.ts";
 import { ToolExecutionStore } from "./tool-execution-store.ts";
 import type { ToolPolicyGuard } from "../policies/tool-policy-guard.ts";
+import type { SandboxEnforcementCapabilities } from "../sandbox/sandbox-provider.ts";
 
 export interface ExecuteToolInput {
     runId:string;
@@ -22,6 +23,7 @@ export interface ExecuteToolInput {
     lastEventSequence:number;
     policySnapshotId?:string;
     workspacePath?:string;
+    sandboxEnforcement?:SandboxEnforcementCapabilities;
 }
 
 export class ToolGateway{

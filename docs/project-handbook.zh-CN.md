@@ -302,7 +302,7 @@ drain → attemptNext
 HTTP 请求 (Authorization: Bearer <key>)
   → requirePrincipal(request, scope)            // src/http/harness-http-api.ts
   → ApiCredentialStore.authenticate(digest)      // src/auth/api-credential-store.ts
-  → 命中凭证行 { subjectId, tenantId, scopes }   // key 在创建时就绑定死归属
+  → 命中凭证行 { tenantId, scopes }              // key 在创建时就绑定死归属（tenant=用户）
   → RequestPrincipal
   → submitRun：tenantId = principal.tenantId     // 写入 agent_runs.tenant_id，固化
   → 下游(调度/沙箱/策略/查询)永远用 run.tenantId，不再“猜归属”
@@ -310,6 +310,8 @@ HTTP 请求 (Authorization: Bearer <key>)
 
 - **任务请求体永不参与身份匹配**：body 里的 `tenantId`/`workspaceId` 只是 legacy/演示时兜底，正常路径一律忽略（见 `submitRun` 三元表达式）。
 - 归属在入口一次定死并落库，这是“防串”的地基。
+
+**产品决定（已落地）**：`tenant = 用户`。因此 `RequestPrincipal` 精简为 `{ tenantId, scopes }`——`tenantId` 是身份+隔离边界，`scopes` 是授权维度（每条受保护路由经 `requirePrincipal` + `hasScope` 判定 403/放行，见 `src/http/harness-http-api.ts`）；原先冗余的 `subjectId`（与 tenantId 一一对应、仅凭证/审计消费）已移除（migration v15 删 `api_credentials.subject_id` 与 `access_audit_events.subject_id`）。
 
 ### 13.2 信任边界：每层信谁、不信谁（已实现）
 
@@ -392,3 +394,48 @@ HTTP 请求 (Authorization: Bearer <key>)
 ### 13.9 一句话总结这套“防串 + 健壮性”骨架
 
 > **身份一次认证、归属一路固化**（13.1）；**每层明确信谁、Agent 是不被信的对象**（13.2）；**六层防线叠着防跨租户**（13.3）；**未知即拒绝、多写一致、恢复必校归属、双层强制状态**（13.4–13.7）；**剩余短板集中在 key 无TTL、网关无限流、开发级沙箱**（13.8）。写新代码时对着 13.3 的检查清单逐条跑一遍，能挡掉大部分“想不到”的坑。
+
+---
+
+## 14. Harness ↔ Pi 边界：会话句柄式，记忆归 Pi（定稿设计 · 待实现）
+
+> 本节定调“先写再改”这类多轮对话的能力边界与目标设计。**当前不可用（见 14.3），以下为“要改”的方向**，实现时以此为准。
+
+### 14.1 定稿模型
+
+HarnessSession 是“一场对话的持久句柄”，每个 Run 是交给 Pi 的一次执行；Pi 在它自己的 runtime session 里叠加上下文、做压缩，把状态写进会话文件；harness 只要保证“下一个 Run 打开的是同一个会话”（`runtimeSessionRef` + `SessionManager.open`），其余记忆全部由 Pi 负责。
+
+```
+HarnessSession（一场对话，持久句柄 runtimeSessionRef）
+  Run#1 → Pi 会话 S（执行、累积）
+  Run#2 → 同一会话 S（open 继承上文、继续累积）
+  ...
+Pi 内部：上下文累积 + 压缩都在 S 里，落盘到会话文件
+```
+
+### 14.2 上下文与压缩都归 Pi（“压缩怎么装进来”的答案）
+
+- Pi 的 `SessionManager.appendCompaction()` 把压缩摘要作为顶层 entry **写进会话文件**；`appendCustomMessageEntry()` 可追加“参与 LLM 上下文”的自定义条目。
+- 因此压缩结果**不需要 harness 注入**：它已持久化在 Pi 会话文件里，harness 只要 `open` 同一个文件，Pi 自己恢复（含压缩过的）上下文。
+- harness 对 Pi 只暴露窄且不透明的接口：`open/continue 会话(ref) + 喂 userInput + 流式事件`；harness 一律不碰消息内容 / 编译 / 压缩。
+
+### 14.3 需要改的三处接线（现状 → 目标）
+
+| # | 现状 | 目标 |
+|---|---|---|
+| 1 | `PiAdapter.start` 用 `SessionManager.create` 每次新建空白会话，`finally` 里 `session.dispose()` 销毁 | 按 `runtimeSessionRef` **`open` 同一会话**执行，且**不销毁**、供下一个 Run 复用 |
+| 2 | `resume` 只接受 INTERRUPTED（中断恢复同一场） | 增加**会话级 continue**：COMPLETED 的 Run 也能“续接”，不走终态 resume |
+| 3 | `sessionsByRunId` 以 runId 为键、每 run 一个临时 Pi 会话 | 会话句柄归 **HarnessSession（会话）**所有，每个 Run 只是“借用”，键位从 run 维度挪到会话维度 |
+
+核心：**Run 生命周期（每轮终态）与 会话生命周期（持久）解耦**——Run 终态不代表会话结束。
+
+### 14.4 待补：用户显式 compact 指令
+
+用户可能直接下发“压缩这段对话”的指令，**Pi runtime 需要能响应**——这是 harness 要透传给 Pi 的一个新动作：
+- 需在接口上新增“compact”操作（或识别到系统指令后调用 Pi 的压缩原语）；
+- 当前**没有**这条通路（HTTP 层无此端点、PiAdapter 无此方法）——待实现。
+
+### 14.5 诚实标注
+
+- **现状**：跨 Run 不续上下文（每 Run 独立新建空白），多轮“先写再改”不可用。
+- **方向**：按 14.3 + 14.4 改，属“要改”范围；记忆/压缩本身仍归 Pi，harness 只做“选会话 + 复用句柄 + 转事件”。

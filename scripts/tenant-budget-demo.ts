@@ -20,7 +20,7 @@ const budgets: Readonly<Record<string, TenantBudget>> = {
     "tenant-a": { tenantId: "tenant-a", weight: 2, maxUnits: 8 },
     "tenant-b": { tenantId: "tenant-b", weight: 1, maxUnits: 8 },
 };
-const weights = { "tenant-a": 2, "tenant-b": 1 };
+const weights: Readonly<Record<string, number>> = { "tenant-a": 2, "tenant-b": 1 };
 const CAPACITY = 9;
 
 const ledger = new MemoryResourceLedger();
@@ -36,7 +36,7 @@ function decide(label: string, tenantId: string, pressure: ExecutionPolicyInput[
     const decision = policy.decide({
         runId: label,
         tenantId,
-        classification: { pressure, snapshotId: "snap" },
+        classification: { pressure, snapshotId: "snap", reasons: [], gpuMemoryUsagePercent: null },
         activeRunCount: 0,
         activeTenantRunCount: 0,
     });

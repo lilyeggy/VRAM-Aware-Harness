@@ -1,0 +1,196 @@
+<section class="module" id="module-13" style="background: var(--color-bg-warm)">
+  <div class="module-content">
+    <header class="module-header animate-in">
+      <span class="module-number">13</span>
+      <h1 class="module-title">系统设计题实战工坊</h1>
+      <p class="module-subtitle">二面三面的主菜："设计一个多租户 Agent 平台 / 设计一个 LLM Gateway"。知识装进脑子之后，这一页练输出。</p>
+    </header>
+
+    <div class="module-body">
+
+      <section class="screen animate-in">
+        <h2 class="screen-heading">万能四步法：45 分钟时间盒</h2>
+        <p>系统设计题没有标准答案，但有标准节奏。四步走完，每步都有时间盒：</p>
+        <div class="step-cards stagger-children">
+          <div class="step-card animate-in">
+            <div class="step-num" style="background:var(--color-actor-2)">1</div>
+            <div class="step-body">
+              <strong>需求澄清（5 分钟）</strong>
+              <p>功能需求圈边界（哪些不做！）、非功能定指标（QPS/延迟/可用性/隔离等级）。主动问"租户规模多大？任务平均时长？"——提问质量就是资深度。</p>
+            </div>
+          </div>
+          <div class="step-card animate-in">
+            <div class="step-num" style="background:var(--color-actor-2)">2</div>
+            <div class="step-body">
+              <strong>容量估算（5 分钟）</strong>
+              <p>并发任务数 × 平均 token 用量 → GPU 张数；排队长度 → 队列存储；日志量 → 事件库选型。数字可以粗，但要有估算意识。</p>
+            </div>
+          </div>
+          <div class="step-card animate-in">
+            <div class="step-num" style="background:var(--color-accent)">3</div>
+            <div class="step-body">
+              <strong>分层架构（15 分钟）</strong>
+              <p>入口 → 身份 → 编排 → 执行 → 基础设施五层画图，每层说清"负责什么/不负责什么"。边界意识比组件堆砌值钱。</p>
+            </div>
+          </div>
+          <div class="step-card animate-in">
+            <div class="step-num" style="background:var(--color-accent)">4</div>
+            <div class="step-body">
+              <strong>深挖权衡（15 分钟）</strong>
+              <p>面试官必钻：故障恢复、公平性、隔离、成本。每个点给"方案 A vs B + 我选哪个为什么"。承认取舍比假装完美高级。</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="screen animate-in">
+        <h2 class="screen-heading">真题① 设计一个多租户 Agent 任务平台（= 你的项目反向白板）</h2>
+        <p>这道题你最有发言权——练习<strong>不看资料从零推一遍</strong>。面试官的标准追问树：</p>
+        <div class="flow-animation" data-steps='[
+  {"highlight":"flow-actor-34","label":"第一步 澄清：多少租户？任务类型（改代码/跑测试）？能接受排队吗？Secret 有哪些类别？"},
+  {"highlight":"flow-actor-35","packet":true,"from":"actor-34","to":"actor-35","label":"第二步 估算：100 租户 × 峰值 3 并发 = 300 并发任务；单任务 50K token → 需要 N 张推理卡与排队缓冲"},
+  {"highlight":"flow-actor-36","packet":true,"from":"actor-35","to":"actor-36","label":"第三步 分层：API 网关鉴权 → 编排层（状态机+队列+准入）→ 执行层（沙箱+Runtime）→ 推理层"},
+  {"highlight":"flow-actor-37","packet":true,"from":"actor-36","to":"actor-37","label":"第四步 深挖A 故障：Run 卡死怎么办 → 心跳/重启扫描 → INTERRUPTED → Checkpoint 校验 runId 归属 → 只重放安全副作用"},
+  {"highlight":"flow-actor-38","packet":true,"from":"actor-37","to":"actor-38","label":"第四步 深挖B 公平与隔离：Tenant 轮转 + 双并发上限 + 每 Attempt 独立沙箱 + 决策台账落库"},
+  {"highlight":"flow-actor-39","label":"收尾 演进路径：单机验证语义 → Postgres 化 → 多 Worker 抢 DB 行锁 → K8s 沙箱池 —— 展示成长性思维"}
+]'>
+          <div class="flow-actors">
+            <div class="flow-actor" id="flow-actor-34">
+              <div class="flow-actor-icon" style="border-color: #6B6560; background: #EFEAE3">❓</div>
+              <span>澄清<br>需求</span>
+            </div>
+            <div class="flow-actor" id="flow-actor-35">
+              <div class="flow-actor-icon" style="border-color: #D4A843; background: #FDF5E0">🧮</div>
+              <span>容量<br>估算</span>
+            </div>
+            <div class="flow-actor" id="flow-actor-36">
+              <div class="flow-actor-icon" style="border-color: #2A7B9B; background: #E4F2F7">🏛️</div>
+              <span>五层<br>架构</span>
+            </div>
+            <div class="flow-actor" id="flow-actor-37">
+              <div class="flow-actor-icon" style="border-color: #C93B3B; background: #FDE8E8">🔥</div>
+              <span>深挖<br>故障恢复</span>
+            </div>
+            <div class="flow-actor" id="flow-actor-38">
+              <div class="flow-actor-icon" style="border-color: #2D8B55; background: #E8F5EE">🛡️</div>
+              <span>深挖<br>公平隔离</span>
+            </div>
+            <div class="flow-actor" id="flow-actor-39">
+              <div class="flow-actor-icon" style="border-color: #7B6DAA; background: #EFEBF7">🚀</div>
+              <span>演进<br>路径</span>
+            </div>
+          </div>
+
+          <div class="flow-packet" id="flow-packet"></div>
+
+          <div class="flow-step-label" id="flow-label">点击「Next Step」开始</div>
+
+          <div class="flow-controls">
+            <button class="btn flow-next-btn">下一步</button>
+            <button class="btn flow-reset-btn">重新开始</button>
+            <span class="flow-progress"></span>
+          </div>
+        </div>
+        <div class="callout callout-info">
+          <div class="callout-icon">🌳</div>
+          <div class="callout-content">
+            <strong class="callout-title">高频追问树（提前埋好答案）</strong>
+            <p>"两个租户互相能看到对方的文件吗？"→ 六道防线 + 容器只挂自己的 workspace。"GPU 打满了怎么办？"→ 观测分类背压 + fail-closed 排队。"任务跑到一半进程崩了？"→ 双复写记账 + 只重放 READ_ONLY。"怎么计费？"→ ResourceLedger commit/settle 账本 + Eval 成本聚合。</p>
+          </div>
+        </div>
+      </section>
+
+      <section class="screen animate-in">
+        <h2 class="screen-heading">真题② 设计一个 LLM Gateway（Shopee 二面原题 · 对照打分）</h2>
+        <p>用 Shopee 的评分点给你的 C 方向实现逐项打分——<strong>✅ 已实现 ⚠️ 部分 ❌ 未做</strong>，把差距讲成 roadmap：</p>
+        <table style="width:100%;border-collapse:collapse;font-size:var(--text-sm)">
+          <tr style="border-bottom:2px solid var(--color-border)">
+            <th style="text-align:left;padding:var(--space-2)">评分点</th><th style="text-align:left;padding:var(--space-2)">你的现状</th><th style="text-align:left;padding:var(--space-2)">面试话术</th>
+          </tr>
+          <tr style="border-bottom:1px solid var(--color-border-light)"><td style="padding:var(--space-2)">基于能力的路由</td><td style="padding:var(--space-2)">✅ 逻辑模型 → 后端映射（candidatesFor）</td><td style="padding:var(--space-2)" rowspan="4">"我实现了主备顺序路由 + 熔断过滤 + OpenAI 兼容透传含 SSE 流式；下一步按这份评分表扩展——优先做决策持久化和跨模型降级，因为它们直接服务成本治理"</td></tr>
+          <tr style="border-bottom:1px solid var(--color-border-light)"><td style="padding:var(--space-2)">成本/延迟路由</td><td style="padding:var(--space-2)">❌ 未做（RouteDecision 已记录延迟可作依据）</td></tr>
+          <tr style="border-bottom:1px solid var(--color-border-light)"><td style="padding:var(--space-2)">语义路由</td><td style="padding:var(--space-2)">❌ 未做</td></tr>
+          <tr style="border-bottom:1px solid var(--color-border-light)"><td style="padding:var(--space-2)">Fallback 四级</td><td style="padding:var(--space-2)">✅ 同模型主备回退 ⚠️ 缺跨模型降级与兜底模型</td></tr>
+          <tr style="border-bottom:1px solid var(--color-border-light)"><td style="padding:var(--space-2)">负载均衡</td><td style="padding:var(--space-2)">⚠️ 配置顺序即优先级，无加权/token 吞吐均衡</td><td style="padding:var(--space-2)">"LLM 请求时长方差极大，token 吞吐均衡比轮询合理——我的 metrics 解析已能产出吞吐数据"</td></tr>
+          <tr style="border-bottom:1px solid var(--color-border-light)"><td style="padding:var(--space-2)">熔断器</td><td style="padding:var(--space-2)">✅ 连续 3 失败开断、30s 冷却半开</td><td style="padding:var(--space-2)">经典三态机完整落地</td></tr>
+          <tr style="border-bottom:1px solid var(--color-border-light)"><td style="padding:var(--space-2)">统一协议适配</td><td style="padding:var(--space-2)">✅ OpenAI 兼容 + SSE 流式透传 + 模型名替换</td><td style="padding:var(--space-2)"></td></tr>
+          <tr style="border-bottom:1px solid var(--color-border-light)"><td style="padding:var(--space-2)">语义缓存</td><td style="padding:var(--space-2)">❌ 未做</td><td style="padding:var(--space-2)">"需要 Embedding 相似度匹配，且要回答缓存命中时 KV Cache 前缀共享的关系——我知道坑在哪所以排在后面"</td></tr>
+          <tr style="border-bottom:1px solid var(--color-border-light)"><td style="padding:var(--space-2)">可观测性</td><td style="padding:var(--space-2)">⚠️ RouteDecision 内存环形缓冲 200 条未持久化</td><td style="padding:var(--space-2)">诚实边界第一句，然后给持久化方案</td></tr>
+          <tr><td style="padding:var(--space-2)">开源参照</td><td colspan="2" style="padding:var(--space-2)">LiteLLM（统一代理）/ RouteLLM（模型路由研究）/ Portkey（网关 SaaS）——知道名字和定位即可</td></tr>
+        </table>
+        <div class="callout callout-warning">
+          <div class="callout-icon">🥊</div>
+          <div class="callout-content">
+            <strong class="callout-title">打分卡的用法</strong>
+            <p>先自己打分再让面试官看，主动权就在你手里："这九个评分点我完成四个半，剩余的我都清楚为什么排后以及怎么做。"——把未完成从减分项变成规划能力的展示位。</p>
+          </div>
+        </div>
+      </section>
+
+      <section class="screen animate-in">
+        <h2 class="screen-heading">附：沙箱类设计题要点（云端 Agent 沙箱）</h2>
+        <p>2026 年的高频新题："设计一个云端大规模 Agent 沙箱系统"。四个必答要点：</p>
+        <div class="badge-list">
+          <div class="badge-item"><code class="badge-code">会话粘性 vs 冷启动</code><span class="badge-desc">Sticky 会话保上下文但绑定节点易热点；无粘性要解决状态外化——你的 Checkpoint+DB 重建正是后者</span></div>
+          <div class="badge-item"><code class="badge-code">持久化卷</code><span class="badge-desc">workspace 生命周期长于容器：独立存储挂载（你的 bind mount 方案）或对象存储快照</span></div>
+          <div class="badge-item"><code class="badge-code">弹性伸缩</code><span class="badge-desc">预热池（秒级领取）vs 冷启动（镜像拉取秒级开销）；runsc 1.22x 开销是量化依据</span></div>
+          <div class="badge-item"><code class="badge-code">资源配额</code><span class="badge-desc">CPU/内存/PID/网络四限 + 磁盘配额的诚实说明（bind mount 做不到磁盘限额你会拒绝执行）</span></div>
+        </div>
+
+        <div class="quiz-container" id="quiz-module-13">
+          <div class="scenario-block quiz-question-block"
+               data-correct="option-b"
+               data-explanation-right="完全正确！系统设计题的第一分钟不是画图而是收敛问题——'明确不做什么'展示的是范围控制力，也决定了后面所有估算的口径。"
+               data-explanation-wrong="直接画图容易越画越大收不住；抛技术选型则跳过了需求澄清。四步法的第一步永远是澄清边界与非功能指标。">
+            <span class="scenario-label">实战题 1</span>
+            <div class="scenario-context"><p>面试官甩来"设计一个多租户 Agent 平台"，你的第一个动作应该是？</p></div>
+            <div class="quiz-options">
+              <button class="quiz-option" data-value="option-a" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>立刻画出五层架构图，展示架构储备</span>
+              </button>
+              <button class="quiz-option" data-value="option-b" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>澄清需求：租户规模、任务类型、是否接受排队、隔离要求——并明确说出哪些不在范围内</span>
+              </button>
+              <button class="quiz-option" data-value="option-c" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>先比较 K8s 与 Nomad 的选型差异</span>
+              </button>
+            </div>
+            <div class="quiz-feedback"></div>
+          </div>
+
+          <div class="scenario-block quiz-question-block"
+               data-correct="option-a"
+               data-explanation-right="正确！被追问到知识盲区时，'承认不知道 + 给出我会怎么找答案'远好于硬编。系统设计考的是判断力不是背诵量。"
+               data-explanation-wrong="硬编细节一旦被追第二层就穿帮，反而否定前面所有回答的可信度。沉默也不是办法。最优解永远是：诚实 + 方法论。">
+            <span class="scenario-label">实战题 2</span>
+            <div class="scenario-context"><p>深挖环节面试官问了一个你没做过的方向（如"KV Cache 分布式架构怎么设计"），最佳应对是？</p></div>
+            <div class="quiz-options">
+              <button class="quiz-option" data-value="option-a" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>坦承这块没实践过，然后从已知原则推导：KV 传输瓶颈在哪、一致性怎么保证、业界有哪些参照（Mooncake 等）</span>
+              </button>
+              <button class="quiz-option" data-value="option-b" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>凭印象编一个具体方案，显得无所不知</span>
+              </button>
+              <button class="quiz-option" data-value="option-c" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>直接说不知道，等下一题</span>
+              </button>
+            </div>
+            <div class="quiz-feedback"></div>
+          </div>
+
+          <button class="quiz-check-btn" onclick="checkQuiz('quiz-module-13')">检查答案</button>
+          <button class="quiz-reset-btn" onclick="resetQuiz('quiz-module-13')">再试一次</button>
+        </div>
+
+        <p style="margin-top:var(--space-8)"><strong>最后一个模块</strong>：应用层八股补充包 + 全课程知识点的大厂变体问法对照。</p>
+      </section>
+
+    </div>
+  </div>
+</section>

@@ -181,6 +181,16 @@ export class ContainerSandboxProvider implements SandboxProvider, SandboxCommand
         }, "PROVISIONING");
         return Object.freeze({
             id: input.id, workspacePath: input.workspacePath, secretNames: record.secretNames,
+            enforcement: Object.freeze({
+                toolExecutionBoundary: "SANDBOX" as const,
+                filesystemIsolation: true,
+                processIsolation: true,
+                networkPolicyEnforced: true,
+                cpuLimitEnforced: compiled.spec.resourceLimits.cpuCores !== null,
+                memoryLimitEnforced: compiled.spec.resourceLimits.memoryMiB !== null,
+                diskLimitEnforced: compiled.spec.resourceLimits.diskMiB !== null,
+                pidLimitEnforced: compiled.spec.pidLimit !== null,
+            }),
             withSecrets: <T>(callback: (values: Readonly<Record<string, string>>) => T) =>
                 callback(this.secretValues.get(input.id) ?? Object.freeze({})),
         });
@@ -209,6 +219,16 @@ export class ContainerSandboxProvider implements SandboxProvider, SandboxCommand
         if (current !== null && current.status === "ACTIVE") {
             this.store.update({ ...current, status: "TERMINATED", updatedAt: new Date().toISOString() }, "ACTIVE");
         }
+    }
+
+    async cleanupStale(record: SandboxRecord): Promise<void> {
+        const name = `agent-harness-${record.id}`;
+        const result = await this.commands.run([this.docker, "rm", "--force", name]);
+        if (result.exitCode !== 0 && !isContainerMissing(result.stderr || result.stdout)) {
+            throw new Error(`遗留容器清理失败：${redact(result.stderr || result.stdout)}`);
+        }
+        this.containerBySandboxId.delete(record.id);
+        this.secretValues.delete(record.id);
     }
 
     subscribe(handler: (event: SandboxLifecycleEvent) => void): () => void {

@@ -1,0 +1,330 @@
+<section class="module" id="module-7" style="background: var(--color-bg-warm)">
+  <div class="module-content">
+    <header class="module-header animate-in">
+      <span class="module-number">07</span>
+      <h1 class="module-title">五层策略交集与 runsc 沙箱</h1>
+      <p class="module-subtitle">策略不是 if-else 散落各处，而是：数据（五层）→ 纯函数（交集）→ 不可变快照 → 编译目标（OCI argv），每一步可测试可审计。</p>
+    </header>
+
+    <div class="module-body">
+
+      <section class="screen animate-in">
+        <h2 class="screen-heading">出国签证的联审模型</h2>
+        <p>你能不能入境，不是某一关说了算——护照签发国（PLATFORM）、目的地移民局（TENANT）、航司规定（TEMPLATE）、入境卡（WORKSPACE）、本次行程（RUN）五方条件取<strong>交集</strong>：任何一方说不行，你就是不行。交集结果当场盖章封存（不可变快照），边检（沙箱）只认章不认人。</p>
+        <div class="flow-steps stagger-children">
+          <div class="flow-step animate-in">
+            <div class="flow-step-num" style="background: var(--color-actor-1)">P</div>
+            <p><strong>PLATFORM</strong> — 平台底线（如生产环境禁网）</p>
+          </div>
+          <div class="flow-arrow">∩</div>
+          <div class="flow-step animate-in">
+            <div class="flow-step-num" style="background: var(--color-actor-2)">T</div>
+            <p><strong>TENANT</strong> — 租户约束（工具白名单、Secret 授权）</p>
+          </div>
+          <div class="flow-arrow">∩</div>
+          <div class="flow-step animate-in">
+            <div class="flow-step-num" style="background: var(--color-actor-3)">M</div>
+            <p><strong>TEMPLATE</strong> — 模板规格（provider/model/tools/skills）</p>
+          </div>
+          <div class="flow-arrow">∩</div>
+          <div class="flow-step animate-in">
+            <div class="flow-step-num" style="background: var(--color-actor-4)">W</div>
+            <p><strong>WORKSPACE</strong> — 工作区路径边界</p>
+          </div>
+          <div class="flow-arrow">∩</div>
+          <div class="flow-step animate-in">
+            <div class="flow-step-num" style="background: var(--color-accent)">R</div>
+            <p><strong>RUN</strong> — 单次任务附加限制</p>
+          </div>
+        </div>
+        <div class="callout callout-info">
+          <div class="callout-icon">🧮</div>
+          <div class="callout-content">
+            <strong class="callout-title">交集运算的四条规则</strong>
+            <p>布尔权限 AND；列表取交集；资源上限取 min；workspaceRoots 按路径包含关系收窄。sandboxProfile 冲突直接抛错——不允许含糊地带病运行。computeEffectivePolicy 还会先校验五层缺一不可。</p>
+          </div>
+        </div>
+      </section>
+
+      <section class="screen animate-in">
+        <h2 class="screen-heading">交集算法源码</h2>
+        <div class="translation-block">
+          <div class="translation-code">
+            <span class="translation-label">CODE · src/policies/effective-policy.ts</span>
+            <pre><code><span class="code-line"><span class="code-keyword">function</span> <span class="code-function">intersectConstraints</span>(</span>
+<span class="code-line">    left: PolicyConstraints,</span>
+<span class="code-line">    right: PolicyConstraints,</span>
+<span class="code-line">): PolicyConstraints {</span>
+<span class="code-line">    <span class="code-keyword">return</span> {</span>
+<span class="code-line">        sandboxProfile: <span class="code-function">intersectSandboxProfiles</span>(</span>
+<span class="code-line">            left.sandboxProfile ?? <span class="code-keyword">null</span>,</span>
+<span class="code-line">            right.sandboxProfile ?? <span class="code-keyword">null</span>,</span>
+<span class="code-line">        ),</span>
+<span class="code-line">        allowedTools: <span class="code-function">intersectValues</span>(left.allowedTools, right.allowedTools),</span>
+<span class="code-line">        allowedSkills: <span class="code-function">intersectValues</span>(left.allowedSkills, right.allowedSkills),</span>
+<span class="code-line">        allowedModels: <span class="code-function">intersectValues</span>(left.allowedModels, right.allowedModels),</span>
+<span class="code-line">        workspaceRoots: <span class="code-function">intersectRoots</span>(left.workspaceRoots, right.workspaceRoots),</span>
+<span class="code-line">        allowNetwork: left.allowNetwork &amp;&amp; right.allowNetwork,</span>
+<span class="code-line">        allowProcess: left.allowProcess &amp;&amp; right.allowProcess,</span>
+<span class="code-line">        allowedSecrets: <span class="code-function">intersectValues</span>(left.allowedSecrets, right.allowedSecrets),</span>
+<span class="code-line">        resourceLimits: {</span>
+<span class="code-line">            cpuCores: <span class="code-function">minimum</span>(left.resourceLimits.cpuCores, right.resourceLimits.cpuCores),</span>
+<span class="code-line">            memoryMiB: <span class="code-function">minimum</span>(left.resourceLimits.memoryMiB, right.resourceLimits.memoryMiB),</span>
+<span class="code-line">            diskMiB: <span class="code-function">minimum</span>(left.resourceLimits.diskMiB, right.resourceLimits.diskMiB),</span>
+<span class="code-line">        },</span>
+<span class="code-line">    };</span>
+<span class="code-line">}</span></code></pre>
+          </div>
+          <div class="translation-english">
+            <span class="translation-label">白话翻译</span>
+            <div class="translation-lines">
+              <p class="tl">两层约束进来，一层更严的约束出去——这就是"有效策略"的全部秘密。</p>
+              <p class="tl">沙箱等级特殊：两边都声明但不一样时直接抛错，因为"到底用哪个隔离级别"没有交集可言。</p>
+              <p class="tl">工具/技能/模型/Secret 白名单取交集——双方都点头的才保留。</p>
+              <p class="tl">路径根按包含关系收窄成更小的集合。</p>
+              <p class="tl">联网、开进程是布尔 AND——任何一方禁止即禁止。</p>
+              <p class="tl">CPU/内存/磁盘上限取更小的那个值。</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="screen animate-in">
+        <h2 class="screen-heading">从策略到 docker 命令行：OCI 编译产物</h2>
+        <p>OciSandboxSpecCompiler 把 EffectivePolicySnapshot 编译成真实的 docker run 参数。先看前置守卫，再看产物：</p>
+        <div class="translation-block">
+          <div class="translation-code">
+            <span class="translation-label">CODE · src/sandbox/oci-sandbox-spec.ts · compile</span>
+            <pre><code><span class="code-line"><span class="code-comment">// 前置守卫（节选）：</span></span>
+<span class="code-line"><span class="code-keyword">if</span> (policy.resourceLimits.diskMiB !== <span class="code-keyword">null</span>) {</span>
+<span class="code-line">    <span class="code-keyword">throw new</span> <span class="code-function">Error</span>(<span class="code-string">"Container bind mount 无法强制磁盘配额，拒绝执行"</span>);</span>
+<span class="code-line">}</span>
+<span class="code-line"><span class="code-keyword">if</span> (profile === <span class="code-string">"restricted-egress"</span> &amp;&amp; policy.allowNetwork) {</span>
+<span class="code-line">    <span class="code-keyword">throw new</span> <span class="code-function">Error</span>(<span class="code-string">"restricted-egress 尚未接入受控 egress proxy，拒绝直连公网"</span>);</span>
+<span class="code-line">}</span>
+<span class="code-line"></span>
+<span class="code-line"><span class="code-keyword">const</span> args: string[] = [</span>
+<span class="code-line">    <span class="code-string">"run"</span>, <span class="code-string">"--detach"</span>, <span class="code-string">"--rm"</span>, <span class="code-string">"--name"</span>, name,</span>
+<span class="code-line">    <span class="code-string">"--user"</span>, `${<span class="code-variable">this</span>.config.userId}:${<span class="code-variable">this</span>.config.userId}`,</span>
+<span class="code-line">    <span class="code-string">"--read-only"</span>, <span class="code-string">"--cap-drop"</span>, <span class="code-string">"ALL"</span>,</span>
+<span class="code-line">    <span class="code-string">"--security-opt"</span>, <span class="code-string">"no-new-privileges"</span>, <span class="code-string">"--pids-limit"</span>, <span class="code-string">"128"</span>,</span>
+<span class="code-line">    <span class="code-string">"--workdir"</span>, <span class="code-string">"/workspace"</span>, <span class="code-string">"--mount"</span>,</span>
+<span class="code-line">    `type=bind,src=${workspacePath},dst=/workspace`,</span>
+<span class="code-line">    <span class="code-string">"--tmpfs"</span>, <span class="code-string">"/tmp:rw,noexec,nosuid,size=64m"</span>,</span>
+<span class="code-line">    <span class="code-string">"--network"</span>, networkMode === <span class="code-string">"none"</span> ? <span class="code-string">"none"</span> : <span class="code-string">"bridge"</span>,</span>
+<span class="code-line">];</span></code></pre>
+          </div>
+          <div class="translation-english">
+            <span class="translation-label">白话翻译</span>
+            <div class="translation-lines">
+              <p class="tl">守卫一：bind mount 做不到磁盘配额——有这个要求就拒绝执行，而不是假装配了。</p>
+              <p class="tl">守卫二：受限出网 profile 还没接 egress 代理时，允许联网的策略直接拒绝。</p>
+              <p class="tl">下面开始编译真实命令行——每一面旗子对应一条安全承诺。</p>
+            </div>
+          </div>
+        </div>
+        <div class="badge-list">
+          <div class="badge-item"><code class="badge-code">--user 65532:65532</code><span class="badge-desc">非 root UID 运行——容器内进程对宿主没有任何 root 权限</span></div>
+          <div class="badge-item"><code class="badge-code">--read-only</code><span class="badge-desc">只读 RootFS——镜像层不可篡改，写入只允许 /workspace 和受限 tmpfs</span></div>
+          <div class="badge-item"><code class="badge-code">--cap-drop ALL</code><span class="badge-desc">丢弃全部 Linux capabilities——连 chown 这类基础特权都没有</span></div>
+          <div class="badge-item"><code class="badge-code">no-new-privileges</code><span class="badge-desc">禁止通过 setuid 提权——即使镜像里有 SUID 程序也升不了权限</span></div>
+          <div class="badge-item"><code class="badge-code">--pids-limit 128</code><span class="badge-desc">进程数上限——fork 炸弹在 128 个进程处撞墙</span></div>
+          <div class="badge-item"><code class="badge-code">--mount type=bind</code><span class="badge-desc">只挂载本 Attempt 的 workspace 目录——B 租户的文件物理上不在视野里</span></div>
+          <div class="badge-item"><code class="badge-code">--tmpfs noexec,nosuid,64m</code><span class="badge-desc">临时目录可写但不可执行、不带 suid、最多 64MB</span></div>
+          <div class="badge-item"><code class="badge-code">--network none</code><span class="badge-desc">默认无网络——非 development profile 强制 none</span></div>
+        </div>
+      </section>
+
+      <section class="screen animate-in">
+        <h2 class="screen-heading">Secret 的短暂人生：标记替换 + 输出脱敏</h2>
+        <p>Secret 值的一生只有一瞬间：argv 组装那一刻。它永不进入不可变 spec、永不进入 runtime evidence、错误输出还要过正则脱敏：</p>
+        <div class="translation-block">
+          <div class="translation-code">
+            <span class="translation-label">CODE · src/sandbox/oci-sandbox-spec.ts + container-sandbox-provider.ts</span>
+            <pre><code><span class="code-line"><span class="code-comment">// 编译时只放占位标记：</span></span>
+<span class="code-line"><span class="code-keyword">for</span> (<span class="code-keyword">const</span> name <span class="code-keyword">of</span> secretNames) {</span>
+<span class="code-line">    <span class="code-comment">// The caller replaces this marker with a value in the short-lived</span></span>
+<span class="code-line">    <span class="code-comment">// Docker argv. It cannot accidentally be persisted as evidence.</span></span>
+<span class="code-line">    args.<span class="code-function">push</span>(<span class="code-string">"--env"</span>, `${name}=__HARNESS_SECRET_${name}__`);</span>
+<span class="code-line">}</span>
+<span class="code-line"></span>
+<span class="code-line"><span class="code-comment">// Provider 在组装 argv 那一刻才替换为真实值：</span></span>
+<span class="code-line"><span class="code-keyword">private</span> <span class="code-function">withSecretValues</span>(args, environment) {</span>
+<span class="code-line">    <span class="code-keyword">return</span> args.<span class="code-function">map</span>((argument) =&gt; argument.<span class="code-function">replace</span>(</span>
+<span class="code-line">        /__HARNESS_SECRET_([A-Z][A-Z0-9_]*)__/, (_, name) =&gt; environment[name] ?? <span class="code-string">""</span>,</span>
+<span class="code-line">    ));</span>
+<span class="code-line">}</span>
+<span class="code-line"></span>
+<span class="code-line"><span class="code-comment">// 错误输出统一脱敏（ENV_NAME=[REDACTED]），截断到 1000 字符：</span></span>
+<span class="code-line"><span class="code-keyword">function</span> <span class="code-function">redact</span>(value: string): string {</span>
+<span class="code-line">    <span class="code-keyword">return</span> value.<span class="code-function">replace</span>(/(?:[A-Z][A-Z0-9_]{2,})=\S+/g, <span class="code-string">"$1=[REDACTED]"</span>).<span class="code-function">slice</span>(<span class="code-number">0</span>, <span class="code-number">1_000</span>);</span>
+<span class="code-line">}</span></code></pre>
+          </div>
+          <div class="translation-english">
+            <span class="translation-label">白话翻译</span>
+            <div class="translation-lines">
+              <p class="tl">编译产物里只有形如 __HARNESS_SECRET_API_KEY__ 的占位符——落库的证据记录即使被拖走也没有真值。</p>
+              <p class="tl">Provider 拿到授权 Secret 后，只在拼 docker argv 的内存瞬间替换占位符。</p>
+              <p class="tl">万一容器报错把环境变量打进 stderr，redact() 会把所有大写形式的 KEY=value 替换成 KEY=[REDACTED]，并截断长度。</p>
+              <p class="tl">三重防线共同保证："证据可以公开审计，密钥不留痕迹"。</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="screen animate-in">
+        <h2 class="screen-heading">声称 ≠ 事实：docker inspect 验证 + 证据三元组</h2>
+        <p>"OCI 兼容镜像不能证明哪个内核/runtime 执行了它。"所以容器创建后还要用 <code style="font-family:var(--font-mono)">docker inspect</code> 取回实际 runtime 证据——不符就删容器、记 FAILED、抛错：</p>
+        <div class="translation-block">
+          <div class="translation-code">
+            <span class="translation-label">CODE · src/sandbox/container-sandbox-provider.ts · create</span>
+            <pre><code><span class="code-line"><span class="code-keyword">const</span> verifiedEvidence = <span class="code-keyword">await</span> <span class="code-variable">this</span>.adapter.<span class="code-function">verify</span>(</span>
+<span class="code-line">    <span class="code-variable">this</span>.commands, <span class="code-variable">this</span>.docker, `agent-harness-${input.id}`,</span>
+<span class="code-line">);</span>
+<span class="code-line"><span class="code-keyword">if</span> (!verifiedEvidence.verified) {</span>
+<span class="code-line">    <span class="code-keyword">await</span> <span class="code-variable">this</span>.commands.<span class="code-function">run</span>([<span class="code-variable">this</span>.docker, <span class="code-string">"rm"</span>, <span class="code-string">"--force"</span>, `agent-harness-${input.id}`]);</span>
+<span class="code-line">    <span class="code-keyword">const</span> reason = verifiedEvidence.verificationReason</span>
+<span class="code-line">        ?? `实际 runtime 不是 ${<span class="code-variable">this</span>.runtime}`;</span>
+<span class="code-line">    <span class="code-keyword">const</span> failed = {</span>
+<span class="code-line">        ...record, status: <span class="code-string">"FAILED"</span> <span class="code-keyword">as const</span>, updatedAt: <span class="code-keyword">new</span> <span class="code-function">Date</span>().<span class="code-function">toISOString</span>(),</span>
+<span class="code-line">        failureReason: reason, runtimeEvidence: <span class="code-function">freezeRuntimeEvidence</span>(verifiedEvidence),</span>
+<span class="code-line">    };</span>
+<span class="code-line">    <span class="code-variable">this</span>.store.<span class="code-function">update</span>(failed, <span class="code-string">"PROVISIONING"</span>);</span>
+<span class="code-line">    <span class="code-variable">this</span>.<span class="code-function">emit</span>(failed, <span class="code-string">"FAILED"</span>, reason);</span>
+<span class="code-line">    <span class="code-keyword">throw new</span> <span class="code-function">Error</span>(`Sandbox runtime 证据校验失败：${reason}`);</span>
+<span class="code-line">}</span></code></pre>
+          </div>
+          <div class="translation-english">
+            <span class="translation-label">白话翻译</span>
+            <div class="translation-lines">
+              <p class="tl">容器起来了，但"我们要求 runsc"和"实际跑在 runsc 上"是两回事。</p>
+              <p class="tl">验证失败的第一反应不是报警而是清理——先把容器删掉，不留一个弱隔离环境活着。</p>
+              <p class="tl">失败原因写清楚：要么是验证器给出的具体理由，要么是"实际 runtime 与请求不符"。</p>
+              <p class="tl">状态机从 PROVISIONING 推到 FAILED，证据冻结进数据库。</p>
+              <p class="tl">最后向调用方抛错——这次 Run 不会以错误的隔离级别启动。default/restricted-egress profile 甚至在构造函数就禁止 runc 回退；strict 无 KVM 时由 UnavailableStrictSandboxProvider fail-closed。</p>
+            </div>
+          </div>
+        </div>
+        <div class="callout callout-accent">
+          <div class="callout-icon">🔗</div>
+          <div class="callout-content">
+            <strong class="callout-title">证据三元组（Evidence Triple）</strong>
+            <p>intent ──compile──► product ──observe──► fact：policyFingerprint（策略意图指纹）+ specFingerprint（编译产物指纹）+ runtimeEvidence（观测事实）。verifyIsolationTriple 是 fail-closed 的一致性校验：任何一环缺失或冲突 → inconsistent；还支持重编译漂移检测——策略或编译器被偷偷改过就能发现。真机 tripleConsistent=true。</p>
+          </div>
+        </div>
+      </section>
+
+      <section class="screen animate-in">
+        <h2 class="screen-heading">ManagedAgentRuntime：把一切串起来的执行序</h2>
+        <p>归属四元组校验 → computeEffectivePolicy → saveSnapshot → 创建 Attempt → 能力校验 → 策略编译 → Sandbox 创建 → 启动 Runtime → finally 清理。注释原文值得背：</p>
+        <div class="translation-block">
+          <div class="translation-code">
+            <span class="translation-label">CODE · src/runtime/managed-agent-runtime.ts</span>
+            <pre><code><span class="code-line"><span class="code-comment">// Attempt 从创建时就绑定不可变策略快照。这样即使能力校验、策略编译或</span></span>
+<span class="code-line"><span class="code-comment">// Sandbox 创建在真正启动 Runtime 前失败，拒绝记录仍可完整解释。</span></span>
+<span class="code-line"><span class="code-keyword">let</span> attempt = <span class="code-function">createRunAttempt</span>({</span>
+<span class="code-line">    id: <span class="code-variable">crypto</span>.<span class="code-function">randomUUID</span>(),</span>
+<span class="code-line">    runId: run.id,</span>
+<span class="code-line">    attemptNumber: <span class="code-variable">this</span>.attempts.<span class="code-function">nextAttemptNumber</span>(run.id),</span>
+<span class="code-line">    kind,</span>
+<span class="code-line">    instanceId: instance.id,</span>
+<span class="code-line">    templateVersionId: template.id,</span>
+<span class="code-line">    capabilityProfileId: profile.id,</span>
+<span class="code-line">    policySnapshotId: snapshot.id,</span>
+<span class="code-line">    sandboxId: <span class="code-keyword">null</span>,</span>
+<span class="code-line">    createdAt: now,</span>
+<span class="code-line">});</span>
+<span class="code-line"><span class="code-variable">this</span>.attempts.<span class="code-function">create</span>(attempt);</span></code></pre>
+          </div>
+          <div class="translation-english">
+            <span class="translation-label">白话翻译</span>
+            <p class="tl">顺序设计的关键：Attempt 先于一切可能失败的步骤诞生，并且出生时就绑定策略快照 ID。哪怕三行之后能力校验失败，审计员也能看到"第 N 次 Attempt 因缺少能力 X 被 REJECTED，依据快照 Y"——拒绝本身是一等公民，也要可解释。</p>
+            <p class="tl">后续链路：validateRuntimeCapabilities 缺强制能力→REJECTED；compilePiPolicy 产出 APPLIED/DEGRADED/REJECTED 全落库；sandbox.create 失败→Attempt FAILED；成功才 startRunAttempt(RUNNING)。finally 里 terminate 容器、Instance 回 READY；onSandboxFailure 订阅保证容器意外 LOST 时 Attempt 转 INTERRUPTED 并发 agent_interrupted 事件。</p>
+          </div>
+        </div>
+        <table style="width:100%;border-collapse:collapse;margin-top:var(--space-6);font-size:var(--text-sm)">
+          <tr style="border-bottom:2px solid var(--color-border)">
+            <th style="text-align:left;padding:var(--space-2)">P0.5 分级</th><th style="text-align:left;padding:var(--space-2)">手段</th><th style="text-align:left;padding:var(--space-2)">能防</th><th style="text-align:left;padding:var(--space-2)">不能防</th>
+          </tr>
+          <tr style="border-bottom:1px solid var(--color-border-light)"><td style="padding:var(--space-2)">P0</td><td style="padding:var(--space-2)">无沙箱</td><td style="padding:var(--space-2)">—</td><td style="padding:var(--space-2)">—</td></tr>
+          <tr style="border-bottom:1px solid var(--color-border-light)"><td style="padding:var(--space-2)"><strong>P0.5 当前</strong></td><td style="padding:var(--space-2)">runsc gVisor + 默认 seccomp</td><td style="padding:var(--space-2)">文件/网络/进程隔离</td><td style="padding:var(--space-2)">共享内核漏洞</td></tr>
+          <tr><td style="padding:var(--space-2)">P1</td><td style="padding:var(--space-2)">Kata/Firecracker microVM</td><td style="padding:var(--space-2)">独立内核</td><td style="padding:var(--space-2)">需 KVM、成本高</td></tr>
+        </table>
+
+        <div class="quiz-container" id="quiz-module-7">
+          <div class="quiz-question-block"
+               data-correct="option-a"
+               data-explanation-right="正确！allowNetwork 是布尔 AND：平台 true ∩ 租户 false = false。"允许"没有投票权，"禁止"有一票否决权——这正是 fail-closed 在策略层的表达。"
+               data-explanation-wrong="交集运算里布尔权限用的是 AND：任何一层说 false 结果就是 false。想想签证联审——任何一个部门拒签你就出不去。">
+            <h3 class="quiz-question">场景题：PLATFORM 层 allowNetwork=true、TENANT 层 allowNetwork=false、TEMPLATE 未声明（null）。最终这个 Run 能联网吗？</h3>
+            <div class="quiz-options">
+              <button class="quiz-option" data-value="option-a" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>不能——布尔权限逐层 AND，租户的 false 一票否决</span>
+              </button>
+              <button class="quiz-option" data-value="option-b" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>能——平台层已放行，且 TEMPLATE 层 null 表示不限制</span>
+              </button>
+              <button class="quiz-option" data-value="option-c" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>抛出策略冲突异常，Run 被拒绝</span>
+              </button>
+            </div>
+            <div class="quiz-feedback"></div>
+          </div>
+
+          <div class="quiz-question-block"
+               data-correct="option-b"
+               data-explanation-right="正是！bind mount 无法强制磁盘配额——与其给一个假保护，不如显式拒绝。'无法兑现的承诺不承诺'是整个安全设计的一贯风格。"
+               data-explanation-wrong="忽略等于假装限额生效了——这是最危险的那种 bug。这个项目的原则是：做不到的安全承诺要大声说出来并拒绝执行，而不是静默降级。">
+            <h3 class="quiz-question">为什么策略里 diskMiB 有值时 OciSandboxSpecCompiler 直接抛错，而不是"尽量近似地限制"？</h3>
+            <div class="quiz-options">
+              <button class="quiz-option" data-value="option-a" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>磁盘测量太慢，会影响调度延迟</span>
+              </button>
+              <button class="quiz-option" data-value="option-b" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>bind mount 技术上无法强制磁盘配额——近似限制是虚假安全，fail-closed 拒绝执行</span>
+              </button>
+              <button class="quiz-option" data-value="option-c" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>这是遗留代码，后续版本会支持</span>
+              </button>
+            </div>
+            <div class="quiz-feedback"></div>
+          </div>
+
+          <div class="quiz-question-block"
+               data-correct="option-c"
+               data-explanation-right="完全正确！配置声明≠实际执行。inspect 验证 + 证据三元组让'我们跑的就是我们声称的隔离'成为可审计的事实，而不是一句口号。"
+               data-explanation-wrong="Docker daemon 可能因配置、版本、降级逻辑用不同的 runtime 启动容器——如果不去看实际值，'声称 runsc'就只是愿望。这正是证据三元组第三环（observe→fact）存在的意义。">
+            <h3 class="quiz-question">创建容器后为什么还要 docker inspect 验证实际 runtime？配置文件里明明写了 runsc。</h3>
+            <div class="quiz-options">
+              <button class="quiz-option" data-value="option-a" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>为了收集性能指标做 benchmark</span>
+              </button>
+              <button class="quiz-option" data-value="option-b" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>为了兼容不同版本的 Docker CLI 参数差异</span>
+              </button>
+              <button class="quiz-option" data-value="option-c" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>daemon 可能实际用了别的 runtime——必须闭环验证并把证据冻结进数据库，不符则删容器 fail-closed</span>
+              </button>
+            </div>
+            <div class="quiz-feedback"></div>
+          </div>
+
+          <button class="quiz-check-btn" onclick="checkQuiz('quiz-module-7')">检查答案</button>
+          <button class="quiz-reset-btn" onclick="resetQuiz('quiz-module-7')">再试一次</button>
+        </div>
+
+        <p style="margin-top:var(--space-8)"><strong>下一模块</strong>：基础闭环之上的三个差异化深化——评测、观测、路由网关。</p>
+      </section>
+
+    </div>
+  </div>
+</section>

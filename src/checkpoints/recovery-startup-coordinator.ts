@@ -10,6 +10,10 @@ export interface QueuedRunRestorer {
     restore():void;
 }
 
+export interface StartupSandboxReconciler {
+    reconcile(): Promise<void>;
+}
+
 /**
  * 把启动扫描和恢复任务入队串成 HarnessApplication 的启动恢复步骤。
  *
@@ -25,9 +29,12 @@ export class RecoveryStartupCoordinator {
         private readonly recoveryExecutor:
             Pick<RecoveryExecutor, "execute">,
         private readonly queuedRunRestorer:QueuedRunRestorer,
+        private readonly sandboxReconciler?: StartupSandboxReconciler,
     ) {}
 
     async recover(): Promise<void> {
+        // 必须先停止旧进程可能遗留的执行环境，再允许恢复任务重新入队。
+        await this.sandboxReconciler?.reconcile();
         // 先恢复旧的 QUEUED Run；随后扫描产生的新恢复任务会由
         // RecoveryExecutor 直接加入同一个 Scheduler，不会重复恢复。
         this.queuedRunRestorer.restore();

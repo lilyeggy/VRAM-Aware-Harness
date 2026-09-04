@@ -34,7 +34,20 @@ export interface SandboxHandle {
     readonly id: string;
     readonly workspacePath: string;
     readonly secretNames: readonly string[];
+    /** Runtime facts, not desired policy. Consumers must fail closed on gaps. */
+    readonly enforcement: SandboxEnforcementCapabilities;
     withSecrets<T>(callback: (environment: Readonly<Record<string, string>>) => T): T;
+}
+
+export interface SandboxEnforcementCapabilities {
+    readonly toolExecutionBoundary: "HOST" | "SANDBOX";
+    readonly filesystemIsolation: boolean;
+    readonly processIsolation: boolean;
+    readonly networkPolicyEnforced: boolean;
+    readonly cpuLimitEnforced: boolean;
+    readonly memoryLimitEnforced: boolean;
+    readonly diskLimitEnforced: boolean;
+    readonly pidLimitEnforced: boolean;
 }
 
 export interface SandboxLifecycleEvent {
@@ -56,6 +69,8 @@ export interface SandboxProvider {
     }): Promise<SandboxHandle>;
     terminate(sandboxId: string): Promise<void>;
     subscribe(handler: (event: SandboxLifecycleEvent) => void): () => void;
+    /** Remove an execution environment left by a previous service process. */
+    cleanupStale?(record: SandboxRecord): Promise<void>;
 }
 
 /** Optional command boundary for tools that must execute inside a created sandbox. */

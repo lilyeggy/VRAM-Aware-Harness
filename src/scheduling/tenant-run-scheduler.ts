@@ -13,12 +13,15 @@ export type QueueReasonCode =
     | "RESOURCE_BUSY"
     | "RESOURCE_CRITICAL"
     | "RESOURCE_UNKNOWN"
-    | "RESOURCE_OBSERVATION_FAILED";
+    | "RESOURCE_OBSERVATION_FAILED"
+    | "TENANT_BUDGET_EXCEEDED";
 
 // 队列里面的 Run 的格式要求
 export interface EnqueueRunInput {
     runId: string;
     tenantId: string;
+    /** Runs sharing a conversation must never be active concurrently. */
+    sessionId?: string;
     reasonCode?: QueueReasonCode;
     enqueuedAt?: string;
 }
@@ -26,11 +29,12 @@ export interface EnqueueRunInput {
 export interface QueuedRun {
     runId: string;
     tenantId: string;
+    sessionId?: string;
     reasonCode: QueueReasonCode;
     enqueuedAt: string;
 }
 
-export interface QueueEntry extends QueuedRun {
+export interface QueueEntry extends Omit<QueuedRun, "sessionId"> {
     position: number;
     tenantPosition: number;
 }
@@ -49,6 +53,7 @@ export class TenantRunScheduler {
     private readonly queuesByTenant = new Map<string, QueuedRun[]>();
     private readonly tenantOrder: string[] = [];
     private readonly activeTenantByRunId = new Map<string, string>();
+    private readonly activeSessionByRunId = new Map<string, string>();
 
     constructor(private readonly config: TenantRunSchedulerConfig) {
         assertPositiveInteger(config.maxActiveRuns, "maxActiveRuns");
@@ -79,6 +84,7 @@ export class TenantRunScheduler {
         const queuedRun: QueuedRun = {
             runId: input.runId,
             tenantId: input.tenantId,
+            ...(input.sessionId === undefined ? {} : { sessionId: input.sessionId }),
             reasonCode:
                 input.reasonCode ?? "AWAITING_SCHEDULING",
             enqueuedAt:
@@ -166,6 +172,17 @@ export class TenantRunScheduler {
                 continue;
             }
 
+            // A conversation is an ordered message stream. Keep the candidate
+            // queued while an earlier Run from the same conversation is active.
+            if (
+                run.sessionId !== undefined
+                && this.hasActiveSession(run.sessionId)
+            ) {
+                tenantQueue.unshift(run);
+                this.tenantOrder.push(tenantId);
+                continue;
+            }
+
             // 如果这个 tenant 还有等待任务，那么将它放在下一轮队尾
             // 如果已经情况，那么就从queuesByTenant删除
             if (tenantQueue.length > 0){
@@ -178,6 +195,9 @@ export class TenantRunScheduler {
                 run.runId,
                 run.tenantId
             );
+            if (run.sessionId !== undefined) {
+                this.activeSessionByRunId.set(run.runId, run.sessionId);
+            }
             return run;
         }
      
@@ -198,10 +218,18 @@ export class TenantRunScheduler {
         return count;
     }
 
+    private hasActiveSession(sessionId: string): boolean {
+        for (const activeSessionId of this.activeSessionByRunId.values()) {
+            if (activeSessionId === sessionId) return true;
+        }
+        return false;
+    }
+
 
     // 释放资源
     release(runId:string):boolean {
         // 释放指定 run 的 slot
+        this.activeSessionByRunId.delete(runId);
         return this.activeTenantByRunId.delete(runId);
     }
 
@@ -303,7 +331,10 @@ export class TenantRunScheduler {
             tenantPositions.set(tenantId,tenantPosition);
 
             entries.push({
-                ...run,
+                runId: run.runId,
+                tenantId: run.tenantId,
+                reasonCode: run.reasonCode,
+                enqueuedAt: run.enqueuedAt,
                 position:entries.length + 1,
                 tenantPosition,
             })

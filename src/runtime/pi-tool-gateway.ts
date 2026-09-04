@@ -20,7 +20,10 @@ import type {
     ExecuteToolInput,
 } from "../tools/tool-gateway.ts";
 import type { ToolEffect } from "../tools/tool-execution.ts";
-import type { SandboxCommandExecutor } from "../sandbox/sandbox-provider.ts";
+import type {
+    SandboxCommandExecutor,
+    SandboxEnforcementCapabilities,
+} from "../sandbox/sandbox-provider.ts";
 
 type AnyPiToolDefinition = ToolDefinition<any, any>;
 
@@ -55,6 +58,7 @@ export interface PiGatewayRunContext {
     getLastEventSequence(): number;
     getPolicySnapshotId?(): string | undefined;
     getSandboxId?(): string | undefined;
+    getSandboxEnforcement?(): SandboxEnforcementCapabilities | undefined;
 }
 
 /**
@@ -120,6 +124,9 @@ export function wrapPiToolWithGateway(
                     ...(runContext.workspacePath === undefined
                         ? {}
                         : { workspacePath: runContext.workspacePath }),
+                    ...(runContext.getSandboxEnforcement?.() === undefined
+                        ? {}
+                        : { sandboxEnforcement: runContext.getSandboxEnforcement() }),
                 },
                 () => definition.execute(
                     toolCallId,
@@ -161,6 +168,7 @@ export function createGatewayPiTools(
                 workspacePath,
                 runContext.getSandboxId?.(),
                 sandboxExecutor,
+                runContext.getSandboxEnforcement?.(),
             ),
             classifyPiToolEffect(toolName),
             gateway,
@@ -188,7 +196,17 @@ function createPiToolDefinition(
     workspacePath: string,
     sandboxId?: string,
     sandboxExecutor?: SandboxCommandExecutor,
+    enforcement?: SandboxEnforcementCapabilities,
 ): AnyPiToolDefinition {
+    if (
+        enforcement?.toolExecutionBoundary === "SANDBOX"
+        && (sandboxId === undefined || sandboxExecutor === undefined)
+    ) {
+        throw new Error("Sandbox 工具执行边界缺少 sandboxId 或命令执行器，拒绝回退宿主机");
+    }
+    if (sandboxId !== undefined && sandboxExecutor === undefined) {
+        throw new Error("已有 Sandbox execution context 但缺少命令执行器，拒绝回退宿主机");
+    }
     if (sandboxId !== undefined && sandboxExecutor !== undefined) {
         return createSandboxedPiToolDefinition(
             toolName, workspacePath, sandboxId, sandboxExecutor,

@@ -246,10 +246,19 @@ export class ManagedAgentRuntime implements AgentRuntime {
 
         const managedRequest = {
             ...request,
+            run: {
+                ...request.run,
+                // Checkpoint 恢复有自己的、不可替代的 session 引用；普通的
+                // 对话消息才从 HarnessSession 续接上一次 Pi 上下文。
+                ...(kind === "START"
+                    ? { runtimeSessionRef: session.runtimeSessionRef }
+                    : {}),
+            },
             execution: {
                 attemptId: attempt.id,
                 policySnapshotId: snapshot.id,
                 sandboxId: handle.id,
+                sandboxEnforcement: handle.enforcement,
                 runtimeConfig: compiled,
             },
         } as T;

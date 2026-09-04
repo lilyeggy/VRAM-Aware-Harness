@@ -25,16 +25,23 @@ import type { RunOutputChunk } from "../runs/run-output-store.ts";
 import type { WorkspaceDiff } from "../workspaces/workspace-snapshot.ts";
 import type { RunArtifact } from "../workspaces/run-artifact-store.ts";
 import type { AccessAuditStore } from "../audit/access-audit-store.ts";
+import type { HarnessInstance } from "../instances/harness-instance.ts";
 import type { EvaluationAggregator } from "../eval/evaluation-aggregator.ts";
 import type { LlmGateway } from "../llm-gateway/llm-gateway.ts";
-import { dashboardResponse } from "./harness-dashboard.ts";
-import { observePageResponse } from "./harness-observe-page.ts";
+import { platformDashboardResponse } from "./harness-platform-dashboard.ts";
+import type { Conversation } from "../conversations/conversation.ts";
 
 export interface HarnessHttpApplication {
     isStarted():boolean;
     submitRun(input:StartRunInput):AgentRun;
     getRun(runId:string):AgentRun | null;
     getRunsForTenant(tenantId:string):AgentRun[];
+    createConversation?(input: { tenantId: string; workspaceId: string; title?: string }): Conversation;
+    getConversation?(id: string, tenantId: string): Conversation | null;
+    getConversationsForWorkspace?(tenantId: string, workspaceId: string): Conversation[];
+    getRunsForConversation?(tenantId: string, conversationId: string): AgentRun[];
+    touchConversation?(id: string, tenantId: string): void;
+    getAgentsForTenant?(tenantId:string):HarnessInstance[];
     getRunEvents(runId:string):RunEvent[];
     getRunOutput(runId:string):{ chunks: RunOutputChunk[]; finalText: string };
     getRunWorkspaceDiff(runId:string):WorkspaceDiff | null;
@@ -53,6 +60,9 @@ export interface CheckpointLookup {
 
 export interface HttpAccessControl {
     authenticate(rawKey: string): RequestPrincipal | null;
+    registerUser?(email: string, password: string): { userId: string; tenantId: string };
+    loginUser?(email: string, password: string): { token: string; userId: string; tenantId: string; expiresAt: string } | null;
+    revokeSession?(token: string): void;
     workspaceService: WorkspaceService;
     auditStore?: AccessAuditStore;
 }
@@ -104,8 +114,29 @@ export class HarnessHttpApi {
             .filter(Boolean)
             .map((segment) => decodeURIComponent(segment));
 
+        if (request.method === "POST" && segments.join("/") === "auth/register") {
+            if (!this.accessControl?.registerUser) throw new HttpError(503, "账户服务未启用");
+            const body = await readJsonObject(request);
+            try {
+                return jsonResponse({ user: this.accessControl.registerUser(requiredString(body, "email"), requiredString(body, "password")) }, 201);
+            } catch (error) { throw new HttpError(409, error instanceof Error ? error.message : String(error)); }
+        }
+        if (request.method === "POST" && segments.join("/") === "auth/login") {
+            if (!this.accessControl?.loginUser) throw new HttpError(503, "账户服务未启用");
+            const body = await readJsonObject(request);
+            const result = this.accessControl.loginUser(requiredString(body, "email"), requiredString(body, "password"));
+            if (result === null) throw new HttpError(401, "邮箱或密码错误");
+            return jsonResponse(result);
+        }
+        if (request.method === "POST" && segments.join("/") === "auth/logout") {
+            const authorization = request.headers.get("authorization");
+            const token = authorization?.startsWith("Bearer ") ? authorization.slice(7).trim() : "";
+            this.accessControl?.revokeSession?.(token);
+            return jsonResponse({ ok: true });
+        }
+
         if (request.method === "GET" && segments.length === 0) {
-            return dashboardResponse();
+            return platformDashboardResponse();
         }
 
         if (request.method === "GET" && segments.length === 1) {
@@ -115,8 +146,18 @@ export class HarnessHttpApi {
                         ok:this.application.isStarted(),
                         started:this.application.isStarted(),
                     });
+                case "ready": {
+                    const ready = this.application.isStarted();
+                    return jsonResponse({ ready }, ready ? 200 : 503);
+                }
                 case "queue":
                     return this.getQueue(request);
+                case "agents": {
+                    const principal = this.requirePrincipal(request, "tasks:read");
+                    return jsonResponse({
+                        agents:this.application.getAgentsForTenant?.(principal.tenantId) ?? [],
+                    });
+                }
                 case "workspaces":
                     return this.listWorkspaces(request);
                 case "resources": {
@@ -129,30 +170,29 @@ export class HarnessHttpApi {
                 }
                 case "audit":
                     return this.listAuditEvents(request);
-                case "observe":
-                    return observePageResponse();
                 case "eval": {
                     if (this.evaluation === undefined) {
                         throw new HttpError(503, "评测能力未启用");
                     }
                     // 无认证模式（本地/演示）可用 ?tenant= 过滤；有认证则按租户隔离。
                     if (this.accessControl === undefined) {
+                        const evaluation = this.evaluation;
                         const tenantFilter =
                             url.searchParams.get("tenant") ?? undefined;
-                        const runs = this.evaluation.listRunMetrics(tenantFilter);
-                        const tenants = this.evaluation.listTenants();
+                        const runs = evaluation.listRunMetrics(tenantFilter);
+                        const tenants = evaluation.listTenants();
                         // 每个租户各自的指标，供观测页画租户对比图。
                         const perTenant = tenants.map((t) => ({
                             tenant: t,
-                            summary: this.evaluation.summarize(
-                                this.evaluation.listRunMetrics(t),
+                            summary: evaluation.summarize(
+                                evaluation.listRunMetrics(t),
                             ),
                         }));
                         return jsonResponse({
                             scope: tenantFilter ?? "all-tenants",
                             tenants,
                             perTenant,
-                            executionQuality: this.evaluation.summarize(runs),
+                            executionQuality: evaluation.summarize(runs),
                             resourceAdmission:
                                 this.evaluation.computeResourceEvaluation(
                                     tenantFilter,
@@ -184,6 +224,32 @@ export class HarnessHttpApi {
             && segments[0] === "workspaces"
         ) {
             return this.createWorkspace(request);
+        }
+
+        if (
+            segments.length === 3
+            && segments[0] === "workspaces"
+            && segments[2] === "conversations"
+        ) {
+            return request.method === "POST"
+                ? this.createConversation(request, segments[1] ?? "")
+                : request.method === "GET"
+                    ? this.listConversations(request, segments[1] ?? "")
+                    : (() => { throw new HttpError(405, "不支持的请求方法"); })();
+        }
+
+        if (segments[0] === "conversations" && segments.length >= 2) {
+            const conversationId = segments[1] ?? "";
+            if (request.method === "GET" && segments.length === 2) {
+                return this.getConversation(request, conversationId);
+            }
+            if (
+                request.method === "POST"
+                && segments.length === 3
+                && segments[2] === "messages"
+            ) {
+                return this.sendConversationMessage(request, conversationId);
+            }
         }
 
         if (
@@ -357,6 +423,80 @@ export class HarnessHttpApi {
         return jsonResponse({ run }, 202);
     }
 
+    private async createConversation(request: Request, workspaceId: string): Promise<Response> {
+        const principal = this.requirePrincipal(request, "tasks:write");
+        if (this.accessControl === undefined || this.application.createConversation === undefined) {
+            throw new HttpError(501, "对话服务未启用");
+        }
+        const workspace = this.accessControl.workspaceService.getForTenant(
+            workspaceId,
+            principal.tenantId,
+        );
+        if (workspace === null) throw new HttpError(404, "找不到 Workspace");
+        const body = await readOptionalJsonObject(request);
+        const title = optionalString(body, "title");
+        return jsonResponse({
+            conversation: this.application.createConversation({
+                tenantId: principal.tenantId,
+                workspaceId,
+                ...(title == null ? {} : { title }),
+            }),
+        }, 201);
+    }
+
+    private listConversations(request: Request, workspaceId: string): Response {
+        const principal = this.requirePrincipal(request, "tasks:read");
+        if (this.accessControl === undefined) throw new HttpError(501, "Workspace 服务未启用");
+        const workspace = this.accessControl.workspaceService.getForTenant(workspaceId, principal.tenantId);
+        if (workspace === null) throw new HttpError(404, "找不到 Workspace");
+        return jsonResponse({
+            conversations: this.application.getConversationsForWorkspace?.(
+                principal.tenantId,
+                workspaceId,
+            ) ?? [],
+        });
+    }
+
+    private getConversation(request: Request, conversationId: string): Response {
+        const principal = this.requirePrincipal(request, "tasks:read");
+        const conversation = this.application.getConversation?.(
+            conversationId,
+            principal.tenantId,
+        ) ?? null;
+        if (conversation === null) throw new HttpError(404, "找不到对话");
+        return jsonResponse({
+            conversation,
+            runs: this.application.getRunsForConversation?.(
+                principal.tenantId,
+                conversationId,
+            ) ?? [],
+        });
+    }
+
+    private async sendConversationMessage(request: Request, conversationId: string): Promise<Response> {
+        const principal = this.requirePrincipal(request, "tasks:write");
+        const conversation = this.application.getConversation?.(
+            conversationId,
+            principal.tenantId,
+        ) ?? null;
+        if (conversation === null) throw new HttpError(404, "找不到对话");
+        if (this.accessControl === undefined) throw new HttpError(501, "Workspace 服务未启用");
+        const workspace = this.accessControl.workspaceService.getForTenant(
+            conversation.workspaceId,
+            principal.tenantId,
+        );
+        if (workspace === null) throw new HttpError(404, "找不到 Workspace");
+        const body = await readJsonObject(request);
+        const run = this.application.submitRun({
+            tenantId: principal.tenantId,
+            harnessSessionId: conversation.id,
+            userInput: requiredString(body, "userInput"),
+            workspacePath: workspace.rootPath,
+        });
+        this.application.touchConversation?.(conversation.id, principal.tenantId);
+        return jsonResponse({ run }, 202);
+    }
+
     private async resumeRun(
         request:Request,
         runId:string,
@@ -457,7 +597,7 @@ export class HarnessHttpApi {
     private requirePrincipal(request: Request, scope: string): RequestPrincipal {
         if (this.accessControl === undefined) {
             // Retained only for direct legacy unit tests; composition always injects auth.
-            return { subjectId: "legacy-test", tenantId: "legacy", scopes: ["*"] };
+            return { tenantId: "legacy", scopes: ["*"] };
         }
         const authorization = request.headers.get("authorization");
         const rawKey = authorization?.startsWith("Bearer ")
@@ -488,7 +628,6 @@ export class HarnessHttpApi {
     ): void {
         this.accessControl?.auditStore?.record({
             action, outcome,
-            subjectId: principal?.subjectId ?? null,
             tenantId: principal?.tenantId ?? null,
             resourceType: "HTTP_REQUEST",
             resourceId: null,

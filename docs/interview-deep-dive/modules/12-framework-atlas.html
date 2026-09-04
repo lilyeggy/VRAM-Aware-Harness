@@ -1,0 +1,169 @@
+<section class="module" id="module-12" style="background: var(--color-bg)">
+  <div class="module-content">
+    <header class="module-header animate-in">
+      <span class="module-number">12</span>
+      <h1 class="module-title">框架横评与生态坐标</h1>
+      <p class="module-subtitle">"OpenClaw、Hermes、Claude Code，对比一下记忆机制和工具调用，撑住五分钟。"——七个 Harness 的横向坐标系。</p>
+    </header>
+
+    <div class="module-body">
+
+      <section class="screen animate-in">
+        <h2 class="screen-heading">先定调：横评不是选美</h2>
+        <p>面试开场先说这句："架构选择只在具体目标下才有意义——本地体验、治理、远程隔离、长期记忆或最小内核，各家的工程重心不同。"<strong>不做谁更强的总分排名，做'同一责任各自如何兑现'的对照</strong>——这句话本身就是加分项。</p>
+        <div class="pattern-cards stagger-children">
+          <div class="pattern-card animate-in" style="border-top: 3px solid var(--color-actor-1)">
+            <div class="pattern-icon" style="background: var(--color-actor-1)">💻</div>
+            <h4 class="pattern-title">Claude Code</h4>
+            <p class="pattern-desc">编码 Harness · 本地优先。分层上下文 + 权限治理做到极致</p>
+          </div>
+          <div class="pattern-card animate-in" style="border-top: 3px solid var(--color-actor-2)">
+            <div class="pattern-icon" style="background: var(--color-actor-2)">🧠</div>
+            <h4 class="pattern-title">Hermes Agent</h4>
+            <p class="pattern-desc">个人 Agent · 自我进化。长期记忆 + 技能学习回路</p>
+          </div>
+          <div class="pattern-card animate-in" style="border-top: 3px solid var(--color-actor-5)">
+            <div class="pattern-icon" style="background: var(--color-actor-5)">🦞</div>
+            <h4 class="pattern-title">OpenClaw</h4>
+            <p class="pattern-desc">个人助理 · 多渠道入口。Gateway 控制面连接消息渠道</p>
+          </div>
+          <div class="pattern-card animate-in" style="border-top: 3px solid var(--color-accent)">
+            <div class="pattern-icon" style="background: var(--color-accent)">🏛️</div>
+            <h4 class="pattern-title">本项目 VRAM-Aware</h4>
+            <p class="pattern-desc">多租户任务服务 · 服务端隔离。控制面与恢复语义是主角</p>
+          </div>
+        </div>
+      </section>
+
+      <section class="screen animate-in">
+        <h2 class="screen-heading">五分钟对比剧本：三家明星框架</h2>
+
+        <h3 style="font-family:var(--font-display);font-size:var(--text-xl);margin-bottom:var(--space-3)">① Claude Code —— 治理层最强辨识度</h3>
+        <div class="badge-list">
+          <div class="badge-item"><code class="badge-code">记忆/上下文</code><span class="badge-desc">CLAUDE.md → rules → skills 分层组装；subagent 用独立上下文承接委派，防主会话污染</span></div>
+          <div class="badge-item"><code class="badge-code">工具治理</code><span class="badge-desc">permission modes（allow/ask/deny）+ hooks 生命周期自动化——动作前后可插入组织控制点</span></div>
+          <div class="badge-item"><code class="badge-code">一句话总结</code><span class="badge-desc">"把上下文来源和动作权限都做成显式、可分层、可覆盖的配置系统"；面向编码工作流，长期人格与多租户远程不是它的核心抽象</span></div>
+        </div>
+
+        <h3 style="font-family:var(--font-display);font-size:var(--text-xl);margin:var(--space-6) 0 var(--space-3)">② Hermes Agent —— 记忆与技能进化</h3>
+        <div class="badge-list">
+          <div class="badge-item"><code class="badge-code">记忆机制</code><span class="badge-desc">持久 MEMORY.md / USER.md：跨会话保留身份与事实；状态外化到文件系统的代表实现</span></div>
+          <div class="badge-item"><code class="badge-code">技能学习</code><span class="badge-desc">Skills 可由 Agent 自己创建并改进——"执行→总结→技能化"的自我改进回路；多入口（CLI/消息渠道/cron）共用同一个 Agent 身份</span></div>
+          <div class="badge-item"><code class="badge-code">一句话总结</code><span class="badge-desc">"把一次工具成功抽取成未来可复用的程序性记忆"；代价是治理面扩大——技能写入和后台任务都需要审批与审计</span></div>
+        </div>
+
+        <h3 style="font-family:var(--font-display);font-size:var(--text-xl);margin:var(--space-6) 0 var(--space-3)">③ OpenClaw —— Gateway 多渠道架构（2026-08 已核实的最新口径）</h3>
+        <div class="badge-list">
+          <div class="badge-item"><code class="badge-code">定位</code><span class="badge-desc">跑在自己设备上的个人 AI 助理，为<strong>单一操作者</strong>设计；在 WhatsApp/Telegram/Slack/Discord/iMessage 等现有渠道里见面</span></div>
+          <div class="badge-item"><code class="badge-code">架构核心</code><span class="badge-desc">Gateway 是本地控制面：统一管理 sessions、tools、events 和渠道连接；Control UI / CLI / TUI 都连到它</span></div>
+          <div class="badge-item"><code class="badge-code">安全边界</code><span class="badge-desc">主会话的工具<strong>默认直接跑在宿主机上</strong>，除非显式配置 sandboxing——官方安全指南明确要求暴露前读 runbook。这是与你项目最大的对照点！</span></div>
+          <div class="badge-item"><code class="badge-code">扩展生态</code><span class="badge-desc">Tools / Skills / Plugins + ClawHub 市场；Companion 节点提供语音、Canvas、摄像头等设备侧能力</span></div>
+        </div>
+        <div class="callout callout-accent">
+          <div class="callout-icon">⚔️</div>
+          <div class="callout-content">
+            <strong class="callout-title">对比反杀（背下来）</strong>
+            <p>"OpenClaw 默认宿主执行、单操作者信任模型——这正确定位了它是个人助理。而我的项目服务的是<strong>互相不信任的多租户</strong>：非 root 只读容器、cap drop ALL、默认无网络、每 Attempt 独立沙箱加证据三元组。信任模型决定隔离设计，这不是谁做得好谁做得差，是命题不同。"</p>
+          </div>
+        </div>
+      </section>
+
+      <section class="screen animate-in">
+        <h2 class="screen-heading">七家责任矩阵：同一责任，各自兑现</h2>
+        <table style="width:100%;border-collapse:collapse;font-size:var(--text-xs)">
+          <tr style="border-bottom:2px solid var(--color-border)">
+            <th style="text-align:left;padding:var(--space-1)">Harness</th><th style="text-align:left;padding:var(--space-1)">入口形态</th><th style="text-align:left;padding:var(--space-1)">记忆/会话</th><th style="text-align:left;padding:var(--space-1)">治理特色</th><th style="text-align:left;padding:var(--space-1)">工程重心</th>
+          </tr>
+          <tr style="border-bottom:1px solid var(--color-border-light)"><td style="padding:var(--space-1)"><strong>Claude Code</strong></td><td style="padding:var(--space-1)">Terminal / IDE</td><td style="padding:var(--space-1)">CLAUDE.md 层级 + transcript</td><td style="padding:var(--space-1)">permission modes + hooks</td><td style="padding:var(--space-1)">高频编码闭环</td></tr>
+          <tr style="border-bottom:1px solid var(--color-border-light)"><td style="padding:var(--space-1)"><strong>Hermes</strong></td><td style="padding:var(--space-1)">CLI/渠道/cron 多入口</td><td style="padding:var(--space-1)">MEMORY.md / USER.md 持久</td><td style="padding:var(--space-1)">技能写入需审批</td><td style="padding:var(--space-1)">自我进化回路</td></tr>
+          <tr style="border-bottom:1px solid var(--color-border-light)"><td style="padding:var(--space-1)"><strong>OpenClaw</strong></td><td style="padding:var(--space-1)">消息渠道 + Control UI</td><td style="padding:var(--space-1)">Gateway 会话管理</td><td style="padding:var(--space-1)">沙箱可选配置</td><td style="padding:var(--space-1)">多渠道聚合</td></tr>
+          <tr style="border-bottom:1px solid var(--color-border-light)"><td style="padding:var(--space-1)"><strong>Codex CLI</strong></td><td style="padding:var(--space-1)">CLI + app-server 协议</td><td style="padding:var(--space-1)">threads / turns / items</td><td style="padding:var(--space-1)">sandbox policy 与 approval policy 分离</td><td style="padding:var(--space-1)">协议化边界</td></tr>
+          <tr style="border-bottom:1px solid var(--color-border-light)"><td style="padding:var(--space-1)"><strong>Gemini CLI</strong></td><td style="padding:var(--space-1)">CLI</td><td style="padding:var(--space-1)">会话 + 扩展配置</td><td style="padding:var(--space-1)">权限提升做成可见事件</td><td style="padding:var(--space-1)">最小权限起步</td></tr>
+          <tr style="border-bottom:1px solid var(--color-border-light)"><td style="padding:var(--space-1)"><strong>OpenHands</strong></td><td style="padding:var(--space-1)">Web / API</td><td style="padding:var(--space-1)">Conversation Handler 管状态</td><td style="padding:var(--space-1)">Workspace Manager 分配用户级容器</td><td style="padding:var(--space-1)">远程工作区隔离</td></tr>
+          <tr><td style="padding:var(--space-1)"><strong>Pi（本项目内核）</strong></td><td style="padding:var(--space-1)">SDK / JSON / RPC 嵌入</td><td style="padding:var(--space-1)">Session branching + compaction</td><td style="padding:var(--space-1)">有意不内置 permissions/MCP——交给外层 Harness</td><td style="padding:var(--space-1)">极小内核 + extension-first</td></tr>
+        </table>
+        <div class="callout callout-info">
+          <div class="callout-icon">🧭</div>
+          <div class="callout-content">
+            <strong class="callout-title">你的坐标（收尾话术）</strong>
+            <p>"这些 Harness 都是 Layer 03 单体执行壳；我的项目站在它们之上往 Layer 04 走——多租户、配额、审计、公平调度、跨 Run 恢复。Pi 是我选中的极小内核，它的'不内置治理'恰恰是我能在外面建控制面的原因。"</p>
+          </div>
+        </div>
+
+        <div class="quiz-container" id="quiz-module-12">
+          <div class="quiz-question-block"
+               data-correct="option-a"
+               data-explanation-right="完全正确！Codex 把'能不能做到'（沙箱限制能力）和'是否允许做'（审批授予例外）拆成两个独立策略——这个分离思路和你项目里 sandbox profile 与 policy 快照的分离同构。"
+               data-explanation-wrong="回想那句 borrow 总结：不要把进程能力和用户授权混成一个布尔值。这正是 Codex 最值得借鉴的设计。">
+            <h3 class="quiz-question">Codex CLI 最有辨识度的治理设计是什么？</h3>
+            <div class="quiz-options">
+              <button class="quiz-option" data-value="option-a" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>sandbox policy 与 approval policy 分离：沙箱限制"能力"，审批授予"例外"，两者不混为一个布尔值</span>
+              </button>
+              <button class="quiz-option" data-value="option-b" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>所有工具调用一律需要人工逐条确认</span>
+              </button>
+              <button class="quiz-option" data-value="option-c" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>用 MEMORY.md 文件持久化用户画像</span>
+              </button>
+            </div>
+            <div class="quiz-feedback"></div>
+          </div>
+
+          <div class="quiz-question-block"
+               data-correct="option-b"
+               data-explanation-right="正确！这是今天刚从官方 README 核实的事实：主会话工具默认宿主执行、沙箱可选。单操作者的个人助理可以这样做，多租户服务端绝不可以——信任模型的差异正是你项目的立足点。"
+               data-explanation-wrong="OpenClaw 面向单一操作者、跑在自己的设备上，默认信任宿主环境是合理的产品取舍——但这也正是它与你多租户项目的根本分野，面试里主动指出这一点非常加分。">
+            <h3 class="quiz-question">OpenClaw 与你的多租户项目最本质的差异点是什么？</h3>
+            <div class="quiz-options">
+              <button class="quiz-option" data-value="option-a" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>OpenClaw 用 TypeScript 写的，性能不如 Bun</span>
+              </button>
+              <button class="quiz-option" data-value="option-b" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>信任模型：OpenClaw 单操作者、主会话工具默认宿主执行（沙箱可选）；你的项目服务互不信任的多租户，强制非 root 只读容器+无网络+证据三元组</span>
+              </button>
+              <button class="quiz-option" data-value="option-c" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>OpenClaw 不支持任何工具调用</span>
+              </button>
+            </div>
+            <div class="quiz-feedback"></div>
+          </div>
+
+          <div class="quiz-question-block"
+               data-correct="option-c"
+               data-explanation-right="完全正确！"有意不内置"不是缺陷而是边界承诺：稳定内核（loop/session）与变化策略（治理/资源/租户/恢复）分开，才有了你在外层建控制面的空间。"
+               data-explanation-wrong="Pi 的极小内核是刻意设计：permissions、subagents、MCP 这些治理承诺留给宿主定义。如果你用它当内核，恰好由你来补齐治理层——这就是你的项目。">
+            <h3 class="quiz-question">为什么本项目选 Pi 当 Runtime 内核，而不是功能更全的框架？</h3>
+            <div class="quiz-options">
+              <button class="quiz-option" data-value="option-a" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>Pi 是唯一支持 vLLM 的框架</span>
+              </button>
+              <button class="quiz-option" data-value="option-b" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>因为 Pi 完全免费开源没有 license 风险</span>
+              </button>
+              <button class="quiz-option" data-value="option-c" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>Pi 有意不内置 permissions/subagents/MCP 等治理承诺——稳定内核与变化策略分开，Harness 层的治理、资源、租户、恢复语义才能干净地建在外层</span>
+              </button>
+            </div>
+            <div class="quiz-feedback"></div>
+          </div>
+
+          <button class="quiz-check-btn" onclick="checkQuiz('quiz-module-12')">检查答案</button>
+          <button class="quiz-reset-btn" onclick="resetQuiz('quiz-module-12')">再试一次</button>
+        </div>
+
+        <p style="margin-top:var(--space-8)"><strong>下一模块</strong>：知识装进脑子之后，练输出——两道全真系统设计题的实战打法。</p>
+      </section>
+
+    </div>
+  </div>
+</section>

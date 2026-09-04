@@ -25,7 +25,7 @@ function makeInput(overrides: Partial<ExecutionPolicyInput> = {}): ExecutionPoli
     return {
         runId: "run",
         tenantId: "tenant-a",
-        classification: { pressure: "NORMAL", snapshotId: "snap" },
+        classification: { pressure: "NORMAL", snapshotId: "snap", reasons: [], gpuMemoryUsagePercent: null },
         activeRunCount: 0,
         activeTenantRunCount: 0,
         ...overrides,
@@ -126,7 +126,7 @@ test("BudgetAwareExecutionPolicy：基础策略本就 QUEUE 时保持 QUEUE（�
         usage,
     );
     const decision = policy.decide(makeInput({
-        classification: { pressure: "CRITICAL", snapshotId: "snap" },
+        classification: { pressure: "CRITICAL", snapshotId: "snap", reasons: [], gpuMemoryUsagePercent: null },
     }));
     expect(decision.action).toBe("QUEUE");
     expect(decision.reasonCode).toBe("RESOURCE_CRITICAL");

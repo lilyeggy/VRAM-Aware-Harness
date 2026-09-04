@@ -1,0 +1,226 @@
+<section class="module" id="module-11" style="background: var(--color-bg-warm)">
+  <div class="module-content">
+    <header class="module-header animate-in">
+      <span class="module-number">11</span>
+      <h1 class="module-title">Harness Engineering 话语映射</h1>
+      <p class="module-subtitle">"你怎么理解 Harness Engineering？"——2026 年让候选人当场愣住的新题。这一页把你的项目翻译成面试官的业界语言。</p>
+    </header>
+
+    <div class="module-body">
+
+      <section class="screen animate-in">
+        <h2 class="screen-heading">先接住概念：出处与等式</h2>
+        <p>被问"Harness 是什么"，60 秒标准答案分三段：<strong>定义 → 出处 → 等式</strong>。</p>
+        <div class="step-cards stagger-children">
+          <div class="step-card animate-in">
+            <div class="step-num">1</div>
+            <div class="step-body">
+              <strong>定义：给 AI 装缰绳的工程学科</strong>
+              <p>Harness 直译"马具"。模型是马，力量大但会脱缰；Harness 是让这股力量为你所用、跑偏能拉回、摔了能爬起来的那整套东西。</p>
+            </div>
+          </div>
+          <div class="step-card animate-in">
+            <div class="step-num">2</div>
+            <div class="step-body">
+              <strong>出处：两条权威脉络</strong>
+              <p>Mitchell Hashimoto（HashiCorp 创始人）2026-02 博客《My AI Adoption Journey》提出 "Engineer the Harness"：每次 Agent 犯错就把修复沉淀进环境，让它结构性地不再犯。一周后 OpenAI 发文《Harness engineering》背书。</p>
+            </div>
+          </div>
+          <div class="step-card animate-in">
+            <div class="step-num">3</div>
+            <div class="step-body">
+              <strong>等式：Agent = Model + Harness</strong>
+              <p>除模型外，决定它能否稳定交付的一切都属于 Harness。反推 Harness = Agent − Model——边界清晰。</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="screen animate-in">
+        <h2 class="screen-heading">三次重心转移：Prompt → Context → Harness</h2>
+        <p>面试官追问"和 Prompt Engineering 什么区别"时的框架答案：</p>
+        <div class="flow-steps stagger-children">
+          <div class="flow-step animate-in">
+            <div class="flow-step-num">1</div>
+            <p><strong>Prompt Engineering<br>让模型"听懂"</strong>——解决意图表达：角色/示例/CoT 把概率分布聚拢。止步于单轮。</p>
+          </div>
+          <div class="flow-arrow">→</div>
+          <div class="flow-step animate-in">
+            <div class="flow-step-num">2</div>
+            <p><strong>Context Engineering<br>让模型"知道"</strong>——解决信息供给：召回/压缩/组装，对抗上下文腐化。止步于输入侧。</p>
+          </div>
+          <div class="flow-arrow">→</div>
+          <div class="flow-step animate-in">
+            <div class="flow-step-num">3</div>
+            <p><strong>Harness Engineering<br>让模型"做对"</strong>——链路一长就会跑偏：谁来监督？谁拉回来？摔了谁扶？这是行动侧+校验侧的系统工程。</p>
+          </div>
+        </div>
+        <div class="callout callout-accent">
+          <div class="callout-icon">🎯</div>
+          <div class="callout-content">
+            <strong class="callout-title">转折点话术</strong>
+            <p>"前两代优化的是'怎么让模型更会想'，Harness 解决的是'怎么让它不跑偏、跑得稳、出了错还能爬起来'。"——这句说完再接下一屏的六层映射，面试官就知道你不是背名词的。</p>
+          </div>
+        </div>
+      </section>
+
+      <section class="screen animate-in">
+        <h2 class="screen-heading">主视觉：业界六层 ↔ 本项目逐层映射</h2>
+        <p>"如果让你设计一个 Harness，里面装什么？"——标准答案是六层组件。<strong>每一层你都有真实实现</strong>，这就是这张表的杀伤力：</p>
+        <table style="width:100%;border-collapse:collapse;font-size:var(--text-sm)">
+          <tr style="border-bottom:2px solid var(--color-border)">
+            <th style="text-align:left;padding:var(--space-2);width:18%">业界六层</th>
+            <th style="text-align:left;padding:var(--space-2);width:22%">解决的核心问题</th>
+            <th style="text-align:left;padding:var(--space-2)">本项目的真实对应物</th>
+          </tr>
+          <tr style="border-bottom:1px solid var(--color-border-light)">
+            <td style="padding:var(--space-2)"><strong>① 上下文精细化</strong></td>
+            <td style="padding:var(--space-2)">这一轮该看到什么？</td>
+            <td style="padding:var(--space-2)">Pi 会话句柄设计：压缩与上下文归 Pi（SessionManager.appendCompaction 写进会话文件），Harness 只做"选会话+复用句柄+转事件"，不碰消息内容</td>
+          </tr>
+          <tr style="border-bottom:1px solid var(--color-border-light)">
+            <td style="padding:var(--space-2)"><strong>② 工具系统</strong></td>
+            <td style="padding:var(--space-2)">用什么动手？</td>
+            <td style="padding:var(--space-2)">ToolGateway：策略守卫前置 → PREPARED 记账 → 授权 → 执行 → SUCCEEDED+Checkpoint 同事务；工具经 runsc 容器命令边界执行</td>
+          </tr>
+          <tr style="border-bottom:1px solid var(--color-border-light)">
+            <td style="padding:var(--space-2)"><strong>③ 执行编排</strong></td>
+            <td style="padding:var(--space-2)">下一步该干啥？</td>
+            <td style="padding:var(--space-2)">Loop 归 Pi（ReAct 循环），编排归 Harness：Run 状态机 + 公平队列 + 资源准入 + single-flight drain——"循环之上"的受控执行</td>
+          </tr>
+          <tr style="border-bottom:1px solid var(--color-border-light)">
+            <td style="padding:var(--space-2)"><strong>④ 记忆与状态</strong></td>
+            <td style="padding:var(--space-2)">跨轮记住什么？</td>
+            <td style="padding:var(--space-2)">状态全部外化：agent_runs 快照 + run_events 追加时间线 + Checkpoint 稳定引用（runtimeSessionRef+lastEventSequence），重启后从 DB 事实重建内存</td>
+          </tr>
+          <tr style="border-bottom:1px solid var(--color-border-light)">
+            <td style="padding:var(--space-2)"><strong>⑤ 评估观测</strong></td>
+            <td style="padding:var(--space-2)">做得好不好？</td>
+            <td style="padding:var(--space-2)">Eval 聚合器（零新增采集）+ /observe 驾驶舱 + policy_decisions 决策台账 + MODEL_COMPLETED usage 全落库</td>
+          </tr>
+          <tr>
+            <td style="padding:var(--space-2)"><strong>⑥ 约束恢复</strong></td>
+            <td style="padding:var(--space-2)">出错了能不能爬起来？</td>
+            <td style="padding:var(--space-2)">fail-closed 四条线（观测失败→QUEUE / 副作用未知→人工 / 能力缺失→REJECTED / runtime 证据不符→删容器）+ RecoveryService 三件套</td>
+          </tr>
+        </table>
+        <div class="callout callout-accent">
+          <div class="callout-icon">🗡️</div>
+          <div class="callout-content">
+            <strong class="callout-title">差异化反杀话术</strong>
+            <p>"业界的六层大多停留在方法论和最佳实践；我把其中最难的第六层'约束与恢复'做成了带数据库 CHECK 约束、乐观锁和真机攻击测试的系统。方法论我有体系，落地我有 schema 和 254 个测试。"</p>
+          </div>
+        </div>
+      </section>
+
+      <section class="screen animate-in">
+        <h2 class="screen-heading">Mitchell 复利效应 ↔ 你的演进史</h2>
+        <p>"每次 Agent 犯错，把修复沉到环境里"——你的项目就是这个哲学的实践样本，举两个真实证据：</p>
+        <div class="icon-rows">
+          <div class="icon-row">
+            <div class="icon-circle" style="background: var(--color-accent)">🧱</div>
+            <div>
+              <strong>修复沉到 schema：migration v4 的 CHECK 约束</strong>
+              <p>踩过"资源观测失败时伪造快照"的坑之后，修复不是加一行 if，而是数据库 CHECK 约束：决策为 QUEUE+UNKNOWN 时快照必须为 null 且带失败原因——应用层忘了写，存储层也会拒绝。</p>
+            </div>
+          </div>
+          <div class="icon-row">
+            <div class="icon-circle" style="background: var(--color-actor-2)">✂️</div>
+            <div>
+              <strong>修复沉到数据契约：migration v15 删 subject_id</strong>
+              <p>发现 RequestPrincipal 里 subjectId 与 tenantId 一一对应纯属冗余后，直接 migration 删列——身份模型越简单，防串面越小。错误修在类型系统里，不靠人记。</p>
+            </div>
+          </div>
+          <div class="icon-row">
+            <div class="icon-circle" style="background: var(--color-actor-4)">📜</div>
+            <div>
+              <strong>修复沉到测试：Fake Runtime 合同测试先行</strong>
+              <p>AgentRuntime 接口的 start/resume/interrupt/unsubscribe/runId 隔离五条合同先于 PiAdapter 实现存在——任何未来 Runtime 想接入，先过同一套合同。</p>
+            </div>
+          </div>
+        </div>
+        <div class="callout callout-info">
+          <div class="callout-icon">🔭</div>
+          <div class="callout-content">
+            <strong class="callout-title">可观测性九问自检（来源：大厂真题清单）</strong>
+            <p>Trace 记什么？（RunEvent 时间线+usage+decisions ✓）怎么发现跑偏？（事件链+Eval 成功率 ⚠️部分）工具出错怎么归因三步？（TOOL_FAILED payload 带 result/isError + policy_decisions 记 ALLOW/DENY + sandbox evidence ✓）成本失控监控什么？（token/cost/cache 命中率 ✓）失败样本怎么沉淀？（诚实边界文档+migration ✓）——每问都有东西说，弱项主动承认。</p>
+          </div>
+        </div>
+
+        <div class="quiz-container" id="quiz-module-11">
+          <div class="quiz-question-block"
+               data-correct="option-b"
+               data-explanation-right="完全正确！这个顺序展示了三层递进：概念有出处、框架有体系、落地有证据——最后一句把话题引到自己最强的差异化上。"
+               data-explanation-wrong="只答定义会显得像背的；只讲自己项目又接不住面试官的话语体系。正确姿势是'出处→框架→我的落地'三级火箭。">
+            <h3 class="quiz-question">面试官问"你怎么理解 Harness Engineering？"最优的回答结构是？</h3>
+            <div class="quiz-options">
+              <button class="quiz-option" data-value="option-a" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>直接开始讲自己项目的架构细节，用实例证明懂</span>
+              </button>
+              <button class="quiz-option" data-value="option-b" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>先定义（缰绳/Agent=Model+Harness）→ 出处（Mitchell/OpenAI）→ 六层组件 → 最后落到"我项目里每层的真实对应物"</span>
+              </button>
+              <button class="quiz-option" data-value="option-c" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>坦白说这是个炒作的新词，本质还是老一套 DevOps</span>
+              </button>
+            </div>
+            <div class="quiz-feedback"></div>
+          </div>
+
+          <div class="quiz-question-block"
+               data-correct="option-a"
+               data-explanation-right="正是！Loop Engineering 属于第三层执行编排，而你的项目有意把 Loop 留在 Pi（可替换 Runtime），自己专注循环之上的受控执行——依赖倒置的边界画在了这里。"
+               data-explanation-wrong="注意边界：ReAct 循环本身由 Pi 提供，你的项目管的是 Run 状态机、调度、准入这些'循环之外'的治理。这个边界本身就是值得讲的架构决策。">
+            <h3 class="quiz-question">业界说的 "Loop Engineering" 对应六层中的哪一层？你的项目在这一层做了什么、没做什么？</h3>
+            <div class="quiz-options">
+              <button class="quiz-option" data-value="option-a" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>第三层执行编排；项目做了 Run 状态机+公平调度+资源准入，Loop 本身有意留给 Pi（可替换 Runtime）</span>
+              </button>
+              <button class="quiz-option" data-value="option-b" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>第五层评估观测；项目自己实现了 ReAct 循环引擎</span>
+              </button>
+              <button class="quiz-option" data-value="option-c" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>第一层上下文；项目通过 prompt 模板管理循环</span>
+              </button>
+            </div>
+            <div class="quiz-feedback"></div>
+          </div>
+
+          <div class="quiz-question-block"
+               data-correct="option-c"
+               data-explanation-right="完全正确！这正是 Mitchell 复利效应的精髓：修复要结构性生效而不是靠自觉。CHECK 约束比 if 语句强一层——它连绕过应用层的路径一起堵住。"
+               data-explanation-wrong="加注释或改文案都是'提醒'不是'约束'——下次新代码照样能绕过。真正的复利是把不变量写进 schema 和测试里，让人想犯错都难。">
+            <h3 class="quiz-question">"每次踩坑后把修复沉到环境里"——下列哪个做法最符合这个原则？</h3>
+            <div class="quiz-options">
+              <button class="quiz-option" data-value="option-a" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>在代码注释里写明"此处不要伪造快照"</span>
+              </button>
+              <button class="quiz-option" data-value="option-b" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>把踩坑记录发到团队群里周知大家</span>
+              </button>
+              <button class="quiz-option" data-value="option-c" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>migration v4 加 CHECK 约束：QUEUE+UNKNOWN 决策的快照必须为 null 且带失败原因——违反即拒绝写入</span>
+              </button>
+            </div>
+            <div class="quiz-feedback"></div>
+          </div>
+
+          <button class="quiz-check-btn" onclick="checkQuiz('quiz-module-11')">检查答案</button>
+          <button class="quiz-reset-btn" onclick="resetQuiz('quiz-module-11')">再试一次</button>
+        </div>
+
+        <p style="margin-top:var(--space-8)"><strong>下一模块</strong>：横向展开——Claude Code、Hermes、OpenClaw 等七个主流 Harness 怎么对比、你的项目站在坐标系哪里。</p>
+      </section>
+
+    </div>
+  </div>
+</section>

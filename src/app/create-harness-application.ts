@@ -44,6 +44,7 @@ import { PiAdapter } from "../runtime/pi-adapter.ts";
 import { RuntimeCapabilityProfileStore } from "../runtime/runtime-capability-store.ts";
 import type { RuntimeCapabilityProfile } from "../runtime/runtime-capability.ts";
 import { ManagedAgentRuntime } from "../runtime/managed-agent-runtime.ts";
+import { SupervisedAgentRuntime } from "../runtime/supervised-agent-runtime.ts";
 import { EffectivePolicyStore } from "../policies/effective-policy-store.ts";
 import { PolicyRegistry } from "../policies/policy-registry.ts";
 import { PersistentToolPolicyGuard } from "../policies/tool-policy-guard.ts";
@@ -54,6 +55,7 @@ import {
     UnavailableStrictSandboxProvider,
 } from "../sandbox/sandbox-provider-router.ts";
 import { SandboxStore } from "../sandbox/sandbox-store.ts";
+import { SandboxStartupReconciler } from "../sandbox/sandbox-startup-reconciler.ts";
 import {
     EnvironmentSecretProvider,
     ManagedLocalSandboxProvider,
@@ -64,6 +66,7 @@ import { RunStore } from "../runs/runstore.ts";
 import { RunAttemptStore } from "../runs/run-attempt-store.ts";
 import { RunOutputStore } from "../runs/run-output-store.ts";
 import { HarnessSessionStore } from "../sessions/harness-session-store.ts";
+import { ConversationStore } from "../conversations/conversation-store.ts";
 import {
     QueuedRunRecoveryService,
 } from "../scheduling/queued-run-recovery-service.ts";
@@ -106,6 +109,7 @@ export interface HarnessComposition {
     templateStore:HarnessTemplateStore;
     instanceStore:HarnessInstanceStore;
     sessionStore:HarnessSessionStore;
+    conversationStore:ConversationStore;
     attemptStore:RunAttemptStore;
     capabilityStore:RuntimeCapabilityProfileStore;
     effectivePolicyStore:EffectivePolicyStore;
@@ -149,6 +153,7 @@ export async function createHarnessApplication(
     const templateStore = new HarnessTemplateStore(database);
     const instanceStore = new HarnessInstanceStore(database);
     const sessionStore = new HarnessSessionStore(database);
+    const conversationStore = new ConversationStore(database);
     const attemptStore = new RunAttemptStore(database);
     const capabilityStore = new RuntimeCapabilityProfileStore(database);
     const effectivePolicyStore = new EffectivePolicyStore(database);
@@ -176,7 +181,6 @@ export async function createHarnessApplication(
         try {
             credentialStore.create({
                 rawKey: config.bootstrapApiKey,
-                subjectId: "bootstrap-operator",
                 tenantId: "bootstrap",
                 scopes: ["*"],
             });
@@ -211,8 +215,16 @@ export async function createHarnessApplication(
             runStore,
             sandboxProvider as Partial<SandboxCommandExecutor>,
         );
-    const runtime = new ManagedAgentRuntime(
+    const supervisedRuntime = new SupervisedAgentRuntime(
         baseRuntime,
+        sandboxProvider,
+        {
+            executionTimeoutMs: config.executionTimeoutMs ?? 30 * 60_000,
+            interruptGraceMs: config.interruptGraceMs ?? 10_000,
+        },
+    );
+    const runtime = new ManagedAgentRuntime(
+        supervisedRuntime,
         runStore,
         templateStore,
         instanceStore,
@@ -282,10 +294,17 @@ export async function createHarnessApplication(
         checkpointStore,
         coordinator,
     );
+    const sandboxReconciler = new SandboxStartupReconciler(
+        sandboxStore,
+        sandboxProvider,
+        attemptStore,
+        instanceStore,
+    );
     const startupRecovery = new RecoveryStartupCoordinator(
         recoveryService,
         recoveryExecutor,
         queuedRunRestorer,
+        sandboxReconciler,
     );
     const application = new HarnessApplication(
         coordinator,
@@ -297,6 +316,8 @@ export async function createHarnessApplication(
         startupRecovery,
         runOutputStore,
         workspaceResultCoordinator,
+        instanceStore,
+        conversationStore,
     );
     const evaluationAggregator = new EvaluationAggregator(database);
     // 方向 C：LLM 网关（仅当配置了后端时启用）。
@@ -308,6 +329,9 @@ export async function createHarnessApplication(
         checkpointStore,
         {
             authenticate: (rawKey) => credentialStore.authenticate(rawKey),
+            registerUser: (email, password) => credentialStore.registerUser(email, password),
+            loginUser: (email, password) => credentialStore.loginUser(email, password),
+            revokeSession: (token) => credentialStore.revokeSession(token),
             workspaceService,
             auditStore: accessAuditStore,
         },
@@ -327,6 +351,7 @@ export async function createHarnessApplication(
         templateStore,
         instanceStore,
         sessionStore,
+        conversationStore,
         attemptStore,
         capabilityStore,
         effectivePolicyStore,

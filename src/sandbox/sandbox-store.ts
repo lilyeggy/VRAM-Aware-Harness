@@ -106,4 +106,15 @@ export class SandboxStore {
             failureReason: row.failureReason,
         };
     }
+
+    listUnsettled(): SandboxRecord[] {
+        const rows = this.db.query<{ id: string }, []>(`
+            SELECT id FROM sandboxes
+            WHERE status IN ('PROVISIONING', 'ACTIVE')
+            ORDER BY created_at ASC, id ASC;
+        `).all();
+        return rows.map(({ id }) => this.get(id)).filter(
+            (record): record is SandboxRecord => record !== null,
+        );
+    }
 }

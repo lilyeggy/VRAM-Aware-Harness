@@ -46,6 +46,12 @@ test("Secret 只在 Handle 回调中出现，持久化记录只保存名称", as
 
     expect(handle.withSecrets((environment) => environment.API_TOKEN))
         .toBe("super-secret-value");
+    expect(handle.enforcement).toMatchObject({
+        toolExecutionBoundary: "HOST",
+        filesystemIsolation: false,
+        processIsolation: false,
+        networkPolicyEnforced: false,
+    });
     const persisted = store.get("sandbox-1")!;
     expect(persisted.secretNames).toEqual(["API_TOKEN"]);
     expect(JSON.stringify(persisted)).not.toContain("super-secret-value");

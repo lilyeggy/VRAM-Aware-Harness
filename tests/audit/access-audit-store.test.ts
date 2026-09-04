@@ -7,12 +7,12 @@ test("访问审计按 Tenant 保存允许与拒绝事实，不保存凭证内容
     try {
         const store = new AccessAuditStore(db);
         store.record({
-            action: "tasks:read", outcome: "ALLOW", subjectId: "user-a",
+            action: "tasks:read", outcome: "ALLOW",
             tenantId: "tenant-a", resourceType: "HTTP_REQUEST", resourceId: null,
             reason: "scope_granted",
         });
         store.record({
-            action: "tasks:write", outcome: "DENY", subjectId: "user-a",
+            action: "tasks:write", outcome: "DENY",
             tenantId: "tenant-a", resourceType: "HTTP_REQUEST", resourceId: null,
             reason: "missing_scope",
         });

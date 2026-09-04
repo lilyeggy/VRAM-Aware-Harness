@@ -1,0 +1,265 @@
+<section class="module" id="module-1" style="background: var(--color-bg-warm)">
+  <div class="module-content">
+    <header class="module-header animate-in">
+      <span class="module-number">01</span>
+      <h1 class="module-title">项目定位与全局图景</h1>
+      <p class="module-subtitle">面试的前 30 秒决定后面 30 分钟聊什么——这一模块给你那 30 秒，以及它背后的整张地图。</p>
+    </header>
+
+    <div class="module-body">
+
+      <!-- ═══ Screen 1：一句话定位与电梯稿 ═══ -->
+      <section class="screen animate-in">
+        <h2 class="screen-heading">面试官问：「介绍一下你的项目」</h2>
+        <p>答错层次，是面试里最贵的错误：把它说成「又一个 Agent 应用」，后面的所有深挖都会失去支点。这个项目的准确定位是——Agent 之外的<strong><span class="term" data-definition="控制面（control plane）：负责决策与治理的服务层——它不亲自执行业务逻辑，而是决定谁、何时、以什么权限、在什么环境下执行。与真正干活的行为面相对。">控制面</span>服务</strong>。下面两段话请原样背下来。</p>
+
+        <div class="scenario-block">
+          <div class="scenario-context">
+            <span class="scenario-label">一句话定位 · 必须原文背下</span>
+            <p>VRAM-Aware Agent Harness 是一个支持团队共享本地大模型的<strong><span class="term" data-definition="多租户（multi-tenant）：一套系统同时服务多个互不信任的团队，彼此的数据、资源配额与故障必须相互隔离——这是本项目一切设计的出发点。">多租户</span> Agent 任务服务</strong>。用户在独立 Workspace 中提交任务、观察 Agent 执行并获得最终回答、文件 <span class="term" data-definition="Diff：两份文本的差异对比，逐行标出增删改，是展示『改了什么』的标准格式。">Diff</span> 和 <span class="term" data-definition="Artifact（制品）：任务产出的正式交付物文件，归档保存、事后可追溯。">Artifact</span>；系统负责可信租户身份、隔离运行环境、公平调度共享 GPU、工具权限与副作用治理，以及故障后的安全恢复。</p>
+          </div>
+        </div>
+
+        <div class="scenario-block">
+          <div class="scenario-context">
+            <span class="scenario-label">30 秒电梯稿 · 面试开场用</span>
+            <p>我做了一个多租户 Agent 任务控制面。Agent 负责「动脑」，我的系统负责「安排与安保」：多租户身份、GPU 资源准入与<span class="term" data-definition="背压（backpressure）：过载时不硬扛，而是让新请求排队或被拒，把压力传回上游——宁可慢，不可崩。">背压</span>、<span class="term" data-definition="runsc 沙箱：基于 Google gVisor 的容器运行时，用用户态安全内核拦截系统调用——比 Docker 隔离强、比虚拟机轻。">runsc 沙箱</span>隔离、工具<span class="term" data-definition="副作用记账：副作用指对外部世界的持久改变（写文件、发请求）。动手前先把意图持久化成账面记录，出事才有据可查。">副作用记账</span>与崩溃恢复，以及执行评测、观测驾驶舱和 LLM 路由网关三个深化方向。254 个测试全绿，并在 T4 GPU 上做了 120 并发的真机验证。</p>
+          </div>
+        </div>
+
+        <p>电梯稿里每个数字都要能展开讲。这是你的证据链：</p>
+        <div class="badge-list">
+          <div class="badge-item"><code class="badge-code">254 tests / 0 fail</code><span class="badge-desc">全量测试绿，说明控制面的状态机与恢复逻辑被反复锤过</span></div>
+          <div class="badge-item"><code class="badge-code">9 项沙箱攻击真机 PASS</code><span class="badge-desc">逃逸类攻击在 runsc 沙箱里全部被拦住，隔离不是纸面声明</span></div>
+          <div class="badge-item"><code class="badge-code">T4 · 120 并发 → CRITICAL → QUEUE</code><span class="badge-desc">真机上把 GPU 压到临界态，系统自动从放行切换为排队</span></div>
+          <div class="badge-item"><code class="badge-code">runc vs runsc 冷启动 1.22x</code><span class="badge-desc">为隔离付出的启动代价只有 22%，可接受且有数据支撑</span></div>
+          <div class="badge-item"><code class="badge-code">15 个 <span class="term" data-definition="schema migration（模式迁移）：数据表结构随版本演进的变更脚本序列，每一版都可追溯。">schema migration</span></code><span class="badge-desc">控制面数据模型随设计迭代演进了 15 版</span></div>
+          <div class="badge-item"><code class="badge-code">8 个 HTTP 端点</code><span class="badge-desc">对外接口收敛克制，控制面不贪多</span></div>
+        </div>
+      </section>
+
+      <!-- ═══ Screen 2：物业公司 vs 房客隐喻 ═══ -->
+      <section class="screen animate-in">
+        <h2 class="screen-heading">一个隐喻定调：物业公司与房客</h2>
+        <p>Agent（Pi）是<strong>房客</strong>——会自己做饭、洗澡、接待客人，对应思考、调模型、用工具。Harness 是<strong>物业公司</strong>——决定谁能进楼、哪间房给谁用、水电超载要限流、出了事故怎么善后。</p>
+        <p>物业不替房客过日子；但没有物业的楼，是危楼。</p>
+
+        <div class="pattern-cards">
+          <div class="pattern-card animate-in" style="border-top: 3px solid var(--color-actor-2)">
+            <div class="pattern-icon" style="background: var(--color-actor-2)">🧠</div>
+            <h4 class="pattern-title">房客 = Pi（行为平面）</h4>
+            <p class="pattern-desc">自己决定做什么：推理、选择工具、组织回答。项目<strong>复用 Pi SDK</strong>，不重新实现「模型—工具循环」——动脑的事归它。</p>
+          </div>
+          <div class="pattern-card animate-in" style="border-top: 3px solid var(--color-actor-1)">
+            <div class="pattern-icon" style="background: var(--color-actor-1)">🏢</div>
+            <h4 class="pattern-title">物业 = Harness（控制平面）</h4>
+            <p class="pattern-desc">身份、策略、调度、隔离、记账、恢复。它不替模型做任何决策，但在副作用发生前握有<strong>最终否决权</strong>——安排与安保的事归它。</p>
+          </div>
+        </div>
+
+        <div class="callout callout-accent">
+          <div class="callout-icon">💡</div>
+          <div class="callout-content">
+            <strong class="callout-title">关键洞察：否决权放在哪里</strong>
+            <p>控制面不替模型做工具选择，但必须在<strong>副作用发生之前</strong>有最终否决权。事后审查无法撤销一次已经发出去的网络请求或已经删掉的文件——所以检查点必须在行动之前，而不是之后。</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- ═══ Screen 3：四个系统难题 ═══ -->
+      <section class="screen animate-in">
+        <h2 class="screen-heading">四个系统难题：整个项目的骨架</h2>
+        <p>面试官接下来问的每一个深问题，几乎都落在这四张卡上。记住它们，你就有了整场面试的主线。</p>
+
+        <div class="pattern-cards">
+          <div class="pattern-card animate-in" style="border-top: 3px solid var(--color-error)">
+            <div class="pattern-icon" style="background: var(--color-error)">🧾</div>
+            <h4 class="pattern-title">① 副作用感知的执行与恢复</h4>
+            <p class="pattern-desc">工具是对外部世界的真实改变。动手前先记账（PREPARED → SUCCEEDED 双复写），崩溃后只重放安全副作用。<strong>→ Module 3</strong></p>
+          </div>
+          <div class="pattern-card animate-in" style="border-top: 3px solid var(--color-actor-4)">
+            <div class="pattern-icon" style="background: var(--color-actor-4)">🚦</div>
+            <h4 class="pattern-title">② 资源感知的准入与背压</h4>
+            <p class="pattern-desc">读 <span class="term" data-definition="vLLM：最流行的自托管大模型推理引擎之一，提供 OpenAI 兼容接口并暴露 /metrics 性能指标——本项目靠读它的指标判断 GPU 忙不忙。">vLLM</span> /metrics + GPU 状态，分类 NORMAL/BUSY/CRITICAL/UNKNOWN，START/QUEUE 决策落库。观测失败 = QUEUE（<span class="term" data-definition="fail-closed（失效即关闭）：依赖的信息拿不到或不确定时，选择拒绝或冻结而不是放行。本项目的准入与恢复都选它。">fail-closed</span>）。<strong>→ Module 4</strong></p>
+          </div>
+          <div class="pattern-card animate-in" style="border-top: 3px solid var(--color-actor-5)">
+            <div class="pattern-icon" style="background: var(--color-actor-5)">🛂</div>
+            <h4 class="pattern-title">③ 工具治理</h4>
+            <p class="pattern-desc">每次工具调用都要过权限、超时、副作用分类、可重放性判断——工具不是自由变量，是被管制的边境口岸。<strong>→ Module 3 / 7</strong></p>
+          </div>
+          <div class="pattern-card animate-in" style="border-top: 3px solid var(--color-actor-3)">
+            <div class="pattern-icon" style="background: var(--color-actor-3)">🔎</div>
+            <h4 class="pattern-title">④ 可解释决策</h4>
+            <p class="pattern-desc">模型调用、工具执行、资源快照、策略版本、理由、usage 全部落库，事后能回放出每一个「为什么」。<strong>→ 贯穿全部模块</strong></p>
+          </div>
+        </div>
+      </section>
+
+      <!-- ═══ Screen 4：三平面交互架构图 ═══ -->
+      <section class="screen animate-in">
+        <h2 class="screen-heading">全局地图：三个平面各管什么</h2>
+        <p>点击任意组件，查看它的职责——以及它刻意<strong>不负责</strong>什么。边界感和职责一样重要。</p>
+
+        <div class="arch-diagram">
+          <div class="arch-zone" style="border-color: var(--color-actor-2)">
+            <h4 class="arch-zone-label" style="color: var(--color-actor-2)">行为平面 · Behavior Plane —— 复用 Pi</h4>
+            <div class="arch-component" data-desc="Pi AgentSession：驱动「模型—工具」循环——思考、调 vLLM、发起工具调用。不负责：租户身份、资源准入、权限校验、故障恢复——这些全是越权，归控制平面。">
+              <div class="arch-icon">🧠</div><span>Pi Agent Runtime</span>
+            </div>
+            <div class="arch-component" data-desc="ToolGateway 是两个平面的唯一接入口：所有工具调用必须穿过它进入治理流程。Pi 不直接触碰外部世界——这是接入口，不是旁观者。">
+              <div class="arch-icon">🔌</div><span>ToolGateway 接入点</span>
+            </div>
+          </div>
+
+          <div class="arch-zone" style="border-color: var(--color-accent)">
+            <h4 class="arch-zone-label" style="color: var(--color-accent)">控制平面 · Control Plane —— 本项目自建重点</h4>
+            <div class="arch-component" data-desc="认证解出 Principal，Tenant 身份来自认证而非客户端自报。不负责：授权粒度以内的策略判断细节由 RunPolicy 承载。">
+              <div class="arch-icon">🪪</div><span>租户身份 AuthN</span>
+            </div>
+            <div class="arch-component" data-desc="读 GPU/vLLM 观测做 START/QUEUE 准入决策并落库 policy_decisions。观测失败时 fail-closed：宁可排队也不盲跑。不负责：token 级推理调度。">
+              <div class="arch-icon">🚦</div><span>资源准入 Admission</span>
+            </div>
+            <div class="arch-component" data-desc="Tenant 内 FIFO、Tenant 间 round-robin 的公平调度，claim 后占 slot。不负责：判断任务本身该不该跑——那是准入的事。">
+              <div class="arch-icon">📋</div><span>调度器 Scheduler</span>
+            </div>
+            <div class="arch-component" data-desc="每次工具调用先记 PREPARED 存根再执行，成功后 SUCCEEDED + Checkpoint 同事务落库；崩溃后据此安全恢复。不负责：替模型挑选下一个工具。">
+              <div class="arch-icon">🧾</div><span>副作用记账 + 恢复</span>
+            </div>
+            <div class="arch-component" data-desc="SQLite 单机状态库：agent_runs 存现在是什么状态，run_events 存过去发生过什么，二者共同支撑事后回放。不负责：高可用分布式部署——单机控制面是有意取舍。">
+              <div class="arch-icon">🗄️</div><span>事件与状态落库</span>
+            </div>
+          </div>
+
+          <div class="arch-zone" style="border-color: var(--color-actor-4)">
+            <h4 class="arch-zone-label" style="color: var(--color-actor-4)">基础设施平面 · Infrastructure —— 外部依赖</h4>
+            <div class="arch-component" data-desc="自托管 vLLM 提供 OpenAI 兼容推理接口，同时暴露 /metrics 供准入观测。本项目不接管 token 级调度——那是 vLLM 的领地。">
+              <div class="arch-icon">🤖</div><span>vLLM 推理服务</span>
+            </div>
+            <div class="arch-component" data-desc="RTX A6000 48GB 为基线，T4 做真机并发验证。GPU 是被观测、被配额的资源，不被控制面直接操控。">
+              <div class="arch-icon">⚡</div><span>共享 GPU</span>
+            </div>
+            <div class="arch-component" data-desc="runsc/gVisor 用户态内核沙箱提供每 Attempt 的隔离执行环境。不负责：业务逻辑——沙箱只保证「跑得隔离」，不管「跑得正确」。">
+              <div class="arch-icon">📦</div><span>runsc 容器沙箱</span>
+            </div>
+          </div>
+
+          <div class="arch-description" id="arch-desc">点击任意组件，查看它的职责与「不负责什么」</div>
+        </div>
+      </section>
+
+      <!-- ═══ Screen 5：七层坐标与技术栈 ═══ -->
+      <section class="screen animate-in">
+        <h2 class="screen-heading">七层 Agent Infra 坐标：自建在哪、复用在哪</h2>
+        <p>被问「和 LangChain 这类框架有什么区别」时，用这张分层坐标图回答：你自建的是第③④层，框架解决的是第①②层——<strong>正交，而非竞品</strong>。</p>
+
+        <div class="flow-steps">
+          <div class="flow-step"><div class="flow-step-num">①②</div><p>Runtime / Tool 接入<br><strong>复用 Pi</strong></p></div>
+          <div class="flow-arrow">→</div>
+          <div class="flow-step" style="border-left: 3px solid var(--color-accent)"><div class="flow-step-num" style="background: var(--color-accent)">③</div><p>Environment/Sandbox<br><strong>自建重点</strong></p></div>
+          <div class="flow-arrow">→</div>
+          <div class="flow-step" style="border-left: 3px solid var(--color-accent)"><div class="flow-step-num" style="background: var(--color-accent)">④</div><p>Execution/Orchestration<br><strong>自建重点</strong></p></div>
+        </div>
+        <div class="flow-steps">
+          <div class="flow-step"><div class="flow-step-num">⑤</div><p>事件与指标<br>只做证明所需的部分</p></div>
+          <div class="flow-arrow">→</div>
+          <div class="flow-step"><div class="flow-step-num">⑥</div><p>回归验收<br>测试 + 真机 smoke</p></div>
+          <div class="flow-arrow">→</div>
+          <div class="flow-step"><div class="flow-step-num">⑦</div><p>vLLM + GPU<br>外部依赖，不接管 token 级调度</p></div>
+        </div>
+
+        <div class="callout callout-info">
+          <div class="callout-icon">🗣️</div>
+          <div class="callout-content">
+            <strong class="callout-title">关键表述，原样使用</strong>
+            <p>「项目不重新实现模型—工具循环。Agent 负责『动脑』，本系统负责『安排与安保』。」——这句话同时回答了「这是什么」和「这不是什么」。</p>
+          </div>
+        </div>
+
+        <h2 class="screen-heading" style="margin-top: var(--space-12)">技术栈五件套：每一件都有理由</h2>
+        <div class="icon-rows">
+          <div class="icon-row">
+            <div class="icon-circle" style="background: var(--color-actor-1); color: white">B</div>
+            <div><strong>Bun + TypeScript</strong><p>单机控制面要的是快速启动与一流 TS 体验；类型系统就是状态机的第一道编译期防线。</p></div>
+          </div>
+          <div class="icon-row">
+            <div class="icon-circle" style="background: var(--color-actor-2); color: white">P</div>
+            <div><strong>Pi <span class="term" data-definition="SDK（软件开发工具包）：官方打包好的库与接口，不必从零实现协议细节就能使用某个系统。">SDK</span> 0.80.10</strong><p>通过<span class="term" data-definition="依赖倒置：高层模块依赖抽象接口而非具体实现——控制面只面向 AgentRuntime 接口编程，将来换掉 Pi 不必重写控制面。">依赖倒置</span>接口 AgentRuntime 接入——控制面依赖抽象而非具体实现，换 Runtime 不动地基。</p></div>
+          </div>
+          <div class="icon-row">
+            <div class="icon-circle" style="background: var(--color-actor-5); color: white">G</div>
+            <div><strong>runsc / gVisor</strong><p>用户态内核拦截系统调用，多租户场景下容器隔离不够、虚机太重，它是那个刚好的中间点。</p></div>
+          </div>
+          <div class="icon-row">
+            <div class="icon-circle" style="background: var(--color-actor-4); color: white">V</div>
+            <div><strong>自托管 vLLM（OpenAI 兼容）</strong><p>既要共享 GPU 的吞吐，又要 /metrics 观测口——OpenAI 兼容协议让接入零成本。</p></div>
+          </div>
+          <div class="icon-row">
+            <div class="icon-circle" style="background: var(--color-actor-3); color: white">S</div>
+            <div><strong><span class="term" data-definition="SQLite：嵌入式单文件数据库，无需独立服务进程；单机控制面用它换来事务可靠与零运维备份。">SQLite</span></strong><p>单机控制面的状态、事件、审计全在一个库：同事务写入天然一致，备份就是一个文件。</p></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ═══ Screen 6：诚实边界 + Quiz + 过渡 ═══ -->
+      <section class="screen animate-in">
+        <h2 class="screen-heading">先自曝短板，再进入检验</h2>
+        <div class="callout callout-warning">
+          <div class="callout-icon">🛡️</div>
+          <div class="callout-content">
+            <strong class="callout-title">为什么诚实边界是护城河</strong>
+            <p>主动说「这不是生产级」——单机控制面、无高可用——远比被面试官追问出来体面。主动划界证明你知道边界在哪，这本身就是系统设计能力的证据。</p>
+          </div>
+        </div>
+
+        <p>三道题检验你是否真的吃透了定位。每道题都是面试现场的真实攻击路线。</p>
+
+        <div class="quiz-container" id="quiz-module-1">
+          <div class="quiz-question-block"
+               data-correct="lc-reframe"
+               data-explanation-right="正是。框架解决的是行为平面的编排问题；本项目做的是行为平面之外的控制面——准入、隔离、副作用治理与恢复。两者正交，甚至可以叠着用。"
+               data-explanation-wrong="陷入功能对比就输了：逐条列举会让你被拖进框架细节的泥潭。正确的回应是抬高一层，指出两者根本不在同一个平面上。">
+            <h3 class="quiz-question">Q1 · 场景区：面试官笑着说「你这不就是封装了 LangChain 吗」。最佳回应角度是？</h3>
+            <div class="quiz-options">
+              <button class="quiz-option" data-value="lc-list" onclick="selectOption(this)"><div class="quiz-option-radio"></div><span>逐一列举 LangChain 没有的功能清单，证明自己更完整</span></button>
+              <button class="quiz-option" data-value="lc-reframe" onclick="selectOption(this)"><div class="quiz-option-radio"></div><span>重申分层：编排框架解决行为平面问题，本项目做行为平面之外的控制面（准入、隔离、副作用治理、恢复），二者正交且可组合</span></button>
+              <button class="quiz-option" data-value="lc-modern" onclick="selectOption(this)"><div class="quiz-option-radio"></div><span>承认思路相似，但强调自己选型更新（Bun、gVisor），工程上更现代</span></button>
+            </div>
+            <div class="quiz-feedback"></div>
+          </div>
+
+          <div class="quiz-question-block"
+               data-correct="layers-34"
+               data-explanation-right="对。Environment/Sandbox 与 Execution/Orchestration 正是需要对多租户负责的两层——身份、策略、调度、生命周期、恢复都在这里，其余层要么复用要么精简。"
+               data-explanation-wrong="回忆一下七层坐标图：Agent Runtime 和 Tool 接入是复用 Pi 的，vLLM+GPU 是外部依赖。真正投入自建的是中间的沙箱环境层和执行编排层。">
+            <h3 class="quiz-question">Q2 · 七层 Agent Infra 坐标中，本项目自建的重点是哪两层？</h3>
+            <div class="quiz-options">
+              <button class="quiz-option" data-value="layers-12" onclick="selectOption(this)"><div class="quiz-option-radio"></div><span>①② Agent Runtime / Tool 接入层</span></button>
+              <button class="quiz-option" data-value="layers-34" onclick="selectOption(this)"><div class="quiz-option-radio"></div><span>③④ Environment/Sandbox 与 Execution/Orchestration 层</span></button>
+              <button class="quiz-option" data-value="layers-67" onclick="selectOption(this)"><div class="quiz-option-radio"></div><span>⑥⑦ 回归验收与 vLLM/GPU 基础设施层</span></button>
+            </div>
+            <div class="quiz-feedback"></div>
+          </div>
+
+          <div class="quiz-question-block"
+               data-correct="veto-gate"
+               data-explanation-right="完全正确。模型保持决策权（选哪个工具），控制面持有否决权（允不允许执行）——且否决必须发生在 PREPARED 记账与真实副作用之前，因为事后无法撤销外部世界的改变。"
+               data-explanation-wrong="注意题目说的是「不替模型做工具选择」：A 让控制面越权动了脑；C 把否决放在事后——可一次已发出的网络请求或已删除的文件是无法回滚的。否决权必须在行动之前行使。">
+            <h3 class="quiz-question">Q3 · 「控制面不替模型做工具选择，但必须在副作用发生前有最终否决权」——这句话对应的架构决策是？</h3>
+            <div class="quiz-options">
+              <button class="quiz-option" data-value="veto-replace" onclick="selectOption(this)"><div class="quiz-option-radio"></div><span>由控制面根据资源与策略决定调用哪个工具，模型只负责生成文本</span></button>
+              <button class="quiz-option" data-value="veto-review" onclick="selectOption(this)"><div class="quiz-option-radio"></div><span>工具照常执行，控制面在执行后审计结果，发现问题就回滚补偿</span></button>
+              <button class="quiz-option" data-value="veto-gate" onclick="selectOption(this)"><div class="quiz-option-radio"></div><span>所有工具调用的执行路径必须经过控制面检查点，策略守卫在持久化意图与真实副作用之前行使否决，模型保持决策权</span></button>
+            </div>
+            <div class="quiz-feedback"></div>
+          </div>
+
+          <button class="quiz-check-btn" onclick="checkQuiz('quiz-module-1')">Check Answers</button>
+          <button class="quiz-reset-btn" onclick="resetQuiz('quiz-module-1')">Try Again</button>
+        </div>
+
+        <p style="margin-top: var(--space-10)"><strong>静态地图已就位。</strong>下一模块让这张地图上的数据流动起来：跟着一个 Run 走完它从 QUEUED 到 COMPLETED 的一生——<em>Module 2 · 一次任务的一生</em>。</p>
+      </section>
+
+    </div>
+  </div>
+</section>

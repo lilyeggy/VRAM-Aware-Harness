@@ -120,6 +120,23 @@ test("claimNext 在全局 slot 用尽后保留其余等待 Run", () => {
     })).toThrow("Run 已经在队列中：run-b1");
 });
 
+test("同一 Conversation 的 Run 串行，不同 Conversation 仍可并行", () => {
+    const scheduler = new TenantRunScheduler({
+        maxActiveRuns: 3,
+        maxActiveRunsPerTenant: 3,
+    });
+    scheduler.enqueue({ runId: "run-a1", tenantId: "tenant-a", sessionId: "conversation-a" });
+    scheduler.enqueue({ runId: "run-a2", tenantId: "tenant-a", sessionId: "conversation-a" });
+    scheduler.enqueue({ runId: "run-b1", tenantId: "tenant-b", sessionId: "conversation-b" });
+
+    expect(scheduler.claimNext()?.runId).toBe("run-a1");
+    expect(scheduler.claimNext()?.runId).toBe("run-b1");
+    expect(scheduler.claimNext()).toBeNull();
+
+    scheduler.release("run-a1");
+    expect(scheduler.claimNext()?.runId).toBe("run-a2");
+});
+
 test("已经 claim 的 Run 不能重新入队", () => {
     const scheduler = new TenantRunScheduler({
         maxActiveRuns: 1,

@@ -1,0 +1,347 @@
+<section class="module" id="module-5" style="background: var(--color-bg-warm)">
+  <div class="module-content">
+    <header class="module-header animate-in">
+      <span class="module-number">05</span>
+      <h1 class="module-title">公平调度与队列推进</h1>
+      <p class="module-subtitle">Tenant A 提交 50 个任务、Tenant B 只提交 1 个——B 排第几？这个系统里，B 排第 2。</p>
+    </header>
+
+    <div class="module-body">
+
+      <section class="screen animate-in">
+        <h2 class="screen-heading">幼儿园分苹果：轮流各发一个</h2>
+        <p>两个班的孩子排队领苹果，老师不按全局先来后到，而是两个班<strong>轮流各发一个</strong>——A 班第一个、B 班第一个、A 班第二个……这样 A 班就算有 100 个孩子也不会把 B 班饿死。每个班还有自己的领取上限，防止一个班占光整个果篮。</p>
+        <div class="pattern-cards stagger-children">
+          <div class="pattern-card animate-in" style="border-top: 3px solid var(--color-accent)">
+            <div class="pattern-icon" style="background: var(--color-accent)">🔁</div>
+            <h4 class="pattern-title">Tenant 内 FIFO</h4>
+            <p class="pattern-desc">同一租户内按提交顺序排队——对自己人保持公平</p>
+          </div>
+          <div class="pattern-card animate-in" style="border-top: 3px solid var(--color-actor-2)">
+            <div class="pattern-icon" style="background: var(--color-actor-2)">🔄</div>
+            <h4 class="pattern-title">Tenant 间 round-robin</h4>
+            <p class="pattern-desc">租户之间轮转叫号——防止大租户永久饥饿小租户</p>
+          </div>
+          <div class="pattern-card animate-in" style="border-top: 3px solid var(--color-actor-4)">
+            <div class="pattern-icon" style="background: var(--color-actor-4)">🎫</div>
+            <h4 class="pattern-title">双并发上限</h4>
+            <p class="pattern-desc">maxActiveRuns 全局 + maxActiveRunsPerTenant 单租户，claim 时即占 slot</p>
+          </div>
+        </div>
+        <div class="callout callout-info">
+          <div class="callout-icon">🧃</div>
+          <div class="callout-content">
+            <strong class="callout-title">代码注释里的原始例子</strong>
+            <p>Tenant A: A1,A2,A3 / Tenant B: B1,B2 → 公平调度顺序是 <strong>A1→B1→A2→B2→A3</strong>。listQueue() 会把这个顺序展示为每个 Run 的 position 和 tenantPosition 两个坐标。</p>
+          </div>
+        </div>
+      </section>
+
+      <section class="screen animate-in">
+        <h2 class="screen-heading">claimNext：选中即占 slot</h2>
+        <p>数据结构三件套：<code style="font-family:var(--font-mono)">Map&lt;tenantId, QueuedRun[]&gt;</code> 每租户队列 + <code style="font-family:var(--font-mono)">tenantOrder[]</code> 轮转数组 + <code style="font-family:var(--font-mono)">activeTenantByRunId</code> slot 表。看 claimNext 怎么在三者之间跳转：</p>
+        <div class="translation-block">
+          <div class="translation-code">
+            <span class="translation-label">CODE · src/scheduling/tenant-run-scheduler.ts</span>
+            <pre><code><span class="code-line"><span class="code-function">claimNext</span>() : QueuedRun | <span class="code-keyword">null</span> {</span>
+<span class="code-line">    <span class="code-comment">// 首先检查全局 slot</span></span>
+<span class="code-line">    <span class="code-keyword">if</span> (<span class="code-variable">this</span>.activeTenantByRunId.size &gt;= <span class="code-variable">this</span>.config.maxActiveRuns){</span>
+<span class="code-line">        <span class="code-keyword">return</span> <span class="code-keyword">null</span>;</span>
+<span class="code-line">    }</span>
+<span class="code-line"></span>
+<span class="code-line">    <span class="code-keyword">const</span> tenantsToInspect = <span class="code-variable">this</span>.tenantOrder.length;</span>
+<span class="code-line">    <span class="code-keyword">for</span> (<span class="code-keyword">let</span> inspected = <span class="code-number">0</span>; inspected &lt; tenantsToInspect; inspected += <span class="code-number">1</span>) {</span>
+<span class="code-line">        <span class="code-comment">// 从轮转队列头部取出本轮tenant</span></span>
+<span class="code-line">        <span class="code-keyword">const</span> tenantId = <span class="code-variable">this</span>.tenantOrder.<span class="code-function">shift</span>();</span>
+<span class="code-line">        <span class="code-keyword">if</span> (tenantId === <span class="code-keyword">undefined</span>) { <span class="code-keyword">return</span> <span class="code-keyword">null</span>; }</span>
+<span class="code-line"></span>
+<span class="code-line">        <span class="code-keyword">const</span> tenantQueue = <span class="code-variable">this</span>.queuesByTenant.<span class="code-function">get</span>(tenantId);</span>
+<span class="code-line">        <span class="code-keyword">if</span> (tenantQueue === <span class="code-keyword">undefined</span> || tenantQueue.length === <span class="code-number">0</span>) {</span>
+<span class="code-line">            <span class="code-variable">this</span>.queuesByTenant.<span class="code-function">delete</span>(tenantId);</span>
+<span class="code-line">            <span class="code-keyword">continue</span>;</span>
+<span class="code-line">        }</span>
+<span class="code-line"></span>
+<span class="code-line">        <span class="code-keyword">const</span> activeTenantByRunCount = <span class="code-variable">this</span>.<span class="code-function">getActiveTenantRunCount</span>(tenantId);</span>
+<span class="code-line"></span>
+<span class="code-line">        <span class="code-comment">// 当前 tenant 已经达到并发上限，它仍有等待任务，所以放回轮转队尾.</span></span>
+<span class="code-line">        <span class="code-keyword">if</span> (activeTenantByRunCount &gt;= <span class="code-variable">this</span>.config.maxActiveRunsPerTenant){</span>
+<span class="code-line">            <span class="code-variable">this</span>.tenantOrder.<span class="code-function">push</span>(tenantId);</span>
+<span class="code-line">            <span class="code-keyword">continue</span>;</span>
+<span class="code-line">        }</span>
+<span class="code-line"></span>
+<span class="code-line">        <span class="code-keyword">const</span> run = tenantQueue.<span class="code-function">shift</span>();</span>
+<span class="code-line">        <span class="code-keyword">if</span> (run === <span class="code-keyword">undefined</span>){ <span class="code-variable">this</span>.queuesByTenant.<span class="code-function">delete</span>(tenantId); <span class="code-keyword">continue</span>; }</span>
+<span class="code-line"></span>
+<span class="code-line">        <span class="code-comment">// 如果这个 tenant 还有等待任务，那么将它放在下一轮队尾</span></span>
+<span class="code-line">        <span class="code-comment">// 如果已经清空，那么就从 queuesByTenant 删除</span></span>
+<span class="code-line">        <span class="code-keyword">if</span> (tenantQueue.length &gt; <span class="code-number">0</span>){ <span class="code-variable">this</span>.tenantOrder.<span class="code-function">push</span>(tenantId); }</span>
+<span class="code-line">        <span class="code-keyword">else</span> { <span class="code-variable">this</span>.queuesByTenant.<span class="code-function">delete</span>(tenantId); }</span>
+<span class="code-line"></span>
+<span class="code-line">        <span class="code-variable">this</span>.activeTenantByRunId.<span class="code-function">set</span>(run.runId, run.tenantId);</span>
+<span class="code-line">        <span class="code-keyword">return</span> run;</span>
+<span class="code-line">    }</span>
+<span class="code-line">    <span class="code-keyword">return</span> <span class="code-keyword">null</span>;</span>
+<span class="code-line">}</span></code></pre>
+          </div>
+          <div class="translation-english">
+            <span class="translation-label">白话翻译</span>
+            <div class="translation-lines">
+              <p class="tl">先看果篮是否已满：全局活跃数达到上限就直接返回空。</p>
+              <p class="tl">最多检查一圈所有租户——避免死循环。</p>
+              <p class="tl">轮转指针从队头取出本轮该叫的租号。</p>
+              <p class="tl">这个租户没有等待任务了？清理掉，继续下一家。</p>
+              <p class="tl">统计它当前占了多少个 slot。</p>
+              <p class="tl">达到单租户上限？把它放回队尾但跳过——它还有等待任务，只是这一轮不能领。</p>
+              <p class="tl">从它的队列头部取出第一个等待 Run（FIFO）。</p>
+              <p class="tl">如果它还有后续任务，租户放回轮转队尾；否则彻底移出。</p>
+              <p class="tl">关键一行：立刻登记 slot 占用。claim 的语义是"离开队列并占用一个并发名额"，不是"看看有没有人"。</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="screen animate-in">
+        <h2 class="screen-heading">公平顺序动画 + 槽位双保险</h2>
+        <p>点击下一步，看 claimNext 如何在两个租户间轮流发号，以及右侧 slot 计数的实时变化：</p>
+        <div class="flow-animation" data-steps='[
+  {"highlight":"flow-actor-17","label":"初始状态：Tenant-A 队列 A1 A2 A3，Tenant-B 队列 B1 B2，活跃 slot 0/2"},
+  {"highlight":"flow-actor-19","packet":true,"from":"actor-17","to":"actor-19","label":"第一轮叫 Tenant-A：取出 A1，占用一个 slot —— 活跃 1/2"},
+  {"highlight":"flow-actor-18","label":"A 还有剩余任务，租户放回轮转队尾"},
+  {"highlight":"flow-actor-20","packet":true,"from":"actor-18","to":"actor-20","label":"第二轮轮到 Tenant-B：取出 B1 —— B 没有被 A 的 50 个任务饿死"},
+  {"highlight":"flow-actor-17","packet":true,"from":"actor-18","to":"actor-19","label":"第三轮回 A：取出 A2 —— 全局上限 2 已满，B2 与 A3 继续等待"},
+  {"highlight":"flow-actor-21","label":"任一 Run 结束释放 slot 后，下一轮 drain 立即推进队列"}
+]'>
+          <div class="flow-actors">
+            <div class="flow-actor" id="flow-actor-17">
+              <div class="flow-actor-icon" style="border-color: #D94F30; background: #FDEEE9">🏢</div>
+              <span>Tenant-A<br>A1 A2 A3</span>
+            </div>
+            <div class="flow-actor" id="flow-actor-18">
+              <div class="flow-actor-icon" style="border-color: #2A7B9B; background: #E4F2F7">🏬</div>
+              <span>Tenant-B<br>B1 B2</span>
+            </div>
+            <div class="flow-actor" id="flow-actor-19">
+              <div class="flow-actor-icon" style="border-color: #D94F30; background: #FDEEE9">▶️</div>
+              <span>A 位</span>
+            </div>
+            <div class="flow-actor" id="flow-actor-20">
+              <div class="flow-actor-icon" style="border-color: #2A7B9B; background: #E4F2F7">▶️</div>
+              <span>B 位</span>
+            </div>
+            <div class="flow-actor" id="flow-actor-21">
+              <div class="flow-actor-icon" style="border-color: #D4A843; background: #FDF5E0">🎫</div>
+              <span>slot 表<br>0/2</span>
+            </div>
+          </div>
+
+          <div class="flow-packet" id="flow-packet"></div>
+
+          <div class="flow-step-label" id="flow-label">点击「Next Step」开始</div>
+
+          <div class="flow-controls">
+            <button class="btn flow-next-btn">下一步</button>
+            <button class="btn flow-reset-btn">重新开始</button>
+            <span class="flow-progress"></span>
+          </div>
+        </div>
+
+        <p style="margin-top:var(--space-8)">claim 出来之后交给资源准入。注意这个细节——<strong>算术自洽的软硬两层</strong>：</p>
+        <div class="translation-block">
+          <div class="translation-code">
+            <span class="translation-label">CODE · src/scheduling/run-queue-coordinator.ts</span>
+            <pre><code><span class="code-line"><span class="code-comment">// 选出 run 的时候，run 已经离开队列并占用了 slot，所以需要更新资源情况</span></span>
+<span class="code-line"><span class="code-keyword">const</span> capacity = <span class="code-variable">this</span>.scheduler.<span class="code-function">getCapacity</span>(queuedRun.tenantId);</span>
+<span class="code-line"></span>
+<span class="code-line"><span class="code-keyword">const</span> admissionRequest = {</span>
+<span class="code-line">    runId : queuedRun.runId,</span>
+<span class="code-line">    tenantId : queuedRun.tenantId,</span>
+<span class="code-line">    activeRunCount : capacity.activeRunCount - <span class="code-number">1</span>,</span>
+<span class="code-line">    activeTenantRunCount : capacity.activeTenantRunCount - <span class="code-number">1</span>,</span>
+<span class="code-line">}</span></code></pre>
+          </div>
+          <div class="translation-english">
+            <span class="translation-label">白话翻译</span>
+            <div class="translation-lines">
+              <p class="tl">claim 已经让这个 Run 占了一个 slot，此时读到的容量数字包含它自己。</p>
+              <p class="tl">构造准入请求时把自己刚占的名额减掉——策略层判断的是"除了我之外还有多少人在跑"。这就是槽位双保险：scheduler 是硬上限，策略是减去自身后的软判断，两边算术永远自洽，不会出现"自己把自己挤下去"的悖论。</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="screen animate-in">
+        <h2 class="screen-heading">QUEUE 分支：release 和 re-enqueue 的时序铁律</h2>
+        <p>准入说"还不能跑"时，Run 要回到队列。这里有一行注释值得背下来：</p>
+        <div class="translation-block">
+          <div class="translation-code">
+            <span class="translation-label">CODE · src/scheduling/run-queue-coordinator.ts</span>
+            <pre><code><span class="code-line"><span class="code-keyword">if</span> (decision.action === <span class="code-string">"QUEUE"</span>) {</span>
+<span class="code-line">    <span class="code-keyword">const</span> reasonCode = <span class="code-function">toQueueReasonCode</span>(decision);</span>
+<span class="code-line"></span>
+<span class="code-line">    <span class="code-variable">this</span>.scheduler.<span class="code-function">release</span>(queuedRun.runId);</span>
+<span class="code-line">    <span class="code-comment">// 顺序一定要是先 release 再 enqueue，否则 enqueue 会认为 run 仍在执行并拒绝入队</span></span>
+<span class="code-line">    <span class="code-variable">this</span>.scheduler.<span class="code-function">enqueue</span>({</span>
+<span class="code-line">        runId:queuedRun.runId,</span>
+<span class="code-line">        tenantId:queuedRun.tenantId,</span>
+<span class="code-line">        reasonCode,</span>
+<span class="code-line">        enqueuedAt:queuedRun.enqueuedAt,</span>
+<span class="code-line">    });</span>
+<span class="code-line"></span>
+<span class="code-line">    <span class="code-keyword">return</span> { kind:<span class="code-string">"DEFERRED"</span>, runId:queuedRun.runId, decision }</span>
+<span class="code-line">}</span></code></pre>
+          </div>
+          <div class="translation-english">
+            <span class="translation-label">白话翻译</span>
+            <div class="translation-lines">
+              <p class="tl">决策是排队——先把 reasonCode 转换成队列语言。</p>
+              <p class="tl">第一步必须先归还 slot。因为 enqueue 会拒绝"正在执行中"的 Run——而此刻它在 slot 表里还占着名字。</p>
+              <p class="tl">第二步再入队，带上新的排队原因码。</p>
+              <p class="tl">注意 enqueuedAt 原样带回：被 defer 的 Run 不丢自己的排队时间戳。如果重置了这个时间，反复被 defer 的任务会永远排在后面——公平性就被惩罚机制破坏了。</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="screen animate-in">
+        <h2 class="screen-heading">drain：单飞模式（single-flight）</h2>
+        <p>提交任务、释放 slot、定时器到点……很多事件都会喊"推一把队列"。如果每次都真起一个循环，就会并发乱套。解法是 <span class="term" data-definition="single-flight 模式：并发触发的多次调用合并为一次执行；执行期间的新请求只置一个标志位，当前循环结束后补跑一轮。Go 语言著名的 singleflight 库就是这个思想。">single-flight</span>：</p>
+        <div class="translation-block">
+          <div class="translation-code">
+            <span class="translation-label">CODE · src/scheduling/run-queue-coordinator.ts</span>
+            <pre><code><span class="code-line"><span class="code-function">drain</span>() : Promise&lt;CoordinatorResult[]&gt; {</span>
+<span class="code-line">    <span class="code-comment">// 每次调用都代表系统状态可能发生了变化</span></span>
+<span class="code-line">    <span class="code-comment">// 因此至少请求进行一轮队列检查</span></span>
+<span class="code-line">    <span class="code-variable">this</span>.drainRequested = <span class="code-keyword">true</span>;</span>
+<span class="code-line"></span>
+<span class="code-line">    <span class="code-comment">// 已经有 drain 在执行，重复用同一个 Promise</span></span>
+<span class="code-line">    <span class="code-keyword">if</span> (<span class="code-variable">this</span>.drainPromise !== <span class="code-keyword">null</span>){</span>
+<span class="code-line">        <span class="code-keyword">return</span> <span class="code-variable">this</span>.drainPromise;</span>
+<span class="code-line">    }</span>
+<span class="code-line"></span>
+<span class="code-line">    <span class="code-comment">// 没有 drain 执行，就启动新的推进循环</span></span>
+<span class="code-line">    <span class="code-variable">this</span>.drainPromise = <span class="code-variable">this</span>.<span class="code-function">runDrainLoop</span>();</span>
+<span class="code-line">    <span class="code-keyword">return</span> <span class="code-variable">this</span>.drainPromise;</span>
+<span class="code-line">}</span></code></pre>
+          </div>
+          <div class="translation-english">
+            <span class="translation-label">白话翻译</span>
+            <div class="translation-lines">
+              <p class="tl">任何调用者都先把"需要推进"的标志位置真——这是请求的唯一副作用。</p>
+              <p class="tl">已有循环在跑？直接复用同一个 Promise，不另起炉灶。</p>
+              <p class="tl">没有才创建新循环。循环体是 while(drainRequested)：每轮开始清掉标志位、跑一遍 drainOnce；期间又有人调 drain() 标志位重新变真，循环就再来一轮。finally 里清空 drainPromise，允许下次冷启动。</p>
+            </div>
+          </div>
+        </div>
+        <div class="icon-rows">
+          <div class="icon-row">
+            <div class="icon-circle" style="background: var(--color-actor-2)">⏱️</div>
+            <div>
+              <strong>RunQueuePump 定时器兜底</strong>
+              <p>setInterval 周期性 tick → drain()；构造后立即 tick 一次不等首个间隔。stop() 只清定时器，不打断进行中的 drain。资源恢复后最多等一个周期，队列自动推进。</p>
+            </div>
+          </div>
+          <div class="icon-row">
+            <div class="icon-circle" style="background: var(--color-actor-5)">⚡</div>
+            <div>
+              <strong>提交即调度</strong>
+              <p>HarnessApplication.submitRun 里 void this.queuePump.tick()——新任务不等下一个轮询周期，立刻触发一轮 drain。</p>
+            </div>
+          </div>
+          <div class="icon-row">
+            <div class="icon-circle" style="background: var(--color-actor-3)">🔄</div>
+            <div>
+              <strong>进程重启后的队列重建</strong>
+              <p>内存队列是易失的。启动时从持久化的 QUEUED 行重建（restoreQueuedRun）；listActiveRuns 把陈旧 RUNNING 转 INTERRUPTED 再走恢复扫描——内存状态永远从数据库事实重建。</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="screen animate-in">
+        <h2 class="screen-heading">已知设计缺口：面试主动讲反而加分</h2>
+        <p>这五个缺口全部记录在项目手册 §14.5——能说清"哪里不完美、为什么可接受、怎么改"，比假装完美更有说服力：</p>
+        <div class="badge-list">
+          <div class="badge-item"><code class="badge-code">① sessionId 客户端可自报</code><span class="badge-desc">会话固定/抢注 DoS；结论倾向：服务端鉴权后签发 session id</span></div>
+          <div class="badge-item"><code class="badge-code">② reasonCode 仅存内存</code><span class="badge-desc">重启后 GET /queue 的排队原因不可复现；应落 policy_decisions 还原</span></div>
+          <div class="badge-item"><code class="badge-code">③ 缺 RUN_DEFERRED 事件</code><span class="badge-desc">反复 defer 的过程在 run_events 时间线上是空白</span></div>
+          <div class="badge-item"><code class="badge-code">④ TOCTOU 归档窗口</code><span class="badge-desc">claimNext 与 release+re-enqueue 之间崩溃 → run 从内存队列消失但 DB 仍 QUEUED，需等重启 recovery 回队（已知边界，低风险）</span></div>
+          <div class="badge-item"><code class="badge-code">⑤ 准入是 point-in-time</code><span class="badge-desc">决策 t0、派发 t1 中间资源可变；定位为"去耦的准入点"而非实时保证</span></div>
+        </div>
+
+        <div class="quiz-container" id="quiz-module-5">
+          <div class="quiz-question-block"
+               data-correct="option-b"
+               data-explanation-right="正确！claimNext 先查全局 slot：满了返回 null，队列原样保留。任务不会丢——数据库里它仍是 QUEUED，且启动重建机制保证内存队列可随时从 DB 重建。"
+               data-explanation-wrong="回想 claimNext 第一行：全局活跃数达到 maxActiveRuns 直接 return null——但队列和数据库都没动。丢任务是不可能的，因为有 SQLite 兜底。">
+            <h3 class="quiz-question">场景题：maxActiveRuns=4 且已满，Tenant B 此时提交第 5 个全局任务。claimNext 返回什么？B 的任务会丢吗？</h3>
+            <div class="quiz-options">
+              <button class="quiz-option" data-value="option-a" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>抛出异常，HTTP 层返回 429 拒绝提交</span>
+              </button>
+              <button class="quiz-option" data-value="option-b" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>claimNext 返回 null，任务留在队列与 DB 中，等 slot 释放后自动推进</span>
+              </button>
+              <button class="quiz-option" data-value="option-c" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>挤掉一个最旧的运行中任务给 B 腾位</span>
+              </button>
+            </div>
+            <div class="quiz-feedback"></div>
+          </div>
+
+          <div class="quiz-question-block"
+               data-correct="option-a"
+               data-explanation-right="正是！enqueuedAt 是 FIFO 公平的锚点。重置它等于惩罚'运气不好赶上资源紧张的 Run'，越倒霉越靠后，形成饥饿放大器。"
+               data-explanation-wrong="恰恰相反——如果每次 defer 都刷新时间戳，反复碰上资源紧张的任务会永远沉底。想想幼儿园老师会不会因为苹果暂时发完就让某个孩子重新排到队尾？">
+            <h3 class="quiz-question">被 defer 的 Run 重新入队时，为什么要保留原来的 enqueuedAt 而不是刷新为当前时间？</h3>
+            <div class="quiz-options">
+              <button class="quiz-option" data-value="option-a" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>FIFO 公平按提交时间排序——刷新会让反复遇阻的任务永远沉底（饥饿放大）</span>
+              </button>
+              <button class="quiz-option" data-value="option-b" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>纯粹为了节省一次 Date.now() 调用</span>
+              </button>
+              <button class="quiz-option" data-value="option-c" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>为了和数据库 created_at 字段对齐格式</span>
+              </button>
+            </div>
+            <div class="quiz-feedback"></div>
+          </div>
+
+          <div class="quiz-question-block"
+               data-correct="option-c"
+               data-explanation-right="完全正确！这就是 single-flight：标志位补跑一轮保证不丢事件，Promise 复用保证不会有两个 drain 并发推进同一队列。"
+               data-explanation-wrong="不会并发跑第二个循环——drainPromise 非 null 时直接复用。也不会丢失这次推进请求：drainRequested=true 保证当前循环结束后还会补一轮。">
+            <h3 class="quiz-question">场景题：drain 循环正在执行中，用户又提交了一个新任务触发了 drain()。会发生什么？</h3>
+            <div class="quiz-options">
+              <button class="quiz-option" data-value="option-a" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>并发启动第二个 drain 循环，两者竞争队列锁</span>
+              </button>
+              <button class="quiz-option" data-value="option-b" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>这次 drain 请求被静默丢弃，等下一个定时器周期</span>
+              </button>
+              <button class="quiz-option" data-value="option-c" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>标志位置真并复用现有 Promise——当前循环结束后自动补跑一轮</span>
+              </button>
+            </div>
+            <div class="quiz-feedback"></div>
+          </div>
+
+          <button class="quiz-check-btn" onclick="checkQuiz('quiz-module-5')">检查答案</button>
+          <button class="quiz-reset-btn" onclick="resetQuiz('quiz-module-5')">再试一次</button>
+        </div>
+
+        <p style="margin-top:var(--space-8)"><strong>下一模块</strong>：被叫到号的 Run 凭什么身份执行？多租户防串六道防线。</p>
+      </section>
+
+    </div>
+  </div>
+</section>

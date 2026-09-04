@@ -12,6 +12,8 @@
  * claude agent 就用 claude adapter
  */
 
+import type { SandboxEnforcementCapabilities } from "../sandbox/sandbox-provider.ts";
+
 export interface RuntimeRunRef{
     /** Harness 未来生成的 AgentRun ID */
     runId:string;
@@ -21,6 +23,12 @@ export interface RuntimeRunRef{
     
     /** harnessSession Id,与 AgentSession 不一致 */
     harnessSessionId:string;
+
+    /**
+     * 上一次实际 Runtime 会话的持久化引用。首次消息为空；后续消息由
+     * 控制面从 HarnessSession 注入，Adapter 据此继续同一段模型上下文。
+     */
+    runtimeSessionRef?:string | null;
 
     /** 本次执行使用的 Workspace 工作目录；真正的 Tenant 隔离由上层负责校验 */
     workspacePath:string;
@@ -58,6 +66,7 @@ export interface RuntimeExecutionContext {
     readonly attemptId: string;
     readonly policySnapshotId: string;
     readonly sandboxId: string;
+    readonly sandboxEnforcement: SandboxEnforcementCapabilities;
     readonly runtimeConfig: {
         readonly runtimeKind: "PI";
         readonly provider: string;

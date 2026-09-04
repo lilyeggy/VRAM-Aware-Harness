@@ -15,6 +15,17 @@ import type {
     ExecuteToolInput,
 } from "../../src/tools/tool-gateway.ts";
 
+const sandboxEnforcement = Object.freeze({
+    toolExecutionBoundary: "SANDBOX" as const,
+    filesystemIsolation: true,
+    processIsolation: true,
+    networkPolicyEnforced: true,
+    cpuLimitEnforced: true,
+    memoryLimitEnforced: true,
+    diskLimitEnforced: false,
+    pidLimitEnforced: true,
+});
+
 test("Pi 内置工具采用保守副作用分类", () => {
     expect(classifyPiToolEffect("read")).toBe("READ_ONLY");
     expect(classifyPiToolEffect("grep")).toBe("READ_ONLY");
@@ -36,6 +47,7 @@ test("带 Sandbox execution context 的 Pi 工具不会回退到宿主机", asyn
             runId: "run-sandbox",
             workspacePath: "/srv/workspace",
             getSandboxId: () => "sandbox-1",
+            getSandboxEnforcement: () => sandboxEnforcement,
             getRuntimeSessionRef: () => "session",
             getLastEventSequence: () => 1,
         },
@@ -62,6 +74,22 @@ test("带 Sandbox execution context 的 Pi 工具不会回退到宿主机", asyn
         "sh", "-lc",
         "grep -R -n --binary-files=without-match -- 'secret' '/workspace' 2>/dev/null; code=$?; if [ $code -gt 1 ]; then exit $code; fi; exit 0",
     ]);
+});
+
+test("Sandbox execution context 缺少命令执行器时 fail closed", () => {
+    expect(() => createGatewayPiTools(
+        ["read"],
+        "/srv/workspace",
+        { async execute(_input, invokeTool) { return invokeTool(); } },
+        {
+            runId: "run-sandbox",
+            workspacePath: "/srv/workspace",
+            getSandboxId: () => "sandbox-1",
+            getSandboxEnforcement: () => sandboxEnforcement,
+            getRuntimeSessionRef: () => "session",
+            getLastEventSequence: () => 1,
+        },
+    )).toThrow("拒绝回退宿主机");
 });
 
 test("Pi ToolDefinition 的真实 execute 会经过 Gateway", async () => {

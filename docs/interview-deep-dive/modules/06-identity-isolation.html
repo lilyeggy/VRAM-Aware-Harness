@@ -1,0 +1,352 @@
+<section class="module" id="module-6" style="background: var(--color-bg)">
+  <div class="module-content">
+    <header class="module-header animate-in">
+      <span class="module-number">06</span>
+      <h1 class="module-title">可信身份与六道防串防线</h1>
+      <p class="module-subtitle">请求体里写着 tenantId: "tenant-a"——你敢信吗？身份只在认证那一刻产生一次，之后一路固化，永不采信自报。</p>
+    </header>
+
+    <div class="module-body">
+
+      <section class="screen animate-in">
+        <h2 class="screen-heading">机场安检的登机牌模型</h2>
+        <p>你出示护照（API Key），安检系统打印登机牌（<span class="term" data-definition="RequestPrincipal 是认证后产生的身份对象 { tenantId, scopes }：你是哪个租户、你有哪些权限。之后全程只认它，不再问'你自称是谁'。">RequestPrincipal</span>）。之后全程——贵宾室、登机口、机上餐食——只看登机牌。有人捡到别人的票想混进另一家航空公司的贵宾室？每个闸口都核对归属，对不上一律回答"查无此人"（404），而不是"这不是你的"（403 泄露存在性）。</p>
+        <div class="step-cards stagger-children">
+          <div class="step-card animate-in">
+            <div class="step-num">1</div>
+            <div class="step-body">
+              <strong>HTTP 层验 Key</strong>
+              <p>requirePrincipal(request, scope)：Bearer/x-api-key → 摘要 → ApiCredentialStore.authenticate → 命中 {tenantId, scopes}</p>
+            </div>
+          </div>
+          <div class="step-card animate-in">
+            <div class="step-num">2</div>
+            <div class="step-body">
+              <strong>归属在入口一次定死</strong>
+              <p>submitRun 用 principal.tenantId 写入 agent_runs.tenant_id——从此下游调度/沙箱/策略/查询永远用 run.tenantId，不再"猜归属"</p>
+            </div>
+          </div>
+          <div class="step-card animate-in">
+            <div class="step-num">3</div>
+            <div class="step-body">
+              <strong>产品决定：tenant = 用户</strong>
+              <p>RequestPrincipal 精简为 {tenantId, scopes}；migration v15 删除冗余 subject_id。scopes 是授权维度（tasks:read / tasks:write / models:generate…）</p>
+            </div>
+          </div>
+        </div>
+        <div class="callout callout-warning">
+          <div class="callout-icon">🚨</div>
+          <div class="callout-content">
+            <strong class="callout-title">核心认知：Agent 运行时代码是"敌方"</strong>
+            <p>"Agent Runtime 是被隔离的对象，不是可信基础设施。"所以它对用户权限、文件、网络的访问必须经过外面包着的 ToolGateway + 策略 + 沙箱拦截——不能因为"循环是我写的"就放权。</p>
+          </div>
+        </div>
+      </section>
+
+      <section class="screen animate-in">
+        <h2 class="screen-heading">requirePrincipal：统一强制点</h2>
+        <p>每条受保护路由声明自己的 scope；ALLOW/DENY 全部进<span class="term" data-definition="审计日志表 access_audit_events：谁、对什么资源、做了什么动作、ALLOW 还是 DENY、原因是什么。安全系统里'记录每次拒绝'和'执行拒绝'同样重要。">审计台账</span>：</p>
+        <div class="translation-block">
+          <div class="translation-code">
+            <span class="translation-label">CODE · src/http/harness-http-api.ts</span>
+            <pre><code><span class="code-line"><span class="code-keyword">private</span> <span class="code-function">requirePrincipal</span>(request: Request, scope: string): RequestPrincipal {</span>
+<span class="code-line">    <span class="code-keyword">if</span> (<span class="code-variable">this</span>.accessControl === <span class="code-keyword">undefined</span>) {</span>
+<span class="code-line">        <span class="code-comment">// Retained only for direct legacy unit tests; composition always injects auth.</span></span>
+<span class="code-line">        <span class="code-keyword">return</span> { tenantId: <span class="code-string">"legacy"</span>, scopes: [<span class="code-string">"*"</span>] };</span>
+<span class="code-line">    }</span>
+<span class="code-line">    <span class="code-keyword">const</span> authorization = request.headers.<span class="code-function">get</span>(<span class="code-string">"authorization"</span>);</span>
+<span class="code-line">    <span class="code-keyword">const</span> rawKey = authorization?.<span class="code-function">startsWith</span>(<span class="code-string">"Bearer "</span>)</span>
+<span class="code-line">        ? authorization.<span class="code-function">slice</span>(<span class="code-string">"Bearer "</span>.length).<span class="code-function">trim</span>()</span>
+<span class="code-line">        : request.headers.<span class="code-function">get</span>(<span class="code-string">"x-api-key"</span>)?.<span class="code-function">trim</span>();</span>
+<span class="code-line">    <span class="code-keyword">if</span> (rawKey === <span class="code-keyword">undefined</span> || rawKey.length === <span class="code-number">0</span>) {</span>
+<span class="code-line">        <span class="code-variable">this</span>.<span class="code-function">audit</span>(<span class="code-string">"AUTHENTICATE"</span>, <span class="code-string">"DENY"</span>, <span class="code-keyword">null</span>, <span class="code-string">"missing_api_key"</span>);</span>
+<span class="code-line">        <span class="code-keyword">throw new</span> <span class="code-function">HttpError</span>(<span class="code-number">401</span>, <span class="code-string">"缺少 API Key"</span>);</span>
+<span class="code-line">    }</span>
+<span class="code-line">    <span class="code-keyword">const</span> principal = <span class="code-variable">this</span>.accessControl.<span class="code-function">authenticate</span>(rawKey);</span>
+<span class="code-line">    <span class="code-keyword">if</span> (principal === <span class="code-keyword">null</span>) {</span>
+<span class="code-line">        <span class="code-variable">this</span>.<span class="code-function">audit</span>(<span class="code-string">"AUTHENTICATE"</span>, <span class="code-string">"DENY"</span>, <span class="code-keyword">null</span>, <span class="code-string">"invalid_or_revoked_api_key"</span>);</span>
+<span class="code-line">        <span class="code-keyword">throw new</span> <span class="code-function">HttpError</span>(<span class="code-number">401</span>, <span class="code-string">"API Key 无效或已撤销"</span>);</span>
+<span class="code-line">    }</span>
+<span class="code-line">    <span class="code-keyword">if</span> (!<span class="code-function">hasScope</span>(principal, scope)) {</span>
+<span class="code-line">        <span class="code-variable">this</span>.<span class="code-function">audit</span>(scope, <span class="code-string">"DENY"</span>, principal, <span class="code-string">"missing_scope"</span>);</span>
+<span class="code-line">        <span class="code-keyword">throw new</span> <span class="code-function">HttpError</span>(<span class="code-number">403</span>, <span class="code-string">`缺少权限：${scope}`</span>);</span>
+<span class="code-line">    }</span>
+<span class="code-line">    <span class="code-variable">this</span>.<span class="code-function">audit</span>(scope, <span class="code-string">"ALLOW"</span>, principal, <span class="code-string">"scope_granted"</span>);</span>
+<span class="code-line">    <span class="code-keyword">return</span> principal;</span>
+<span class="code-line">}</span></code></pre>
+          </div>
+          <div class="translation-english">
+            <span class="translation-label">白话翻译</span>
+            <div class="translation-lines">
+              <p class="tl">唯一例外：纯单测/演示无鉴权组件时降级为 legacy 身份——正式组装永远注入真实认证。</p>
+              <p class="tl">从两个常见位置提取原始 Key：Authorization 头优先，x-api-key 兜底。</p>
+              <p class="tl">连 Key 都没带？记一条 DENY 审计再返回 401。</p>
+              <p class="tl">拿原始 Key 去凭证库比对摘要——注意存储的是哈希不是明文。</p>
+              <p class="tl">Key 无效或已撤销？同样先审计后 401。</p>
+              <p class="tl">身份对了还要看权限范围：这把 Key 有没有当前路由要求的 scope？没有就 403。</p>
+              <p class="tl">放行也记 ALLOW 审计——每一次授权决定都有据可查。</p>
+              <p class="tl">返回的 Principal 就是后续所有逻辑唯一信任的身份凭据。</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="screen animate-in">
+        <h2 class="screen-heading">六道防线：逐层设防，不赌任何单点</h2>
+        <p>多租户防串不是靠一处检查，而是六层叠着来——任何一层有疏漏，下一层还兜得住：</p>
+        <div class="pattern-cards stagger-children">
+          <div class="pattern-card animate-in" style="border-top: 3px solid var(--color-actor-1)">
+            <div class="pattern-icon" style="background: var(--color-actor-1)">🔑</div>
+            <h4 class="pattern-title">① tenant 只来自身份</h4>
+            <p class="pattern-desc">submitRun 用 principal.tenantId，请求体里的 tenantId 被直接忽略</p>
+          </div>
+          <div class="pattern-card animate-in" style="border-top: 3px solid var(--color-actor-2)">
+            <div class="pattern-icon" style="background: var(--color-actor-2)">🔗</div>
+            <h4 class="pattern-title">② 归属链一致性校验</h4>
+            <p class="pattern-desc">ManagedAgentRuntime 四元组校验：instance.tenantId / templateVersionId / session.tenantId / session.instanceId 与 run 全对得上才启动</p>
+          </div>
+          <div class="pattern-card animate-in" style="border-top: 3px solid var(--color-actor-3)">
+            <div class="pattern-icon" style="background: var(--color-actor-3)">♻️</div>
+            <h4 class="pattern-title">③ Session 复用校验</h4>
+            <p class="pattern-desc">DefaultPiControlPlane.resolve 对已存在 session 检查 tenant/instance 归属，防复用别人的会话</p>
+          </div>
+          <div class="pattern-card animate-in" style="border-top: 3px solid var(--color-actor-4)">
+            <div class="pattern-icon" style="background: var(--color-actor-4)">🔎</div>
+            <h4 class="pattern-title">④ 查询侧按 tenant 收口</h4>
+            <p class="pattern-desc">listForTenant(tenantId)、getForTenant(id, tenantId) 双参数——服务端从不信任客户端自称归属</p>
+          </div>
+          <div class="pattern-card animate-in" style="border-top: 3px solid var(--color-actor-5)">
+            <div class="pattern-icon" style="background: var(--color-actor-5)">🙈</div>
+            <h4 class="pattern-title">⑤ IDOR 反枚举</h4>
+            <p class="pattern-desc">跨租户访问统一返回 404，与"不存在"不可区分——堵住资源枚举探测</p>
+          </div>
+          <div class="pattern-card animate-in" style="border-top: 3px solid var(--color-accent)">
+            <div class="pattern-icon" style="background: var(--color-accent)">🏛️</div>
+            <h4 class="pattern-title">⑥ 数据库约束兜底</h4>
+            <p class="pattern-desc">外键、UNIQUE、CHECK 在存储层拒绝孤儿与非法状态——应用层漏了还有最后一道闸</p>
+          </div>
+        </div>
+      </section>
+
+      <section class="screen animate-in">
+        <h2 class="screen-heading">两段关键代码：404 反枚举 与 服务端目录生成</h2>
+        <div class="translation-block">
+          <div class="translation-code">
+            <span class="translation-label">CODE · src/http/harness-http-api.ts · getRequiredRun</span>
+            <pre><code><span class="code-line"><span class="code-keyword">if</span> (request !== <span class="code-keyword">undefined</span> &amp;&amp; <span class="code-variable">this</span>.accessControl !== <span class="code-keyword">undefined</span>) {</span>
+<span class="code-line">    <span class="code-keyword">const</span> principal = <span class="code-variable">this</span>.<span class="code-function">requirePrincipal</span>(request, scope);</span>
+<span class="code-line">    <span class="code-keyword">if</span> (run.tenantId !== principal.tenantId) {</span>
+<span class="code-line">        <span class="code-keyword">throw new</span> <span class="code-function">HttpError</span>(<span class="code-number">404</span>, <span class="code-string">`找不到 AgentRun：${runId}`</span>);</span>
+<span class="code-line">    }</span>
+<span class="code-line">}</span></code></pre>
+          </div>
+          <div class="translation-english">
+            <span class="translation-label">白话翻译</span>
+            <div class="translation-lines">
+              <p class="tl">拿到合法身份后再核对：这个 Run 的租户和你一致吗？</p>
+              <p class="tl">不一致就返回 404"找不到"。为什么不是 403？因为 403 等于承认"这个 id 存在，只是你看不了"——攻击者可以借此枚举出全库的资源 ID。404 让两种情况完全不可区分。</p>
+            </div>
+          </div>
+        </div>
+        <div class="translation-block">
+          <div class="translation-code">
+            <span class="translation-label">CODE · src/workspaces/workspace-service.ts · create</span>
+            <pre><code><span class="code-line"><span class="code-keyword">const</span> id = <span class="code-variable">crypto</span>.<span class="code-function">randomUUID</span>();</span>
+<span class="code-line"><span class="code-keyword">const</span> workspace: Workspace = {</span>
+<span class="code-line">    id,</span>
+<span class="code-line">    tenantId,</span>
+<span class="code-line">    name,</span>
+<span class="code-line">    rootPath: <span class="code-function">resolve</span>(<span class="code-variable">this</span>.root, tenantId, id),</span>
+<span class="code-line">    createdAt: <span class="code-keyword">new</span> <span class="code-function">Date</span>().<span class="code-function">toISOString</span>(),</span>
+<span class="code-line">};</span>
+<span class="code-line"><span class="code-keyword">if</span> (!workspace.rootPath.<span class="code-function">startsWith</span>(`${<span class="code-variable">this</span>.root}/`)) {</span>
+<span class="code-line">    <span class="code-keyword">throw new</span> <span class="code-function">Error</span>(<span class="code-string">"非法 Workspace 根目录"</span>);</span>
+<span class="code-line">}</span>
+<span class="code-line"><span class="code-function">mkdirSync</span>(workspace.rootPath, { recursive: <span class="code-keyword">true</span>, mode: <span class="code-number">0o700</span> });</span>
+<span class="code-line"><span class="code-keyword">if</span> (<span class="code-variable">this</span>.executionUid !== <span class="code-keyword">undefined</span>) {</span>
+<span class="code-line">    <span class="code-comment">// A non-root container UID must own its single bind-mounted root.</span></span>
+<span class="code-line">    <span class="code-comment">// Failure is safer than creating a Run that can never access its Workspace.</span></span>
+<span class="code-line">    <span class="code-keyword">if</span> (<span class="code-function">statSync</span>(workspace.rootPath).uid !== <span class="code-variable">this</span>.executionUid) {</span>
+<span class="code-line">        <span class="code-function">chownSync</span>(workspace.rootPath, <span class="code-variable">this</span>.executionUid, -<span class="code-number">1</span>);</span>
+<span class="code-line">    }</span>
+<span class="code-line">} <span class="code-keyword">catch</span> (error) {</span>
+<span class="code-line">    <span class="code-function">rmSync</span>(workspace.rootPath, { recursive: <span class="code-keyword">true</span>, force: <span class="code-keyword">true</span> });</span>
+<span class="code-line">    <span class="code-keyword">throw new</span> <span class="code-function">Error</span>(`无法将 Workspace 交给容器 UID ${<span class="code-variable">this</span>.executionUid}: ...`);</span>
+<span class="code-line">}</span></code></pre>
+          </div>
+          <div class="translation-english">
+            <span class="translation-label">白话翻译</span>
+            <div class="translation-lines">
+              <p class="tl">目录由服务端生成：root / tenantId / 随机 UUID 三段拼装——客户端永远只能提交不透明的 workspaceId，不能提交宿主机路径。</p>
+              <p class="tl">前缀校验防止路径穿越逃出根目录。</p>
+              <p class="tl">0o700 权限：只有属主能进。</p>
+              <p class="tl">容器里跑 Agent 用的是非 root UID，目录必须归它所有，否则挂载后写不了文件。</p>
+              <p class="tl">注释原文就是面试答案："chown 失败比创建一个永远无法访问的 Run 更安全"——删掉目录、拒绝创建、把错误抛给上层。</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="screen animate-in">
+        <h2 class="screen-heading">攻击者的一夜：六道防线的实战剧本</h2>
+        <p>点击播放，看一个持有 Tenant-A 合法 Key 的攻击者如何被层层拦截：</p>
+        <div class="chat-window" id="chat-module-6">
+          <div class="chat-messages">
+            <div class="chat-message" data-msg="0" data-sender="attacker" style="display:none">
+              <div class="chat-avatar" style="background: #C93B3B">😈</div>
+              <div class="chat-bubble">
+                <span class="chat-sender" style="color: #C93B3B">攻击者（持 A 的合法 Key）</span>
+                <p>GET /runs/run-of-tenant-B —— 我猜到了 B 的 runId，直接读！</p>
+              </div>
+            </div>
+            <div class="chat-message" data-msg="1" data-sender="http" style="display:none">
+              <div class="chat-avatar" style="background: #2A7B9B">🌐</div>
+              <div class="chat-bubble">
+                <span class="chat-sender" style="color: #2A7B9B">HTTP API</span>
+                <p>Key 有效，A 是合法用户……但 run.tenantId=B ≠ principal.tenantId=A —— 返回 404「找不到 AgentRun」。（防线⑤：反枚举）</p>
+              </div>
+            </div>
+            <div class="chat-message" data-msg="2" data-sender="attacker" style="display:none">
+              <div class="chat-avatar" style="background: #C93B3B">😈</div>
+              <div class="chat-bubble">
+                <span class="chat-sender" style="color: #C93B3B">攻击者</span>
+                <p>换个姿势：提交任务时在 body 里自报 tenantId="tenant-B"，借你的算力跑我的任务！</p>
+              </div>
+            </div>
+            <div class="chat-message" data-msg="3" data-sender="runsvc" style="display:none">
+              <div class="chat-avatar" style="background: #D94F30">🎫</div>
+              <div class="chat-bubble">
+                <span class="chat-sender" style="color: #D94F30">RunService</span>
+                <p>body 里的 tenantId 直接忽略——tenant 只取 principal.tenantId=A。（防线①：身份固化）你的任务进了 A 自己的队列。</p>
+              </div>
+            </div>
+            <div class="chat-message" data-msg="4" data-sender="runtime" style="display:none">
+              <div class="chat-avatar" style="background: #7B6DAA">🤖</div>
+              <div class="chat-bubble">
+                <span class="chat-sender" style="color: #7B6DAA">ManagedAgentRuntime</span>
+                <p>就算构造出引用 B 的 instance/session，四元组归属校验也会当场拒绝启动。（防线②③）</p>
+              </div>
+            </div>
+            <div class="chat-message" data-msg="5" data-sender="audit" style="display:none">
+              <div class="chat-avatar" style="background: #D4A843">📜</div>
+              <div class="chat-bubble">
+                <span class="chat-sender" style="color: #D4A843">审计台账</span>
+                <p>本轮共记录：DENY × 1（越权读取）、ALLOW × 若干（合法操作）。攻击者全程没碰到 B 的任何字节。</p>
+              </div>
+            </div>
+          </div>
+
+          <div class="chat-typing" id="chat-module-6-typing" style="display:none">
+            <div class="chat-avatar" id="chat-module-6-typing-avatar">?</div>
+            <div class="chat-typing-dots">
+              <span class="typing-dot"></span>
+              <span class="typing-dot"></span>
+              <span class="typing-dot"></span>
+            </div>
+          </div>
+
+          <div class="chat-controls">
+            <button class="btn chat-next-btn">下一条消息</button>
+            <button class="btn chat-all-btn">连续播放</button>
+            <button class="btn chat-reset-btn">重新播放</button>
+            <span class="chat-progress"></span>
+          </div>
+        </div>
+      </section>
+
+      <section class="screen animate-in">
+        <h2 class="screen-heading">工程素养展示 + 当前短板</h2>
+        <p>项目手册里有一份"写新代码检查清单"——面试时主动提这个，等于证明你有体系化的安全习惯：</p>
+        <div class="badge-list">
+          <div class="badge-item"><code class="badge-code">☐ requirePrincipal + 明确 scope</code><span class="badge-desc">新路由有没有过统一强制点？</span></div>
+          <div class="badge-item"><code class="badge-code">☐ 按 principal.tenantId 过滤</code><span class="badge-desc">所有查询都收口了吗？（别只看请求参数）</span></div>
+          <div class="badge-item"><code class="badge-code">☐ 跨租户回 404 不是 403</code><span class="badge-desc">存在性不可区分</span></div>
+          <div class="badge-item"><code class="badge-code">☐ 错误信息不泄露归属</code><span class="badge-desc">报错文案会不会暴露"资源存在"？</span></div>
+          <div class="badge-item"><code class="badge-code">☐ 新表带 tenant_id + 约束</code><span class="badge-desc">外键/UNIQUE/CHECK 兜底</span></div>
+          <div class="badge-item"><code class="badge-code">☐ 该动审计吗</code><span class="badge-desc">敏感操作进 access_audit_events</span></div>
+        </div>
+        <div class="callout callout-info">
+          <div class="callout-icon">⚠️</div>
+          <div class="callout-content">
+            <strong class="callout-title">诚实短板（主动讲）</strong>
+            <p>API Key 无 TTL——泄露即长期有效（演进方向：会话登录作为第二认证器接到同一 RequestPrincipal 主干）；网关无 per-tenant 限流配额；development profile 沙箱隔离弱，产品化必须 container/strict。</p>
+          </div>
+        </div>
+
+        <div class="quiz-container" id="quiz-module-6">
+          <div class="quiz-question-block"
+               data-correct="option-c"
+               data-explanation-right="完全正确！403 会向攻击者确认'这个 id 真实存在，只是你没权限'——这本身就是信息泄露。404 把'不存在'和'无权查看'压缩成同一种响应，枚举探测失效。"
+               data-explanation-wrong="想想攻击者拿到 403 时能推断出什么：'id 存在'。这正是要堵住的侧信道。REST 语义上 403 似乎更'正确'，但安全性优先于语义洁癖。">
+            <h3 class="quiz-question">为什么跨租户读取返回 404 而不是更"语义正确"的 403 Forbidden？</h3>
+            <div class="quiz-options">
+              <button class="quiz-option" data-value="option-a" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>实现偷懒，404 的错误页是现成的</span>
+              </button>
+              <button class="quiz-option" data-value="option-b" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>403 会触发浏览器缓存问题</span>
+              </button>
+              <button class="quiz-option" data-value="option-c" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>403 会泄露资源存在性——让攻击者能枚举有效 ID；404 使两种情况不可区分</span>
+              </button>
+            </div>
+            <div class="quiz-feedback"></div>
+          </div>
+
+          <div class="quiz-question-block"
+               data-correct="option-a"
+               data-explanation-right="正是这道防线！ToolGateway 在 Runtime 外面而不是里面——策略守卫要求 snapshot.runId === input.runId，拿别人 Run 的策略做裁决会被直接拒绝。"
+               data-explanation-wrong="Runtime 本身恰恰是不被信任的对象——防线的设计原则就是假设它会犯错或被诱导。真正拦截发生在它外面的 ToolGateway 策略守卫：快照与 Run 的绑定校验。">
+            <h3 class="quiz-question">场景题：Agent Runtime 里出现 bug，试图用另一个 Run 的恢复数据驱动当前执行。哪一层设计专门针对这种"恢复死角"？</h3>
+            <div class="quiz-options">
+              <button class="quiz-option" data-value="option-a" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>Checkpoint 与策略快照都强绑定 runId——queueResume 校验 checkpoint.runId === runId，工具守卫校验 snapshot.runId</span>
+              </button>
+              <button class="quiz-option" data-value="option-b" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>没有防护——这属于已知的不可解决问题</span>
+              </button>
+              <button class="quiz-option" data-value="option-c" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>依赖 Pi SDK 内部的 session 隔离机制自动处理</span>
+              </button>
+            </div>
+            <div class="quiz-feedback"></div>
+          </div>
+
+          <div class="quiz-question-block"
+               data-correct="option-b"
+               data-explanation-right="完全正确！这就是信任边界的分层哲学：每一层只信上一层已经固化的产物。身份一次认证、归属一路固化——中间任何层都不需要也不允许重新猜测。"
+               data-explanation-wrong="分层信任的关键在于'每层信什么'有明确表格：HTTP 信 key、Service 信 DB 固化的 tenantId、策略信不可变快照、Runtime 不被信。如果 Service 还要去猜客户端意图，边界就形同虚设了。">
+            <h3 class="quiz-question">"每层明确信谁、不信谁"——Service 层读到的 run.tenantId 为什么可信？</h3>
+            <div class="quiz-options">
+              <button class="quiz-option" data-value="option-a" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>因为 SQLite 有 CHECK 约束保证格式正确</span>
+              </button>
+              <button class="quiz-option" data-value="option-b" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>因为它来自 HTTP 入口认证后写入并固化的值，此后无人修改、无人重新自报</span>
+              </button>
+              <button class="quiz-option" data-value="option-c" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>因为每次查询前都会重新调用认证接口验证一遍</span>
+              </button>
+            </div>
+            <div class="quiz-feedback"></div>
+          </div>
+
+          <button class="quiz-check-btn" onclick="checkQuiz('quiz-module-6')">检查答案</button>
+          <button class="quiz-reset-btn" onclick="resetQuiz('quiz-module-6')">再试一次</button>
+        </div>
+
+        <p style="margin-top:var(--space-8)"><strong>下一模块</strong>：身份之外——五层策略交集如何编译成 docker 命令行，把权限落到操作系统层面。</p>
+      </section>
+
+    </div>
+  </div>
+</section>

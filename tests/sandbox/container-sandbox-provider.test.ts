@@ -72,6 +72,16 @@ test("容器 Sandbox 将隔离策略编译为可审计 Docker 参数，并仅持
         observedRuntime: "runsc",
         verified: true,
     });
+    expect(handle.enforcement).toEqual({
+        toolExecutionBoundary: "SANDBOX",
+        filesystemIsolation: true,
+        processIsolation: true,
+        networkPolicyEnforced: true,
+        cpuLimitEnforced: true,
+        memoryLimitEnforced: true,
+        diskLimitEnforced: false,
+        pidLimitEnforced: true,
+    });
 
     await provider.execute(handle.id, ["sh", "-lc", "id"]);
     expect(docker.calls[2]).toEqual([
@@ -99,6 +109,24 @@ test("docker exec 发现容器消失时发出 LOST，而不是把它当成普通
     expect(store.get(handle.id)).toMatchObject({ status: "LOST" });
     expect(events).toMatchObject([{ sandboxId: handle.id, status: "LOST", runId: "run" }]);
     await expect(provider.execute(handle.id, ["sh", "-lc", "pwd"])).rejects.toThrow("不可执行");
+});
+
+test("启动对账可按持久化 Sandbox ID 回收旧进程未登记的容器", async () => {
+    const docker = new FakeDocker();
+    const store = new MemorySandboxStore();
+    const provider = new ContainerSandboxProvider(
+        store as unknown as SandboxStore,
+        { get: () => null }, { image: "agent-sandbox:test" }, docker,
+    );
+    const handle = await provider.create({
+        id: "sandbox-stale", runId: "run", instanceId: "instance",
+        workspacePath: "/srv/workspaces/tenant/workspace", policy: policy(),
+    });
+    await provider.cleanupStale(store.get(handle.id)!);
+    expect(docker.calls.at(-1)).toEqual([
+        "docker", "rm", "--force", "agent-harness-sandbox-stale",
+    ]);
+    await expect(provider.execute(handle.id, ["true"])).rejects.toThrow("不可执行");
 });
 
 test("无法强制 bind mount 磁盘配额或越出 Workspace 根时拒绝执行", async () => {

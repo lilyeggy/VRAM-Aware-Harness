@@ -39,6 +39,8 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 
 # build artifacts
 artifacts/
+data/*.sqlite
+data/*.sqlite-*
 
 # 独立的其他项目目录（不属于本仓库）
 agentic-rl-rollout-explorer/

@@ -69,6 +69,15 @@ export class SandboxProviderRouter implements SandboxProvider, SandboxCommandExe
         }
     }
 
+    async cleanupStale(record: import("./sandbox-provider.ts").SandboxRecord): Promise<void> {
+        const provider = this.providers[record.profile];
+        if (provider?.cleanupStale === undefined) {
+            throw new Error(`Sandbox Provider 不支持启动清理：${record.profile}`);
+        }
+        await provider.cleanupStale(record);
+        this.owners.delete(record.id);
+    }
+
     subscribe(handler: (event: SandboxLifecycleEvent) => void): () => void {
         this.handlers.add(handler);
         return () => this.handlers.delete(handler);

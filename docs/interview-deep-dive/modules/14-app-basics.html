@@ -1,0 +1,187 @@
+<section class="module" id="module-14" style="background: var(--color-bg)">
+  <div class="module-content">
+    <header class="module-header animate-in">
+      <span class="module-number">14</span>
+      <h1 class="module-title">应用层八股补充包 · 变体问法对照</h1>
+      <p class="module-subtitle">Agent 岗标配题不失分——每题先给标准答案，再给"结合本项目怎么说"的桥接。最后一张表：全课程知识点 ↔ 大厂原题包装。</p>
+    </header>
+
+    <div class="module-body">
+
+      <section class="screen animate-in">
+        <h2 class="screen-heading">八股速答：每题 60 秒版 + 项目桥接</h2>
+        <div class="icon-rows">
+          <div class="icon-row">
+            <div class="icon-circle" style="background: var(--color-actor-1)">1️⃣</div>
+            <div>
+              <strong>Function Calling vs RAG，什么时候用哪个？</strong>
+              <p>实时数据/执行动作 → FC；私有知识/离线文档 → RAG；实际系统常组合。<strong>桥接</strong>："我的项目是 FC 的安全壳——工具调用全部过策略守卫、副作用分类和沙箱命令边界，这是生产级 FC 和 demo 级 FC 的差别。"</p>
+            </div>
+          </div>
+          <div class="icon-row">
+            <div class="icon-circle" style="background: var(--color-actor-2)">2️⃣</div>
+            <div>
+              <strong>幻觉怎么产生？怎么减轻？</strong>
+              <p>模型在预测下一个 token 不是检索事实，天然会编。五板斧：RAG 供事实 / FC 查真实数据 / Structured Output 收窄格式 / Prompt 明示"不知道就说" / 多轮自检或交叉验证。<strong>桥接</strong>："工程侧我再加两板斧：副作用 fail-closed（不确定就不动手）+ 全量审计可回放——幻觉最多导致答错，不会导致做错。"</p>
+            </div>
+          </div>
+          <div class="icon-row">
+            <div class="icon-circle" style="background: var(--color-actor-3)">3️⃣</div>
+            <div>
+              <strong>Structured Output 怎么保证稳定？</strong>
+              <p>Prompt 规定格式不稳定；JSON Schema 约束（主流 API 支持）把字段名、类型、必填卡死。<strong>桥接</strong>："下游要自动化解析所以格式即契约——我的 RunEvent payload 带 payloadVersion 字段，就是给事件 schema 的演进留的版本位。"</p>
+            </div>
+          </div>
+          <div class="icon-row">
+            <div class="icon-circle" style="background: var(--color-actor-4)">4️⃣</div>
+            <div>
+              <strong>上下文腐化 / Lost in the Middle 是什么？</strong>
+              <p>窗口塞满后早期内容被稀释、注意力大幅下降；中间位置的信息最容易被忽略。<strong>桥接</strong>："所以工程上不是拼命塞满窗口而是精准控制放什么——我的方案是把记忆压缩整个交给 Pi 会话层（appendCompaction 写进会话文件持久化），Harness 只管选会话和复用句柄。"</p>
+            </div>
+          </div>
+          <div class="icon-row">
+            <div class="icon-circle" style="background: var(--color-actor-5)">5️⃣</div>
+            <div>
+              <strong>RAG 检索策略怎么设计？</strong>
+              <p>混合检索（向量抓语义 + 关键词抓精确）用 RRF 融合；Chunk 512-1024 token 带 50-100 重叠；HyDE 先生成假设文档再检索；重排序提升精度。<strong>桥接</strong>："我的项目没做 RAG——诚实承认，但我知道难点三座山：文档预处理质量、召回质量、生成忠实度。"</p>
+            </div>
+          </div>
+          <div class="icon-row">
+            <div class="icon-circle" style="background: var(--color-accent)">6️⃣</div>
+            <div>
+              <strong>SFT vs RLHF？微调 vs RAG？</strong>
+              <p>改行为风格用 SFT 快速迭代；对齐偏好用 RLHF/DPO；知识频繁更新用 RAG（改库不改模）；能力本质缺失才微调。<strong>桥接</strong>："我把模型当可替换工作负载（ADR 0005），这些是模型侧手段——我的立身之本是控制面语义不随模型升级漂移。"</p>
+            </div>
+          </div>
+          <div class="icon-row">
+            <div class="icon-circle" style="background: var(--color-text-muted)">7️⃣</div>
+            <div>
+              <strong>多 Agent 主子通信链路怎么设计？异常怎么处理？</strong>
+              <p>主 Agent 拆解任务 → 子 Agent 独立上下文执行 → 结构化结果回传；异常要有超时/重试/降级和部分结果回收。<strong>桥接</strong>："我的项目单 Runtime 但机制同构：Attempt 隔离每次执行、Sandbox LOST 事件 → Attempt INTERRUPTED → agent_interrupted 事件 → 调度层重新排队，这就是'子任务失败的标准化收敛路径'。"</p>
+            </div>
+          </div>
+          <div class="icon-row">
+            <div class="icon-circle" style="background: var(--color-actor-1)">8️⃣</div>
+            <div>
+              <strong>Agent 成本失控监控什么指标？</strong>
+              <p>token 总量与增速、单任务成本分布、cache 命中率、工具调用的间接成本（失败重试放大器）、预算告警。<strong>桥接</strong>："我的 Eval 层直接产出这些：totalTokens/costTotal/cacheHitRate 从 MODEL_COMPLETED usage 聚合，零新增采集。"</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="screen animate-in">
+        <h2 class="screen-heading">大厂变体问法对照表：同一知识点，两种包装</h2>
+        <p>面试官很少按教科书问。这张表帮你瞬间识别"变体背后考的还是你讲过的东西"：</p>
+        <table style="width:100%;border-collapse:collapse;font-size:var(--text-xs)">
+          <tr style="border-bottom:2px solid var(--color-border)">
+            <th style="text-align:left;padding:var(--space-2)">本课程模块</th><th style="text-align:left;padding:var(--space-2)">你熟悉问法</th><th style="text-align:left;padding:var(--space-2)">大厂变体包装</th>
+          </tr>
+          <tr style="border-bottom:1px solid var(--color-border-light)"><td style="padding:var(--space-2)"><strong>M03 副作用恢复</strong></td><td style="padding:var(--space-2)">任务崩了怎么恢复？</td><td style="padding:var(--space-2)">"连续任务的正确性怎么保证？"（字节）/ "如何防止重复执行危险操作？"（腾讯系）</td></tr>
+          <tr style="border-bottom:1px solid var(--color-border-light)"><td style="padding:var(--space-2)"><strong>M04 资源准入</strong></td><td style="padding:var(--space-2)">GPU 满了怎么办？</td><td style="padding:var(--space-2)">"推理服务怎么做负载均衡与削峰？"（阿里 PAI 视角）/ "采样瓶颈与长尾负载不均怎么处理？"（快手 RL Infra）</td></tr>
+          <tr style="border-bottom:1px solid var(--color-border-light)"><td style="padding:var(--space-2)"><strong>M05 公平调度</strong></td><td style="padding:var(--space-2)">多租户怎么防饥饿？</td><td style="padding:var(--space-2)">"设计一个多租户任务调度器，要求公平性和隔离性"（通用系统设计题）</td></tr>
+          <tr style="border-bottom:1px solid var(--color-border-light)"><td style="padding:var(--space-2)"><strong>M06 身份防串</strong></td><td style="padding:var(--space-2)">跨租户怎么隔离？</td><td style="padding:var(--space-2)">"Agent 平台怎么防提示注入后的横向越权？"（安全向）/ "IDOR 在 Agent 场景的新形态？"</td></tr>
+          <tr style="border-bottom:1px solid var(--color-border-light)"><td style="padding:var(--space-2)"><strong>M07 策略沙箱</strong></td><td style="padding:var(--space-2)">沙箱怎么做的？</td><td style="padding:var(--space-2)">"为 Agent 设计安全的代码执行环境"（675 题清单高频）/ "gVisor 和 Firecracker 怎么选？"</td></tr>
+          <tr style="border-bottom:1px solid var(--color-border-light)"><td style="padding:var(--space-2)"><strong>M08 网关评测</strong></td><td style="padding:var(--space-2)">LLM 网关做了什么？</td><td style="padding:var(--space-2)">"设计一个 LLM Gateway"（Shopee 二面原题 → M13 打分卡）</td></tr>
+          <tr style="border-bottom:1px solid var(--color-border-light)"><td style="padding:var(--space-2)"><strong>M10 引擎原理</strong></td><td style="padding:var(--space-2)">vLLM 为什么快？</td><td style="padding:var(--space-2)">"PagedAttention 解决什么问题？"（同花顺）/ "vLLM 抢占策略源码在哪？"（同花顺二面）</td></tr>
+          <tr style="border-bottom:1px solid var(--color-border-light)"><td style="padding:var(--space-2)"><strong>M11 Harness 话语</strong></td><td style="padding:var(--space-2)">你的项目架构？</td><td style="padding:var(--space-2)">"你怎么理解 Harness Engineering？" / "Agent = Model + Harness 怎么理解？"（2026 新题，来源 C）</td></tr>
+          <tr><td style="padding:var(--space-2)"><strong>M12 框架横评</strong></td><td style="padding:var(--space-2)">为什么不用 LangChain？</td><td style="padding:var(--space-2)">"对比 OpenClaw/Hermes/Claude Code 的记忆与上下文管理"（字节面经明示要撑住五分钟）</td></tr>
+        </table>
+      </section>
+
+      <section class="screen animate-in">
+        <h2 class="screen-heading">终极自检：三个信号你准备好了</h2>
+        <div class="pattern-cards stagger-children">
+          <div class="pattern-card animate-in" style="border-top: 3px solid var(--color-accent)">
+            <div class="pattern-icon" style="background: var(--color-accent)">🎤</div>
+            <h4 class="pattern-title">信号一：能双向翻译</h4>
+            <p class="pattern-desc">听到"PagedAttention"能讲到块表，听到"Harness 六层"能落到自己的 ToolGateway——两个话语体系自由切换。</p>
+          </div>
+          <div class="pattern-card animate-in" style="border-top: 3px solid var(--color-actor-2)">
+            <div class="pattern-icon" style="background: var(--color-actor-2)">🗺️</div>
+            <h4 class="pattern-title">信号二：知道边界在哪</h4>
+            <p class="pattern-desc">被问到没做过的方向，能说清"没做过 + 我会怎么推导 + 业界参照物"，而不是硬编或沉默。</p>
+          </div>
+          <div class="pattern-card animate-in" style="border-top: 3px solid var(--color-actor-4)">
+            <div class="pattern-icon" style="background: var(--color-actor-4)">🧲</div>
+            <h4 class="pattern-title">信号三：能引导话题</h4>
+            <p class="pattern-desc">每答 2-3 个问题就有机会把话题拉回自己最强处：恢复语义、fail-closed 一致性、真机证据链。</p>
+          </div>
+        </div>
+
+        <div class="quiz-container" id="quiz-module-14">
+          <div class="scenario-block quiz-question-block"
+               data-correct="option-c"
+               data-explanation-right="完全正确！标准答案展示知识面，项目桥接展示深度——两者的组合才是'既懂业界通识又有独家实践'的完整形象。只答其一都会显得单薄。"
+               data-explanation-wrong="只背标准答案会和所有候选人撞车；只讲自己项目又显得不懂业界常识。八股的价值在于它是共同语言，桥接的价值在于你是你。">
+            <span class="scenario-label">收束题</span>
+            <div class="scenario-context"><p>"幻觉有哪些减轻方法？"这题的最佳答法结构是？</p></div>
+            <div class="quiz-options">
+              <button class="quiz-option" data-value="option-a" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>只背五板斧标准答案，越快说完越好</span>
+              </button>
+              <button class="quiz-option" data-value="option-b" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>只讲自己项目的做法，标准答案面试官都知道</span>
+              </button>
+              <button class="quiz-option" data-value="option-c" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>先给五板斧标准答案证明懂通识，再桥接"工程侧我还有 fail-closed 和全量审计两板斧——幻觉最多导致答错，不会导致做错"</span>
+              </button>
+            </div>
+            <div class="quiz-feedback"></div>
+          </div>
+
+          <div class="scenario-block quiz-question-block"
+               data-correct="option-b"
+               data-explanation-right="完全正确！识别出'变体考的是同一个东西'的那一刻，你就从被动应答变成了主动输出——这张对照表的全部意义就在于此。"
+               data-explanation-wrong="别被新包装吓到。拆开包装看内核：状态机+记账+幂等+恢复归属校验——这些你在 M03 已经吃透到源码级了。">
+            <span class="scenario-label">收束题 2</span>
+            <div class="scenario-context"><p>面试官问"你们怎么保证 Agent 连续任务的正确性？"（字节原题）——它其实是在考你课程的哪个模块？</p></div>
+            <div class="quiz-options">
+              <button class="quiz-option" data-value="option-a" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>纯前端交互问题，跟课程模块无关</span>
+              </button>
+              <button class="quiz-option" data-value="option-b" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>M03 副作用恢复：状态机 + 双复写记账 + Checkpoint 归属校验 + 只重放安全副作用——这就是"连续任务正确性"的完整答案</span>
+              </button>
+              <button class="quiz-option" data-value="option-c" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>M08 的 Eval 指标体系</span>
+              </button>
+            </div>
+            <div class="quiz-feedback"></div>
+          </div>
+
+          <button class="quiz-check-btn" onclick="checkQuiz('quiz-module-14')">检查答案</button>
+          <button class="quiz-reset-btn" onclick="resetQuiz('quiz-module-14')">再试一次</button>
+        </div>
+      </section>
+
+      <section class="screen animate-in">
+        <h2 class="screen-heading">全课程完结 · 最终 Checklist 升级版</h2>
+        <p>基础篇（M01-M09）+ 考场扩展篇（M10-M14）全部完成。最终检查清单：</p>
+        <div class="badge-list">
+          <div class="badge-item"><code class="badge-code">☐ 项目本体四深挖</code><span class="badge-desc">M03 恢复 / M04 背压 / M05 调度 / M06-07 隔离——任选一个能白板讲 10 分钟</span></div>
+          <div class="badge-item"><code class="badge-code">☐ 引擎层弹药</code><span class="badge-desc">M10：PD 分离必要性、抢占两模式、FP8/INT8 并存原因</span></div>
+          <div class="badge-item"><code class="badge-code">☐ 话语体系切换</code><span class="badge-desc">M11：六层映射表能默写，Mitchell 出处能说出</span></div>
+          <div class="badge-item"><code class="badge-code">☐ 框架五分钟</code><span class="badge-desc">M12：CC/Hermes/OpenClaw 对比 + OpenClaw 默认宿主执行的对照反杀</span></div>
+          <div class="badge-item"><code class="badge-code">☐ 两道设计题</code><span class="badge-desc">M13：平台题追问树走一遍 + Gateway 打分卡九项自查</span></div>
+          <div class="badge-item"><code class="badge-code">☐ 八股桥接</code><span class="badge-desc">M14：八道速答题每题的"项目桥接"那句都能脱口而出</span></div>
+          <div class="badge-item"><code class="badge-code">☐ 变体识别</code><span class="badge-desc">对照表过三遍，看到任何新包装能在 5 秒内定位到模块</span></div>
+        </div>
+        <div class="callout callout-accent">
+          <div class="callout-icon">🏁</div>
+          <div class="callout-content">
+            <strong class="callout-title">最后一句</strong>
+            <p>这个项目最锋利的地方从来不是"我什么都会"，而是<strong>"每一层我都清楚边界，每个承诺都有证据"</strong>。面试官见过太多什么都敢说的候选人——你的克制和证据链，就是最强的差异化。祝面试顺利！🎯</p>
+          </div>
+        </div>
+      </section>
+
+    </div>
+  </div>
+</section>

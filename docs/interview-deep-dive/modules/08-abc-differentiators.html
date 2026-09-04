@@ -1,0 +1,321 @@
+<section class="module" id="module-8" style="background: var(--color-bg)">
+  <div class="module-content">
+    <header class="module-header animate-in">
+      <span class="module-number">08</span>
+      <h1 class="module-title">差异化深化 A / B / C</h1>
+      <p class="module-subtitle">任务能跑通只是及格线。三个方向分别对应 agent infra 岗位的 eval、observability、inference gateway 关键词。</p>
+    </header>
+
+    <div class="module-body">
+
+      <section class="screen animate-in">
+        <h2 class="screen-heading">车队管理三件套</h2>
+        <p>A 是行车记录仪 + 油耗报表（任务跑完了，但跑得<em>好</em>吗？）；B 是车队调度大屏；C 是备用路线导航（主路堵了自动换备路，连续堵路就先不推荐这条路）。三者共享一个设计哲学——<strong>零侵入</strong>：</p>
+        <div class="pattern-cards stagger-children">
+          <div class="pattern-card animate-in" style="border-top: 3px solid var(--color-accent)">
+            <div class="pattern-icon" style="background: var(--color-accent)">📊</div>
+            <h4 class="pattern-title">A · 执行质量评测（Eval）</h4>
+            <p class="pattern-desc">只读已有落库数据，零新增采集。行业标配指标 + 控制面护城河指标。输出 scripts/eval-report.ts 文本报表 + GET /eval JSON。</p>
+          </div>
+          <div class="pattern-card animate-in" style="border-top: 3px solid var(--color-actor-2)">
+            <div class="pattern-icon" style="background: var(--color-actor-2)">🖥️</div>
+            <h4 class="pattern-title">B · 观测驾驶舱（Observe）</h4>
+            <p class="pattern-desc">独立只读页 /observe，与任务操作台解耦。状态环形图、完成度渐变条、租户对比、背压堆叠条、明细表，多租户切换。</p>
+          </div>
+          <div class="pattern-card animate-in" style="border-top: 3px solid var(--color-actor-4)">
+            <div class="pattern-icon" style="background: var(--color-actor-4)">🧭</div>
+            <h4 class="pattern-title">C · LLM 路由网关（Gateway）</h4>
+            <p class="pattern-desc">OpenAI 兼容代理：主备回退 + 熔断 + RouteDecision 记录。Agent/控制面/沙箱都不变，只改 models.json 的 baseUrl 指向网关。</p>
+          </div>
+        </div>
+        <div class="callout callout-accent">
+          <div class="callout-icon">💡</div>
+          <div class="callout-content">
+            <strong class="callout-title">为什么"零侵入"是优点而不是妥协？</strong>
+            <p>如果评测需要往执行路径里插桩，评测系统本身就成了新的故障点和性能损耗源。A 的全部数据来自控制面本来就为"可解释决策"落库的事实——这恰恰证明前面模块的持久化设计是超前的投资：写数据时没想好怎么用，用的时候发现全都够。</p>
+          </div>
+        </div>
+      </section>
+
+      <section class="screen animate-in">
+        <h2 class="screen-heading">方向 A：从六张表读出三层指标</h2>
+        <div class="file-tree">
+          <div class="ft-folder open"><span class="ft-name">agent_runs</span><span class="ft-desc">终态/租户/排队耗时(created→started)/执行耗时/checkpoint</span></div>
+          <div class="ft-folder open"><span class="ft-name">run_attempts</span><span class="ft-desc">尝试次数（平均 attempt 数）</span></div>
+          <div class="ft-folder open"><span class="ft-name">tool_executions</span><span class="ft-desc">工具副作用画像 + 被拦危险副作用数</span></div>
+          <div class="ft-folder open"><span class="ft-name">run_events(MODEL_COMPLETED)</span><span class="ft-desc">LLM token/cost 用量（聚合 payload.usage）</span></div>
+          <div class="ft-folder open"><span class="ft-name">run_workspace_diffs / run_artifacts / run_output_chunks</span><span class="ft-desc">完成度：diff 率 / artifact 率 / finalText 率</span></div>
+          <div class="ft-folder open"><span class="ft-name">policy_decisions</span><span class="ft-desc">资源准入评测：背压触发率、观测失败率</span></div>
+        </div>
+        <p style="margin-top:var(--space-6)">两类指标的划分是面试记忆点——行业标配证明你懂常识，护城河指标证明你有独家视角：</p>
+        <div class="icon-rows">
+          <div class="icon-row">
+            <div class="icon-circle" style="background: var(--color-text-muted)">📏</div>
+            <div>
+              <strong>行业标配</strong>
+              <p>成功率、平均尝试次数、queueWaitMs/runDurationMs 的 avg+P95、token 总量与成本</p>
+            </div>
+          </div>
+          <div class="icon-row">
+            <div class="icon-circle" style="background: var(--color-accent)">🏰</div>
+            <div>
+              <strong>控制面护城河</strong>
+              <p>背压触发率 pressuredRate、无人值守率 unattendedRate、危险拦截率 blockedDangerousToolCount、cache 命中率 cacheRead/(input+cacheRead)</p>
+            </div>
+          </div>
+        </div>
+        <p>"无人值守率"的定义最能体现控制面语义——它直接复用 Module 3 的 canAutomaticallyReplay：</p>
+        <div class="translation-block">
+          <div class="translation-code">
+            <span class="translation-label">CODE · src/eval/evaluation-aggregator.ts</span>
+            <pre><code><span class="code-line"><span class="code-comment">// 无人值守率：没有「被拦下的危险副作用」的任务占比。</span></span>
+<span class="code-line">unattendedRate: <span class="code-function">rate</span>(</span>
+<span class="code-line">    runs.<span class="code-function">filter</span>((r) =&gt; r.blockedDangerousToolCount === <span class="code-number">0</span>).length,</span>
+<span class="code-line">),</span>
+<span class="code-line"></span>
+<span class="code-line"><span class="code-comment">// 单个 Run 内的计数逻辑：</span></span>
+<span class="code-line"><span class="code-comment">// 仍处于 PREPARED 且不可自动重放 = 被拦下的危险副作用。</span></span>
+<span class="code-line"><span class="code-keyword">if</span> (</span>
+<span class="code-line">    row.status === <span class="code-string">"PREPARED"</span></span>
+<span class="code-line">    &amp;&amp; !<span class="code-function">canAutomaticallyReplay</span>(row.status, row.effect)</span>
+<span class="code-line">) {</span>
+<span class="code-line">    blockedDangerousToolCount += <span class="code-number">1</span>;</span>
+<span class="code-line">}</span></code></pre>
+          </div>
+          <div class="translation-english">
+            <span class="translation-label">白话翻译</span>
+            <div class="translation-lines">
+              <p class="tl">一个任务全程没有任何"需要人工确认的危险副作用"，才算真正的无人值守。</p>
+              <p class="tl">判定标准不是新造一套规则，而是调用和控制面完全相同的 canAutomaticallyReplay 函数——安全语义只有一份，评测层和控制面永远不会出现两套标准打架。</p>
+              <p class="tl">这就是"零新增采集"背后的深层一致性：数据模型即安全模型。</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="screen animate-in">
+        <h2 class="screen-heading">方向 C：回退语义与熔断三态</h2>
+        <p>网关的回退规则一句话就能讲清（面试原话）：<strong>429 / 5xx / 网络错误 / 超时 → 后端问题，换下一个后端重试；其余 4xx → 请求本身的问题，换了也没用，直接透传。</strong></p>
+        <p>熔断器是经典三态机——Closed（正常放行）→ Open（连续失败达阈值，冷却期内跳过）→ Half-Open（冷却结束允许一次试探）：</p>
+        <div class="translation-block">
+          <div class="translation-code">
+            <span class="translation-label">CODE · src/llm-gateway/model-router.ts · candidatesFor</span>
+            <pre><code><span class="code-line"><span class="code-function">candidatesFor</span>(logicalModel: string): LlmBackend[] {</span>
+<span class="code-line">    <span class="code-keyword">const</span> list = <span class="code-variable">this</span>.backendsByModel.<span class="code-function">get</span>(logicalModel) ?? [];</span>
+<span class="code-line">    <span class="code-keyword">const</span> now = <span class="code-variable">this</span>.now();</span>
+<span class="code-line">    <span class="code-keyword">return</span> list.<span class="code-function">filter</span>((b) =&gt; {</span>
+<span class="code-line">        <span class="code-keyword">const</span> state = <span class="code-variable">this</span>.states.<span class="code-function">get</span>(b.id);</span>
+<span class="code-line">        <span class="code-keyword">if</span> (!state) <span class="code-keyword">return</span> <span class="code-keyword">true</span>;</span>
+<span class="code-line">        <span class="code-keyword">if</span> (state.circuitOpenUntil === <span class="code-number">0</span>) <span class="code-keyword">return</span> <span class="code-keyword">true</span>;</span>
+<span class="code-line">        <span class="code-keyword">if</span> (now &gt;= state.circuitOpenUntil) {</span>
+<span class="code-line">            <span class="code-comment">// 冷却结束：半开，允许一次尝试</span></span>
+<span class="code-line">            state.circuitOpenUntil = <span class="code-number">0</span>;</span>
+<span class="code-line">            <span class="code-keyword">return</span> <span class="code-keyword">true</span>;</span>
+<span class="code-line">        }</span>
+<span class="code-line">        <span class="code-keyword">return</span> <span class="code-keyword">false</span>;</span>
+<span class="code-line">    });</span>
+<span class="code-line">}</span></code></pre>
+          </div>
+          <div class="translation-english">
+            <span class="translation-label">白话翻译</span>
+            <div class="translation-lines">
+              <p class="tl">按配置优先级取出该逻辑模型的后端候选列表。</p>
+              <p class="tl">逐个检查熔断状态。</p>
+              <p class="tl">熔断关闭（circuitOpenUntil 为 0）：正常候选。</p>
+              <p class="tl">冷却期已过：半开——清零并放进候选，给它一次将功赎罪的机会。</p>
+              <p class="tl">还在冷却期：跳过，避免反复打挂掉的后端。</p>
+              <p class="tl">配合 recordFailure：连续失败 ≥3 次打开熔断 30 秒；recordSuccess 清零计数。默认阈值和冷却时间都可注入配置。</p>
+            </div>
+          </div>
+        </div>
+        <p>回退主循环里每一步都记录 RouteDecision——选谁、试了谁、是否回退、延迟、成败，与 policy_decisions「决策台账」同一思路：</p>
+        <div class="translation-block">
+          <div class="translation-code">
+            <span class="translation-label">CODE · src/llm-gateway/llm-gateway.ts · handleChatCompletions 节选</span>
+            <pre><code><span class="code-line"><span class="code-keyword">for</span> (<span class="code-keyword">const</span> backend <span class="code-keyword">of</span> candidates) {</span>
+<span class="code-line">    attempted.<span class="code-function">push</span>(backend.id);</span>
+<span class="code-line">    <span class="code-keyword">const</span> outcome = <span class="code-keyword">await</span> <span class="code-variable">this</span>.<span class="code-function">tryBackend</span>(backend, body);</span>
+<span class="code-line">    <span class="code-keyword">if</span> (outcome.kind === <span class="code-string">"success"</span>) {</span>
+<span class="code-line">        <span class="code-variable">this</span>.router.<span class="code-function">recordSuccess</span>(backend.id);</span>
+<span class="code-line">        <span class="code-variable">this</span>.router.<span class="code-function">recordDecision</span>({ ...base,</span>
+<span class="code-line">            chosenBackendId: backend.id, status: <span class="code-string">"SUCCESS"</span>,</span>
+<span class="code-line">            httpStatus: outcome.response.status,</span>
+<span class="code-line">            fallback: attempted.length &gt; <span class="code-number">1</span>, ... });</span>
+<span class="code-line">        <span class="code-keyword">return</span> outcome.response;</span>
+<span class="code-line">    }</span>
+<span class="code-line">    <span class="code-keyword">if</span> (outcome.kind === <span class="code-string">"client-error"</span>) {</span>
+<span class="code-line">        <span class="code-comment">// 请求本身问题：不回退，直接透传上游 4xx。</span></span>
+<span class="code-line">        <span class="code-variable">this</span>.router.<span class="code-function">recordDecision</span>({ ...base, status: <span class="code-string">"FAILED"</span>, ... });</span>
+<span class="code-line">        <span class="code-keyword">return</span> outcome.response;</span>
+<span class="code-line">    }</span>
+<span class="code-line">    <span class="code-comment">// retryable：记录失败并回退下一个后端</span></span>
+<span class="code-line">    <span class="code-variable">this</span>.router.<span class="code-function">recordFailure</span>(backend.id);</span>
+<span class="code-line">}</span></code></pre>
+          </div>
+          <div class="translation-english">
+            <span class="translation-label">白话翻译</span>
+            <div class="translation-lines">
+              <p class="tl">依序尝试每个候选后端，记下试过谁。</p>
+              <p class="tl">成功：清零熔断计数，记录 SUCCESS 决策——fallback 字段如实标注"这是换过一次才成功的"。</p>
+              <p class="tl">4xx 客户端错误：请求本身有问题，回退到别的后端只会重复失败，直接把错误透传给调用方。</p>
+              <p class="tl">可重试失败（429/5xx/网络/超时）：给这个后端记一笔失败，继续试下一个。</p>
+              <p class="tl">循环结束还没成？502 + 全部已试后端列表。stream:true 时响应体是透传的上游 SSE 流；转发时逻辑模型名会被替换为后端真实模型名。</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="screen animate-in">
+        <h2 class="screen-heading">回退实战动画</h2>
+        <div class="flow-animation" data-steps='[
+  {"highlight":"flow-actor-22","packet":true,"from":"actor-22","to":"actor-23","label":"Pi 发起请求 model=qwen-dev —— baseUrl 已指向网关，Agent 与控制面毫无感知"},
+  {"highlight":"flow-actor-23","label":"路由器查候选：vllm-local 优先，opencode-cloud 备胎；两者熔断均关闭"},
+  {"highlight":"flow-actor-24","packet":true,"from":"actor-23","to":"actor-24","label":"第一次尝试 vllm-local：60 秒超时 —— 属于可重试失败，recordFailure 计数 +1"},
+  {"highlight":"flow-actor-26","packet":true,"from":"actor-23","to":"actor-26","label":"第二次尝试 opencode-cloud：200 OK —— recordSuccess 清零熔断计数"},
+  {"highlight":"flow-actor-27","packet":true,"from":"actor-23","to":"actor-27","label":"RouteDecision 落环形缓冲：fallback=true、延迟、两个 attemptedBackendIds"}
+]'>
+          <div class="flow-actors">
+            <div class="flow-actor" id="flow-actor-22">
+              <div class="flow-actor-icon" style="border-color: #7B6DAA; background: #EFEBF7">🤖</div>
+              <span>Pi Agent</span>
+            </div>
+            <div class="flow-actor" id="flow-actor-23">
+              <div class="flow-actor-icon" style="border-color: #D94F30; background: #FDEEE9">🚪</div>
+              <span>LLM Gateway<br>:3000</span>
+            </div>
+            <div class="flow-actor" id="flow-actor-24">
+              <div class="flow-actor-icon" style="border-color: #D4A843; background: #FDF5E0">🐌</div>
+              <span>vllm-local<br>主</span>
+            </div>
+            <div class="flow-actor" id="flow-actor-26">
+              <div class="flow-actor-icon" style="border-color: #2D8B55; background: #E8F5EE">☁️</div>
+              <span>opencode-cloud<br>备</span>
+            </div>
+            <div class="flow-actor" id="flow-actor-27">
+              <div class="flow-actor-icon" style="border-color: #2A7B9B; background: #E4F2F7">📜</div>
+              <span>RouteDecision<br>环形缓冲</span>
+            </div>
+          </div>
+
+          <div class="flow-packet" id="flow-packet"></div>
+
+          <div class="flow-step-label" id="flow-label">点击「Next Step」开始</div>
+
+          <div class="flow-controls">
+            <button class="btn flow-next-btn">下一步</button>
+            <button class="btn flow-reset-btn">重新开始</button>
+            <span class="flow-progress"></span>
+          </div>
+        </div>
+        <div class="callout callout-warning">
+          <div class="callout-icon">⚠️</div>
+          <div class="callout-content">
+            <strong class="callout-title">诚实边界（必须主动讲）</strong>
+            <p>C 第一步完成：网关逻辑 + mock 测试 10 个 + 端到端冒烟。<strong>第二步未完成</strong>：Pi 真实调用经网关尚未打通验证；RouteDecision 是内存环形缓冲（200 条），<strong>未持久化</strong>。另外入口已接统一身份主干：POST /v1/chat/completions 要 models:generate scope，GET /llm-gateway/stats 要 models:observe。</p>
+          </div>
+        </div>
+      </section>
+
+      <section class="screen animate-in">
+        <h2 class="screen-heading">可观测性三支柱在 Agent 场景的落地</h2>
+        <div class="icon-rows">
+          <div class="icon-row">
+            <div class="icon-circle" style="background: var(--color-actor-1)">📜</div>
+            <div>
+              <strong>Logs ≈ RunEvent 时间线</strong>
+              <p>RUN_CREATED→RUN_STARTED→MODEL_*/TOOL_*→RUN_COMPLETED，带 dedupeKey 幂等去重——每次执行的完整叙事</p>
+            </div>
+          </div>
+          <div class="icon-row">
+            <div class="icon-circle" style="background: var(--color-actor-2)">📈</div>
+            <div>
+              <strong>Metrics ≈ Eval 聚合</strong>
+              <p>GET /eval 输出成功率/P95/无人值守率/背压触发率——从事件流算出的系统健康度</p>
+            </div>
+          </div>
+          <div class="icon-row">
+            <div class="icon-circle" style="background: var(--color-actor-4)">🔍</div>
+            <div>
+              <strong>Traces ≈ MODEL_STARTED/COMPLETED 对</strong>
+              <p>modelCallId 串联起 provider/model/durationMs/usage/cost——单次模型调用的完整画像</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="quiz-container" id="quiz-module-8">
+          <div class="quiz-question-block"
+               data-correct="option-b"
+               data-explanation-right="正确！401 说明 key 或参数错了——这是请求侧问题，换后端必然同样失败。区分'后端坏了'和'请求错了'正是回退语义的核心判断。"
+               data-explanation-wrong="回想回退语义：只有后端问题才值得换路重试。401 鉴权错误换一个后端再发一遍，结果还是 401——白白多打一次上游。">
+            <h3 class="quiz-question">场景题：上游返回 401 鉴权错误。网关会回退到下一个后端吗？</h3>
+            <div class="quiz-options">
+              <button class="quiz-option" data-value="option-a" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>会——任何非 200 都应该换下一个后端碰运气</span>
+              </button>
+              <button class="quiz-option" data-value="option-b" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>不会——其余 4xx 是请求本身的问题，回退无意义，直接透传</span>
+              </button>
+              <button class="quiz-option" data-value="option-c" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>会——并且把该后端熔断 30 分钟</span>
+              </button>
+            </div>
+            <div class="quiz-feedback"></div>
+          </div>
+
+          <div class="quiz-question-block"
+               data-correct="option-a"
+               data-explanation-right="完全正确！成功率只回答'跑完了没有'，无人值守率回答'敢不敢没人盯着跑'——后者才是控制面价值的直接度量，也是别的框架给不出的指标。"
+               data-explanation-wrong="这两个指标回答的是不同的问题。一个任务可能 COMPLETED 了但中途触发了人工确认——它成功了但不算无人值守。想想哪个指标更能体现'副作用治理'的价值。">
+            <h3 class="quiz-question">unattendedRate 和 successRate 有什么本质区别？为什么前者是"护城河指标"？</h3>
+            <div class="quiz-options">
+              <button class="quiz-option" data-value="option-a" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>unattended 衡量"全程无需人工干预的比例"，依赖副作用治理语义——只有做了控制面的系统才算得出</span>
+              </button>
+              <button class="quiz-option" data-value="option-b" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>没有区别，只是同一个数的两种叫法</span>
+              </button>
+              <button class="quiz-option" data-value="option-c" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>unattended 只统计夜间运行的任务</span>
+              </button>
+            </div>
+            <div class="quiz-feedback"></div>
+          </div>
+
+          <div class="quiz-question-block"
+               data-correct="option-c"
+               data-explanation-right="正确！这正是 C 方向的设计卖点：接入方式只是把 baseUrl 从 vLLM 直连改为指向网关——Pi、ToolGateway、Sandbox 全部无感知。好的基础设施改动应该是调用方看不见的。"
+               data-explanation-wrong="恰恰相反——整个 C 方向的设计约束就是'Agent、控制面、沙箱都不变'。如果接入要改 Pi 代码，第二步之前的一切测试都会失效。">
+            <h3 class="quiz-question">把 Pi 的流量切到 LLM 网关需要改哪些代码？</h3>
+            <div class="quiz-options">
+              <button class="quiz-option" data-value="option-a" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>PiAdapter 里加一层 HTTP 中间件拦截模型请求</span>
+              </button>
+              <button class="quiz-option" data-value="option-b" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>RunService 和 ToolGateway 都要注入网关客户端</span>
+              </button>
+              <button class="quiz-option" data-value="option-c" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>不改代码——只改 models.json 的 baseUrl 指向网关即可</span>
+              </button>
+            </div>
+            <div class="quiz-feedback"></div>
+          </div>
+
+          <button class="quiz-check-btn" onclick="checkQuiz('quiz-module-8')">检查答案</button>
+          <button class="quiz-reset-btn" onclick="resetQuiz('quiz-module-8')">再试一次</button>
+        </div>
+
+        <p style="margin-top:var(--space-8)"><strong>下一模块</strong>：证据地图、数字卡与追问弹药库（M09）。另外，<a href="#module-13" style="color:var(--color-accent)">模块 13</a> 会用 Shopee 二面真题的九个评分点给本方向的实现逐项打分，别错过。</p>
+      </section>
+
+    </div>
+  </div>
+</section>

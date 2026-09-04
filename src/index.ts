@@ -11,6 +11,9 @@ export * from "./checkpoints/recovery-startup-coordinator.ts";
 
 export * from "./control-plane/default-pi-control-plane.ts";
 
+export * from "./conversations/conversation.ts";
+export * from "./conversations/conversation-store.ts";
+
 export * from "./demo/day7-fake-demo.ts";
 export * from "./demo/demo-agent-runtime.ts";
 
@@ -52,6 +55,7 @@ export * from "./runtime/pi-adapter.ts";
 export * from "./runtime/pi-tool-gateway.ts";
 export * from "./runtime/runtime-capability.ts";
 export * from "./runtime/runtime-capability-store.ts";
+export * from "./runtime/supervised-agent-runtime.ts";
 
 export * from "./sandbox/container-runtime-adapter.ts";
 export * from "./sandbox/container-sandbox-provider.ts";
@@ -61,6 +65,7 @@ export * from "./sandbox/sandbox-profile.ts";
 export * from "./sandbox/sandbox-provider-router.ts";
 export * from "./sandbox/sandbox-provider.ts";
 export * from "./sandbox/sandbox-store.ts";
+export * from "./sandbox/sandbox-startup-reconciler.ts";
 
 export * from "./scheduling/run-queue-coordinator.ts";
 export * from "./scheduling/run-queue-pump.ts";

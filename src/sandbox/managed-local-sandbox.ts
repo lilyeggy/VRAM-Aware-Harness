@@ -110,6 +110,16 @@ export class ManagedLocalSandboxProvider implements SandboxProvider {
             id: input.id,
             workspacePath: input.workspacePath,
             secretNames: provisioning.secretNames,
+            enforcement: Object.freeze({
+                toolExecutionBoundary: "HOST" as const,
+                filesystemIsolation: false,
+                processIsolation: false,
+                networkPolicyEnforced: false,
+                cpuLimitEnforced: false,
+                memoryLimitEnforced: false,
+                diskLimitEnforced: false,
+                pidLimitEnforced: false,
+            }),
             withSecrets: <T>(callback: (values: Readonly<Record<string, string>>) => T) =>
                 callback(this.secretValues.get(input.id) ?? Object.freeze({})),
         });
@@ -125,6 +135,10 @@ export class ManagedLocalSandboxProvider implements SandboxProvider {
             status: "TERMINATED",
             updatedAt: new Date().toISOString(),
         }, current.status);
+    }
+
+    async cleanupStale(_record: SandboxRecord): Promise<void> {
+        // ManagedLocal has no child environment that can survive this process.
     }
 
     /** 故障注入和真实 Provider 失联回调共用的生命周期入口。 */

@@ -1,0 +1,341 @@
+<section class="module" id="module-9" style="background: var(--color-bg-warm)">
+  <div class="module-content">
+    <header class="module-header animate-in">
+      <span class="module-number">09</span>
+      <h1 class="module-title">证据地图、诚实边界与追问弹药库</h1>
+      <p class="module-subtitle">前八个模块让你能讲"做了什么"；本模块让你经得起"做到什么程度"的拷问。面试前一晚，只看这一页。</p>
+    </header>
+
+    <div class="module-body">
+
+      <section class="screen animate-in">
+        <h2 class="screen-heading">登山者的装备检查表</h2>
+        <p>上山前逐项核对：绳索（测试）、冰爪（真机证据）、地图（架构）、应急预案（诚实边界）。每一样都要在出发前确认过，而不是被问到了现找。</p>
+
+        <h3 style="font-family:var(--font-display);font-size:var(--text-xl);margin:var(--space-8) 0 var(--space-4)">测试地图：254 tests / 0 fail 的构成</h3>
+        <table style="width:100%;border-collapse:collapse;font-size:var(--text-sm)">
+          <tr style="border-bottom:2px solid var(--color-border)">
+            <th style="text-align:left;padding:var(--space-2)">层</th><th style="text-align:left;padding:var(--space-2)">代表</th><th style="text-align:left;padding:var(--space-2)">验证什么</th>
+          </tr>
+          <tr style="border-bottom:1px solid var(--color-border-light)"><td style="padding:var(--space-2)"><strong>单元/组件</strong></td><td style="padding:var(--space-2)">run-state-machine · tool-gateway · resource-classifier · tenant-run-scheduler · effective-policy</td><td style="padding:var(--space-2)">纯逻辑与不变量</td></tr>
+          <tr style="border-bottom:1px solid var(--color-border-light)"><td style="padding:var(--space-2)"><strong>合同测试</strong></td><td style="padding:var(--space-2)">FakeAgentRuntime（start/resume/interrupt/unsubscribe/runId 隔离）</td><td style="padding:var(--space-2)">AgentRuntime 接口契约——依赖倒置的证明</td></tr>
+          <tr style="border-bottom:1px solid var(--color-border-light)"><td style="padding:var(--space-2)"><strong>应用层</strong></td><td style="padding:var(--space-2)">harness-application · create-harness-application</td><td style="padding:var(--space-2)">组装、启动恢复、生命周期</td></tr>
+          <tr style="border-bottom:1px solid var(--color-border-light)"><td style="padding:var(--space-2)"><strong>HTTP</strong></td><td style="padding:var(--space-2)">harness-http-api · tenant-boundary</td><td style="padding:var(--space-2)">路由、鉴权、404 反枚举</td></tr>
+          <tr style="border-bottom:1px solid var(--color-border-light)"><td style="padding:var(--space-2)"><strong>集成/E2E</strong></td><td style="padding:var(--space-2)">day7-fake-demo · day7-recovery-resource.e2e · stage1-stage2-control-plane.e2e · harness-process-http</td><td style="padding:var(--space-2)">真实编排链闭环</td></tr>
+          <tr><td style="padding:var(--space-2)"><strong>真机 smoke</strong></td><td style="padding:var(--space-2)">smoke:container(:attacks) · e2e-gpu-pressure · sandbox-runtime-benchmark</td><td style="padding:var(--space-2)">Docker+runsc 攻击、T4+vLLM 背压、runtime 开销</td></tr>
+        </table>
+        <div class="callout callout-info">
+          <div class="callout-icon">🧪</div>
+          <div class="callout-content">
+            <strong class="callout-title">测试哲学（被质疑 Fake 测试时的答案）</strong>
+            <p>"状态机、恢复、工具幂等和策略分支主要由 Fake Runtime 确定性验证；真实 vLLM/GPU 只用于集成验证。"确定性测试保证语义正确可重复，真机 smoke 保证物理事实成立——两层缺一不可，这不是妥协而是分层。统一验收入口：<code style="font-family:var(--font-mono)">bun run verify:stage0</code>（test + typecheck + demo:day7）。</p>
+          </div>
+        </div>
+      </section>
+
+      <section class="screen animate-in">
+        <h2 class="screen-heading">数字记忆卡：点开确认出处</h2>
+        <div class="pattern-cards stagger-children">
+          <div class="pattern-card animate-in" style="border-top: 3px solid var(--color-accent)">
+            <div class="pattern-icon" style="background: var(--color-accent);font-size:1rem;font-weight:700">254</div>
+            <h4 class="pattern-title">tests / 0 fail</h4>
+            <p class="pattern-desc">bun test ./tests 输出。构成：204 基底 → 证据 13 → 三元组 9 → 预算 10 → GPU 兼容 2 → Eval 6 → LLM 网关 10。用途：证明基础稳定。</p>
+          </div>
+          <div class="pattern-card animate-in" style="border-top: 3px solid var(--color-actor-5)">
+            <div class="pattern-icon" style="background: var(--color-actor-5);font-size:1rem;font-weight:700">9 项</div>
+            <h4 class="pattern-title">沙箱攻击全 PASS</h4>
+            <p class="pattern-desc">跨租户 Workspace/Secret、宿主路径、路径穿越、默认无网络、PID 上限、tmpfs noexec、kill→LOST。真机 Linux Docker + runsc。</p>
+          </div>
+          <div class="pattern-card animate-in" style="border-top: 3px solid var(--color-actor-4)">
+            <div class="pattern-icon" style="background: var(--color-actor-4);font-size:1rem;font-weight:700">120 并发</div>
+            <h4 class="pattern-title">→ CRITICAL → QUEUE 落库</h4>
+            <p class="pattern-desc">AutoDL T4 16G + vLLM 0.7.3；running=120、kv≈62%。用途：背压不是纸面设计。</p>
+          </div>
+          <div class="pattern-card animate-in" style="border-top: 3px solid var(--color-actor-2)">
+            <div class="pattern-icon" style="background: var(--color-actor-2);font-size:1rem;font-weight:700">1.22x</div>
+            <h4 class="pattern-title">runsc 冷启动开销</h4>
+            <p class="pattern-desc">runc vs runsc benchmark。用途：隔离开销可接受，量化过的取舍。</p>
+          </div>
+          <div class="pattern-card animate-in" style="border-top: 3px solid var(--color-actor-3)">
+            <div class="pattern-icon" style="background: var(--color-actor-3);font-size:1rem;font-weight:700">15</div>
+            <h4 class="pattern-title">schema migrations</h4>
+            <p class="pattern-desc">v1 runs+events → v2 dedupe_key → v4 CHECK 快照 null 语义 → v15 删 subject_id。schema 即设计史。</p>
+          </div>
+          <div class="pattern-card animate-in" style="border-top: 3px solid var(--color-text-muted)">
+            <div class="pattern-icon" style="background: var(--color-text-muted);font-size:1rem;font-weight:700">8</div>
+            <h4 class="pattern-title">HTTP 端点</h4>
+            <p class="pattern-desc">POST /runs、GET /runs[/:id[/events|/output|/workspace-diff|/artifacts]]、interrupt/resume、queue/resources/health + /eval + /observe + /v1/chat/completions。</p>
+          </div>
+        </div>
+      </section>
+
+      <section class="screen animate-in">
+        <h2 class="screen-heading">诚实边界对照表：绝对不能吹 vs 正确说法</h2>
+        <div class="badge-list">
+          <div class="badge-item"><code class="badge-code" style="color:#C93B3B">✗ 自研沙箱，安全级别同 Kata/Firecracker</code><span class="badge-desc">✓ 底层用现成 runsc/gVisor，亮点在上层控制面三环（策略编译/租户管控/可验证证据）</span></div>
+          <div class="badge-item"><code class="badge-code" style="color:#C93B3B">✗ 生产级高并发分布式系统</code><span class="badge-desc">✓ 单进程 + SQLite 的学习/面试项目，无多机高可用——单机是有意的 MVP 取舍</span></div>
+          <div class="badge-item"><code class="badge-code" style="color:#C93B3B">✗ 绝对安全</code><span class="badge-desc">✓ 9 项攻击冒烟在真机通过；无 KVM 不声称 strict/microVM 隔离通过</span></div>
+          <div class="badge-item"><code class="badge-code" style="color:#C93B3B">✗ GPU 准入完全真实</code><span class="badge-desc">✓ T4+vLLM 0.7.3 120 并发验证过；A6000 未二次复验；公平份额在超大并发下属估算</span></div>
+          <div class="badge-item"><code class="badge-code" style="color:#C93B3B">✗ LLM 网关生产可用</code><span class="badge-desc">✓ 第一步完成（代理/回退/熔断/记录）；Pi 真实调用未接；决策记录未持久化</span></div>
+        </div>
+        <div class="callout callout-accent">
+          <div class="callout-icon">💎</div>
+          <div class="callout-content">
+            <strong class="callout-title">诚实是护城河</strong>
+            <p>主动说出"这不是生产级"比被追问出来好得多。每个"没做"都配上"为什么可接受"和"要怎么做"——这展示的是工程判断力，而不是能力上限。</p>
+          </div>
+        </div>
+      </section>
+
+      <section class="screen animate-in">
+        <h2 class="screen-heading">高频追问速答弹药库</h2>
+        <p>每条答案控制在 60 秒内说完，先给结论再给一层细节：</p>
+        <div class="icon-rows">
+          <div class="icon-row">
+            <div class="icon-circle" style="background: var(--color-actor-1)">Q1</div>
+            <div>
+              <strong>为什么用 runsc/gVisor 而不自研沙箱？</strong>
+              <p>预算/人力/安全责任都不够自研 runtime。亮点在上层三环：策略边界编译、租户资源管控、可验证证据三元组。没有 KVM 就不声称 strict VM 隔离通过——诚实边界本身就是设计决策。</p>
+            </div>
+          </div>
+          <div class="icon-row">
+            <div class="icon-circle" style="background: var(--color-actor-1)">Q2</div>
+            <div>
+              <strong>资源准入怎么做？背压怎么触发？</strong>
+              <p>vLLM /metrics + nvidia-smi 双源并行 → ResourceSnapshot → 四组阈值分类 NORMAL/BUSY/CRITICAL/UNKNOWN → DeterministicExecutionPolicy 出 START/QUEUE + reasonCode → policy_decisions+resource_snapshots 同事务落库。观测失败=QUEUE(RESOURCE_OBSERVATION_FAILED)，fail-closed。</p>
+            </div>
+          </div>
+          <div class="icon-row">
+            <div class="icon-circle" style="background: var(--color-actor-1)">Q3</div>
+            <div>
+              <strong>任务崩溃了怎么恢复？</strong>
+              <p>ToolEffect 三分类；只有 PREPARED+READ_ONLY 自动重放（IDEMPOTENT_WRITE 也 fail-closed：声明≠证据）。RecoveryService.scanInterruptedRuns 把陈旧 RUNNING 转 INTERRUPTED 并建计划 → decideRecovery 出 AUTO_RESUME/MANUAL_REVIEW → RecoveryExecutor 经 coordinator.submitResume 重新入队——恢复也要重新过资源准入和 slot 占用。</p>
+            </div>
+          </div>
+          <div class="icon-row">
+            <div class="icon-circle" style="background: var(--color-actor-1)">Q4</div>
+            <div>
+              <strong>多租户怎么隔离？</strong>
+              <p>身份层：API Key→摘要比对→Principal{tenantId,scopes}，tenant 不来自请求体；运行层：独立 workspace 目录 + runsc 容器（非 root、只读 rootfs、cap drop ALL、默认无网络）；调度层：Tenant 内 FIFO、租户间 round-robin、双并发上限；数据层：查询按 tenant 收口 + 404 反枚举 + DB 约束兜底。</p>
+            </div>
+          </div>
+          <div class="icon-row">
+            <div class="icon-circle" style="background: var(--color-actor-1)">Q5</div>
+            <div>
+              <strong>为什么 IDEMPOTENT_WRITE 不自动重放？</strong>
+              <p>"写入被声明为幂等"不足以证明外部系统会使用稳定幂等键。在 ToolExecution 持久化并校验真实幂等证据之前保持 fail-closed——声明不等于证据，这是恢复安全性的底线。</p>
+            </div>
+          </div>
+          <div class="icon-row">
+            <div class="icon-circle" style="background: var(--color-actor-1)">Q6</div>
+            <div>
+              <strong>并发更新 Run 会不会互相覆盖？</strong>
+              <p>乐观锁：UPDATE ... WHERE id=$id AND status=$previousStatus，changes!==1 即抛错——过期快照覆盖新状态被挡。事件去重靠 UNIQUE(run_id, dedupe_key) 部分唯一索引；Run 快照与事件同事务写入。</p>
+            </div>
+          </div>
+          <div class="icon-row">
+            <div class="icon-circle" style="background: var(--color-actor-1)">Q7</div>
+            <div>
+              <strong>drain 会不会并发跑多个？</strong>
+              <p>single-flight：drainPromise 复用 + drainRequested 标志位补跑一轮。attemptNext 内部先 claimNext 占 slot；QUEUE 时先 release 再 re-enqueue（顺序反了 enqueue 会拒绝），并保留原 enqueuedAt 防饥饿放大。</p>
+            </div>
+          </div>
+          <div class="icon-row">
+            <div class="icon-circle" style="background: var(--color-actor-1)">Q8</div>
+            <div>
+              <strong>流量翻 100 倍怎么办？</strong>
+              <p>诚实回答"现在不行"+ 给出可信路径：RunStore 换 Postgres、调度器外置或多 Worker 抢 DB 行锁、Sandbox Provider 池化、vLLM 多实例 + 网关路由（RouteDecision 扩展点已预留）。当前单进程是 MVP 有意取舍，控制面语义已被测试锁定，迁移不改行为。</p>
+            </div>
+          </div>
+          <div class="icon-row">
+            <div class="icon-circle" style="background: var(--color-actor-1)">Q9</div>
+            <div>
+              <strong>最大的技术挑战是什么？</strong>
+              <p>推荐答：不是某个算法，而是"让安全成为默认值"——fail-closed 贯穿四条线（观测失败→QUEUE、副作用未知→人工确认、能力缺失→REJECTED、runtime 证据不符→删容器）；以及恢复路径的归属校验（checkpoint.runId/策略快照 runId 双绑定）——多租户防串最容易被漏掉的死角。</p>
+            </div>
+          </div>
+          <div class="icon-row">
+            <div class="icon-circle" style="background: var(--color-actor-5)">🎯</div>
+            <div>
+              <strong>反问面试官的问题</strong>
+              <p>"您团队 agent infra 目前最大的痛点是隔离、调度、观测还是模型路由？"——把话题引到自己最强的方向，同时展示对领域问题空间的认知。</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="screen animate-in">
+        <h2 class="screen-heading">三条演示命令：各自证明什么、不证明什么</h2>
+        <div class="step-cards">
+          <div class="step-card">
+            <div class="step-num">1</div>
+            <div class="step-body">
+              <strong>bun run demo:day7</strong>
+              <p>不依赖 GPU：制造带 Checkpoint 的中断 Run + 普通排队 Run，先 CRITICAL 再恢复 NORMAL。出现 RESULT: PASS = 恢复路径、资源准入、队列推进、事件审计在同一条真实编排链闭环。<em>不证明：真实模型/Docker 隔离。</em></p>
+            </div>
+          </div>
+          <div class="step-card">
+            <div class="step-num">2</div>
+            <div class="step-body">
+              <strong>bun run demo:console</strong>
+              <p>同源 Task Console：UI + API Key + 受管 Workspace + 任务历史 + 结果 API 全链路（明确使用 Fake Runtime）。<em>不证明：Docker 隔离、真实模型兼容性、性能。</em></p>
+            </div>
+          </div>
+          <div class="step-card">
+            <div class="step-num">3</div>
+            <div class="step-body">
+              <strong>bun run smoke:container:attacks</strong>
+              <p>Linux Docker + runsc 真机：两租户 Workspace/Secret/路径攻击、默认无网络、PID/tmpfs 上限、kill→LOST。PASS 输出必须保存在真机。<em>开发机没有 runsc 时应失败——fake 测试不算真机证据。</em></p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="screen animate-in">
+        <h2 class="screen-heading">终极场景演练：五道压力题</h2>
+        <div class="quiz-container" id="quiz-module-9">
+          <div class="scenario-block quiz-question-block"
+               data-correct="option-b"
+               data-explanation-right="正是！分层的测试哲学：Fake 保证确定性与速度，真机 smoke 保证物理事实。两者覆盖不同失败面，互不替代——能讲清这个分层本身就是工程成熟度的证明。"
+               data-explanation-wrong="不要道歉也不要全盘认输——Fake 测试覆盖的是语义正确性（状态机/恢复/幂等），这些恰恰不适合在真机上随机验证。真机证据有另一条线：9 项攻击 + 120 并发。">
+            <span class="scenario-label">压力题 1</span>
+            <div class="scenario-context"><p>面试官皱眉："你的 254 个测试都是 Fake Runtime 跑的，不算数吧？"最佳回应是？</p></div>
+            <div class="quiz-options">
+              <button class="quiz-option" data-value="option-a" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>承认局限："确实，我后续把所有测试都改成真机跑"</span>
+              </button>
+              <button class="quiz-option" data-value="option-b" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>分层回应："状态机/恢复/幂等由 Fake 确定性验证保证语义；真机另有 9 项攻击 smoke 和 T4 120 并发背压证据——两层覆盖不同的失败面"</span>
+              </button>
+              <button class="quiz-option" data-value="option-c" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>反驳："Fake 测试是业界标准做法，真机测试反而不可靠"</span>
+              </button>
+            </div>
+            <div class="quiz-feedback"></div>
+          </div>
+
+          <div class="scenario-block quiz-question-block"
+               data-correct="option-c"
+               data-explanation-right="完美结构：先划边界再讲价值，主动亮出短板并给出演进路径。诚实边界清单就是为这一刻准备的。"
+               data-explanation-wrong="说'能用'会被追问高可用细节后崩盘；只说'不能用'又浪费了展示设计深度的机会。正确姿势永远是：定位 + 已证事实 + 短板 + 演进方向。">
+            <span class="scenario-label">压力题 2</span>
+            <div class="scenario-context"><p>"这个系统能直接上生产吗？"——回答的最佳结构是？</p></div>
+            <div class="quiz-options">
+              <button class="quiz-option" data-value="option-a" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>"能，我的测试全绿所以质量有保障"</span>
+              </button>
+              <button class="quiz-option" data-value="option-b" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>"不能，这只是个学习项目"，然后沉默</span>
+              </button>
+              <button class="quiz-option" data-value="option-c" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>"它是单机控制面，不是生产级——但核心语义（状态机/恢复/准入/隔离）已被 254 测试和真机证据锁定；生产化路径是 Postgres + 外置调度 + Provider 池化"</span>
+              </button>
+            </div>
+            <div class="quiz-feedback"></div>
+          </div>
+
+          <div class="scenario-block quiz-question-block"
+               data-correct="option-a"
+               data-explanation-right="正确！用具体机制反驳'只是 CRUD'：乐观锁防覆盖、部分唯一索引做幂等去重、同事务双写防状态与历史脱节——每一个都是分布式系统的经典问题在小尺度上的精确解决。"
+               data-explanation-wrong="CRUD 之说的错误在于把'表'当成了系统的全部。真正的复杂度在并发一致性（谁先写成功）、投递语义（at-least-once 如何幂等）和恢复正确性——这些你都有具体机制可以指认。">
+            <span class="scenario-label">压力题 3</span>
+            <div class="scenario-context"><p>"你这项目我看就是一堆 CRUD 加几个 if，核心技术含量在哪？"——最有力的反驳是指出哪个细节？</p></div>
+            <div class="quiz-options">
+              <button class="quiz-option" data-value="option-a" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>并发正确性三件套：乐观锁 UPDATE...WHERE status=prev、UNIQUE(run_id,dedupe_key) 幂等去重、快照+事件同事务双写——CRUD 做不到故障后不重放危险副作用</span>
+              </button>
+              <button class="quiz-option" data-value="option-b" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>"我用了 Bun，性能比 Node 快很多"</span>
+              </button>
+              <button class="quiz-option" data-value="option-c" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>"代码量大，说明功能多"</span>
+              </button>
+            </div>
+            <div class="quiz-feedback"></div>
+          </div>
+
+          <div class="scenario-block quiz-question-block"
+               data-correct="option-b"
+               data-explanation-right="正确！point-in-time admission 是有意的设计定位：决策 t0 与派发 t1 解耦。追求强实时准入需要 admission lease/心跳机制，复杂度陡增而收益存疑——知道这个 trade-off 并能说出改进方向，就是加分答案。"
+               data-explanation-wrong="两个极端都不对：它不是 bug（决策已如实落库、语义是'去耦的准入点'），但也不是实时保证。关键是能说清'为什么可接受'以及'要更强保证该怎么做'。">
+            <span class="scenario-label">压力题 4</span>
+            <div class="scenario-context"><p>"你在 t0 决策 START，t1 才真正派发——中间资源可能已经变了，这不就是个 bug 吗？"——正确的回应是？</p></div>
+            <div class="quiz-options">
+              <button class="quiz-option" data-value="option-a" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>承认设计失误，承诺改成派发前二次校验</span>
+              </button>
+              <button class="quiz-option" data-value="option-b" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>定位澄清：这是"去耦的准入点"而非实时保证——每次决策都落库可审计，且 CRITICAL 判定本身有安全余量；若需更强保证可加 admission lease，但 MVP 阶段复杂度收益不划算</span>
+              </button>
+              <button class="quiz-option" data-value="option-c" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>否认："我们的观测是实时的，不存在这个问题"</span>
+              </button>
+            </div>
+            <div class="quiz-feedback"></div>
+          </div>
+
+          <div class="scenario-block quiz-question-block"
+               data-correct="option-a"
+               data-explanation-right="聪明的反问：把面试官的兴趣点引导到你最强的方向（本项目四个方向都有深度），同时展示你对 agent infra 问题空间的整体认知——面试的最后印象分就在这里。"
+               data-explanation-wrong="反问环节的目标是建立双向的技术对话，而不是评估对方。最好的反问是把话题引向你有弹药的方向——你刚好看完了一整套隔离/调度/观测/路由的深挖材料。">
+            <span class="scenario-label">压力题 5</span>
+            <div class="scenario-context"><p>面试尾声，面试官问"你有什么想问我们的？"——哪 个反问最能为你加分？</p></div>
+            <div class="quiz-options">
+              <button class="quiz-option" data-value="option-a" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>"您团队 agent infra 目前最大的痛点是隔离、调度、观测还是模型路由？"——引向自己最强的方向</span>
+              </button>
+              <button class="quiz-option" data-value="option-b" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>"你们加班多么？"</span>
+              </button>
+              <button class="quiz-option" data-value="option-c" onclick="selectOption(this)">
+                <div class="quiz-option-radio"></div>
+                <span>"您觉得我的项目还有什么问题？"——把裁判权交给对方</span>
+              </button>
+            </div>
+            <div class="quiz-feedback"></div>
+          </div>
+
+          <button class="quiz-check-btn" onclick="checkQuiz('quiz-module-9')">检查答案</button>
+          <button class="quiz-reset-btn" onclick="resetQuiz('quiz-module-9')">再试一次</button>
+        </div>
+      </section>
+
+      <section class="screen animate-in">
+        <h2 class="screen-heading">面试前一晚 Checklist</h2>
+        <div class="badge-list">
+          <div class="badge-item"><code class="badge-code">☐ 30 秒电梯稿</code><span class="badge-desc">背熟 Module 1 的话术：定位 → 四难题 → 数字收尾</span></div>
+          <div class="badge-item"><code class="badge-code">☐ 一条端到端链路</code><span class="badge-desc">Module 2 的 10 步流程能白板画出来</span></div>
+          <div class="badge-item"><code class="badge-code">☐ 一个深挖方向</code><span class="badge-desc">选 Module 3（恢复）或 Module 4（背压）练到 10 分钟不卡壳</span></div>
+          <div class="badge-item"><code class="badge-code">☐ 六个数字卡</code><span class="badge-desc">254 / 9 项 / 120 并发 / 1.22x / 15 migrations / 8 端点</span></div>
+          <div class="badge-item"><code class="badge-code">☐ 五条诚实边界</code><span class="badge-desc">Module 9 对照表的 ✓ 说法，逐条念一遍防止嘴瓢</span></div>
+          <div class="badge-item"><code class="badge-code">☐ 十条追问速答</code><span class="badge-desc">每条 60 秒版本对着镜子讲一遍</span></div>
+          <div class="badge-item"><code class="badge-code">☐ 一条演示命令</code><span class="badge-desc">bun run demo:day7 跑通并看懂 RESULT: PASS 的含义</span></div>
+          <div class="badge-item"><code class="badge-code">☐ 一句反问</code><span class="badge-desc">"隔离、调度、观测还是模型路由？"——准备好接住任何一种回答</span></div>
+        </div>
+        <div class="callout callout-accent">
+          <div class="callout-icon">🎓</div>
+          <div class="callout-content">
+            <strong class="callout-title">课程收束：这个项目的学习协作约定</strong>
+            <p>"先理解边界 → 自己实现 → 测试证明 → 复盘"。每个阶段通过验收前不堆叠下一阶段功能；遇到问题时记录期望状态、实际状态和事件序列。面试里讲完项目，这句话就是你工作方式的最好注脚。</p>
+          </div>
+        </div>
+        <p style="text-align:center;margin-top:var(--space-12);font-size:var(--text-lg);color:var(--color-text-secondary)">基础篇（M01-M09）完结 · 接下来是考场扩展篇：引擎原理 → Harness 话语 → 框架横评 → 系统设计 → 八股桥接 🎯</p>
+      </section>
+
+    </div>
+  </div>
+</section>
