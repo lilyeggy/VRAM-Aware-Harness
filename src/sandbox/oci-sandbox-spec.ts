@@ -70,6 +70,11 @@ export class OciSandboxSpecCompiler {
         const networkMode = profile === "development"
             ? (policy.allowNetwork ? "bridge" : "none")
             : "none";
+        // Docker's runsc integration on the currently supported server image
+        // rejects --pids-limit during container startup. Do not claim a PID
+        // cgroup limit that the runtime cannot enforce; the capability is
+        // represented explicitly in the compiled/audited spec instead.
+        const pidLimit = this.config.runtime === "runsc" ? null : 128;
         const spec = freezeSandboxSpec({
             profile,
             runtime: this.config.runtime,
@@ -81,7 +86,7 @@ export class OciSandboxSpecCompiler {
             readOnlyRootfs: true,
             droppedCapabilities: "ALL",
             noNewPrivileges: true,
-            pidLimit: 128,
+            pidLimit,
             resourceLimits: policy.resourceLimits,
             secretNames,
         });
@@ -90,12 +95,15 @@ export class OciSandboxSpecCompiler {
             "run", "--detach", "--rm", "--name", name,
             "--user", `${this.config.userId}:${this.config.userId}`,
             "--read-only", "--cap-drop", "ALL",
-            "--security-opt", "no-new-privileges", "--pids-limit", "128",
+            "--security-opt", "no-new-privileges",
             "--workdir", "/workspace", "--mount",
             `type=bind,src=${workspacePath},dst=/workspace`,
             "--tmpfs", "/tmp:rw,noexec,nosuid,size=64m",
             "--network", networkMode === "none" ? "none" : "bridge",
         ];
+        if (pidLimit !== null) {
+            args.push("--pids-limit", String(pidLimit));
+        }
         if (policy.resourceLimits.cpuCores !== null) {
             args.push("--cpus", String(policy.resourceLimits.cpuCores));
         }

@@ -80,7 +80,7 @@ test("容器 Sandbox 将隔离策略编译为可审计 Docker 参数，并仅持
         cpuLimitEnforced: true,
         memoryLimitEnforced: true,
         diskLimitEnforced: false,
-        pidLimitEnforced: true,
+        pidLimitEnforced: false,
     });
 
     await provider.execute(handle.id, ["sh", "-lc", "id"]);
