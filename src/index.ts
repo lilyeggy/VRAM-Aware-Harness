@@ -23,6 +23,7 @@ export * from "./events/runtime-event-bridge.ts";
 export * from "./http/harness-http-api.ts";
 export * from "./http/harness-dashboard.ts";
 export * from "./http/harness-http-server.ts";
+export * from "./http/harness-user-console.ts";
 
 export * from "./instances/harness-instance.ts";
 export * from "./instances/harness-instance-store.ts";
@@ -35,6 +36,7 @@ export * from "./resources/resource-admission-service.ts";
 export * from "./resources/resource-classifier.ts";
 export type * from "./resources/resource-observer.ts";
 export * from "./resources/vllm-resource-observer.ts";
+export * from "./resources/resource-metrics-sampler.ts";
 
 export * from "./policies/effective-policy.ts";
 export * from "./policies/effective-policy-store.ts";
