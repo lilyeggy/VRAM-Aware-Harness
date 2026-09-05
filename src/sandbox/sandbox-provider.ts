@@ -37,6 +37,10 @@ export interface SandboxHandle {
     /** Runtime facts, not desired policy. Consumers must fail closed on gaps. */
     readonly enforcement: SandboxEnforcementCapabilities;
     withSecrets<T>(callback: (environment: Readonly<Record<string, string>>) => T): T;
+    readonly acquisition?: {
+        readonly durationMs: number;
+        readonly warmHit: boolean;
+    };
 }
 
 export interface SandboxEnforcementCapabilities {
@@ -60,6 +64,7 @@ export interface SandboxLifecycleEvent {
 }
 
 export interface SandboxProvider {
+    close?(): void | Promise<void>;
     create(input: {
         id: string;
         runId: string;

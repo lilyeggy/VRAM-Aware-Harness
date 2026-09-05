@@ -30,6 +30,9 @@ export interface RuntimeRunRef{
      */
     runtimeSessionRef?:string | null;
 
+    /** 本次 Run 的推理深度，必须随 Run 持久化以支持恢复。 */
+    thinkingLevel?: "off" | "minimal" | "low" | "medium" | "high";
+
     /** 本次执行使用的 Workspace 工作目录；真正的 Tenant 隔离由上层负责校验 */
     workspacePath:string;
 
@@ -73,6 +76,7 @@ export interface RuntimeExecutionContext {
         readonly modelId: string;
         readonly tools: readonly string[];
         readonly skills: readonly string[];
+        readonly thinkingLevel?: "off" | "minimal" | "low" | "medium" | "high";
     };
 }
 
@@ -110,12 +114,27 @@ export type RuntimeEvent =
         delta:string;
     }
     | {
+        type:"thinking_delta";
+        runId:string,
+        timestamp:string;
+        delta:string;
+    }
+    | {
         type: "model_started";
         runId: string;
         timestamp: string;
         modelCallId: string;
         provider: string;
         model: string;
+    }
+    | {
+        type: "model_first_token";
+        runId: string;
+        timestamp: string;
+        modelCallId: string;
+        provider: string;
+        model: string;
+        channel: "text" | "thinking";
     }
     | {
         type: "model_completed";
@@ -167,6 +186,14 @@ export type RuntimeEvent =
         timestamp:string;
         checkpointId:string;     // 从哪个checkpoint恢复
         runtimeSessionRef:string;   // 实际打开了哪个pi session
+    }
+    | {
+        type: "sandbox_acquired";
+        runId: string;
+        timestamp: string;
+        durationMs: number;
+        warmHit: boolean;
+        runtime: string;
     }
 
 export type RuntimeEventHandler = (event:RuntimeEvent) => void;

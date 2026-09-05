@@ -1,4 +1,5 @@
 import type { EffectivePolicySnapshot } from "../policies/effective-policy.ts";
+import { ContainerWarmPool } from './container-warm-pool.ts';
 import {
     DockerRuncRuntimeAdapter,
     DockerRunscRuntimeAdapter,
@@ -24,6 +25,8 @@ import type {
 export type { ContainerCommandRuntime } from "./container-runtime-adapter.ts";
 
 export interface ContainerSandboxConfig {
+    readonly warmPoolSize?: number;
+    readonly warmPoolOwner?: string;
     readonly image: string;
     /**
      * `runtime` accepted a Docker executable path in the pre-P0.5 contract;
@@ -51,6 +54,8 @@ export class ContainerSandboxProvider implements SandboxProvider, SandboxCommand
     private readonly runtime: "runsc" | "runc";
     private readonly adapter: ContainerRuntimeAdapter;
     private readonly compiler: OciSandboxSpecCompiler;
+    private readonly warmPool: ContainerWarmPool | undefined;
+    private readonly replenishments = new Map<string, { key: string; args: readonly string[] }>();
 
     constructor(
         private readonly store: SandboxStore,
@@ -95,6 +100,7 @@ export class ContainerSandboxProvider implements SandboxProvider, SandboxCommand
             profile: this.profile,
             runtime: this.runtime,
         });
+        if (config.warmPoolSize) this.warmPool = new ContainerWarmPool(commands, this.docker, config.warmPoolSize, 60_000, config.warmPoolOwner);
     }
 
     async create(input: {
@@ -140,7 +146,14 @@ export class ContainerSandboxProvider implements SandboxProvider, SandboxCommand
             this.adapter.augmentCreateArgs(compiled.createArgs),
             environment,
         );
-        const result = await this.commands.run([this.docker, ...args]);
+        const keyArgs = [...args];
+        keyArgs[keyArgs.indexOf('--name') + 1] = '<resource>';
+        const poolKey = JSON.stringify([input.policy.tenantId, keyArgs]);
+        const eligible = this.warmPool !== undefined && Object.keys(environment).length === 0;
+        const acquisitionStartedAt = performance.now();
+        const warmed = eligible && await this.warmPool!.take(poolKey, `agent-harness-${input.id}`);
+        const result = warmed ? { exitCode: 0, stdout: '', stderr: '' }
+            : await this.commands.run([this.docker, ...args]);
         if (result.exitCode !== 0) {
             const failed = {
                 ...record, status: "FAILED" as const, updatedAt: new Date().toISOString(),
@@ -172,6 +185,7 @@ export class ContainerSandboxProvider implements SandboxProvider, SandboxCommand
         }
 
         this.containerBySandboxId.set(input.id, `agent-harness-${input.id}`);
+        if (eligible) this.replenishments.set(input.id, { key: poolKey, args });
         this.secretValues.set(input.id, Object.freeze(environment));
         this.store.update({
             ...record,
@@ -181,6 +195,10 @@ export class ContainerSandboxProvider implements SandboxProvider, SandboxCommand
         }, "PROVISIONING");
         return Object.freeze({
             id: input.id, workspacePath: input.workspacePath, secretNames: record.secretNames,
+            acquisition: Object.freeze({
+                durationMs: Math.round(performance.now() - acquisitionStartedAt),
+                warmHit: Boolean(warmed),
+            }),
             enforcement: Object.freeze({
                 toolExecutionBoundary: "SANDBOX" as const,
                 filesystemIsolation: true,
@@ -219,7 +237,13 @@ export class ContainerSandboxProvider implements SandboxProvider, SandboxCommand
         if (current !== null && current.status === "ACTIVE") {
             this.store.update({ ...current, status: "TERMINATED", updatedAt: new Date().toISOString() }, "ACTIVE");
         }
+        const replenish = this.replenishments.get(sandboxId);
+        this.replenishments.delete(sandboxId);
+        if (replenish) void this.warmPool!.warm(replenish.key, replenish.args)
+            .catch(error => console.error('Sandbox warm replenishment failed', error));
     }
+
+    async close(): Promise<void> { await this.warmPool?.close(); }
 
     async cleanupStale(record: SandboxRecord): Promise<void> {
         const name = `agent-harness-${record.id}`;

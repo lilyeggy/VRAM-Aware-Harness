@@ -194,6 +194,7 @@ export class ManagedAgentRuntime implements AgentRuntime {
 
         const sandboxId = crypto.randomUUID();
         let handle;
+        const sandboxAcquireStartedAt = performance.now();
         try {
             handle = await this.sandbox.create({
                 id: sandboxId,
@@ -209,14 +210,18 @@ export class ManagedAgentRuntime implements AgentRuntime {
             throw error;
         }
 
+        this.emit({
+            type: "sandbox_acquired",
+            runId: run.id,
+            timestamp: new Date().toISOString(),
+            durationMs: Math.round(handle.acquisition?.durationMs ?? (performance.now() - sandboxAcquireStartedAt)),
+            warmHit: handle.acquisition?.warmHit ?? false,
+            runtime: snapshot.sandboxProfile ?? this.sandboxProfile,
+        });
+
         attempt = startRunAttempt(attempt, new Date().toISOString(), snapshot.id, handle.id);
         this.attempts.update(attempt, "PENDING");
-        const activeInstance = transitionHarnessInstance(
-            instance,
-            "ACTIVE",
-            new Date().toISOString(),
-        );
-        this.instances.update(activeInstance, instance.actualState);
+        this.instances.acquireRun(instance.id);
         this.activeBySandboxId.set(handle.id, {
             attemptId: attempt.id,
             instanceId: instance.id,
@@ -259,7 +264,10 @@ export class ManagedAgentRuntime implements AgentRuntime {
                 policySnapshotId: snapshot.id,
                 sandboxId: handle.id,
                 sandboxEnforcement: handle.enforcement,
-                runtimeConfig: compiled,
+                runtimeConfig: {
+                    ...compiled,
+                    thinkingLevel: request.run.thinkingLevel ?? "off",
+                },
             },
         } as T;
 
@@ -293,13 +301,8 @@ export class ManagedAgentRuntime implements AgentRuntime {
             this.activeBySandboxId.delete(handle.id);
             await this.sandbox.terminate(handle.id);
             const currentInstance = this.instances.get(instance.id);
-            if (currentInstance?.actualState === "ACTIVE") {
-                const ready = transitionHarnessInstance(
-                    currentInstance,
-                    "READY",
-                    new Date().toISOString(),
-                );
-                this.instances.update(ready, currentInstance.actualState);
+            if (currentInstance !== null && currentInstance.activeRunCount > 0) {
+                this.instances.releaseRun(instance.id);
             }
         }
     }

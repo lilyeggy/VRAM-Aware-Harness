@@ -60,8 +60,23 @@ export class RuntimeEventBridge{
             case "agent_resumed":
                 return null;
 
+            case "sandbox_acquired":
+                return {
+                    runId: event.runId,
+                    type: "SANDBOX_ACQUIRED",
+                    timestamp: event.timestamp,
+                    payloadVersion: 1,
+                    dedupeKey: `sandbox:${event.runId}:acquired`,
+                    payload: {
+                        durationMs: event.durationMs,
+                        warmHit: event.warmHit,
+                        runtime: event.runtime,
+                    },
+                };
+
             // text_delta 只用于实时展示，不存储
             case "text_delta":
+            case "thinking_delta":
                 return null;
 
             case "model_started":
@@ -92,6 +107,21 @@ export class RuntimeEventBridge{
                         durationMs: event.durationMs,
                         stopReason: event.stopReason,
                         usage: event.usage,
+                    },
+                };
+
+            case "model_first_token":
+                return {
+                    runId: event.runId,
+                    type: "MODEL_FIRST_TOKEN",
+                    timestamp: event.timestamp,
+                    payloadVersion: 1,
+                    dedupeKey: `model:${event.modelCallId}:first-token`,
+                    payload: {
+                        modelCallId: event.modelCallId,
+                        provider: event.provider,
+                        model: event.model,
+                        channel: event.channel,
                     },
                 };
 

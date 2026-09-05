@@ -14,6 +14,8 @@
 
 import type { PolicyConstraints } from "../policies/effective-policy.ts";
 
+export type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high";
+
 export type AgentRunStatus = 
     | "QUEUED"
     | "RUNNING"
@@ -39,6 +41,9 @@ export interface AgentRun{
     checkpointId:string | null;
     failureReason:string | null;
 
+    /** 用户选择的推理深度；缺省 off 兼容旧 Run。 */
+    thinkingLevel?: ThinkingLevel;
+
     /** Stage 1 正式控制面入口为新 Run 固定的不可变执行证据。 */
     templateVersionId?:string;
     harnessInstanceId?:string;
@@ -62,7 +67,9 @@ export type RunEventType =
     | "RUN_COMPLETED"
     | "RUN_FAILED"
     | "MODEL_STARTED"
+    | "MODEL_FIRST_TOKEN"
     | "MODEL_COMPLETED"
+    | "SANDBOX_ACQUIRED"
     | "TOOL_REQUESTED"
     | "TOOL_STARTED"
     | "TOOL_COMPLETED"
@@ -82,5 +89,3 @@ export interface RunEvent{
     // Day 2 的生命周期事件没有来源事件 key，因此该字段可选。
     dedupeKey?:string;
 }
-
-
