@@ -37,6 +37,7 @@ export interface PiAdapterConfig{
     provider:string;
     modelId:string;
     tools:string[];
+    thinkingLevel?: "off" | "minimal" | "low" | "medium" | "high";
 }
 
 /**
@@ -138,6 +139,9 @@ export class PiAdapter implements AgentRuntime{
             throw new Error(`未找到${config.provider}/${config.modelId}`)
         }
 
+        const sessionInitializedStartedAt = performance.now();
+        const sessionMode: "NEW" | "OPEN_EXISTING" = request.run.runtimeSessionRef === null
+            || request.run.runtimeSessionRef === undefined ? "NEW" : "OPEN_EXISTING";
         const runtimeSessionRefHolder: {
             current: string | null;
         } = {
@@ -177,6 +181,7 @@ export class PiAdapter implements AgentRuntime{
             customTools,
             sessionManager,
             ...(resourceLoader === undefined ? {} : { resourceLoader }),
+            thinkingLevel: request.execution?.runtimeConfig.thinkingLevel ?? this.config.thinkingLevel ?? "off",
             // 创建一个可以持久化 Pi 对话历史的 SessionManager。
         })
 
@@ -190,9 +195,19 @@ export class PiAdapter implements AgentRuntime{
         }
         runtimeSessionRefHolder.current = runtimeSessionRef;
         this.sessionsByRunId.set(request.run.runId,session);
+        this.emit({
+            type: "session_initialized",
+            runId,
+            timestamp: new Date().toISOString(),
+            durationMs: Math.round(performance.now() - sessionInitializedStartedAt),
+            mode: sessionMode,
+        });
         // 把 runId和 session 对应起来
 
         const modelStartedAtByCallId = new Map<string, number>();
+        const activeModelCallIdByRunId = new Map<string, string>();
+        const firstTokenEmittedByCallId = new Set<string>();
+        const modelInfoByCallId = new Map<string, { provider: string; model: string }>();
 
         const unsubscribe = session.subscribe((piEvent) => {
             const timestamp = new Date().toISOString();
@@ -219,6 +234,8 @@ export class PiAdapter implements AgentRuntime{
                         modelCallId,
                         Date.now(),
                     );
+                    activeModelCallIdByRunId.set(runId, modelCallId);
+                    modelInfoByCallId.set(modelCallId, { provider: piEvent.message.provider, model: piEvent.message.responseModel ?? piEvent.message.model });
 
                     this.emit({
                         type: "model_started",
@@ -234,12 +251,31 @@ export class PiAdapter implements AgentRuntime{
 
                 case "message_update":
                     if (piEvent.assistantMessageEvent.type === "text_delta"){
+                        const modelCallId = activeModelCallIdByRunId.get(runId);
+                        const modelInfo = modelCallId === undefined ? undefined : modelInfoByCallId.get(modelCallId);
+                        if (modelCallId !== undefined && modelInfo !== undefined && !firstTokenEmittedByCallId.has(modelCallId)) {
+                            firstTokenEmittedByCallId.add(modelCallId);
+                            this.emit({ type: "model_first_token", runId, timestamp, modelCallId, ...modelInfo, channel: "text" });
+                        }
                         this.emit({
                             type:"text_delta",
                             runId,
                             timestamp,
                             delta:piEvent.assistantMessageEvent.delta,
                         })
+                    } else if (piEvent.assistantMessageEvent.type === "thinking_delta") {
+                        const modelCallId = activeModelCallIdByRunId.get(runId);
+                        const modelInfo = modelCallId === undefined ? undefined : modelInfoByCallId.get(modelCallId);
+                        if (modelCallId !== undefined && modelInfo !== undefined && !firstTokenEmittedByCallId.has(modelCallId)) {
+                            firstTokenEmittedByCallId.add(modelCallId);
+                            this.emit({ type: "model_first_token", runId, timestamp, modelCallId, ...modelInfo, channel: "thinking" });
+                        }
+                        this.emit({
+                            type:"thinking_delta",
+                            runId,
+                            timestamp,
+                            delta:piEvent.assistantMessageEvent.delta,
+                        });
                     }
                     break;
 
@@ -254,6 +290,9 @@ export class PiAdapter implements AgentRuntime{
                         modelStartedAtByCallId.get(modelCallId);
 
                     modelStartedAtByCallId.delete(modelCallId);
+                    activeModelCallIdByRunId.delete(runId);
+                    firstTokenEmittedByCallId.delete(modelCallId);
+                    modelInfoByCallId.delete(modelCallId);
 
                     this.emit({
                         type: "model_completed",
@@ -435,6 +474,7 @@ export class PiAdapter implements AgentRuntime{
             );
         }
 
+        const sessionInitializedStartedAt = performance.now();
         const sessionManager = SessionManager.open(
             request.checkpoint.runtimeSessionRef,
             undefined,
@@ -467,6 +507,7 @@ export class PiAdapter implements AgentRuntime{
             customTools,
             sessionManager,
             ...(resourceLoader === undefined ? {} : { resourceLoader }),
+            thinkingLevel: request.execution?.runtimeConfig.thinkingLevel ?? this.config.thinkingLevel ?? "off",
         })
 
         const checkpointId = request.checkpoint.checkpointId
@@ -475,8 +516,18 @@ export class PiAdapter implements AgentRuntime{
 
 
         this.sessionsByRunId.set(request.run.runId,session)
+        this.emit({
+            type: "session_initialized",
+            runId,
+            timestamp: new Date().toISOString(),
+            durationMs: Math.round(performance.now() - sessionInitializedStartedAt),
+            mode: "RESUME_CHECKPOINT",
+        });
 
         const modelStartedAtByCallId = new Map<string, number>();
+        const activeModelCallIdByRunId = new Map<string, string>();
+        const firstTokenEmittedByCallId = new Set<string>();
+        const modelInfoByCallId = new Map<string, { provider: string; model: string }>();
 
         const unsubscribe = session.subscribe((piEvent) => {
             const timestamp = new Date().toISOString();
@@ -503,6 +554,8 @@ export class PiAdapter implements AgentRuntime{
                         modelCallId,
                         Date.now(),
                     );
+                    activeModelCallIdByRunId.set(runId, modelCallId);
+                    modelInfoByCallId.set(modelCallId, { provider: piEvent.message.provider, model: piEvent.message.responseModel ?? piEvent.message.model });
 
                     this.emit({
                         type: "model_started",
@@ -516,14 +569,33 @@ export class PiAdapter implements AgentRuntime{
                     break;
                 }
 
-                    case "message_update":
+                case "message_update":
                     if (piEvent.assistantMessageEvent.type === "text_delta"){
+                        const modelCallId = activeModelCallIdByRunId.get(runId);
+                        const modelInfo = modelCallId === undefined ? undefined : modelInfoByCallId.get(modelCallId);
+                        if (modelCallId !== undefined && modelInfo !== undefined && !firstTokenEmittedByCallId.has(modelCallId)) {
+                            firstTokenEmittedByCallId.add(modelCallId);
+                            this.emit({ type: "model_first_token", runId, timestamp, modelCallId, ...modelInfo, channel: "text" });
+                        }
                         this.emit({
                             type:"text_delta",
                             runId,
                             timestamp,
                             delta:piEvent.assistantMessageEvent.delta,
                         })
+                    } else if (piEvent.assistantMessageEvent.type === "thinking_delta") {
+                        const modelCallId = activeModelCallIdByRunId.get(runId);
+                        const modelInfo = modelCallId === undefined ? undefined : modelInfoByCallId.get(modelCallId);
+                        if (modelCallId !== undefined && modelInfo !== undefined && !firstTokenEmittedByCallId.has(modelCallId)) {
+                            firstTokenEmittedByCallId.add(modelCallId);
+                            this.emit({ type: "model_first_token", runId, timestamp, modelCallId, ...modelInfo, channel: "thinking" });
+                        }
+                        this.emit({
+                            type:"thinking_delta",
+                            runId,
+                            timestamp,
+                            delta:piEvent.assistantMessageEvent.delta,
+                        });
                     }
                     break;
 
@@ -538,6 +610,9 @@ export class PiAdapter implements AgentRuntime{
                         modelStartedAtByCallId.get(modelCallId);
 
                     modelStartedAtByCallId.delete(modelCallId);
+                    activeModelCallIdByRunId.delete(runId);
+                    firstTokenEmittedByCallId.delete(modelCallId);
+                    modelInfoByCallId.delete(modelCallId);
 
                     this.emit({
                         type: "model_completed",

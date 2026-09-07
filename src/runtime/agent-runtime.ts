@@ -102,6 +102,19 @@ export interface RuntimeModelUsage {
 
 export type RuntimeEvent = 
     | {
+        type: "control_prepared";
+        runId: string;
+        timestamp: string;
+        durationMs: number;
+    }
+    | {
+        type: "session_initialized";
+        runId: string;
+        timestamp: string;
+        durationMs: number;
+        mode: "NEW" | "OPEN_EXISTING" | "RESUME_CHECKPOINT";
+    }
+    | {
         type:"agent_started";
         runId:string;
         timestamp:string;
@@ -189,6 +202,8 @@ export type RuntimeEvent =
     }
     | {
         type: "sandbox_acquired";
+        sandboxId: string;
+        attemptId: string;
         runId: string;
         timestamp: string;
         durationMs: number;

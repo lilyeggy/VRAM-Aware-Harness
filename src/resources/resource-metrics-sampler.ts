@@ -41,6 +41,7 @@ export class ResourceMetricsSampler {
         if (this.timer !== null) return;
         void this.sample();
         this.timer = setInterval(() => void this.sample(), this.intervalMs);
+        this.timer.unref?.();
     }
 
     stop(): void {
@@ -60,6 +61,10 @@ export class ResourceMetricsSampler {
             const result: ResourceSample = observed.ok
                 ? { ok: true, sampledAt: observed.snapshot.observedAt, snapshot: observed.snapshot }
                 : { ok: false, sampledAt: observed.observedAt, reason: observed.reason, message: observed.message };
+            this.append(result);
+            return result;
+        } catch {
+            const result = { ok: false as const, sampledAt: this.now().toISOString(), reason: "UNAVAILABLE", message: "Resource probe threw an exception" };
             this.append(result);
             return result;
         } finally {

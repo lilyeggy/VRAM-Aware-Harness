@@ -106,6 +106,7 @@ export class ManagedAgentRuntime implements AgentRuntime {
         request: T,
         invoke: (request: T) => Promise<void>,
     ): Promise<void> {
+        const controlPreparedStartedAt = performance.now();
         const run = this.runs.get(request.run.runId);
         if (
             run === null
@@ -192,6 +193,13 @@ export class ManagedAgentRuntime implements AgentRuntime {
             now,
         );
 
+        this.emit({
+            type: "control_prepared",
+            runId: run.id,
+            timestamp: new Date().toISOString(),
+            durationMs: Math.round(performance.now() - controlPreparedStartedAt),
+        });
+
         const sandboxId = crypto.randomUUID();
         let handle;
         const sandboxAcquireStartedAt = performance.now();
@@ -212,9 +220,11 @@ export class ManagedAgentRuntime implements AgentRuntime {
 
         this.emit({
             type: "sandbox_acquired",
+            sandboxId,
+            attemptId: attempt.id,
             runId: run.id,
             timestamp: new Date().toISOString(),
-            durationMs: Math.round(handle.acquisition?.durationMs ?? (performance.now() - sandboxAcquireStartedAt)),
+            durationMs: Math.round(performance.now() - sandboxAcquireStartedAt),
             warmHit: handle.acquisition?.warmHit ?? false,
             runtime: snapshot.sandboxProfile ?? this.sandboxProfile,
         });

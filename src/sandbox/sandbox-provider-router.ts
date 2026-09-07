@@ -83,7 +83,8 @@ export class SandboxProviderRouter implements SandboxProvider, SandboxCommandExe
         return () => this.handlers.delete(handler);
     }
 
-    close(): void {
+    async close(): Promise<void> {
+        for (const provider of new Set(Object.values(this.providers))) await provider?.close?.();
         for (const unsubscribe of this.unsubscribers) unsubscribe();
         this.unsubscribers.length = 0;
         this.handlers.clear();
