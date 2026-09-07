@@ -45,3 +45,8 @@ data/*.sqlite-*
 # 独立的其他项目目录（不属于本仓库）
 agentic-rl-rollout-explorer/
 ax-code-atlas/
+
+# 本地学习、八股问答与实验目录
+计算机基础实验/
+面试问答/
+项目核心思路伪代码/

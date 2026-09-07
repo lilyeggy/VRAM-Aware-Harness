@@ -1,0 +1,17 @@
+{
+  "providers": {
+    "local-vllm": {
+      "baseUrl": "http://127.0.0.1:18000/v1",
+      "api": "openai-completions",
+      "compat": {
+        "supportsDeveloperRole": false,
+        "supportsReasoningEffort": false
+      },
+      "models": [
+        {
+          "id": "qwen3.8-27b-fp8"
+        }
+      ]
+    }
+  }
+}

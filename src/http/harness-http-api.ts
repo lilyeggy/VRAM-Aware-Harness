@@ -29,6 +29,7 @@ import type { HarnessInstance } from "../instances/harness-instance.ts";
 import type { EvaluationAggregator } from "../eval/evaluation-aggregator.ts";
 import type { LlmGateway } from "../llm-gateway/llm-gateway.ts";
 import { platformDashboardResponse } from "./harness-platform-dashboard.ts";
+import { userConsoleResponse } from "./harness-user-console.ts";
 import type { Conversation } from "../conversations/conversation.ts";
 
 export interface HarnessHttpApplication {
@@ -43,7 +44,7 @@ export interface HarnessHttpApplication {
     touchConversation?(id: string, tenantId: string): void;
     getAgentsForTenant?(tenantId:string):HarnessInstance[];
     getRunEvents(runId:string):RunEvent[];
-    getRunOutput(runId:string):{ chunks: RunOutputChunk[]; finalText: string };
+    getRunOutput(runId:string):{ chunks: RunOutputChunk[]; finalText: string; thinkingText?: string };
     getRunWorkspaceDiff(runId:string):WorkspaceDiff | null;
     getRunArtifacts(runId:string):RunArtifact[];
     getRunArtifact(runId:string, path:string):Promise<Uint8Array | null>;
@@ -82,6 +83,9 @@ class HttpError extends Error {
  * 它只负责路由、输入校验和 JSON 转换；调度、恢复、资源准入和持久化
  * 都继续由 HarnessApplication 及其下层组件负责。
  */
+import type { ResourceMetricsSampler } from "../resources/resource-metrics-sampler.ts";
+import { summarizeRunObservation } from "../resources/run-observation.ts";
+
 export class HarnessHttpApi {
     constructor(
         private readonly application:HarnessHttpApplication,
@@ -89,6 +93,7 @@ export class HarnessHttpApi {
         private readonly accessControl?:HttpAccessControl,
         private readonly evaluation?:EvaluationAggregator,
         private readonly llmGateway?:LlmGateway,
+        private readonly resourceMetrics?: ResourceMetricsSampler,
     ) {}
 
     async fetch(request:Request):Promise<Response> {
@@ -139,6 +144,15 @@ export class HarnessHttpApi {
             return platformDashboardResponse();
         }
 
+        // 用户工作台：面向最终用户的对话式任务页面（与运营控制台分离）。
+        if (
+            request.method === "GET"
+            && segments.length === 1
+            && segments[0] === "app"
+        ) {
+            return userConsoleResponse();
+        }
+
         if (request.method === "GET" && segments.length === 1) {
             switch (segments[0]) {
                 case "health":
@@ -164,6 +178,7 @@ export class HarnessHttpApi {
                     const principal = this.requirePrincipal(request, "resources:read");
                     void principal;
                     return jsonResponse({
+                        samples: this.resourceMetrics?.getSamples() ?? [],
                         observation:
                             await this.application.observeResources(),
                     });
@@ -339,6 +354,12 @@ export class HarnessHttpApi {
                 });
             }
 
+            if (request.method === "GET" && segments.length === 3 && segments[2] === "observability") {
+                const run = this.getRequiredRun(runId, request, "tasks:read");
+                this.requirePrincipal(request, "resources:read");
+                return jsonResponse(summarizeRunObservation(run, this.application.getRunEvents(runId), this.resourceMetrics?.getSamples() ?? []));
+            }
+
             if (
                 request.method === "GET"
                 && segments.length === 3
@@ -415,6 +436,7 @@ export class HarnessHttpApi {
                 ?? optionalString(body, "harnessSessionId")
                 ?? crypto.randomUUID(),
             userInput:requiredString(body, "userInput"),
+            thinkingLevel: parseThinkingLevel(body),
             workspacePath:this.accessControl === undefined
                 ? requiredString(body, "workspacePath")
                 : (workspace as NonNullable<typeof workspace>).rootPath,
@@ -491,6 +513,7 @@ export class HarnessHttpApi {
             tenantId: principal.tenantId,
             harnessSessionId: conversation.id,
             userInput: requiredString(body, "userInput"),
+            thinkingLevel: parseThinkingLevel(body),
             workspacePath: workspace.rootPath,
         });
         this.application.touchConversation?.(conversation.id, principal.tenantId);
@@ -706,6 +729,15 @@ function optionalString(
     }
 
     return value;
+}
+
+function parseThinkingLevel(body:Record<string,unknown>): StartRunInput["thinkingLevel"] {
+    const value = optionalString(body, "thinkingLevel");
+    if (value === null) return undefined;
+    if (!["off", "minimal", "low", "medium", "high"].includes(value)) {
+        throw new HttpError(400, "thinkingLevel 必须是 off、minimal、low、medium 或 high");
+    }
+    return value as StartRunInput["thinkingLevel"];
 }
 
 function jsonResponse(value:unknown, status = 200):Response {

@@ -51,6 +51,7 @@ export async function startHarnessProcess(
 
     try {
         await composition.application.start();
+        composition.resourceMetrics.start();
         server = startHarnessHttpServer(composition.httpApi, {
             hostname:config.httpHost,
             port:config.httpPort,

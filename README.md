@@ -227,7 +227,7 @@ Agentic Policy 仅作为候选研究路线，见
 | 可信身份与 Tenant-scoped API | 已完成 P0 切片 | API Key/Principal、服务端派生 Tenant、跨 Tenant Run 访问返回 404 |
 | 受管 Workspace | 已完成 P0 切片 | `workspaceId` 映射到服务端 Tenant Root；客户端不能提交宿主机路径 |
 | Container Sandbox 命令边界 | 已完成 P0 切片 | 每 Attempt 可使用非 root、只读 RootFS、cap drop、网络/CPU/内存/PID 限制的容器；Pi 文件/Shell 工具经容器命令边界执行 |
-| 用户任务结果与最小 Web 界面 | 进行中 | 同源 Task Console、任务历史、输出、Workspace Diff 和终态 Artifact 已具备 Tenant-scoped API；工具时间线与人工处理待补 |
+| 用户任务结果与最小 Web 界面 | 进行中 | 同源 Task Console、任务历史、输出、Workspace Diff 和终态 Artifact 已具备 Tenant-scoped API；用户工作台 `/app` 已提供注册登录、对话式任务、Diff/Artifact/事件查看；工具时间线与人工处理待补 |
 | Claude / 异构 ResourcePool | 已暂停 | 不进入秋招前主线 |
 
 本轮逐项设计、攻击测试与后续缺口见
@@ -266,6 +266,31 @@ bun run demo:console
 Workspace，再提交任务即可看到 Run 终态和持久化输出。该命令明确使用 Fake Runtime：它
 证明的是产品/API/控制面纵向链路，**不**证明 Docker 隔离、真实模型兼容性或性能；按
 `Ctrl+C` 会关闭服务并删除临时数据。
+
+## 用户工作台（/app）
+
+面向最终用户的对话式任务页面（与面向开发者的运营控制台分离），入口为 `GET /app`：
+
+- 邮箱 + 密码注册 / 登录（`/auth/register`、`/auth/login` 会话 Token），也可用租户
+  签发的 API Key 直接进入；Token 只保存在本浏览器 localStorage；
+- 按 Workspace 组织对话，发送任务后自动创建 Run，实时展示排队位置、执行状态、
+  流式输出、Workspace Diff 汇总、Artifact 下载与 RunEvent 时间线；
+- 支持中断运行中的任务、从 Checkpoint 恢复中断任务；
+- 所有请求仍由服务端凭证派生 Tenant，页面不接受 tenantId。
+
+本地体验（Fake Runtime，无 GPU / 模型依赖）：
+
+```bash
+bun run scripts/user-console-demo-server.ts
+# 打开 http://127.0.0.1:3977/app
+# 演示账号：demo@team.local / demo-password-123
+```
+
+端到端冒烟（注册→登录→Workspace→对话→任务→结果）：
+
+```bash
+bun run scripts/user-console-smoke.ts
+```
 
 ## Docker/gVisor Sandbox 真机 Smoke
 

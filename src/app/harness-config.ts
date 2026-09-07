@@ -17,6 +17,7 @@ export interface HarnessConfig {
     sandboxRuntime:"runsc" | "runc";
     containerImage:string;
     containerUserId:number;
+    sandboxWarmPoolSize?:number;
 
     piProvider:string;
     piModelId:string;
@@ -26,6 +27,7 @@ export interface HarnessConfig {
 
     vllmMetricsUrl:string;
     resourceObservationTimeoutMs:number;
+    resourceMetricsIntervalMs:number;
     gpuIds:string[];
     resourceThresholds:ResourceThresholds;
 
@@ -91,6 +93,9 @@ export function loadHarnessConfig(
     }
 
     return {
+        ...(environment.HARNESS_SANDBOX_WARM_POOL_SIZE === undefined ? {} : {
+            sandboxWarmPoolSize: positiveInteger(environment, 'HARNESS_SANDBOX_WARM_POOL_SIZE', 2),
+        }),
         databasePath:environment.HARNESS_DATABASE_PATH
             ?? resolve(cwd, "data/harness.sqlite"),
         httpHost:environment.HARNESS_HOST ?? "127.0.0.1",
@@ -135,6 +140,7 @@ export function loadHarnessConfig(
             "HARNESS_RESOURCE_TIMEOUT_MS",
             3_000,
         ),
+        resourceMetricsIntervalMs:positiveInteger(environment, "HARNESS_RESOURCE_METRICS_INTERVAL_MS", 1_000),
         gpuIds:stringList(environment.HARNESS_GPU_IDS, ["0"]),
         resourceThresholds:{
             busyGpuMemoryPercent:numberValue(

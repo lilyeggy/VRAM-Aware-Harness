@@ -200,9 +200,13 @@ export class HarnessApplication {
         return this.runStore.listEvents(runId);
     }
 
-    getRunOutput(runId: string): { chunks: RunOutputChunk[]; finalText: string } {
+    getRunOutput(runId: string): { chunks: RunOutputChunk[]; finalText: string; thinkingText: string } {
         const chunks = this.runOutputStore?.list(runId) ?? [];
-        return { chunks, finalText: chunks.map((chunk) => chunk.delta).join("") };
+        return {
+            chunks,
+            finalText: chunks.filter((chunk) => chunk.channel === "answer").map((chunk) => chunk.delta).join(""),
+            thinkingText: chunks.filter((chunk) => chunk.channel === "thinking").map((chunk) => chunk.delta).join(""),
+        };
     }
 
     getRunWorkspaceDiff(runId: string): WorkspaceDiff | null {

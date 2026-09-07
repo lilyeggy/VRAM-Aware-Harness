@@ -10,6 +10,10 @@ const pollIntervalMs = positiveInteger(
     process.env.HARNESS_SMOKE_POLL_INTERVAL_MS,
     500,
 );
+const apiKey = process.env.HARNESS_API_KEY?.trim();
+const authenticatedHeaders:Record<string,string> = apiKey === undefined || apiKey.length === 0
+    ? {}
+    : { authorization:`Bearer ${apiKey}` };
 
 const healthResponse = await fetch(`${baseUrl}/health`);
 
@@ -26,18 +30,29 @@ if (!health.ok || !health.started) {
     throw new Error("Harness 尚未启动完成");
 }
 
+const workspaceResponse = await fetch(`${baseUrl}/workspaces`, {
+    method:"POST",
+    headers:{ "content-type":"application/json", ...authenticatedHeaders },
+    body:JSON.stringify({ name:`smoke-${crypto.randomUUID()}` }),
+});
+
+if (!workspaceResponse.ok) {
+    throw new Error(`创建 Workspace 失败：HTTP ${workspaceResponse.status} ${await workspaceResponse.text()}`);
+}
+
+const workspacePayload = await workspaceResponse.json() as { workspace:{ id:string } };
+
 const submittedAt = Date.now();
 const submitResponse = await fetch(`${baseUrl}/runs`, {
     method:"POST",
-    headers:{ "content-type":"application/json" },
+    headers:{ "content-type":"application/json", ...authenticatedHeaders },
     body:JSON.stringify({
         tenantId:process.env.HARNESS_SMOKE_TENANT_ID
             ?? "smoke-tenant",
         sessionId:`smoke-${crypto.randomUUID()}`,
         userInput:process.env.HARNESS_SMOKE_USER_INPUT
             ?? "请使用 read 工具读取 README.md，并只回答第一行。",
-        workspacePath:process.env.HARNESS_SMOKE_WORKSPACE_PATH
-            ?? process.cwd(),
+        workspaceId:workspacePayload.workspace.id,
     }),
 });
 
@@ -63,6 +78,7 @@ let runPayload:{
 while (true) {
     const response = await fetch(
         `${baseUrl}/runs/${encodeURIComponent(submitted.run.id)}`,
+        { headers:authenticatedHeaders },
     );
 
     if (!response.ok) {
@@ -90,6 +106,7 @@ while (true) {
 
 const eventsResponse = await fetch(
     `${baseUrl}/runs/${encodeURIComponent(submitted.run.id)}/events`,
+    { headers:authenticatedHeaders },
 );
 
 if (!eventsResponse.ok) {

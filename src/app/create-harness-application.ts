@@ -99,7 +99,10 @@ export interface HarnessCompositionDependencies {
     capabilityProfile?:RuntimeCapabilityProfile;
 }
 
+import { ResourceMetricsSampler } from "../resources/resource-metrics-sampler.ts";
+
 export interface HarnessComposition {
+    resourceMetrics: ResourceMetricsSampler;
     application:HarnessApplication;
     httpApi:HarnessHttpApi;
     database:Database;
@@ -320,6 +323,12 @@ export async function createHarnessApplication(
         conversationStore,
     );
     const evaluationAggregator = new EvaluationAggregator(database);
+    // Separate observer instance: token-rate counters must not race admission probes.
+    const resourceMetrics = new ResourceMetricsSampler(dependencies.resourceObserver ?? new VllmResourceObserver({
+        metricsUrl: config.vllmMetricsUrl,
+        timeoutMs: config.resourceObservationTimeoutMs,
+        gpuIds: config.gpuIds,
+    }), { intervalMs: config.resourceMetricsIntervalMs });
     // 方向 C：LLM 网关（仅当配置了后端时启用）。
     const llmGateway = config.llmBackends.length > 0
         ? new LlmGateway(new ModelRouter(config.llmBackends))
@@ -337,11 +346,13 @@ export async function createHarnessApplication(
         },
         evaluationAggregator,
         llmGateway,
+        resourceMetrics,
     );
 
     let closed = false;
 
     return {
+        resourceMetrics,
         application,
         httpApi,
         database,
@@ -378,6 +389,8 @@ export async function createHarnessApplication(
             }
 
             await application.stop();
+            resourceMetrics.stop();
+            await (sandboxProvider as SandboxProvider).close?.();
 
             if (ownsDatabase) {
                 database.close();
@@ -402,6 +415,8 @@ function createContainerSandboxRouter(
         profile: config.sandboxProfile,
         sandboxRuntime: config.sandboxRuntime,
         userId: config.containerUserId,
+        warmPoolSize: config.sandboxWarmPoolSize,
+        warmPoolOwner: `port-${config.httpPort}`,
     });
     return new SandboxProviderRouter({
         default: container,
