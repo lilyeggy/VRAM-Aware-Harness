@@ -66,12 +66,34 @@ export class RuntimeEventBridge{
                     type: "SANDBOX_ACQUIRED",
                     timestamp: event.timestamp,
                     payloadVersion: 1,
-                    dedupeKey: `sandbox:${event.runId}:acquired`,
+                    dedupeKey: `sandbox:${event.sandboxId}:acquired`,
                     payload: {
                         durationMs: event.durationMs,
                         warmHit: event.warmHit,
-                        runtime: event.runtime,
+                        profile: event.runtime,
+                        sandboxId: event.sandboxId,
+                        attemptId: event.attemptId,
                     },
+                };
+
+            case "control_prepared":
+                return {
+                    runId: event.runId,
+                    type: "CONTROL_PREPARED",
+                    timestamp: event.timestamp,
+                    payloadVersion: 1,
+                    dedupeKey: `control:${event.runId}:prepared`,
+                    payload: { durationMs: event.durationMs },
+                };
+
+            case "session_initialized":
+                return {
+                    runId: event.runId,
+                    type: "SESSION_INITIALIZED",
+                    timestamp: event.timestamp,
+                    payloadVersion: 1,
+                    dedupeKey: `session:${event.runId}:initialized`,
+                    payload: { durationMs: event.durationMs, mode: event.mode },
                 };
 
             // text_delta 只用于实时展示，不存储

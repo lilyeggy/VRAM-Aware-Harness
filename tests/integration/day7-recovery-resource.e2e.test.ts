@@ -254,6 +254,8 @@ test("Day7：重启后恢复安全 Run，并在资源恢复时自动推进全部
                 "RUN_STARTED",
                 "RUN_INTERRUPTED",
                 "RUN_QUEUED",
+                "QUEUE_BLOCKED",
+                "QUEUE_BLOCKED",
                 "RUN_RESUMED",
                 "RUN_COMPLETED",
             ]);

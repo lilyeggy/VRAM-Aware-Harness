@@ -61,6 +61,7 @@ export interface AgentRun{
 export type RunEventType = 
     | "RUN_CREATED"
     | "RUN_QUEUED"
+    | "QUEUE_BLOCKED"
     | "RUN_STARTED"
     | "RUN_RESUMED"
     | "RUN_INTERRUPTED"
@@ -70,6 +71,8 @@ export type RunEventType =
     | "MODEL_FIRST_TOKEN"
     | "MODEL_COMPLETED"
     | "SANDBOX_ACQUIRED"
+    | "CONTROL_PREPARED"
+    | "SESSION_INITIALIZED"
     | "TOOL_REQUESTED"
     | "TOOL_STARTED"
     | "TOOL_COMPLETED"

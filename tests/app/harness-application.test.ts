@@ -381,7 +381,7 @@ test("应用门面统一查询 Run、事件、决策、队列、容量和资源"
 
         expect(application.getRun(run.id)?.status).toBe("QUEUED");
         expect(application.getRunEvents(run.id).map((event) => event.type))
-            .toEqual(["RUN_CREATED"]);
+            .toEqual(["RUN_CREATED", "QUEUE_BLOCKED"]);
         expect(application.getRunDecisions(run.id)).toEqual([decision]);
         expect(application.getQueue()).toEqual([
             expect.objectContaining({

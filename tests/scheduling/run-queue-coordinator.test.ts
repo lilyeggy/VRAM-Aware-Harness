@@ -1215,6 +1215,7 @@ test("恢复 Run 在资源拒绝后保留恢复参数，资源正常后占用 sl
                 tenantId: interruptedRun.tenantId,
                 harnessSessionId: interruptedRun.harnessSessionId,
                 workspacePath: interruptedRun.workspacePath,
+                thinkingLevel: "off",
             },
             checkpoint: {
                 checkpointId: checkpoint.id,
@@ -1228,6 +1229,7 @@ test("恢复 Run 在资源拒绝后保留恢复参数，资源正常后占用 sl
         )).toEqual([
             "RUN_INTERRUPTED",
             "RUN_QUEUED",
+            "QUEUE_BLOCKED",
             "RUN_RESUMED",
             "RUN_COMPLETED",
         ]);
@@ -1336,6 +1338,147 @@ test("运行中 interrupt 不提前释放 slot，Runtime 退出后才允许后�
         expect(scheduler.getCapacity(firstRun.tenantId).activeRunCount)
             .toBe(0);
     } finally {
+        db.close();
+    }
+});
+
+test("scheduler-only queue blockers are persisted once per reason transition", async () => {
+    const cases: Array<{
+        name: string;
+        config: { maxActiveRuns: number; maxActiveRunsPerTenant: number };
+        active: { tenantId: string; sessionId: string };
+        waiting: { tenantId: string; sessionId: string };
+        expected: "GLOBAL_CONCURRENCY_LIMIT" | "TENANT_CONCURRENCY_LIMIT" | "SESSION_SERIALIZATION";
+    }> = [
+        {
+            name: "global",
+            config: { maxActiveRuns: 1, maxActiveRunsPerTenant: 1 },
+            active: { tenantId: "tenant-a", sessionId: "session-a" },
+            waiting: { tenantId: "tenant-b", sessionId: "session-b" },
+            expected: "GLOBAL_CONCURRENCY_LIMIT",
+        },
+        {
+            name: "tenant",
+            config: { maxActiveRuns: 2, maxActiveRunsPerTenant: 1 },
+            active: { tenantId: "tenant-a", sessionId: "session-a" },
+            waiting: { tenantId: "tenant-a", sessionId: "session-b" },
+            expected: "TENANT_CONCURRENCY_LIMIT",
+        },
+        {
+            name: "session",
+            config: { maxActiveRuns: 2, maxActiveRunsPerTenant: 2 },
+            active: { tenantId: "tenant-a", sessionId: "session-a" },
+            waiting: { tenantId: "tenant-a", sessionId: "session-a" },
+            expected: "SESSION_SERIALIZATION",
+        },
+    ];
+
+    for (const scenario of cases) {
+        const db = openHarnessDatabase(":memory:");
+        const store = new RunStore(db);
+        const runtime = new BlockingAgentRuntime();
+        const runService = new RunService(store, runtime);
+        const scheduler = new TenantRunScheduler(scenario.config);
+        const admission: ResourceAdmissionEvaluator = {
+            async evaluate(request) {
+                return createAdmissionResult(createDecision(
+                    request,
+                    "START",
+                    "RESOURCE_NORMAL",
+                ));
+            },
+        };
+        const coordinator = new RunQueueCoordinator(
+            runService,
+            scheduler,
+            admission,
+        );
+
+        try {
+            const active = coordinator.submit({
+                tenantId: scenario.active.tenantId,
+                harnessSessionId: scenario.active.sessionId,
+                userInput: `${scenario.name} active`,
+                workspacePath: "/tmp/workspace-active",
+            });
+            const activeAttempt = coordinator.attemptNext();
+            await runtime.waitForStartCount(1);
+            const waiting = coordinator.submit({
+                tenantId: scenario.waiting.tenantId,
+                harnessSessionId: scenario.waiting.sessionId,
+                userInput: `${scenario.name} waiting`,
+                workspacePath: "/tmp/workspace-waiting",
+            });
+
+            expect(await coordinator.attemptNext()).toEqual({ kind: "EMPTY" });
+            const blockers = store.listEvents(waiting.id)
+                .filter((event) => event.type === "QUEUE_BLOCKED");
+            expect(blockers).toHaveLength(1);
+            expect(blockers[0]?.payload).toMatchObject({
+                reasonCode: scenario.expected,
+            });
+
+            // A subsequent Pump tick sees the same blocker but must not flood
+            // the immutable event log with an identical explanation.
+            await coordinator.attemptNext();
+            expect(store.listEvents(waiting.id).filter(
+                (event) => event.type === "QUEUE_BLOCKED",
+            )).toHaveLength(1);
+
+            runtime.releaseAllStarted();
+            await activeAttempt;
+            expect(store.get(active.id)?.status).toBe("COMPLETED");
+        } finally {
+            runtime.releaseAllStarted();
+            db.close();
+        }
+    }
+});
+
+test("提交到已满 scheduler 时立即记录阻塞原因，不等待下一次 drain", async () => {
+    const db = openHarnessDatabase(":memory:");
+    const store = new RunStore(db);
+    const runtime = new BlockingAgentRuntime();
+    const runService = new RunService(store, runtime);
+    const scheduler = new TenantRunScheduler({
+        maxActiveRuns: 1,
+        maxActiveRunsPerTenant: 1,
+    });
+    const admission: ResourceAdmissionEvaluator = {
+        async evaluate(request) {
+            return createAdmissionResult(createDecision(
+                request,
+                "START",
+                "RESOURCE_NORMAL",
+            ));
+        },
+    };
+    const coordinator = new RunQueueCoordinator(runService, scheduler, admission);
+
+    try {
+        coordinator.submit({
+            tenantId: "tenant-a", harnessSessionId: "session-a",
+            userInput: "active", workspacePath: "/tmp/active",
+        });
+        const activeAttempt = coordinator.attemptNext();
+        await runtime.waitForStartCount(1);
+
+        const waiting = coordinator.submit({
+            tenantId: "tenant-b", harnessSessionId: "session-b",
+            userInput: "waiting", workspacePath: "/tmp/waiting",
+        });
+        expect(store.listEvents(waiting.id).filter(
+            (event) => event.type === "QUEUE_BLOCKED",
+        )).toEqual([expect.objectContaining({
+            payload: expect.objectContaining({
+                reasonCode: "GLOBAL_CONCURRENCY_LIMIT",
+            }),
+        })]);
+
+        runtime.releaseAllStarted();
+        await activeAttempt;
+    } finally {
+        runtime.releaseAllStarted();
         db.close();
     }
 });

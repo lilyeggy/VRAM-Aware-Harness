@@ -105,7 +105,7 @@ function harnessInstance(): HarnessInstance {
     return {
         id: "instance-1", tenantId: "tenant-1", templateVersionId: "version-1",
         capabilityProfileId: "capability-1", runtimeKind: "PI",
-        desiredState: "RUNNING", actualState: "ACTIVE", failureReason: null,
+        desiredState: "RUNNING", actualState: "ACTIVE", activeRunCount: 1, failureReason: null,
         createdAt: "2026-08-22T00:00:00.000Z", updatedAt: "2026-08-22T00:00:01.000Z",
     };
 }

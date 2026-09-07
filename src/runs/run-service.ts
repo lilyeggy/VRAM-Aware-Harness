@@ -10,6 +10,7 @@ import type { Checkpoint } from "../checkpoints/checkpoint.ts";
 import type {
     AgentRun,
     RunEvent,
+    ThinkingLevel,
 } from "./agent-run.ts"
 import type { RunStore } from "./runstore.ts"
 import type { PolicyConstraints } from "../policies/effective-policy.ts";
@@ -23,6 +24,7 @@ export interface StartRunInput {
     userInput : string;
     workspacePath : string;
     runPolicy?: PolicyConstraints;
+    thinkingLevel?: ThinkingLevel;
 }
 
 export interface RunControlBinding {
@@ -70,6 +72,7 @@ export class RunService{
             finishedAt:null,
             checkpointId:null,
             failureReason:null,
+            thinkingLevel: input.thinkingLevel ?? "off",
             ...(input.runPolicy === undefined
                 ? {}
                 : { runPolicy: input.runPolicy }),
@@ -91,6 +94,28 @@ export class RunService{
         this.store.create(run,createdEvent);
 
         return run;
+    }
+
+    /** Persist a queue blocker without changing the authoritative Run state. */
+    recordQueueBlocked(
+        runId: string,
+        payload: Record<string, unknown>,
+    ): void {
+        const run = this.getRequiredRun(runId);
+
+        if (run.status !== "QUEUED") {
+            return;
+        }
+
+        this.store.appendEvent({
+            eventId: crypto.randomUUID(),
+            runId,
+            sequence: this.store.getLastEventSequence(runId) + 1,
+            type: "QUEUE_BLOCKED",
+            timestamp: new Date().toISOString(),
+            payloadVersion: 1,
+            payload,
+        });
     }
 
     async executeQueuedRun(runId:string) : Promise<AgentRun> {
@@ -140,6 +165,7 @@ export class RunService{
                     ...(run.harnessInstanceId === undefined
                         ? {}
                         : { harnessInstanceId: run.harnessInstanceId }),
+                    ...(run.thinkingLevel === undefined ? {} : { thinkingLevel: run.thinkingLevel }),
                 },
                 input: run.userInput,
             });
@@ -271,6 +297,7 @@ export class RunService{
                     ...(runningRun.harnessInstanceId === undefined
                         ? {}
                         : { harnessInstanceId: runningRun.harnessInstanceId }),
+                    ...(runningRun.thinkingLevel === undefined ? {} : { thinkingLevel: runningRun.thinkingLevel }),
                 },
                 checkpoint: {
                     checkpointId: input.checkpoint.id,
@@ -375,6 +402,10 @@ export class RunService{
         return this.runtime.subscribe(runId, (event) => {
             if (event.type === "text_delta") {
                 this.outputStore?.append(runId, event.delta);
+                return;
+            }
+            if (event.type === "thinking_delta") {
+                this.outputStore?.append(runId, event.delta, "thinking");
                 return;
             }
             const draft = this.eventBridge.map(event);

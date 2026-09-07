@@ -17,6 +17,7 @@ export interface HarnessInstance {
     readonly runtimeKind: RuntimeKind;
     readonly desiredState: HarnessInstanceDesiredState;
     readonly actualState: HarnessInstanceActualState;
+    readonly activeRunCount: number;
     readonly failureReason: string | null;
     readonly createdAt: string;
     readonly updatedAt: string;
@@ -44,6 +45,7 @@ export function createHarnessInstance(
         ...input,
         desiredState: "RUNNING" as const,
         actualState: "PROVISIONING" as const,
+        activeRunCount: 0,
         failureReason: null,
         updatedAt: input.createdAt,
     });

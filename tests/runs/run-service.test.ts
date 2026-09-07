@@ -82,6 +82,7 @@ test("executeQueuedRun 执行持久化 Run，并接续等待期间的事件序�
                 tenantId: "tenant-queued",
                 harnessSessionId: "session-queued",
                 workspacePath: "/tmp/queued-workspace",
+                thinkingLevel: "off",
             },
             input: "执行已经通过调度的任务",
         }]);
@@ -206,6 +207,7 @@ test("RunService使用 Fake Runtime 完成一次完整 Run" , async () =>{
                     tenantId: "tenant-1",
                     harnessSessionId: "session-1",
                     workspacePath: "/tmp/workspace",
+                    thinkingLevel: "off",
                 },
                 input: "完成一个测试任务",
             },
@@ -458,6 +460,7 @@ test("RunService 会从 Checkpoint 恢复 INTERRUPTED Run", async () => {
                     tenantId: "tenant-1",
                     harnessSessionId: "session-1",
                     workspacePath: "/tmp/workspace",
+                    thinkingLevel: "off",
                 },
                 checkpoint: {
                     checkpointId,

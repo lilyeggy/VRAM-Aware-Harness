@@ -79,10 +79,49 @@ export class RunQueueCoordinator  {
         private readonly scheduler:TenantRunScheduler,
         private readonly admission: ResourceAdmissionEvaluator,
         private readonly pendingResumeByRunId = new Map<string,ResumeRunInput>(),
+        private readonly lastQueueBlockerByRunId = new Map<string, QueueReasonCode>(),
         private drainPromise: Promise<CoordinatorResult[]> | null = null, // 当前是否有drain正在运行
         private drainRequested = false, // 正在运行期间，是否又收到了新的推进请求
         
     ) {}
+
+    /**
+     * Materialize scheduler-only blocking facts into each queued Run timeline.
+     * The Pump may call drain repeatedly, so equal consecutive reasons are
+     * intentionally collapsed. A later reason change is retained as a new
+     * event, which preserves a useful causal timeline without event flooding.
+     */
+    private synchronizeQueueBlockers(): void {
+        const blockers = this.scheduler.listQueueBlockers();
+        const queuedRunIds = new Set(blockers.map((blocker) => blocker.runId));
+
+        for (const runId of this.lastQueueBlockerByRunId.keys()) {
+            if (!queuedRunIds.has(runId)) {
+                this.lastQueueBlockerByRunId.delete(runId);
+            }
+        }
+
+        for (const blocker of blockers) {
+            // Normal queue residency is already represented by RUN_CREATED /
+            // RUN_QUEUED. Persist only a concrete blocker that explains why
+            // this Run cannot advance right now.
+            if (blocker.reasonCode === "AWAITING_SCHEDULING") {
+                continue;
+            }
+            if (this.lastQueueBlockerByRunId.get(blocker.runId) === blocker.reasonCode) {
+                continue;
+            }
+
+            this.runService.recordQueueBlocked(blocker.runId, {
+                reasonCode: blocker.reasonCode,
+                position: blocker.position,
+                tenantPosition: blocker.tenantPosition,
+                activeRunCount: blocker.activeRunCount,
+                activeTenantRunCount: blocker.activeTenantRunCount,
+            });
+            this.lastQueueBlockerByRunId.set(blocker.runId, blocker.reasonCode);
+        }
+    }
     // submit只负责把用户任务变成 run 队列
     submit(input:StartRunInput) : AgentRun {
         // 接收到用户任务输入后，创建对应持久化的Queued Run
@@ -94,6 +133,7 @@ export class RunQueueCoordinator  {
             tenantId:run.tenantId,
             sessionId:run.harnessSessionId,
         })
+        this.synchronizeQueueBlockers();
 
         // 返回 Queued Run
         return run;
@@ -109,6 +149,7 @@ export class RunQueueCoordinator  {
             tenantId:run.tenantId,
             sessionId:run.harnessSessionId,
         });
+        this.synchronizeQueueBlockers();
 
         return run;
     }
@@ -126,6 +167,7 @@ export class RunQueueCoordinator  {
         const queuedRun = this.scheduler.claimNext();
 
         if (queuedRun === null) {
+            this.synchronizeQueueBlockers();
             return {
                 kind : "EMPTY",
             };
@@ -161,6 +203,7 @@ export class RunQueueCoordinator  {
                 reasonCode : "RESOURCE_OBSERVATION_FAILED",
                 enqueuedAt : queuedRun.enqueuedAt,
             });
+            this.synchronizeQueueBlockers();
             throw error;
         }
 
@@ -180,6 +223,7 @@ export class RunQueueCoordinator  {
                 reasonCode,
                 enqueuedAt:queuedRun.enqueuedAt,
             });
+            this.synchronizeQueueBlockers();
 
             return {
                 kind:"DEFERRED",
@@ -355,6 +399,8 @@ export class RunQueueCoordinator  {
             this.pendingResumeByRunId.delete(run.id);
             throw error;
         }
+
+        this.synchronizeQueueBlockers();
 
         return run;
     }

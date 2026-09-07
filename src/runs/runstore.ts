@@ -52,6 +52,7 @@ interface AgentRunRow {
     templateVersionId: string | null;
     harnessInstanceId: string | null;
     runPolicyJson: string | null;
+    thinkingLevel: "off" | "minimal" | "low" | "medium" | "high";
 }
 
 export type DeduplicatedRunEvent = RunEvent & {
@@ -93,6 +94,7 @@ export class RunStore {
             runPolicyJson: run.runPolicy === undefined
                 ? null
                 : JSON.stringify(run.runPolicy),
+            thinkingLevel: run.thinkingLevel ?? "off",
         };
 
         const createRunAndInitialEvent = this.db.transaction(() => {
@@ -113,7 +115,8 @@ export class RunStore {
                         failure_reason,
                         template_version_id,
                         harness_instance_id,
-                        run_policy_json
+                        run_policy_json,
+                        thinking_level
                     )
                     VALUES (
                         $id,
@@ -130,7 +133,8 @@ export class RunStore {
                         $failureReason,
                         $templateVersionId,
                         $harnessInstanceId,
-                        $runPolicyJson
+                        $runPolicyJson,
+                        $thinkingLevel
                     );
                 `)
                 .run(parameters);
@@ -166,7 +170,8 @@ export class RunStore {
                     failure_reason AS failureReason,
                     template_version_id AS templateVersionId,
                     harness_instance_id AS harnessInstanceId,
-                    run_policy_json AS runPolicyJson
+                    run_policy_json AS runPolicyJson,
+                    thinking_level AS thinkingLevel
                 FROM agent_runs
                 WHERE id = $runId;
             `)
@@ -186,7 +191,8 @@ export class RunStore {
                 created_at AS createdAt, updated_at AS updatedAt, started_at AS startedAt,
                 finished_at AS finishedAt, checkpoint_id AS checkpointId,
                 failure_reason AS failureReason, template_version_id AS templateVersionId,
-                harness_instance_id AS harnessInstanceId, run_policy_json AS runPolicyJson
+                harness_instance_id AS harnessInstanceId, run_policy_json AS runPolicyJson,
+                thinking_level AS thinkingLevel
             FROM agent_runs
             WHERE tenant_id = $tenantId
             ORDER BY created_at DESC, rowid DESC
@@ -203,7 +209,8 @@ export class RunStore {
                 created_at AS createdAt, updated_at AS updatedAt, started_at AS startedAt,
                 finished_at AS finishedAt, checkpoint_id AS checkpointId,
                 failure_reason AS failureReason, template_version_id AS templateVersionId,
-                harness_instance_id AS harnessInstanceId, run_policy_json AS runPolicyJson
+                harness_instance_id AS harnessInstanceId, run_policy_json AS runPolicyJson,
+                thinking_level AS thinkingLevel
             FROM agent_runs
             WHERE tenant_id = $tenantId AND harness_session_id = $harnessSessionId
             ORDER BY created_at ASC, rowid ASC;
@@ -234,7 +241,8 @@ export class RunStore {
                     failure_reason AS failureReason,
                     template_version_id AS templateVersionId,
                     harness_instance_id AS harnessInstanceId,
-                    run_policy_json AS runPolicyJson
+                    run_policy_json AS runPolicyJson,
+                    thinking_level AS thinkingLevel
                 FROM agent_runs
                 WHERE status IN ('RUNNING', 'WAITING_TOOL')
                 ORDER BY created_at ASC, rowid ASC;
@@ -265,7 +273,8 @@ export class RunStore {
                     failure_reason AS failureReason,
                     template_version_id AS templateVersionId,
                     harness_instance_id AS harnessInstanceId,
-                    run_policy_json AS runPolicyJson
+                    run_policy_json AS runPolicyJson,
+                    thinking_level AS thinkingLevel
                 FROM agent_runs
                 WHERE status = 'QUEUED'
                 ORDER BY created_at ASC, rowid ASC;
@@ -310,6 +319,7 @@ export class RunStore {
                 runPolicyJson: run.runPolicy === undefined
                     ? null
                     : JSON.stringify(run.runPolicy),
+                thinkingLevel: run.thinkingLevel ?? "off",
                 previousStatus: currentRun.status,
             };
 
@@ -331,7 +341,8 @@ export class RunStore {
                         failure_reason = $failureReason,
                         template_version_id = $templateVersionId,
                         harness_instance_id = $harnessInstanceId,
-                        run_policy_json = $runPolicyJson
+                        run_policy_json = $runPolicyJson,
+                        thinking_level = $thinkingLevel
                     WHERE id = $id
                       AND status = $previousStatus;
                 `)
@@ -361,6 +372,7 @@ export class RunStore {
             finishedAt: row.finishedAt,
             checkpointId: row.checkpointId,
             failureReason: row.failureReason,
+            thinkingLevel: row.thinkingLevel,
         };
         if (row.templateVersionId !== null) {
             run.templateVersionId = row.templateVersionId;

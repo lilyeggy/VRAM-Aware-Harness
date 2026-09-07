@@ -24,6 +24,7 @@ function createQueuedRun(runId = "run-1"): AgentRun {
         finishedAt: null,
         checkpointId: null,
         failureReason: null,
+        thinkingLevel: "off",
     };
 }
 

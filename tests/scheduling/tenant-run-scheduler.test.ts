@@ -4,6 +4,38 @@ import {
     TenantRunScheduler,
 } from "../../src/scheduling/tenant-run-scheduler.ts";
 
+test("queue blockers distinguish global, tenant, and same-session limits", () => {
+    const global = new TenantRunScheduler({
+        maxActiveRuns: 1,
+        maxActiveRunsPerTenant: 1,
+    });
+    global.enqueue({ runId: "global-active", tenantId: "a" });
+    expect(global.claimNext()?.runId).toBe("global-active");
+    global.enqueue({ runId: "global-waiting", tenantId: "b" });
+    expect(global.listQueueBlockers()[0]?.reasonCode)
+        .toBe("GLOBAL_CONCURRENCY_LIMIT");
+
+    const tenant = new TenantRunScheduler({
+        maxActiveRuns: 2,
+        maxActiveRunsPerTenant: 1,
+    });
+    tenant.enqueue({ runId: "tenant-active", tenantId: "a" });
+    expect(tenant.claimNext()?.runId).toBe("tenant-active");
+    tenant.enqueue({ runId: "tenant-waiting", tenantId: "a" });
+    expect(tenant.listQueueBlockers()[0]?.reasonCode)
+        .toBe("TENANT_CONCURRENCY_LIMIT");
+
+    const session = new TenantRunScheduler({
+        maxActiveRuns: 2,
+        maxActiveRunsPerTenant: 2,
+    });
+    session.enqueue({ runId: "session-active", tenantId: "a", sessionId: "s" });
+    expect(session.claimNext()?.runId).toBe("session-active");
+    session.enqueue({ runId: "session-waiting", tenantId: "a", sessionId: "s" });
+    expect(session.listQueueBlockers()[0]?.reasonCode)
+        .toBe("SESSION_SERIALIZATION");
+});
+
 test("enqueue 为新 Run 补齐默认排队事实", () => {
     const scheduler = new TenantRunScheduler({
         maxActiveRuns: 2,

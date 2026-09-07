@@ -10,6 +10,7 @@ export type QueueReasonCode =
     | "AWAITING_SCHEDULING"
     | "GLOBAL_CONCURRENCY_LIMIT"
     | "TENANT_CONCURRENCY_LIMIT"
+    | "SESSION_SERIALIZATION"
     | "RESOURCE_BUSY"
     | "RESOURCE_CRITICAL"
     | "RESOURCE_UNKNOWN"
@@ -42,6 +43,17 @@ export interface QueueEntry extends Omit<QueuedRun, "sessionId"> {
 export interface SchedulerCapacity {
     activeRunCount:number;
     activeTenantRunCount:number;
+}
+
+/**
+ * A point-in-time explanation for a Run that remains queued. It is diagnostic
+ * evidence, not a new scheduler decision: the scheduler continues to own the
+ * actual claim/release transition.
+ */
+export interface QueueBlocker extends QueueEntry {
+    reasonCode: QueueReasonCode;
+    activeRunCount: number;
+    activeTenantRunCount: number;
 }
 
 /**
@@ -345,6 +357,45 @@ export class TenantRunScheduler {
         }
 
         return entries;
+    }
+
+    /**
+     * Explain the current blocker for every queued Run without mutating queue
+     * order or reserving a slot. Scheduler capacity reasons take precedence
+     * over a previously stored resource-admission reason because they are the
+     * immediate reason the Run cannot be claimed now.
+     */
+    listQueueBlockers(): QueueBlocker[] {
+        const globalAtLimit =
+            this.activeTenantByRunId.size >= this.config.maxActiveRuns;
+
+        return this.listQueue().map((entry) => {
+            const queued = this.findQueuedRun(entry.runId);
+            const activeTenantRunCount = this.getActiveTenantRunCount(
+                entry.tenantId,
+            );
+            let reasonCode = entry.reasonCode;
+
+            if (globalAtLimit) {
+                reasonCode = "GLOBAL_CONCURRENCY_LIMIT";
+            } else if (
+                activeTenantRunCount >= this.config.maxActiveRunsPerTenant
+            ) {
+                reasonCode = "TENANT_CONCURRENCY_LIMIT";
+            } else if (
+                queued?.sessionId !== undefined
+                && this.hasActiveSession(queued.sessionId)
+            ) {
+                reasonCode = "SESSION_SERIALIZATION";
+            }
+
+            return {
+                ...entry,
+                reasonCode,
+                activeRunCount: this.activeTenantByRunId.size,
+                activeTenantRunCount,
+            };
+        });
     }
 
 }

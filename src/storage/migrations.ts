@@ -835,4 +835,29 @@ export const migrations: readonly SchemaMigration[] = [
                 ON conversations(tenant_id, workspace_id, updated_at DESC);
         `,
     },
+    {
+        version: 18,
+        name: "add_run_output_channels",
+        up: `
+            ALTER TABLE run_output_chunks ADD COLUMN channel TEXT NOT NULL DEFAULT 'answer'
+                CHECK (channel IN ('answer', 'thinking'));
+        `,
+    },
+    {
+        version: 19,
+        name: "add_run_thinking_level",
+        up: `
+            ALTER TABLE agent_runs ADD COLUMN thinking_level TEXT NOT NULL DEFAULT 'off'
+                CHECK (thinking_level IN ('off', 'minimal', 'low', 'medium', 'high'));
+        `,
+    },
+    {
+        version: 20,
+        name: "add_harness_instance_active_run_count",
+        up: `
+            ALTER TABLE harness_instances
+                ADD COLUMN active_run_count INTEGER NOT NULL DEFAULT 0
+                CHECK (active_run_count >= 0);
+        `,
+    },
 ];

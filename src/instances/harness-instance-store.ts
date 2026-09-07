@@ -9,11 +9,11 @@ export class HarnessInstanceStore {
             INSERT INTO harness_instances (
                 id, tenant_id, template_version_id, capability_profile_id,
                 runtime_kind, desired_state, actual_state, failure_reason,
-                created_at, updated_at
+                active_run_count, created_at, updated_at
             ) VALUES (
                 $id, $tenantId, $templateVersionId, $capabilityProfileId,
                 $runtimeKind, $desiredState, $actualState, $failureReason,
-                $createdAt, $updatedAt
+                $activeRunCount, $createdAt, $updatedAt
             );
         `).run({ ...instance });
     }
@@ -27,6 +27,7 @@ export class HarnessInstanceStore {
                 desired_state AS desiredState,
                 actual_state AS actualState,
                 failure_reason AS failureReason,
+                active_run_count AS activeRunCount,
                 created_at AS createdAt, updated_at AS updatedAt
             FROM harness_instances WHERE id = $id;
         `).get({ id });
@@ -41,6 +42,7 @@ export class HarnessInstanceStore {
                 desired_state AS desiredState,
                 actual_state AS actualState,
                 failure_reason AS failureReason,
+                active_run_count AS activeRunCount,
                 created_at AS createdAt, updated_at AS updatedAt
             FROM harness_instances
             WHERE tenant_id = $tenantId
@@ -61,6 +63,35 @@ export class HarnessInstanceStore {
         if (result.changes !== 1) {
             throw new Error(`HarnessInstance 状态已变化：${instance.id}`);
         }
+    }
+
+    acquireRun(id: string): HarnessInstance {
+        const result = this.db.query<unknown, { id: string; updatedAt: string }>(`
+            UPDATE harness_instances
+            SET active_run_count = active_run_count + 1,
+                actual_state = 'ACTIVE', updated_at = $updatedAt
+            WHERE id = $id AND desired_state = 'RUNNING'
+                AND actual_state IN ('READY', 'ACTIVE');
+        `).run({ id, updatedAt: new Date().toISOString() });
+        if (result.changes !== 1) throw new Error(`HarnessInstance 无法获取执行槽位：${id}`);
+        return this.get(id)!;
+    }
+
+    releaseRun(id: string): HarnessInstance {
+        const result = this.db.query<unknown, { id: string; updatedAt: string }>(`
+            UPDATE harness_instances
+            SET active_run_count = active_run_count - 1,
+                actual_state = CASE
+                    WHEN actual_state = 'FAILED' THEN 'FAILED'
+                    WHEN active_run_count <= 1 THEN 'READY'
+                    ELSE 'ACTIVE'
+                END,
+                updated_at = $updatedAt
+            WHERE id = $id AND active_run_count > 0
+                AND actual_state IN ('ACTIVE', 'FAILED');
+        `).run({ id, updatedAt: new Date().toISOString() });
+        if (result.changes !== 1) throw new Error(`HarnessInstance 无法释放执行槽位：${id}`);
+        return this.get(id)!;
     }
 }
 
