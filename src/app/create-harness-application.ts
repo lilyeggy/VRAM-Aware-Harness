@@ -45,6 +45,7 @@ import { RuntimeCapabilityProfileStore } from "../runtime/runtime-capability-sto
 import type { RuntimeCapabilityProfile } from "../runtime/runtime-capability.ts";
 import { ManagedAgentRuntime } from "../runtime/managed-agent-runtime.ts";
 import { SupervisedAgentRuntime } from "../runtime/supervised-agent-runtime.ts";
+import { WorkerProcessAgentRuntime } from "../runtime/worker-process-runtime.ts";
 import { EffectivePolicyStore } from "../policies/effective-policy-store.ts";
 import { PolicyRegistry } from "../policies/policy-registry.ts";
 import { PersistentToolPolicyGuard } from "../policies/tool-policy-guard.ts";
@@ -211,13 +212,36 @@ export async function createHarnessApplication(
     );
 
     const baseRuntime = dependencies.runtime
-        ?? await createPiRuntime(
-            config,
-            dependencies.modelRuntime,
-            toolGateway,
-            runStore,
-            sandboxProvider as Partial<SandboxCommandExecutor>,
-        );
+        ?? (config.workerIsolation === "process"
+            ? new WorkerProcessAgentRuntime({
+                workerScriptPath: config.workerScriptPath,
+                bunCommand: "bun",
+                cwd: process.cwd(),
+                interruptGraceMs: config.interruptGraceMs ?? 10_000,
+                workerHandshakeTimeoutMs: config.workerHandshakeTimeoutMs ?? 15_000,
+                workerConfig: {
+                    piProvider: config.piProvider,
+                    piModelId: config.piModelId,
+                    piTools: config.piTools,
+                    piModelsPath: config.piModelsPath,
+                    piAuthPath: config.piAuthPath,
+                    sandboxProvider: config.sandboxProvider,
+                    sandboxProfile: config.sandboxProfile,
+                    sandboxRuntime: config.sandboxRuntime,
+                    containerImage: config.containerImage,
+                    containerUserId: config.containerUserId,
+                },
+                orphanSandboxCleaner: async (sandboxId: string) => {
+                    await (sandboxProvider as SandboxProvider).terminate(sandboxId).catch(() => undefined);
+                },
+            })
+            : await createPiRuntime(
+                config,
+                dependencies.modelRuntime,
+                toolGateway,
+                runStore,
+                sandboxProvider as Partial<SandboxCommandExecutor>,
+            ));
     const supervisedRuntime = new SupervisedAgentRuntime(
         baseRuntime,
         sandboxProvider,

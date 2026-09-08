@@ -36,6 +36,10 @@ export interface HarnessConfig {
     pumpIntervalMs:number;
     executionTimeoutMs?:number;
     interruptGraceMs?:number;
+    /** Master-Worker 进程隔离模式："process" 为独立子进程隔离，"in-process" 为主进程内运行 */
+    workerIsolation: "process" | "in-process";
+    workerScriptPath?: string;
+    workerHandshakeTimeoutMs?: number;
     /** 方向 C：LLM 网关后端列表（空数组=网关未启用）。 */
     llmBackends:LlmBackend[];
 }
@@ -202,6 +206,15 @@ export function loadHarnessConfig(
             "HARNESS_INTERRUPT_GRACE_MS",
             10_000,
         ),
+        workerIsolation: environment.HARNESS_WORKER_ISOLATION === "in-process"
+            ? "in-process"
+            : "process",
+        workerScriptPath: environment.HARNESS_WORKER_SCRIPT_PATH !== undefined
+            ? resolve(cwd, environment.HARNESS_WORKER_SCRIPT_PATH)
+            : resolve(cwd, "src/worker/worker-main.ts"),
+        workerHandshakeTimeoutMs: environment.HARNESS_WORKER_HANDSHAKE_TIMEOUT_MS !== undefined
+            ? positiveInteger(environment, "HARNESS_WORKER_HANDSHAKE_TIMEOUT_MS", 15_000)
+            : 15_000,
     };
 }
 
