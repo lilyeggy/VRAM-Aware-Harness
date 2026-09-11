@@ -108,6 +108,79 @@ export class HarnessInstanceStore {
         if (result.changes !== 1) throw new Error(`HarnessInstance 无法释放执行槽位：${id}`);
         return this.get(id)!;
     }
+
+    /**
+     * N19：启动对账——清掉上一次进程留下的实例槽位残留。
+     *
+     * 为什么必须做：进程刚起来时**没有任何 Run 在跑**，所以此刻任何
+     * `active_run_count > 0` 都是上次异常退出（被 SIGTERM / kill）留下的脏值。
+     * 更要命的是 `acquireRun` 只在 `actual_state IN ('READY','ACTIVE')` 放行，
+     * 而 `releaseRun` 遇到 FAILED 会把 FAILED 保持住——于是「执行中被杀 →
+     * 实例停在 FAILED 且计数为 1」之后再也没人拿得到槽位：
+     *
+     *   RESUME_FAILED: HarnessInstance 无法获取执行槽位
+     *   → 协调器按 INSTANCE_NOT_READY 重新入队 → 下一轮再失败 …… 无限活锁。
+     *
+     * 真机实证（R11）：活锁期间每轮失败的 RESUME 还会真实创建并泄漏一个沙箱。
+     *
+     * 处置：计数归零；`desired_state='RUNNING'` 的实例回到 READY 重新参与调度
+     * （它本来就应该是可服务的）；`desired_state='STOPPED'` 的实例只清计数、
+     * 保留停机意图，不会被误唤醒。
+     *
+     * @returns 被修正的实例，供启动日志交代"修了什么"——不静默改状态。
+     */
+    reconcileStaleSlotsForStartup(): HarnessInstance[] {
+        const stale = this.db.query<HarnessInstance, Record<string, never>>(`
+            SELECT id, tenant_id AS tenantId,
+                template_version_id AS templateVersionId,
+                capability_profile_id AS capabilityProfileId,
+                runtime_kind AS runtimeKind,
+                desired_state AS desiredState,
+                actual_state AS actualState,
+                failure_reason AS failureReason,
+                active_run_count AS activeRunCount,
+                created_at AS createdAt, updated_at AS updatedAt
+            FROM harness_instances
+            WHERE active_run_count > 0
+                OR (desired_state = 'RUNNING'
+                    AND actual_state NOT IN ('READY', 'ACTIVE'));
+        `).all({});
+
+        if (stale.length === 0) {
+            return [];
+        }
+
+        const updatedAt = new Date().toISOString();
+        const update = this.db.query<unknown, {
+            id: string;
+            actualState: string;
+            failureReason: string | null;
+            updatedAt: string;
+        }>(`
+            UPDATE harness_instances
+            SET active_run_count = 0,
+                actual_state = $actualState,
+                failure_reason = $failureReason,
+                updated_at = $updatedAt
+            WHERE id = $id;
+        `);
+
+        const reconciled: HarnessInstance[] = [];
+        for (const instance of stale) {
+            const serviceable = instance.desiredState === "RUNNING";
+            update.run({
+                id: instance.id,
+                actualState: serviceable ? "READY" : instance.actualState,
+                failureReason: serviceable ? null : instance.failureReason,
+                updatedAt,
+            });
+            const current = this.get(instance.id);
+            if (current !== null) {
+                reconciled.push(current);
+            }
+        }
+        return reconciled;
+    }
 }
 
 type HarnessInstanceBindings = {

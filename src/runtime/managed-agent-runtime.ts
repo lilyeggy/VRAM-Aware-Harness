@@ -200,6 +200,19 @@ export class ManagedAgentRuntime implements AgentRuntime {
             durationMs: Math.round(performance.now() - controlPreparedStartedAt),
         });
 
+        // N19：**先占实例槽位，再创建沙箱**。顺序就是缺陷本体。
+        //
+        // 原先是先 `sandbox.create()`、后 `acquireRun()`。当实例残留 FAILED
+        // 时 `acquireRun` 会抛 `InstanceSlotUnavailableError`，而那次抛错发生在
+        // 沙箱**已经创建之后**，回收沙箱的 `finally`（在 acquireRun 之后才开始）
+        // 覆盖不到这条路径 —— 于是每一次失败的 RESUME 都留下一个无人回收的容器。
+        // 真机实证：活锁期间实测留下 2 个 `agent-harness-*` 容器。
+        //
+        // 先占槽位可以 fail fast：拿不到槽位就什么都不创建。
+        // 注意这里必须在沙箱创建之前抛，让协调器的 INSTANCE_NOT_READY 重排逻辑
+        // 照旧生效（它认的就是这个异常类型）。
+        this.instances.acquireRun(instance.id);
+
         const sandboxId = crypto.randomUUID();
         let handle;
         const sandboxAcquireStartedAt = performance.now();
@@ -212,6 +225,9 @@ export class ManagedAgentRuntime implements AgentRuntime {
                 policy: snapshot,
             });
         } catch (error) {
+            // 沙箱没建起来：立刻归还槽位，否则会变成另一种泄漏
+            // （槽位占着、沙箱不存在，实例就再也回不到 READY）。
+            this.instances.releaseRun(instance.id);
             const reason = error instanceof Error ? error.message : String(error);
             const failed = finishRunAttempt(attempt, "FAILED", new Date().toISOString(), reason);
             this.attempts.update(failed, attempt.status);
@@ -231,7 +247,6 @@ export class ManagedAgentRuntime implements AgentRuntime {
 
         attempt = startRunAttempt(attempt, new Date().toISOString(), snapshot.id, handle.id);
         this.attempts.update(attempt, "PENDING");
-        this.instances.acquireRun(instance.id);
         this.activeBySandboxId.set(handle.id, {
             attemptId: attempt.id,
             instanceId: instance.id,

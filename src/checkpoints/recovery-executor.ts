@@ -33,6 +33,12 @@ export class RecoveryExecutor {
         private readonly coordinator:
             Pick<RunQueueCoordinator, "submitResume">,
         private readonly onManualReview?:RecoveryManualReviewAuditor,
+        /**
+         * N18：与 RecoveryService 同一份会话引用可达性判定。
+         * 这里必须再校验一次——计划可能来自旧快照，其间会话文件可能已被清理。
+         */
+        private readonly isSessionRefReachable?:
+            (runtimeSessionRef:string)=>boolean,
     ) {}
 
     async execute(
@@ -48,10 +54,18 @@ export class RecoveryExecutor {
             // 计划可能来自旧的扫描快照或被上层错误改写：即便 plan 声称
             // AUTO_RESUME，只要按当前工具副作用历史重算出 MANUAL_REVIEW，
             // 就坚决拒绝自动重放——未证明幂等/未知副作用一律转人工。
+            // N18：同时复核 Checkpoint 引用的运行时会话是否仍可达。
             const effectiveDecision = plan.decision.action === "AUTO_RESUME"
                 ? decideRecovery(
                     plan.checkpoint?.id ?? null,
                     plan.preparedExecutions,
+                    {
+                        runtimeSessionRef:
+                            plan.checkpoint?.runtimeSessionRef ?? null,
+                        ...(this.isSessionRefReachable === undefined
+                            ? {}
+                            : { isReachable: this.isSessionRefReachable }),
+                    },
                 )
                 : plan.decision;
 

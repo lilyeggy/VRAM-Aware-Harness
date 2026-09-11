@@ -612,3 +612,210 @@ X05 原本因"缺真实写盘夹具"记 BLOCKED。改用真实 bash 工具构造
 2. 压缩阈值是按**本部署** 32768/4096 标定的常量，换模型窗口需重算——依据与不变量已写进代码注释和 `.env.example`，但**没有做成自动推导**；
 3. 界面层仍不展示"本会话被压缩过"，用户侧依旧只有服务端日志可查；
 4. 24h 耐久档、R07 长任务档等仍在本轮冻结的边界之外（见 `docs/scenario-coverage-consolidated.zh-CN.md` §0.5）。
+
+## §23 第十轮：收尾前清掉 5 条系统侧未修缺陷（2026-09-11）
+
+> 背景：全场景账里 86 个场景的 8 个 FAIL 中，去掉"当场已修"（N7/N8）与"模型能力问题"（C05）后，
+> 系统侧还剩 5 条未修：**N22、N25、N23、N18、N19**。本轮把这 5 条全部修掉并各自补了回归测试。
+> 环境：实例 `campaign-n23verify-20260911`（端口 13032，container/runsc + `python:3.12-alpine`）。
+
+### 总览
+
+| # | 缺陷 | 级别 | 修复要点 | 验证 |
+| --- | --- | --- | --- | --- |
+| N23 | `ceiling=1` 的租户**永远启动不了任何 Run** | 高 | 预算层不再有第二个用量来源 | 本地回归 + **真机：3 个 ceiling=1 租户全部 COMPLETED** |
+| N18 | 损坏的 Checkpoint 被**静默忽略** | 高 | 恢复前校验会话引用可达，不可达转人工 | 本地回归 + **真机：`SESSION_REF_UNREACHABLE` + 拒绝恢复** |
+| N19 | 恢复活锁 + **每次失败泄漏一个沙箱** | 高 | 先占槽后建沙箱 + 启动对账释放残留 + 重试上限 | 本地回归 + **真机：槽位重置为 READY、0 次 RESUME_FAILED、容器回收** |
+| N22 | 切对话时**迟到轮询响应覆盖当前页** | 中高 | 响应加「对话 id + 请求序号」双守卫 | 本地回归（含浏览器引擎解析）+ 确认已部署 |
+| N25 | 断网期间**轮询错误被静默吞掉** | 中高 | 顶部降级横幅 + 保留已知队列 | 本地回归 + 确认已部署 |
+
+**回归**：`bun test ./tests` → **431 pass / 0 fail**；`bun run typecheck` → 已入库源码 0 错误。
+
+---
+
+### N23（高）：预算层重复计数，`ceiling=1` 租户恒被拒
+
+**根因（比台账原记录更明确）**：用量有**两个来源**。
+
+- `run-queue-coordinator.ts` 在 `claimNext()` 之后，向 base policy 传的是**已扣掉当前 Run** 的计数
+  （`capacity.activeTenantRunCount - 1`），`ExecutionPolicyInput.activeTenantRunCount` 就是它；
+- 而 `BudgetAwareExecutionPolicy.decide()` 调的是 `usage.availableUnits(tenantId)`，
+  `SchedulerCapacityBudgetUsage` 会**回读调度器**、拿到**仍含当前 Run** 的原始计数。
+
+于是同一个 Run 被算两次：`availableUnits = ceiling − 1`，**`ceiling == 1` 时恒为 0**，
+任何 Run 都反复 `QUEUE / TENANT_BUDGET_EXCEEDED` 直到 TTL 失败。真机 Q08 证据里三条 Run
+都是 `_contractAdmit=true` 却被改判 `admitted=false`（`contract_violation=true`）——
+即 base policy 本会放行，被预算层错误拦下。
+
+**修法（`src/resources/budget-aware-policy.ts`）**：用量只保留**一个**来源——
+本次准入事实 `input.activeTenantRunCount`。预算解析器退化为"只回答预算上界"
+（`fairShareUnits` / `maxUnits`），不再参与用量计算：
+
+```ts
+const ceiling = Math.min(
+    this.usage.fairShareUnits(input.tenantId),
+    this.usage.maxUnits(input.tenantId),
+);
+const usedUnits = input.activeTenantRunCount;   // 权威口径：已扣掉当前 Run
+if (ceiling - usedUnits >= this.unitsPerRun) return baseline;
+```
+
+`availableUnits()` 保留但标注为**仅观测/离线核对**，准入路径不得使用——避免同类缺陷复发。
+
+**本地回归**：新增 2 条（`tests/resources/budget-policy-wiring.test.ts`），
+分别锁定"无占用时必须 START"与"真占 1 个时才 QUEUE"。原 3 条按账本/调度器读数驱动的用例
+已按新契约改写为从准入事实驱动（**契约变更，非放宽标准**）。
+
+**真机复验（通过）**：注册 3 个等权租户（weight 1 / maxUnits 1 → ceiling 全为 1），
+并把 GPU 阈值与并发上限全部放宽，使**预算层成为唯一可能拦截任务的约束**。结果：
+
+```
+A: status=COMPLETED failureReason=None   decisions=['RESOURCE_NORMAL']
+B: status=COMPLETED failureReason=None   decisions=['RESOURCE_NORMAL']
+C: status=COMPLETED failureReason=None   decisions=['RESOURCE_NORMAL']
+```
+
+对照修复前：全部 `admitted=false` + 反复 `TENANT_BUDGET_EXCEEDED` 直到 TTL 失败。
+
+---
+
+### N18（高）：损坏的 Checkpoint 被静默忽略
+
+**根因**：恢复路径只校验 Checkpoint 归属（`runId` 匹配），**不校验它引用的会话是否真的打得开**。
+而 Pi 的 `loadEntriesFromFile` 对**不存在的文件返回空数组**，
+`SessionManager.open` 于是给出一个"没有历史的会话"——Run 照常 `COMPLETED`、日志零告警，
+用户以为续上了上下文，其实模型对之前做过什么一无所知。
+
+**修法（分三层，纵深防御）**：
+
+1. `recovery-decision.ts`：新增 `SESSION_REF_UNREACHABLE` 理由；`decideRecovery` 接受
+   `SessionRefCheck { runtimeSessionRef, isReachable }`。判定放在**未知副作用检查之后**——
+   不能让一个打不开的会话引用盖过更强的安全信号；两者都落 MANUAL_REVIEW，但理由可区分。
+2. `runtime/session-ref-reachability.ts`（新增）：文件存在、是普通文件、且**非空**才算可达
+   （空文件等价于"没有历史"）。之所以必须**显式注入**而不是默认开启：只有真实 Pi 运行时的
+   引用才是文件路径，demo/测试替身用的是合成引用（`/tmp/demo-pi-session.jsonl`、
+   `demo-session-<runId>`），默认开启会把它们全判成损坏。因此 `create-harness-application`
+   仅在**未注入 runtime**（即我们自己装配真实 Pi）时才注入该校验。
+3. `pi-adapter.ts` 的 resume 路径加同一校验：**即使决策层漏过也宁可显式失败**，
+   绝不让 Pi 用空会话悄悄续跑。
+
+**真机复验（通过）**：停机后植入一条 `runtime_session_ref=/tmp/n18-missing-session-file.jsonl`
+的 Checkpoint 并把 Run 置为 RUNNING，重启后：
+
+```
+[recovery] N18 恢复点已损坏，拒绝自动恢复：runId=7ca791cf… checkpointId=n18-bogus-checkpoint
+           runtimeSessionRef=/tmp/n18-missing-session-file.jsonl
+
+seq 17 RUN_INTERRUPTED {"reason":"MANUAL_REVIEW_REQUIRED","recoveryAction":"MANUAL_REVIEW",
+                        "recoveryReason":"SESSION_REF_UNREACHABLE",…}
+run.status = INTERRUPTED      # 不是 COMPLETED
+```
+
+对照修复前：`r10.json` 记录的是 `httpStatus=202、runStatus=COMPLETED、failureReason=null` —— 静默"成功"。
+另注：同一实例上被硬杀、**没有 Checkpoint** 的 Run 走的是 `NO_CHECKPOINT` 分支，
+说明该校验不会误伤正常恢复。
+
+---
+
+### N19（高）：恢复活锁 + 每次失败泄漏一个沙箱
+
+**根因比原台账多一层，共三处叠加**：
+
+1. **顺序缺陷（新定位，泄漏的直接原因）**：`managed-agent-runtime.ts` 原先**先建沙箱、后占实例槽位**。
+   槽位不可用时 `acquireRun` 抛错，而这次抛错发生在**沙箱已创建之后**，回收沙箱的 `finally`
+   （在 `acquireRun` 之后才开始）**覆盖不到这条路径** → 每次失败的 RESUME 都留下一个无人回收的容器。
+2. **启动残留**：执行中被**硬杀**（SIGKILL）→ 实例停在 `ACTIVE, active_run_count=1`；
+   重启时 `sandbox-startup-reconciler` 找到遗留沙箱并把实例转成 **FAILED，但 `update()`
+   不重置 `active_run_count`** → `FAILED + count=1`。
+3. **不可服务 + 无界重排**：`acquireRun` 只在 `READY/ACTIVE` 放行，而 `releaseRun` 会把 FAILED 保持住
+   → 该实例**永远**拿不到槽位；同时 N2 的 `INSTANCE_NOT_READY` 重排**没有上限** →
+   `INTERRUPTED↔QUEUED` 活锁，且每轮都真实创建/销毁一个沙箱。
+
+**修法（三处对应）**：
+
+- **先占槽、后建沙箱**（`managed-agent-runtime.ts`）：拿不到槽位就什么都不创建（fail fast）；
+  沙箱创建失败则立刻归还槽位。
+- **启动对账**（`harness-instance-store.reconcileStaleSlotsForStartup()` + 接进
+  `RecoveryStartupCoordinator`，且**早于**任何恢复执行）：进程刚起来时没有任何 Run 在跑，
+  所以 `active_run_count > 0` 必是脏值 → 计数归零；`desired_state='RUNNING'` 的实例回到 READY
+  重新参与调度，`STOPPED` 的只清计数、保留停机意图。修正结果**打进启动日志**，不静默改状态。
+- **重试上限**（`run-queue-coordinator.ts`，`maxInstanceNotReadyRetries` 默认 5）：
+  低于上限仍按 N2 语义重排；超过即**停止重排并转人工**，避免活锁与沙箱 churn。
+
+**真机复验（通过）**：提交长任务 → 等到 RUNNING → `kill -9` Master，残留现场：
+
+```
+[{"id":"default-pi-instance:0cd636f7…","actual_state":"ACTIVE","active_run_count":1}]
+残留容器: agent-harness-1877be0a-…（1 个）
+```
+
+重启后：
+
+```
+[startup] N19 修正 1 个实例的槽位残留（上次进程异常退出的遗留），已重置为可服务状态：
+          {…,"desiredState":"RUNNING","actualState":"READY","activeRunCount":0,…}
+实例状态: 三个实例全部 READY / active_run_count=0 / failure_reason=null
+RESUME_FAILED 次数: 0
+残留容器: 0（被 sandbox reconciler 回收）
+```
+
+对照修复前：`r11-instance-livelock.txt` 记录该实例此后每次恢复都 `RESUME_FAILED: HarnessInstance 无法获取执行槽位`，
+并实测留下 2 个 `agent-harness-*` 容器。
+
+---
+
+### N22（中高）：切换对话时迟到的轮询响应覆盖当前页
+
+**根因**：`user-console-client.js` 的 `refreshConversation()` 在调用时读取 `S.conversationId` 拼 URL，
+但响应处理里对 `S.conversation` / `S.runs` / `convTitle` 的赋值与 `renderThread()`
+**没有任何"响应是否仍属于当前对话"的校验**。轮询每 1600ms 一次、内部还有 `loadOutput`/`loadFacts`
+链式请求，窗口可达数百 ms 到数秒；期间用户切了对话，A 的响应就会覆盖 B 的标题与消息，
+用户在正文里点"中断/恢复"还可能作用到错误对象。
+
+**修法**：两条判据同时用——
+
+- **调用时快照** `var requestedId = S.conversationId;`
+- **请求序号** `var seq = ++S.refreshSeq;`
+
+响应入口与**链式请求之后、渲染之前**都要通过 `requestedId !== S.conversationId || seq !== S.refreshSeq`
+的守卫。只比对对话 id 不够：A→B→A 快速切换时，旧 A 的响应迟到会恰好对上 id。
+另外 `openConversation` 改为**立刻** `stopPoll()`，而不是等刷新完成后才重排定时器。
+
+**验证**：本地回归测试断言快照早于请求、守卫早于状态写入、链式渲染前二次确认、切对话先停轮询；
+并**由既有 N1 用例用浏览器引擎对整段内联脚本做解析断言**（保证改动可被真实浏览器解析）。
+另确认 `/app` 已提供修复后的代码（`refreshSeq`、`var requestedId = S.conversationId;` 均命中）。
+
+> **如实标注**：该竞态本身**未在真实浏览器里复现**——它需要受控的网络延迟/乱序响应。
+> 当前是"代码级 + 部署级"验证，不是"真实浏览器时序"验证。
+
+---
+
+### N25（中高）：断网期间轮询错误被静默吞掉
+
+**根因**：轮询的 `.catch(function(){})` 把失败完全吞掉，`refreshQueue` 的失败分支还会
+**把队列直接清空**。后果有二：断网 30/120s 期间界面既没有错误也没有离线提示，
+持续把过期状态当最新状态展示；以及一次网络抖动就会把"排队中"的任务显示成不在队列里
+（用错误数据冒充最新状态）。
+
+**修法**：
+
+- 新增顶部降级横幅 `#netBanner`：`api()` 是唯一出口，网络失败经 `isNetworkError()` 识别后
+  累计并点亮横幅，文案明确写出"**页面显示的是最后一次成功获取的状态，可能已过期**"；
+  恢复后隐藏横幅、补一次刷新（仅当中断持续 ≥3s 才提示，避免抖动刷屏）。
+- `api()` 成功时复位失败计数；HTTP 4xx/5xx 带 `status`，不算网络故障，不误报。
+- 监听 `offline` / `online` 事件即时反映，不必等下一次轮询超时。
+- `refreshQueue` 失败时**保留上一次已知队列**；登出时清掉横幅状态。
+
+**验证**：本地回归测试断言横幅元素与样式存在、`api()` 内接入 `noteNetFail/noteNetOk`、
+离线事件监听存在、`refreshQueue` 不再在失败分支清空队列；并确认 `/app` 已提供修复后的代码。
+
+> **如实标注**：同 N22，本轮未在真实浏览器里做断网时序验证，属"代码级 + 部署级"验证。
+
+---
+
+### 随本轮披露的测试资产状态
+
+- 本轮新增/修改的测试**按既定约定只留本地、不入库**（`tests/` 已入库 71 个文件，本地 93 个）。
+- 其中 `tests/resources/resource-budget-ledger.test.ts` 是**已入库**文件，因 N23 的契约变更
+  （用量改由准入事实驱动）同步改写了 3 条用例。**未入库**，因此新克隆里这 3 条会按旧契约失败。
+  这是"测试不入库"约定的已知后果，已在 `docs/scenario-test-index.zh-CN.md` §6 边界里披露。

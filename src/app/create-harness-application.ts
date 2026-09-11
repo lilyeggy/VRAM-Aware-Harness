@@ -20,6 +20,9 @@ import { CheckpointStore } from "../checkpoints/checkpoint-store.ts";
 import { RecoveryExecutor } from "../checkpoints/recovery-executor.ts";
 import { RecoveryService } from "../checkpoints/recovery-service.ts";
 import {
+    createFileSessionRefReachability,
+} from "../runtime/session-ref-reachability.ts";
+import {
     RecoveryStartupCoordinator,
 } from "../checkpoints/recovery-startup-coordinator.ts";
 import {
@@ -396,10 +399,22 @@ export async function createHarnessApplication(
             console.error("RunQueuePump 推进失败", error);
         }),
     });
+    // N18：**仅在我们自己装配真实 Pi 运行时**（未注入 runtime）时注入会话引用
+    // 可达性校验。注入式 runtime 是 demo / 测试替身，它们用的是合成引用
+    // （如 `/tmp/demo-pi-session.jsonl`、`demo-session-<runId>`），不对应真实
+    // 文件；按文件可达性判定会把它们的每一次恢复都误判成"恢复点已损坏"。
+    //
+    // 真实运行时的引用是 Pi 的会话 JSONL 路径，恢复前必须确认它还在，
+    // 否则 Pi 会拿一个空会话继续（loadEntriesFromFile 对缺失文件返回 []），
+    // Run 照常 COMPLETED 却丢掉了全部历史。
+    const isSessionRefReachable = dependencies.runtime === undefined
+        ? createFileSessionRefReachability()
+        : undefined;
     const recoveryService = new RecoveryService(
         runStore,
         toolExecutionStore,
         checkpointStore,
+        isSessionRefReachable,
     );
     const recoveryExecutor = new RecoveryExecutor(
         coordinator,
@@ -427,6 +442,7 @@ export async function createHarnessApplication(
                 },
             });
         },
+        isSessionRefReachable,
     );
     const queuedRunRestorer = new QueuedRunRecoveryService(
         runStore,
@@ -444,6 +460,10 @@ export async function createHarnessApplication(
         recoveryExecutor,
         queuedRunRestorer,
         sandboxReconciler,
+        // N19：启动时先清掉上次进程异常退出留下的实例槽位残留
+        // （FAILED + active_run_count>0），否则恢复任务会撞
+        // INSTANCE_NOT_READY 活锁并反复泄漏沙箱。
+        instanceStore,
     );
     const application = new HarnessApplication(
         coordinator,

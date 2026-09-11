@@ -3,6 +3,7 @@ import { CheckpointStore } from "./checkpoint-store.ts";
 import {
     decideRecovery,
     type RecoveryDecision,
+    type SessionRefCheck,
 } from "./recovery-decision.ts";
 import type {
     AgentRun,
@@ -34,6 +35,12 @@ export class RecoveryService {
         private readonly toolExecutionStore:
             ToolExecutionStore,
         private readonly checkpointStore: CheckpointStore,
+        /**
+         * N18：判定 Checkpoint 引用的运行时会话是否仍然可达。
+         * 由装配处注入（生产 = 文件存在性校验）；不注入时保持原有行为。
+         */
+        private readonly isSessionRefReachable?:
+            (runtimeSessionRef:string)=>boolean,
     ) {}
 
     scanInterruptedRuns(): RunRecoveryPlan[] {
@@ -48,10 +55,27 @@ export class RecoveryService {
                 activeRun.id,
             );
         const checkpoint = this.getValidCheckpoint(activeRun);
+        const sessionRef: SessionRefCheck = {
+            runtimeSessionRef: checkpoint?.runtimeSessionRef ?? null,
+            ...(this.isSessionRefReachable === undefined
+                ? {}
+                : { isReachable: this.isSessionRefReachable }),
+        };
         const decision = decideRecovery(
             checkpoint?.id ?? null,
             preparedExecutions,
+            sessionRef,
         );
+
+        // N18：损坏的恢复点必须留下可诊断的痕迹，不能再静默降级。
+        if (decision.reason === "SESSION_REF_UNREACHABLE") {
+            console.warn(
+                `[recovery] N18 恢复点已损坏，拒绝自动恢复：`
+                + `runId=${activeRun.id} checkpointId=${checkpoint?.id}`
+                + ` runtimeSessionRef=${String(checkpoint?.runtimeSessionRef)}`,
+            );
+        }
+
         const timestamp = new Date().toISOString();
 
         const interruptedRun: AgentRun = {

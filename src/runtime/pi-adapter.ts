@@ -28,6 +28,9 @@ import {
     createGatewayPiTools,
     type ToolGatewayExecutor,
 } from "./pi-tool-gateway.ts";
+import {
+    createFileSessionRefReachability,
+} from "./session-ref-reachability.ts";
 import { createPiCapabilityProfile } from "./runtime-capability.ts";
 import type {
     SandboxCommandExecutor,
@@ -41,6 +44,12 @@ import type {
 function piAgentDir():string {
     return join(homedir(), ".pi", "agent");
 }
+
+/**
+ * N18：Pi 的 `runtime_session_ref` 就是会话 JSONL 的文件路径，所以用文件可达性
+ * 判定；与恢复决策层注入的是同一个实现，两处口径保持一致。
+ */
+const isSessionRefReachable = createFileSessionRefReachability();
 
 /**
  * N28 主机制：Pi 会话摘要式压缩参数（Harness 视角的显式契约）。
@@ -508,6 +517,21 @@ export class PiAdapter implements AgentRuntime{
         }
 
         const sessionInitializedStartedAt = performance.now();
+
+        // N18 纵深防御：即使恢复决策层漏过了可达性校验，这里也不能让 Pi 用
+        // 一个空会话悄悄续跑。Pi 的 loadEntriesFromFile 对不存在的文件返回
+        // 空数组，SessionManager.open 于是给出一个"没有历史的会话"——Run 会
+        // 照常 COMPLETED，而模型完全不知道之前做过什么。宁可显式失败。
+        const resumeSessionRef = request.checkpoint.runtimeSessionRef;
+        if (!isSessionRefReachable(resumeSessionRef)) {
+            throw new Error(
+                `N18 拒绝恢复：Checkpoint 引用的运行时会话不可达`
+                + `（runId=${request.run.runId}`
+                + ` runtimeSessionRef=${String(resumeSessionRef)}）`
+                + `。继续执行会静默丢失全部上下文，已按 fail-closed 中止。`,
+            );
+        }
+
         const sessionManager = SessionManager.open(
             request.checkpoint.runtimeSessionRef,
             undefined,

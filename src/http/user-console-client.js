@@ -10,7 +10,11 @@ var S = {
   runs: [],
   outputs: {}, thinking: {}, outputStatuses: {}, diffs: {}, artifacts: {}, events: {}, expanded: {},
   queue: [],
-  pollTimer: null, activeRunId: null, suggestion: '', sending: false
+  pollTimer: null, activeRunId: null, suggestion: '', sending: false,
+  /* N22：会话刷新请求序号。迟到的响应必须靠它识别并丢弃。 */
+  refreshSeq: 0,
+  /* N25：连续网络失败次数；用于把"静默重试"变成可见的降级提示。 */
+  netFails: 0, netDown: false
 };
 var $ = function(id){ return document.getElementById(id); };
 var ACTIVE = ['QUEUED','RUNNING','WAITING_TOOL'];
@@ -76,6 +80,47 @@ function autoGrow(){
 }
 
 /* ---------- API ---------- */
+/* N25：网络层健康度。修复前轮询失败被 `.catch(function(){})` 静默吞掉，
+   用户看到的是一份过期状态却毫不知情。这里把「连不上」变成页面上可见、
+   可恢复的状态，而不是让界面继续假装一切正常。 */
+function isNetworkError(err){
+  // fetch 本身失败（断网/DNS/连接被拒）抛的是 TypeError，没有我们附加的 status；
+  // HTTP 4xx/5xx 是我们自己构造并带 status 的 Error。
+  return !(err && typeof err.status === 'number');
+}
+function noteNetFail(){
+  S.netFails += 1;
+  if(!S.netDown) S.netDownSince = Date.now();
+  var msg = navigator.onLine === false
+    ? '当前设备已离线。'
+    : '无法连接服务，正在重试。';
+  showNetBanner(msg + '页面显示的是最后一次成功获取的状态，可能已过期（已失败 ' + S.netFails + ' 次）。');
+}
+function noteNetOk(){
+  var wasDown = S.netDown;
+  var downMs = wasDown && S.netDownSince ? Date.now() - S.netDownSince : 0;
+  S.netFails = 0;
+  if(!wasDown) return;
+  S.netDown = false;
+  hideNetBanner();
+  // 只有真正持续了一小段时间的中断才提示"已恢复"；否则抖动一次就弹一次，
+  // 横幅会来回跳、提示会刷屏，反而变成噪音。
+  if(downMs >= 3000) toast('已恢复连接，正在同步最新状态');
+  // 立刻补一次刷新，避免用户盯着断网期间的旧数据继续操作。
+  if(S.conversationId) refreshConversation(false).catch(function(){});
+  refreshQueue();
+}
+function showNetBanner(text){
+  var el = $('netBanner');
+  if(!el) return;
+  S.netDown = true;
+  el.innerHTML = '<span class="nbdot"></span>' + esc(text);
+  el.classList.add('on');
+}
+function hideNetBanner(){
+  var el = $('netBanner');
+  if(el) el.classList.remove('on');
+}
 function api(path, opts){
   opts = opts || {};
   var headers = opts.headers || {};
@@ -91,7 +136,12 @@ function api(path, opts){
         }
         return body;
       });
-    });
+    })
+    .then(function(body){ noteNetOk(); return body; },
+      function(err){
+        if(isNetworkError(err)) noteNetFail();
+        throw err;
+      });
 }
 
 /* ---------- 登录 ---------- */
@@ -112,7 +162,10 @@ function logout(){
   S.token = ''; S.demo = false;
   localStorage.removeItem('vh-user-token'); localStorage.removeItem('vh-user-email'); localStorage.removeItem('vh-user-demo');
   if(token && !S.demo) fetch('/auth/logout', { method:'POST', headers:{ 'authorization':'Bearer ' + token } }).catch(function(){});
-  stopPoll(); showAuth();
+  stopPoll();
+  // N25：登出后不得留下"断网中"的横幅，否则重新登录会看到过期提示。
+  S.netFails = 0; S.netDown = false; hideNetBanner();
+  showAuth();
 }
 function enterApp(){
   $('auth').classList.add('hidden'); $('app').classList.remove('hidden');
@@ -193,6 +246,9 @@ function updateWsChip(){
   $('wsChip').textContent = ws ? ws.name : '未选择 Workspace';
 }
 function openConversation(id, pushState){
+  // N22：切对话时立刻停掉旧轮询。原先要等 refreshConversation 完成才重排定时器，
+  // 这段窗口里旧的定时器仍会触发，而它的响应又会无条件写回全局状态。
+  stopPoll();
   S.conversationId = id;
   S.outputs = {}; S.thinking = {}; S.outputStatuses = {}; S.diffs = {}; S.artifacts = {}; S.events = {}; S.expanded = {}; S.queue = [];
   $('hero').classList.add('hidden'); $('suggestZone').classList.add('hidden'); $('thread').classList.remove('hidden');
@@ -204,8 +260,23 @@ function openConversation(id, pushState){
   }).catch(function(e){ toast(e.message, true); });
 }
 function refreshConversation(withOutputs){
-  if(!S.conversationId) return Promise.resolve();
-  return api('/conversations/' + encodeURIComponent(S.conversationId)).then(function(body){
+  var requestedId = S.conversationId;
+  if(!requestedId) return Promise.resolve();
+  // N22：本次刷新的序号。轮询每 1600ms 一次，内部还有 loadOutput/loadFacts
+  // 链式请求，响应窗口可达数百 ms 到数秒；期间用户完全可能切到别的对话
+  // （或被 interrupt/resume 触发一次新刷新）。
+  //
+  // 修复前没有任何守卫：迟到的响应会直接覆盖 S.conversation / S.runs /
+  // convTitle 并重渲染，于是"状态是对话 B、页面显示 A 的标题和消息"，
+  // 用户在正文里点中断/恢复还可能作用到错误对象（真机 U04 实证）。
+  //
+  // 判据用两条：① 响应所属对话仍是当前对话；② 它是**最新**的一次刷新。
+  // 只有 ① 不足以覆盖 A→B→A 的快速切换（旧 A 的响应迟到时 id 恰好又对上了）。
+  var seq = ++S.refreshSeq;
+  return api('/conversations/' + encodeURIComponent(requestedId)).then(function(body){
+    if(requestedId !== S.conversationId || seq !== S.refreshSeq) return;
+    var responseId = body.conversation && body.conversation.id;
+    if(responseId !== undefined && responseId !== requestedId) return;
     S.conversation = body.conversation || null;
     S.runs = (body.runs || []).slice().sort(function(a,b){ return String(a.createdAt).localeCompare(String(b.createdAt)); });
     $('convTitle').textContent = S.conversation ? S.conversation.title : '对话';
@@ -222,9 +293,14 @@ function refreshConversation(withOutputs){
       return Promise.resolve();
     }));
     return chain.then(function(){
+      // 链式请求同样可能跨过切换窗口，渲染前必须再确认一次。
+      if(requestedId !== S.conversationId || seq !== S.refreshSeq) return;
       var last = S.runs[S.runs.length - 1];
       var ready = last && last.status === 'COMPLETED' && S.diffs[last.id] === undefined ? loadFacts(last.id) : Promise.resolve();
-      return ready.then(function(){ renderThread(); schedulePoll(); });
+      return ready.then(function(){
+        if(requestedId !== S.conversationId || seq !== S.refreshSeq) return;
+        renderThread(); schedulePoll();
+      });
     });
   });
 }
@@ -252,7 +328,11 @@ function loadEvents(runId){
   }).catch(function(e){ toast(e.message, true); });
 }
 function refreshQueue(){
-  return api('/queue').then(function(body){ S.queue = body.queue || []; renderThread(); }).catch(function(){ S.queue = []; });
+  // N25：拉取失败时保留上一次的队列，**不要清空**。原实现在失败分支里把队列
+  // 直接置空，一次网络抖动就会把"排队中"的任务显示成不在队列里 —— 那是用错误
+  // 数据冒充最新状态。连接问题改由顶部横幅统一呈现。
+  return api('/queue').then(function(body){ S.queue = body.queue || []; renderThread(); })
+    .catch(function(){ /* 保留上次已知队列；可见性由 netBanner 负责 */ });
 }
 
 /* ---------- 发送 / 控制 ---------- */
@@ -324,7 +404,9 @@ function schedulePoll(){
   if(!hasActive) return;
   S.pollTimer = setInterval(function(){
     if(document.hidden) return;
-    refreshConversation(false).catch(function(){ /* 网络抖动忽略，下个周期重试 */ });
+    // N25：这里的异常仍然照旧吞掉（下一个周期重试是对的），但失败**不再无声**——
+    // api() 会累计失败次数并点亮顶部降级横幅，用户能看见"数据可能已过期"。
+    refreshConversation(false).catch(function(){});
     refreshQueue();
   }, 1600);
   refreshQueue();
@@ -332,6 +414,15 @@ function schedulePoll(){
 function stopPoll(){
   if(S.pollTimer){ clearInterval(S.pollTimer); S.pollTimer = null; }
 }
+/* N25：浏览器离线/恢复立刻反映到横幅，不必等下一次轮询超时。 */
+window.addEventListener('offline', function(){
+  showNetBanner('当前设备已离线。页面显示的是最后一次成功获取的状态，可能已过期。');
+});
+window.addEventListener('online', function(){
+  // 交给下一次真实请求确认是否真的恢复（online 事件不代表服务可达）。
+  if(S.conversationId) refreshConversation(false).catch(function(){});
+  refreshQueue();
+});
 
 /* ---------- 渲染 ---------- */
 function renderSuggests(){

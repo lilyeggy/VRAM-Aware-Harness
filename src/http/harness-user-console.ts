@@ -222,6 +222,16 @@ a{color:var(--accent)}
 .toast.on{opacity:1;transform:translate(-50%,0)}
 .toast.bad{background:var(--bad)}
 
+/* N25：断网/请求失败时页面必须有可见的降级提示。修复前轮询错误被静默吞掉，
+   界面既没有错误也没有离线提示，还持续把过期状态当作最新状态展示。 */
+.netbanner{position:fixed;top:0;left:0;right:0;background:var(--warn);color:#FFFDF8;
+  font-size:12.5px;line-height:1.5;text-align:center;padding:7px 14px;
+  transform:translateY(-102%);transition:transform .22s;z-index:70}
+.netbanner.on{transform:none}
+.netbanner .nbdot{display:inline-block;width:7px;height:7px;border-radius:50%;background:#FFE7B8;
+  margin-right:7px;vertical-align:1px;animation:nbpulse 1.2s ease-in-out infinite}
+@keyframes nbpulse{0%,100%{opacity:.35}50%{opacity:1}}
+
 @media (max-width:860px){
   .app{grid-template-columns:1fr}
   .sidebar{position:fixed;inset:0 auto 0 0;width:280px;z-index:40;transform:translateX(-102%);transition:.22s;box-shadow:0 0 60px rgba(30,26,16,.18)}
@@ -321,6 +331,7 @@ a{color:var(--accent)}
   </main>
 </div>
 
+<div id="netBanner" class="netbanner" role="status" aria-live="polite"></div>
 <div id="toast" class="toast"></div>
 
 <script>

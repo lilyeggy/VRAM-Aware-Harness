@@ -20,7 +20,13 @@ export type RecoveryAction =
 export type RecoveryReason = 
     | "SAFE_CHECKPOINT"
     | "NO_CHECKPOINT"
-    | "UNSAFE_TOOL_EFFECT";
+    | "UNSAFE_TOOL_EFFECT"
+    /**
+     * N18：Checkpoint 归属没问题，但它引用的运行时会话已经打不开了。
+     * 此时"恢复"只会静默变成"开一个没有历史的新会话"，用户以为续上了上下文
+     * 其实没有 —— 因此拒绝自动恢复，确定性转人工。
+     */
+    | "SESSION_REF_UNREACHABLE";
 
 export interface RecoveryDecision {
     action:RecoveryAction;
@@ -28,9 +34,25 @@ export interface RecoveryDecision {
     blockingToolExecutionId:string|null;
 };
 
+/**
+ * N18：运行时会话引用的可达性校验。
+ *
+ * 为什么必须由调用方注入：只有运行时适配器知道这个引用指向什么载体
+ * （Pi 的 `runtime_session_ref` 是会话 JSONL 文件路径；demo/测试运行时可能是
+ * 合成字符串）。所以这里不做任何默认假设——未提供 `isReachable` 时保持原有
+ * 行为，生产装配显式注入「文件是否存在」这一校验。
+ */
+export interface SessionRefCheck {
+    /** Checkpoint 记录的运行时会话引用。 */
+    runtimeSessionRef?:string|null;
+    /** 返回 false 表示该引用不可达，恢复必须转人工。 */
+    isReachable?:(runtimeSessionRef:string)=>boolean;
+}
+
 export function decideRecovery (
     checkpointId:string|null,
     preparedExecution:readonly ToolExecution[],
+    sessionRef:SessionRefCheck = {},
 ):RecoveryDecision{
     if (checkpointId === null){
         const action : RecoveryAction = "MANUAL_REVIEW";
@@ -56,6 +78,30 @@ export function decideRecovery (
             action:"MANUAL_REVIEW",
             reason:"UNSAFE_TOOL_EFFECT",
             blockingToolExecutionId:unsafeExecution.id,
+        }
+    }
+
+    // N18：副作用安全之后，再校验"这次恢复是否真的能续接原会话"。
+    //
+    // 放在 unsafe 判定**之后**是有意的：未知副作用必须先被挡住，不能让一个
+    // 打不开的会话引用盖过更强的安全信号。两者都落到 MANUAL_REVIEW，但理由
+    // 不同，运维据此才能区分"要人工确认副作用"还是"恢复点已经损坏"。
+    //
+    // 不校验的后果（真机实证 R10）：Pi 的 `loadEntriesFromFile` 对不存在的
+    // 文件返回空数组，`SessionManager.open` 因此得到一个空会话，Run 照常
+    // COMPLETED、日志零告警 —— 用户以为续上了上下文，其实模型对之前做过什么
+    // 一无所知。这与"不确定副作用不得自动重放"是同一条原则：宁可拒绝，不要
+    // 假装成功。
+    const sessionRefUnreachable = typeof sessionRef.runtimeSessionRef === "string"
+        && sessionRef.runtimeSessionRef !== ""
+        && sessionRef.isReachable !== undefined
+        && !sessionRef.isReachable(sessionRef.runtimeSessionRef);
+
+    if (sessionRefUnreachable){
+        return {
+            action:"MANUAL_REVIEW",
+            reason:"SESSION_REF_UNREACHABLE",
+            blockingToolExecutionId:null,
         }
     }
 

@@ -50,6 +50,14 @@ export interface RunQueueCoordinatorOptions {
      * 支柱 3：排队 TTL（ms）。undefined 表示不启用排队超时熔断。
      */
     queueTtlMs?: number;
+    /**
+     * N19：同一 Run 允许因 INSTANCE_NOT_READY 重排的最大次数（默认 5）。
+     *
+     * 低于上限时按 N2 语义当作启动对账窗口的瞬态失败、下一轮重试；
+     * 超过上限说明实例槽位结构性不可用，继续重排只会形成
+     * INTERRUPTED↔QUEUED 活锁并反复创建/销毁沙箱，因此停止自动重排转人工。
+     */
+    maxInstanceNotReadyRetries?: number;
     /** 时钟（测试注入）。 */
     now?: () => number;
     /**
@@ -101,6 +109,16 @@ export class RunQueueCoordinator  {
         private drainPromise: Promise<CoordinatorResult[]> | null = null, // 当前是否有drain正在运行
         private drainRequested = false, // 正在运行期间，是否又收到了新的推进请求
         private readonly options: RunQueueCoordinatorOptions = {},
+        /**
+         * N19：同一 Run 因 INSTANCE_NOT_READY 被重新入队的次数。
+         *
+         * 该状态本意是"启动对账窗口里的瞬态"（N2），但实例槽位若**结构性**
+         * 不可用（例如上次进程执行中被杀，实例停在 FAILED 且计数为 1），
+         * 无界重排就会变成 INTERRUPTED↔QUEUED 活锁，而且每一轮失败的 RESUME
+         * 都真实创建/销毁一个沙箱（真机实测泄漏 2 个容器）。
+         * 因此必须有上限：超过即停止重排并转人工，把问题暴露出来而不是空转。
+         */
+        private readonly instanceNotReadyAttempts = new Map<string, number>(),
     ) {}
 
     /**
@@ -383,6 +401,10 @@ export class RunQueueCoordinator  {
                 resumeInput,
             );
 
+            // N19：本次执行真的启动了，清掉该 Run 的 INSTANCE_NOT_READY 计数，
+            // 避免把一次成功之后的偶发瞬态累计成"耗尽"。
+            this.instanceNotReadyAttempts.delete(queuedRun.runId);
+
             return {
                 kind:"EXECUTED",
                 run,
@@ -393,12 +415,46 @@ export class RunQueueCoordinator  {
             // 瞬态失败。识别后重新入队（下一轮 pump 重试），不再把异常栈
             // 抛进 pump 的 onError；其余错误维持原行为。
             if (error instanceof InstanceSlotUnavailableError) {
-                console.warn(
-                    `实例暂未就绪，Run 重新入队等待下一轮调度：${queuedRun.runId}（${error.instanceId}）`,
-                );
+                const attempts =
+                    (this.instanceNotReadyAttempts.get(queuedRun.runId) ?? 0) + 1;
+                this.instanceNotReadyAttempts.set(queuedRun.runId, attempts);
                 // 与 admission 失败路径一致：先 release 再 enqueue，
                 // 否则 enqueue 会认为 Run 仍在执行而拒绝入队。
                 this.scheduler.release(queuedRun.runId);
+
+                const maxRetries = this.options.maxInstanceNotReadyRetries ?? 5;
+                if (attempts > maxRetries) {
+                    // N19：不再无界重排。走到这里说明实例槽位是**结构性**
+                    // 不可用（不是启动窗口的瞬态），继续重排只会变成
+                    // INTERRUPTED↔QUEUED 活锁，而且每轮失败的 RESUME 都会真实
+                    // 创建/销毁一个沙箱。停止自动重排，把事实记下来交人工。
+                    this.instanceNotReadyAttempts.delete(queuedRun.runId);
+                    this.pendingResumeByRunId.delete(queuedRun.runId);
+                    const message =
+                        `实例槽位持续不可用，已停止自动重排并转人工：`
+                        + `instanceId=${error.instanceId} 已重试 ${attempts - 1} 次`
+                        + `（上限 ${maxRetries}）`;
+                    console.error(`[N19] ${message} runId=${queuedRun.runId}`);
+                    this.recordInstanceNotReadyExhausted(
+                        queuedRun.runId,
+                        error.instanceId,
+                        attempts - 1,
+                        maxRetries,
+                    );
+                    this.synchronizeQueueBlockers();
+                    return {
+                        kind:"DEFERRED",
+                        runId:queuedRun.runId,
+                        decision,
+                    };
+                }
+
+                // N2：重启对账窗口里实例行 actual_state 尚未就绪，启动尝试是
+                // 瞬态失败。识别后重新入队（下一轮 pump 重试），不再把异常栈
+                // 抛进 pump 的 onError；其余错误维持原行为。
+                console.warn(
+                    `实例暂未就绪，Run 重新入队等待下一轮调度：${queuedRun.runId}（${error.instanceId}，第 ${attempts}/${maxRetries} 次）`,
+                );
                 this.scheduler.enqueue({
                     runId : queuedRun.runId,
                     tenantId : queuedRun.tenantId,
@@ -423,6 +479,36 @@ export class RunQueueCoordinator  {
         }
     }
     
+    /**
+     * N19：把"实例槽位已耗尽重试、转人工"这件事落成可查的 Run 事实。
+     *
+     * 不静默：Run 若已经离开 QUEUED（恢复路径会先置 RUNNING），
+     * `failQueuedRun`/`recordQueueBlocked` 会按状态机拒绝，属预期；
+     * 此时至少保证有 error 级日志，不会像修复前那样无声空转。
+     */
+    private recordInstanceNotReadyExhausted(
+        runId: string,
+        instanceId: string,
+        attempted: number,
+        maxRetries: number,
+    ): void {
+        const payload = {
+            reason: "INSTANCE_NOT_READY_RETRY_EXHAUSTED",
+            instanceId,
+            attempted,
+            maxRetries,
+            note: "实例槽位结构性不可用，已停止自动重排，需人工处理后手动恢复",
+        };
+        try {
+            this.runService.recordQueueBlocked(runId, payload);
+        } catch (recordError) {
+            console.error(
+                `[N19] 写入实例槽位耗尽事实失败：runId=${runId}`,
+                recordError,
+            );
+        }
+    }
+
     private async drainOnce():Promise<CoordinatorResult[]> {
         // 支柱 3：先熔断排队超时的 Run，再推进队列。
         this.enforceQueueTtl();
