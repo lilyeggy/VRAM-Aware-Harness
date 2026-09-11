@@ -16,6 +16,10 @@
 import type { Database } from "bun:sqlite";
 
 import { canAutomaticallyReplay } from "../tools/tool-execution.ts";
+import {
+    LlmCacheMetricsStore,
+    type LlmCacheMetricsAggregate,
+} from "./llm-cache-metrics-store.ts";
 import type {
     EvaluationSummary,
     ResourceEvaluation,
@@ -39,6 +43,10 @@ interface CountRow {
 interface ToolEffectRow {
     effect: "READ_ONLY" | "IDEMPOTENT_WRITE" | "UNKNOWN_EFFECT";
     status: "PREPARED" | "SUCCEEDED" | "FAILED";
+}
+
+interface ToolEffectRowWithRun extends ToolEffectRow {
+    run_id: string;
 }
 
 interface PayloadRow {
@@ -92,7 +100,13 @@ function average(values: readonly number[]): number | null {
 }
 
 export class EvaluationAggregator {
-    constructor(private readonly db: Database) {}
+    private readonly llmCacheMetricsStore: LlmCacheMetricsStore;
+
+    constructor(private readonly db: Database) {
+        // D1：缓存指标聚合的 SQL 唯一来源是 LlmCacheMetricsStore，
+        // 聚合器只委托，避免两处逐字重复的 SQL 静默分叉。
+        this.llmCacheMetricsStore = new LlmCacheMetricsStore(db);
+    }
 
     /** 计算单个 Run 的指标；Run 不存在返回 null。 */
     computeRunMetrics(runId: string): RunMetrics | null {
@@ -151,19 +165,11 @@ export class EvaluationAggregator {
                  WHERE run_id = $runId AND type = 'MODEL_COMPLETED'`,
             )
             .all({ runId });
-        const llmUsage = aggregateLlmUsage(usageEvents);
 
-        return {
-            runId: run.id,
-            tenantId: run.tenant_id,
-            finalStatus: run.status,
+        return this.toRunMetrics(run, {
             attemptCount,
-            queueWaitMs: msBetween(run.created_at, run.started_at),
-            runDurationMs: msBetween(run.started_at, run.finished_at),
-            toolCallCount: toolRows.length,
-            toolCallsByEffect,
-            blockedDangerousToolCount,
-            hasCheckpoint: run.checkpoint_id !== null,
+            toolRows,
+            usagePayloads: usageEvents,
             producedDiff: this.exists(
                 `SELECT 1 FROM run_workspace_diffs WHERE run_id = $runId`,
                 runId,
@@ -176,28 +182,154 @@ export class EvaluationAggregator {
                 `SELECT 1 FROM run_output_chunks WHERE run_id = $runId LIMIT 1`,
                 runId,
             ),
+        });
+    }
+
+    /**
+     * D2：单 Run 指标装配（纯装配，不含查询）。
+     * 点查（computeRunMetrics）与批量对账（listRunMetrics）共用同一装配，
+     * 保证两条路径的口径永远一致。
+     */
+    private toRunMetrics(
+        run: AgentRunRow,
+        facts: {
+            attemptCount: number;
+            toolRows: readonly ToolEffectRow[];
+            usagePayloads: readonly PayloadRow[];
+            producedDiff: boolean;
+            producedArtifact: boolean;
+            hasFinalText: boolean;
+        },
+    ): RunMetrics {
+        const toolCallsByEffect = {
+            readOnly: 0,
+            idempotentWrite: 0,
+            unknownEffect: 0,
+        };
+        let blockedDangerousToolCount = 0;
+        for (const row of facts.toolRows) {
+            if (row.effect === "READ_ONLY") {
+                toolCallsByEffect.readOnly += 1;
+            } else if (row.effect === "IDEMPOTENT_WRITE") {
+                toolCallsByEffect.idempotentWrite += 1;
+            } else {
+                toolCallsByEffect.unknownEffect += 1;
+            }
+            // 仍处于 PREPARED 且不可自动重放 = 被拦下的危险副作用。
+            if (
+                row.status === "PREPARED"
+                && !canAutomaticallyReplay(row.status, row.effect)
+            ) {
+                blockedDangerousToolCount += 1;
+            }
+        }
+
+        const llmUsage = aggregateLlmUsage([...facts.usagePayloads]);
+
+        return {
+            runId: run.id,
+            tenantId: run.tenant_id,
+            finalStatus: run.status,
+            attemptCount: facts.attemptCount,
+            queueWaitMs: msBetween(run.created_at, run.started_at),
+            runDurationMs: msBetween(run.started_at, run.finished_at),
+            toolCallCount: facts.toolRows.length,
+            toolCallsByEffect,
+            blockedDangerousToolCount,
+            hasCheckpoint: run.checkpoint_id !== null,
+            producedDiff: facts.producedDiff,
+            producedArtifact: facts.producedArtifact,
+            hasFinalText: facts.hasFinalText,
             llmUsage,
         };
     }
 
-    /** 计算一组 Run（可选按租户过滤）的指标。 */
+    /**
+     * 计算一组 Run（可选按租户过滤）的指标。
+     *
+     * D2：原先对每个 Run 逐一点查 6 张表（N+1）。现在每张表只做一次
+     * 批量读取（GROUP BY / DISTINCT / 全量集合），再装配回每个 Run——
+     * 数据规模增大时查询数是 O(表数) 而不是 O(Run 数)。
+     */
     listRunMetrics(tenantId?: string): RunMetrics[] {
-        const rows = tenantId === undefined
+        const runs = tenantId === undefined
             ? this.db
-                .query<{ id: string }, Record<string, never>>(
-                    `SELECT id FROM agent_runs ORDER BY created_at ASC`,
+                .query<AgentRunRow, Record<string, never>>(
+                    `SELECT id, tenant_id, status, created_at, started_at,
+                            finished_at, checkpoint_id
+                     FROM agent_runs ORDER BY created_at ASC`,
                 )
                 .all({})
             : this.db
-                .query<{ id: string }, { tenantId: string }>(
-                    `SELECT id FROM agent_runs WHERE tenant_id = $tenantId
+                .query<AgentRunRow, { tenantId: string }>(
+                    `SELECT id, tenant_id, status, created_at, started_at,
+                            finished_at, checkpoint_id
+                     FROM agent_runs WHERE tenant_id = $tenantId
                      ORDER BY created_at ASC`,
                 )
                 .all({ tenantId });
+        if (runs.length === 0) {
+            return [];
+        }
 
-        return rows
-            .map((row) => this.computeRunMetrics(row.id))
-            .filter((m): m is RunMetrics => m !== null);
+        const attemptCounts = new Map<string, number>();
+        for (const row of this.db
+            .query<CountRow & { run_id: string }, []>(
+                `SELECT run_id, COUNT(*) AS n FROM run_attempts GROUP BY run_id`,
+            )
+            .all()) {
+            attemptCounts.set(row.run_id, row.n);
+        }
+
+        const toolRowsByRun = new Map<string, ToolEffectRowWithRun[]>();
+        for (const row of this.db
+            .query<ToolEffectRowWithRun, []>(
+                `SELECT run_id, effect, status FROM tool_executions`,
+            )
+            .all()) {
+            const list = toolRowsByRun.get(row.run_id) ?? [];
+            list.push(row);
+            toolRowsByRun.set(row.run_id, list);
+        }
+
+        const usagePayloadsByRun = new Map<string, string[]>();
+        for (const row of this.db
+            .query<PayloadRow & { run_id: string }, []>(
+                `SELECT run_id, payload_json FROM run_events
+                 WHERE type = 'MODEL_COMPLETED'`,
+            )
+            .all()) {
+            const list = usagePayloadsByRun.get(row.run_id) ?? [];
+            list.push(row.payload_json);
+            usagePayloadsByRun.set(row.run_id, list);
+        }
+
+        const diffRunIds = new Set(
+            this.db.query<{ run_id: string }, []>(
+                `SELECT run_id FROM run_workspace_diffs`,
+            ).all().map((row) => row.run_id),
+        );
+        const artifactRunIds = new Set(
+            this.db.query<{ run_id: string }, []>(
+                `SELECT run_id FROM run_artifacts`,
+            ).all().map((row) => row.run_id),
+        );
+        const outputRunIds = new Set(
+            this.db.query<{ run_id: string }, []>(
+                `SELECT DISTINCT run_id FROM run_output_chunks`,
+            ).all().map((row) => row.run_id),
+        );
+
+        return runs.map((run) => this.toRunMetrics(run, {
+            attemptCount: attemptCounts.get(run.id) ?? 0,
+            toolRows: toolRowsByRun.get(run.id) ?? [],
+            usagePayloads: (usagePayloadsByRun.get(run.id) ?? []).map(
+                (payload_json) => ({ payload_json }),
+            ),
+            producedDiff: diffRunIds.has(run.id),
+            producedArtifact: artifactRunIds.has(run.id),
+            hasFinalText: outputRunIds.has(run.id),
+        }));
     }
 
     /** 把一组单任务指标聚合成系统/租户级总结（纯函数，易测）。 */
@@ -354,6 +486,16 @@ export class EvaluationAggregator {
             )
             .all({})
             .map((row) => row.tenant_id);
+    }
+
+    /**
+     * 支柱 2：LLM 网关前缀缓存命中评测（读 llm_cache_metrics 台账）。
+     * Run 级 usage.cacheReadTokens 之外，这里补上网关直连视角的
+     * prompt_tokens_details.cached_tokens 系统级命中率。
+     */
+    computeLlmCacheMetrics(backendId?: string): LlmCacheMetricsAggregate {
+        // D1：委托给 LlmCacheMetricsStore.aggregate——SQL 只写一份。
+        return this.llmCacheMetricsStore.aggregate(backendId);
     }
 
     private exists(sql: string, runId: string): boolean {

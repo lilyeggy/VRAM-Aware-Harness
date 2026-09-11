@@ -4,7 +4,11 @@ import type {
     ResourceThresholds,
 } from "../resources/resource-classifier.ts";
 import type { SandboxProfile } from "../sandbox/sandbox-profile.ts";
-import type { LlmBackend } from "../llm-gateway/model-router.ts";
+import type { TenantBudget } from "../resources/tenant-budget.ts";
+import type {
+    LlmBackend,
+    LoadBalancingStrategy,
+} from "../llm-gateway/model-router.ts";
 
 export interface HarnessConfig {
     databasePath:string;
@@ -12,6 +16,8 @@ export interface HarnessConfig {
     httpPort:number;
     workspaceRoot:string;
     bootstrapApiKey:string | undefined;
+    /** Pi/Worker 经 LLM 网关调用模型的专用凭证（仅 models:generate scope）。 */
+    agentApiKey:string | undefined;
     sandboxProvider:"managed-local" | "container";
     sandboxProfile:SandboxProfile;
     sandboxRuntime:"runsc" | "runc";
@@ -34,6 +40,11 @@ export interface HarnessConfig {
     maxActiveRuns:number;
     maxActiveRunsPerTenant:number;
     pumpIntervalMs:number;
+    /**
+     * 支柱 3：排队 TTL。Run 在队列中等待超过该时长且未获得调度准入时，
+     * 状态机安全流转到 FAILED（QUEUE_TIMEOUT），杜绝任务永久饥饿死等。
+     */
+    queueTtlMs:number;
     executionTimeoutMs?:number;
     interruptGraceMs?:number;
     /** Master-Worker 进程隔离模式："process" 为独立子进程隔离，"in-process" 为主进程内运行 */
@@ -42,6 +53,33 @@ export interface HarnessConfig {
     workerHandshakeTimeoutMs?: number;
     /** 方向 C：LLM 网关后端列表（空数组=网关未启用）。 */
     llmBackends:LlmBackend[];
+    /**
+     * 支柱 2：后端负载均衡策略。
+     * priority=配置顺序主备；round-robin=双卡轮询；least-active=最少活跃连接。
+     */
+    llmGatewayStrategy:LoadBalancingStrategy;
+    /** 支柱 2：后端健康探测周期 ms；0 = 关闭周期探测。 */
+    llmHealthProbeIntervalMs:number;
+    llmHealthProbePath:string;
+    llmRequestTimeoutMs:number;
+    /**
+     * N8：提交期单次任务输入的上界（字符数）。超过即在提交时拒绝，
+     * 不再先 202 接受、等模型侧 400 才失败。
+     * 部署时应按所用模型上下文校准（默认 100000 字符，远高于常规任务）。
+     */
+    maxUserInputChars:number;
+    /** 支柱 2：是否启用稳定前缀规范化（vLLM Prefix Caching 优化）。 */
+    llmPrefixCacheEnabled:boolean;
+    /** 支柱 2：流式请求是否由网关注入 include_usage 并采集末尾 usage chunk。 */
+    llmStreamUsageCapture:boolean;
+    /**
+     * B7：租户预算/fair-share 配置（tenantId → weight + maxUnits）。
+     * 空 Record = 不启用预算策略（ admission 行为与历史完全一致）；
+     * 非空时 BudgetAwareExecutionPolicy 叠加在并发策略之上，
+     * 租户超出 min(fairShare, maxUnits) 的 START 决策降级为
+     * QUEUE(TENANT_BUDGET_EXCEEDED)。
+     */
+    tenantBudgets:Record<string, TenantBudget>;
 }
 
 export type HarnessEnvironment = Record<string,string | undefined>;
@@ -56,15 +94,18 @@ export function loadHarnessConfig(
     );
     const vllmBaseUrl = environment.VLLM_BASE_URL
         ?? "http://127.0.0.1:8000/v1";
+    // 支柱 2：工具执行与模型等待期间 GPU 不应空转——默认并发上限放开到
+    // 20~30 档位，工具与文件 I/O 在沙箱内并发执行，不独占 GPU 槽位。
+    // 每租户并发仍然可配（HARNESS_MAX_ACTIVE_RUNS_PER_TENANT）。
     const maxActiveRuns = positiveInteger(
         environment,
         "HARNESS_MAX_ACTIVE_RUNS",
-        2,
+        30,
     );
     const maxActiveRunsPerTenant = positiveInteger(
         environment,
         "HARNESS_MAX_ACTIVE_RUNS_PER_TENANT",
-        1,
+        10,
     );
 
     if (maxActiveRunsPerTenant > maxActiveRuns) {
@@ -109,6 +150,7 @@ export function loadHarnessConfig(
             environment.HARNESS_WORKSPACE_ROOT ?? "data/workspaces",
         ),
         bootstrapApiKey:environment.HARNESS_BOOTSTRAP_API_KEY,
+        agentApiKey:environment.HARNESS_AGENT_API_KEY,
         sandboxProvider:environment.HARNESS_SANDBOX_PROVIDER === "container"
             ? "container"
             : "managed-local",
@@ -135,7 +177,42 @@ export function loadHarnessConfig(
             ? undefined
             : resolve(cwd, environment.PI_AUTH_PATH),
 
-        llmBackends:parseLlmBackends(environment.LLM_BACKENDS),
+        llmBackends:loadLlmBackends(environment, piModelId),
+        llmGatewayStrategy:loadLlmGatewayStrategy(
+            environment.LLM_GATEWAY_STRATEGY,
+        ),
+        llmHealthProbeIntervalMs:nonNegativeInteger(
+            environment,
+            "LLM_HEALTH_PROBE_INTERVAL_MS",
+            10_000,
+        ),
+        // N4：探活路径可配置。默认 "/models"——与 /chat/completions 同一
+        // 拼接约定（baseUrl 已含 /v1），得到 OpenAI 标准端点 /v1/models；
+        // 个别后端只暴露其它端点时用 LLM_HEALTH_PROBE_PATH 覆盖。
+        llmHealthProbePath:environment.LLM_HEALTH_PROBE_PATH ?? "/models",
+        // N6：单次模型请求（含流式全程）超时。旧实现硬编码 60s 且不可配置，
+        // 长输入/长输出任务必然被掐断（真机实测：50k 字符任务连续 4 次
+        // ~60s 中止后 RUN_FAILED）。默认放宽到 300s，可用
+        // LLM_REQUEST_TIMEOUT_MS 覆盖（大输出/慢后端可调至 600s 以上）。
+        llmRequestTimeoutMs:positiveInteger(
+            environment,
+            "LLM_REQUEST_TIMEOUT_MS",
+            300_000,
+        ),
+        // N8：提交期输入上界。旧实现不校验，78 万字符会被 202 接受，
+        // 直到模型侧返回 400 才失败，且提交响应回显全量输入。
+        maxUserInputChars:positiveInteger(
+            environment,
+            "HARNESS_MAX_USER_INPUT_CHARS",
+            100_000,
+        ),
+        llmPrefixCacheEnabled:environment.LLM_PREFIX_CACHE
+            !== "false"
+            && environment.LLM_PREFIX_CACHE !== "0",
+        llmStreamUsageCapture:environment.LLM_STREAM_USAGE_CAPTURE
+            !== "false"
+            && environment.LLM_STREAM_USAGE_CAPTURE !== "0",
+        tenantBudgets:parseTenantBudgets(environment.HARNESS_TENANT_BUDGETS),
 
         vllmMetricsUrl:environment.VLLM_METRICS_URL
             ?? metricsUrlFromBaseUrl(vllmBaseUrl),
@@ -195,6 +272,11 @@ export function loadHarnessConfig(
             environment,
             "HARNESS_PUMP_INTERVAL_MS",
             1_000,
+        ),
+        queueTtlMs:positiveInteger(
+            environment,
+            "HARNESS_QUEUE_TTL_MS",
+            300_000,
         ),
         executionTimeoutMs:positiveInteger(
             environment,
@@ -329,8 +411,55 @@ function loadSandboxProfile(
     return profile;
 }
 
-function parseLlmBackends(raw:string | undefined):LlmBackend[] {
+/**
+ * B7：HARNESS_TENANT_BUDGETS——JSON Record<tenantId, { weight, maxUnits }>。
+ * 例：{"team-a":{"weight":2,"maxUnits":8},"team-b":{"weight":1,"maxUnits":4}}
+ * 未设置或空对象 = 不启用预算策略。
+ */
+function parseTenantBudgets(
+    raw:string | undefined,
+):Record<string, TenantBudget> {
     if (raw === undefined || raw.trim() === "") {
+        return {};
+    }
+    let parsed:unknown;
+    try {
+        parsed = JSON.parse(raw);
+    } catch {
+        throw new Error("HARNESS_TENANT_BUDGETS 不是合法 JSON");
+    }
+    if (
+        typeof parsed !== "object"
+        || parsed === null
+        || Array.isArray(parsed)
+    ) {
+        throw new Error("HARNESS_TENANT_BUDGETS 必须是 JSON 对象");
+    }
+    const budgets:Record<string, TenantBudget> = {};
+    for (const [tenantId, value] of Object.entries(parsed)) {
+        const budget = value as Partial<TenantBudget> | null;
+        if (
+            typeof budget?.weight !== "number"
+            || !Number.isFinite(budget.weight)
+            || budget.weight <= 0
+            || typeof budget?.maxUnits !== "number"
+            || !Number.isFinite(budget.maxUnits)
+            || budget.maxUnits <= 0
+        ) {
+            throw new Error(
+                `HARNESS_TENANT_BUDGETS[${tenantId}] 需要 weight > 0 和 maxUnits > 0（数字）`,
+            );
+        }
+        budgets[tenantId] = {
+            tenantId,
+            weight: budget.weight,
+            maxUnits: budget.maxUnits,
+        };
+    }
+    return budgets;
+}
+
+function parseLlmBackends(raw:string | undefined):LlmBackend[] {    if (raw === undefined || raw.trim() === "") {
         return [];
     }
     let parsed:unknown;
@@ -368,6 +497,55 @@ function loadSandboxRuntime(
         throw new Error(`HARNESS_SANDBOX_RUNTIME 不支持：${runtime}`);
     }
     return runtime;
+}
+
+function loadLlmGatewayStrategy(
+    value:string | undefined,
+):LoadBalancingStrategy {
+    const strategy = value ?? "round-robin";
+    if (
+        strategy !== "priority"
+        && strategy !== "round-robin"
+        && strategy !== "least-active"
+    ) {
+        throw new Error(
+            "LLM_GATEWAY_STRATEGY 只支持 priority / round-robin / least-active",
+        );
+    }
+    return strategy;
+}
+
+/**
+ * 支柱 2：解析 LLM 网关后端。
+ * - LLM_BACKENDS（JSON 数组）显式配置优先；
+ * - 否则 VLLM_BASE_URLS（逗号分隔，如本地双卡 "http://127.0.0.1:8000/v1,
+ *   http://127.0.0.1:8001/v1"）自动展开为 vllm-gpu0 / vllm-gpu1 两个后端；
+ * - 都没有时返回空数组（网关未启用，行为与支柱 1 兼容）。
+ */
+function loadLlmBackends(
+    environment:HarnessEnvironment,
+    piModelId:string,
+):LlmBackend[] {
+    if (environment.LLM_BACKENDS !== undefined) {
+        return parseLlmBackends(environment.LLM_BACKENDS);
+    }
+    const rawUrls = environment.VLLM_BASE_URLS;
+    if (rawUrls === undefined || rawUrls.trim() === "") {
+        return [];
+    }
+    const urls = rawUrls
+        .split(",")
+        .map((item) => item.trim())
+        .filter(Boolean);
+    if (urls.length === 0) {
+        throw new Error("VLLM_BASE_URLS 至少需要一个 baseUrl");
+    }
+    return urls.map((baseUrl, index) => ({
+        id:`vllm-gpu${index}`,
+        baseUrl,
+        model:piModelId,
+        logicalModel:piModelId,
+    }));
 }
 
 function metricsUrlFromBaseUrl(baseUrl:string):string {

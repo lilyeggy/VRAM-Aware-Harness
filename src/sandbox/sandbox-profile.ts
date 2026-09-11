@@ -58,19 +58,6 @@ export function freezeRuntimeEvidence(
     return Object.freeze({ ...evidence });
 }
 
-export function sandboxRuntimeForProfile(profile: SandboxProfile): SandboxRuntime {
-    switch (profile) {
-        case "development":
-            return "managed-local";
-        case "default":
-        case "restricted-egress":
-            return "runsc";
-        case "strict":
-            // The concrete strict backend is intentionally not implemented here.
-            return "firecracker";
-    }
-}
-
 export function resolveSandboxProfile(
     requested: SandboxProfile | null | undefined,
     configured: SandboxProfile,

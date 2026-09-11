@@ -218,6 +218,25 @@ export class RunStore {
     }
 
     /**
+     * B6：返回该 harness 会话已被哪个租户使用过（以最早一条 Run 为准）。
+     * null 表示会话尚未被任何租户使用——首次使用即认领。
+     * 会话归属以服务端持久化事实为准，客户端自选的 sessionId 不能抢注。
+     */
+    findSessionOwner(harnessSessionId: string): string | null {
+        const row = this.db
+            .query<Pick<AgentRunRow, "tenantId">, { harnessSessionId: string }>(`
+                SELECT tenant_id AS tenantId
+                FROM agent_runs
+                WHERE harness_session_id = $harnessSessionId
+                ORDER BY created_at ASC, rowid ASC
+                LIMIT 1;
+            `)
+            .get({ harnessSessionId });
+
+        return row?.tenantId ?? null;
+    }
+
+    /**
      * 服务启动时查找旧进程遗留的活跃 Run。
      *
      * 新进程中不存在这些 Run 对应的 Runtime/Session 实例，因此数据库中的

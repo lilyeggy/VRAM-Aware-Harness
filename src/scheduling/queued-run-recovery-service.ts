@@ -7,6 +7,7 @@ import type {
 import type {
     RunStore,
 } from "../runs/runstore.ts";
+import { buildRecoveryContinuationInput } from "../runs/run-service.ts";
 import type {
     RunQueueCoordinator,
 } from "./run-queue-coordinator.ts";
@@ -54,7 +55,10 @@ export class QueuedRunRecoveryService {
             this.coordinator.restoreQueuedResume(run, {
                 runId:run.id,
                 checkpoint,
-                continuationInput:"请从恢复点继续完成任务",
+                continuationInput: buildRecoveryContinuationInput(
+                    run.userInput,
+                    checkpoint.id,
+                ),
             });
         }
     }

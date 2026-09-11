@@ -39,6 +39,7 @@ import type { HarnessInstanceStore } from "../instances/harness-instance-store.t
 import type { Conversation } from "../conversations/conversation.ts";
 import { createConversation } from "../conversations/conversation.ts";
 import type { ConversationStore } from "../conversations/conversation-store.ts";
+import { summarizeToolDenials, type RunLimitation } from "../policies/run-limitations.ts";
 
 
 export interface StartupRecoveryCoordinator {
@@ -69,6 +70,7 @@ export class HarnessApplication {
         private readonly workspaceResults?: RunWorkspaceResultCoordinator,
         private readonly instanceStore?: HarnessInstanceStore,
         private readonly conversationStore?: ConversationStore,
+        private readonly toolPolicyStore?: { listToolDecisions(runId: string): readonly { toolName: string; action: string; reason: string; decidedAt: string }[] },
     ) {}
 
     private async startOnce() : Promise<void> {
@@ -188,6 +190,14 @@ export class HarnessApplication {
         return this.runStore.listForSession(tenantId, conversationId);
     }
 
+    /**
+     * B6：会话归属（以最早一条 Run 的租户为准）；null 表示未被使用。
+     * HTTP 层用它阻止客户端自选 sessionId 抢注其他租户的会话。
+     */
+    resolveSessionOwner(harnessSessionId: string): string | null {
+        return this.runStore.findSessionOwner(harnessSessionId);
+    }
+
     touchConversation(id: string, tenantId: string): void {
         this.conversationStore?.touch(id, tenantId);
     }
@@ -223,6 +233,12 @@ export class HarnessApplication {
 
     getRunDecisions(runId:string):PolicyDecision[] {
         return this.decisionStore.listForRun(runId);
+    }
+
+    /** N3：完成但受限的 Run 的 DENY 账本聚合；未注入工具策略库时空数组。 */
+    getRunLimitations(runId:string):RunLimitation[] {
+        const decisions = this.toolPolicyStore?.listToolDecisions(runId) ?? [];
+        return summarizeToolDenials(decisions);
     }
 
     getQueue():QueueEntry[] {

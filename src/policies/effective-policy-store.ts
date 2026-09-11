@@ -195,7 +195,3 @@ function constraintsOnly(value: PolicyConstraints): PolicyConstraints {
         resourceLimits: value.resourceLimits,
     };
 }
-
-export function parseCompiledPolicy(value: string): PiCompiledPolicy {
-    return JSON.parse(value) as PiCompiledPolicy;
-}

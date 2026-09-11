@@ -860,4 +860,36 @@ export const migrations: readonly SchemaMigration[] = [
                 CHECK (active_run_count >= 0);
         `,
     },
+    {
+        version: 21,
+        name: "create_llm_cache_metrics",
+        up: `
+            -- 支柱 2：LLM 网关每次非流式转发的 prompt 缓存命中台账。
+            -- cached_tokens 来自 vLLM 响应的 usage.prompt_tokens_details.cached_tokens。
+            CREATE TABLE llm_cache_metrics (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                request_id TEXT NOT NULL,
+                backend_id TEXT NOT NULL,
+                logical_model TEXT NOT NULL,
+                prefix_cache_key TEXT,
+                prompt_tokens INTEGER,
+                cached_tokens INTEGER,
+                recorded_at TEXT NOT NULL
+            );
+            CREATE INDEX idx_llm_cache_metrics_recorded_at
+                ON llm_cache_metrics(recorded_at);
+            CREATE INDEX idx_llm_cache_metrics_backend
+                ON llm_cache_metrics(backend_id, recorded_at);
+        `,
+    },
+    {
+        version: 22,
+        name: "add_audit_attempted_key_digest",
+        up: `
+            -- D4：鉴权失败的 DENY 事件记录被尝试密钥的 SHA-256 摘要。
+            -- 租户归属对无效密钥天然不可知（tenant_id 保持 NULL），
+            -- 摘要让爆破/重放可在不存储任何明文密钥的前提下被关联分析。
+            ALTER TABLE access_audit_events ADD COLUMN attempted_key_digest TEXT;
+        `,
+    },
 ];

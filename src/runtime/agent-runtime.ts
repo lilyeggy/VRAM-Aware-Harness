@@ -225,3 +225,22 @@ export interface AgentRuntime {
 
     subscribe(runId:string,handler:RuntimeEventHandler):()=>void;
 }
+
+/**
+ * 支柱 3：物理强杀能力（Container Hard Kill 的进程侧）。
+ *
+ * 优雅中断（interrupt）在宽限期内未生效时，Supervisor 需要对运行时
+ * 做物理强杀：Worker 独立子进程 SIGKILL + 底层沙箱容器强制清理，
+ * 释放挂起的 CPU/内存与资源租约，防止僵尸进程继续占用系统。
+ * 实现该能力的 Adapter 可选；Supervisor 用类型守卫探测。
+ */
+export interface ForceKillableRuntime extends AgentRuntime {
+    /** 立即物理强杀该 Run 的执行载体，不等待优雅退出。 */
+    forceKill(runId:string):Promise<void>;
+}
+
+export function isForceKillableRuntime(
+    runtime:AgentRuntime,
+):runtime is AgentRuntime & ForceKillableRuntime {
+    return typeof (runtime as ForceKillableRuntime).forceKill === "function";
+}

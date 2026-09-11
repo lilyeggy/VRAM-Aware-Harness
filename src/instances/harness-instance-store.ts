@@ -1,6 +1,21 @@
 import type { Database } from "bun:sqlite";
 import type { HarnessInstance } from "./harness-instance.ts";
 
+/**
+ * N2：实例尚未就绪时 acquireRun 的可识别异常。
+ *
+ * 控制面 kill -9 后重启对账窗口里，DB 中实例行仍是旧的 actual_state
+ * （READY/ACTIVE 之外），第一批排队 Run 的启动尝试会失败——这是瞬态，
+ * 不是调度错误。抛出专用类型让协调器识别并按 DEFERRED 处理（下一轮
+ * pump 重试），而不是把异常栈打满日志、把可恢复竞争当成事故。
+ */
+export class InstanceSlotUnavailableError extends Error {
+    constructor(readonly instanceId: string) {
+        super(`HarnessInstance 无法获取执行槽位：${instanceId}`);
+        this.name = "InstanceSlotUnavailableError";
+    }
+}
+
 export class HarnessInstanceStore {
     constructor(private readonly db: Database) {}
 
@@ -73,7 +88,7 @@ export class HarnessInstanceStore {
             WHERE id = $id AND desired_state = 'RUNNING'
                 AND actual_state IN ('READY', 'ACTIVE');
         `).run({ id, updatedAt: new Date().toISOString() });
-        if (result.changes !== 1) throw new Error(`HarnessInstance 无法获取执行槽位：${id}`);
+        if (result.changes !== 1) throw new InstanceSlotUnavailableError(id);
         return this.get(id)!;
     }
 

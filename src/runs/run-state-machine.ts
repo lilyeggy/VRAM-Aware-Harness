@@ -6,7 +6,9 @@
 import type {AgentRunStatus} from "./agent-run.ts"
 
 const allowedTransitions : Record<AgentRunStatus,readonly AgentRunStatus[]>={
-    QUEUED: ["RUNNING","INTERRUPTED"],
+    // 支柱 3：QUEUED -> FAILED 仅用于排队 TTL 熔断（QUEUE_TIMEOUT）——
+    // 任务等待超门限仍未获得调度准入时，安全流转到终态，杜绝永久饥饿死等。
+    QUEUED: ["RUNNING","INTERRUPTED","FAILED"],
     RUNNING : [
         "WAITING_TOOL",
         "INTERRUPTED",

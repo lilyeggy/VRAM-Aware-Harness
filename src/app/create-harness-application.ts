@@ -26,6 +26,10 @@ import {
     DeterministicExecutionPolicy,
 } from "../resources/execution-policy.ts";
 import {
+    BudgetAwareExecutionPolicy,
+    SchedulerCapacityBudgetUsage,
+} from "../resources/budget-aware-policy.ts";
+import {
     PolicyDecisionStore,
 } from "../resources/policy-decision-store.ts";
 import {
@@ -80,8 +84,14 @@ import {
 } from "../scheduling/tenant-run-scheduler.ts";
 import { openHarnessDatabase } from "../storage/database.ts";
 import { EvaluationAggregator } from "../eval/evaluation-aggregator.ts";
+import {
+    LlmCacheMetricsStore,
+} from "../eval/llm-cache-metrics-store.ts";
 import { ModelRouter } from "../llm-gateway/model-router.ts";
 import { LlmGateway } from "../llm-gateway/llm-gateway.ts";
+import {
+    BackendHealthMonitor,
+} from "../llm-gateway/backend-health-monitor.ts";
 import { HarnessTemplateStore } from "../templates/harness-template-store.ts";
 import { ToolExecutionStore } from "../tools/tool-execution-store.ts";
 import { ToolGateway } from "../tools/tool-gateway.ts";
@@ -134,6 +144,14 @@ export interface HarnessComposition {
     queuePump:RunQueuePump;
     runtime:AgentRuntime;
     resourceObserver:ResourceObserver;
+    /** 支柱 2：双卡 vLLM 网关（未配置后端时为 undefined）。 */
+    llmGateway:LlmGateway | undefined;
+    /** 支柱 2：后端健康探测（网关未启用或探测周期为 0 时为 undefined）。 */
+    llmHealthMonitor:BackendHealthMonitor | undefined;
+    /** 支柱 2：缓存命中指标持久化台账（网关未启用时为 undefined）。 */
+    llmCacheMetricsStore:LlmCacheMetricsStore | undefined;
+    /** 支柱 3：恢复执行器（含 MANUAL_REVIEW 审计与 fail-closed 重校验）。 */
+    recoveryExecutor:RecoveryExecutor;
     close():Promise<void>;
 }
 
@@ -194,6 +212,21 @@ export async function createHarnessApplication(
             }
         }
     }
+    if (config.agentApiKey !== undefined) {
+        // Pi/Worker 经 LLM 网关调用模型时使用这把专用凭证：只授 models:generate，
+        // 与人工 bootstrap key 分离，泄露时可单独撤销（最小权限 + 可审计归属）。
+        try {
+            credentialStore.create({
+                rawKey: config.agentApiKey,
+                tenantId: "agent-runtime",
+                scopes: ["models:generate"],
+            });
+        } catch (error) {
+            if (!(error instanceof Error) || !error.message.includes("UNIQUE")) {
+                throw error;
+            }
+        }
+    }
     const secretProvider = dependencies.secretProvider
         ?? new EnvironmentSecretProvider(process.env);
     const sandboxProvider = dependencies.sandboxProvider
@@ -210,6 +243,21 @@ export async function createHarnessApplication(
         toolExecutionStore,
         new PersistentToolPolicyGuard(effectivePolicyStore),
     );
+
+    // B1：WAITING_TOOL 接线——RunService 在 baseRuntime 之后创建，
+    // 通过晚绑定引用把工具执行阶段回调接到状态机。
+    let runServiceRef: RunService | undefined;
+    const notifyToolExecutionPhase = (
+        runId: string,
+        phase: "STARTED" | "ENDED",
+        info: { toolName: string; toolCallId: string },
+    ): void => {
+        try {
+            runServiceRef?.markToolPhase(runId, phase, info);
+        } catch (error) {
+            console.error("[Harness] Tool phase transition failed:", error);
+        }
+    };
 
     const baseRuntime = dependencies.runtime
         ?? (config.workerIsolation === "process"
@@ -234,6 +282,11 @@ export async function createHarnessApplication(
                 orphanSandboxCleaner: async (sandboxId: string) => {
                     await (sandboxProvider as SandboxProvider).terminate(sandboxId).catch(() => undefined);
                 },
+                // 支柱 0 × 支柱 1 合龙：Worker 内真实工具执行经此桥回到 Master
+                // 走完整 ToolGateway 流水线（策略守卫 + PREPARED 记账 + Checkpoint）。
+                toolGatewayBridge: toolGateway,
+                getRunEventSequence: (runId: string) => runStore.getLastEventSequence(runId),
+                onToolExecutionPhase: notifyToolExecutionPhase,
             })
             : await createPiRuntime(
                 config,
@@ -286,13 +339,33 @@ export async function createHarnessApplication(
         runStore, runtime, controlPlane, undefined, runOutputStore,
         workspaceResultCoordinator,
     );
+    runServiceRef = runService;
     const scheduler = new TenantRunScheduler({
         maxActiveRuns:config.maxActiveRuns,
         maxActiveRunsPerTenant:config.maxActiveRunsPerTenant,
     });
-    const policy = new DeterministicExecutionPolicy({
+    const basePolicy = new DeterministicExecutionPolicy({
         maxActiveRuns:config.maxActiveRuns,
     });
+    // B7：预算/fair-share 策略接线——仅在显式配置租户预算时叠加；
+    // 未配置时 admission 行为与历史完全一致（opt-in 组合，非默认开启）。
+    const budgetTenantIds = Object.keys(config.tenantBudgets);
+    const policy = budgetTenantIds.length > 0
+        ? new BudgetAwareExecutionPolicy(
+            basePolicy,
+            new SchedulerCapacityBudgetUsage(
+                scheduler,
+                config.tenantBudgets,
+                config.maxActiveRuns,
+                Object.fromEntries(
+                    budgetTenantIds.map((tenantId) => [
+                        tenantId,
+                        config.tenantBudgets[tenantId]!.weight,
+                    ]),
+                ),
+            ),
+        )
+        : basePolicy;
     const admission = new ResourceAdmissionService(
         resourceObserver,
         config.resourceThresholds,
@@ -303,6 +376,17 @@ export async function createHarnessApplication(
         runService,
         scheduler,
         admission,
+        undefined,
+        undefined,
+        null,
+        false,
+        {
+            // 支柱 3：排队 TTL——队列等待超过门限的 Run 安全熔断为
+            // FAILED(QUEUE_TIMEOUT)，防止多租户调度器被死等任务拖垮。
+            queueTtlMs: config.queueTtlMs,
+            // B4/B5：DB 对账——孤儿 QUEUED Run 重入队 + TTL 不依赖 pump 存活。
+            queuedRunReader: runStore,
+        },
     );
     const queuePump = new RunQueuePump(coordinator, {
         intervalMs:config.pumpIntervalMs,
@@ -315,7 +399,33 @@ export async function createHarnessApplication(
         toolExecutionStore,
         checkpointStore,
     );
-    const recoveryExecutor = new RecoveryExecutor(coordinator);
+    const recoveryExecutor = new RecoveryExecutor(
+        coordinator,
+        // 支柱 3：MANUAL_REVIEW 落审计证据。Run 保持 INTERRUPTED，
+        // 阻断原因与工具副作用证据进入事件时间线，等待人工确认后
+        // 才能通过既有恢复 API 继续推进。
+        (plan, decision) => {
+            const current = runStore.get(plan.run.id);
+            if (current === null || current.status !== "INTERRUPTED") {
+                return;
+            }
+            runStore.appendEvent({
+                eventId: crypto.randomUUID(),
+                runId: plan.run.id,
+                sequence: runStore.getLastEventSequence(plan.run.id) + 1,
+                type: "RUN_INTERRUPTED",
+                timestamp: new Date().toISOString(),
+                payloadVersion: 1,
+                payload: {
+                    reason: "MANUAL_REVIEW_REQUIRED",
+                    recoveryAction: decision.action,
+                    recoveryReason: decision.reason,
+                    blockingToolExecutionId:
+                        decision.blockingToolExecutionId,
+                },
+            });
+        },
+    );
     const queuedRunRestorer = new QueuedRunRecoveryService(
         runStore,
         checkpointStore,
@@ -345,6 +455,7 @@ export async function createHarnessApplication(
         workspaceResultCoordinator,
         instanceStore,
         conversationStore,
+        effectivePolicyStore,
     );
     const evaluationAggregator = new EvaluationAggregator(database);
     // Separate observer instance: token-rate counters must not race admission probes.
@@ -353,10 +464,38 @@ export async function createHarnessApplication(
         timeoutMs: config.resourceObservationTimeoutMs,
         gpuIds: config.gpuIds,
     }), { intervalMs: config.resourceMetricsIntervalMs });
-    // 方向 C：LLM 网关（仅当配置了后端时启用）。
-    const llmGateway = config.llmBackends.length > 0
-        ? new LlmGateway(new ModelRouter(config.llmBackends))
-        : undefined;
+    // 支柱 2：LLM 网关（仅当配置了后端时启用）。
+    // - 双卡负载均衡：策略来自 config.llmGatewayStrategy（默认 round-robin）；
+    // - 健康探测：周期回填 ModelRouter 健康状态；
+    // - 缓存命中：cached_tokens 样本同步落 SQLite（llm_cache_metrics）。
+    let llmGateway:LlmGateway | undefined;
+    let llmHealthMonitor:BackendHealthMonitor | undefined;
+    let llmCacheMetricsStore:LlmCacheMetricsStore | undefined;
+    if (config.llmBackends.length > 0) {
+        const llmRouter = new ModelRouter(config.llmBackends, {
+            loadBalancing: config.llmGatewayStrategy,
+        });
+        llmCacheMetricsStore = new LlmCacheMetricsStore(database);
+        llmGateway = new LlmGateway(llmRouter, {
+            cacheSampleSink: (sample) => {
+                llmCacheMetricsStore?.record(sample);
+            },
+            prefixCacheEnabled: config.llmPrefixCacheEnabled,
+            streamUsageCapture: config.llmStreamUsageCapture,
+            requestTimeoutMs: config.llmRequestTimeoutMs,
+        });
+        if (config.llmHealthProbeIntervalMs > 0) {
+            llmHealthMonitor = new BackendHealthMonitor(
+                llmRouter,
+                config.llmBackends,
+                {
+                    probeIntervalMs: config.llmHealthProbeIntervalMs,
+                    probePath: config.llmHealthProbePath,
+                },
+            );
+            llmHealthMonitor.start();
+        }
+    }
     const httpApi = new HarnessHttpApi(
         application,
         checkpointStore,
@@ -365,12 +504,16 @@ export async function createHarnessApplication(
             registerUser: (email, password) => credentialStore.registerUser(email, password),
             loginUser: (email, password) => credentialStore.loginUser(email, password),
             revokeSession: (token) => credentialStore.revokeSession(token),
+            sessionOwner: (token) => credentialStore.sessionOwner(token),
+            revokeAllSessions: (userId) => credentialStore.revokeAllSessions(userId),
             workspaceService,
             auditStore: accessAuditStore,
         },
         evaluationAggregator,
         llmGateway,
         resourceMetrics,
+        // N8：提交期输入上界。
+        { maxUserInputChars: config.maxUserInputChars },
     );
 
     let closed = false;
@@ -407,12 +550,17 @@ export async function createHarnessApplication(
         queuePump,
         runtime,
         resourceObserver,
+        llmGateway,
+        llmHealthMonitor,
+        llmCacheMetricsStore,
+        recoveryExecutor,
         async close() {
             if (closed) {
                 return;
             }
 
             await application.stop();
+            llmHealthMonitor?.stop();
             resourceMetrics.stop();
             await (sandboxProvider as SandboxProvider).close?.();
 

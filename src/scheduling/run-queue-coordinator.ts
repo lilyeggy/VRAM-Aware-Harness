@@ -26,6 +26,8 @@ import type {
     TenantRunScheduler,
 }   from "./tenant-run-scheduler.ts";
 
+import { InstanceSlotUnavailableError } from "../instances/harness-instance-store.ts";
+
 
 
 export type CoordinatorResult =
@@ -42,6 +44,22 @@ export type CoordinatorResult =
         run: AgentRun;
         decision: PolicyDecision;
     };
+
+export interface RunQueueCoordinatorOptions {
+    /**
+     * 支柱 3：排队 TTL（ms）。undefined 表示不启用排队超时熔断。
+     */
+    queueTtlMs?: number;
+    /** 时钟（测试注入）。 */
+    now?: () => number;
+    /**
+     * B4/B5：DB 侧 QUEUED Run 读取器（组合根传 runStore）。
+     * 提供 后 reconcileQueuedRuns() 才能对账：把"DB 仍 QUEUED 但已脱离
+     * 内存队列"的孤儿（claimNext 与 re-enqueue 之间崩溃等 TOCTOU 窗口）
+     * 重新入队，并对超过 TTL 的 DB QUEUED Run 熔断——不依赖 pump 是否存活。
+     */
+    readonly queuedRunReader?: { listQueuedRuns(): readonly AgentRun[] };
+}
 
 export function toQueueReasonCode(
     decision: PolicyDecision,
@@ -82,8 +100,50 @@ export class RunQueueCoordinator  {
         private readonly lastQueueBlockerByRunId = new Map<string, QueueReasonCode>(),
         private drainPromise: Promise<CoordinatorResult[]> | null = null, // 当前是否有drain正在运行
         private drainRequested = false, // 正在运行期间，是否又收到了新的推进请求
-        
+        private readonly options: RunQueueCoordinatorOptions = {},
     ) {}
+
+    /**
+     * 支柱 3：一级排队超时（Queue TTL）。
+     *
+     * 每次 drain 前扫描队列：Run 等待时间（enqueuedAt 起，含多次准入
+     * 重排的累计等待）超过 queueTtlMs 且仍未获得调度准入时，把它从
+     * 队列摘除并经状态机安全流转到 FAILED（QUEUE_TIMEOUT），同时清理
+     * 排队计数与待恢复输入，杜绝任务永久饥饿死等、排队计数泄漏。
+     */
+    private enforceQueueTtl(): void {
+        const queueTtlMs = this.options.queueTtlMs;
+        if (queueTtlMs === undefined) {
+            return;
+        }
+        const nowMs = this.options.now?.() ?? Date.now();
+
+        for (const entry of this.scheduler.listQueue()) {
+            const enqueuedAtMs = Date.parse(entry.enqueuedAt);
+            if (
+                !Number.isFinite(enqueuedAtMs)
+                || nowMs - enqueuedAtMs <= queueTtlMs
+            ) {
+                continue;
+            }
+
+            // 先把状态机事实落库（QUEUED -> FAILED），成功后再摘除排队
+            // 条目释放 slot；若落 FAILED 失败则保留排队，下一轮 TTL 重试。
+            try {
+                this.runService.failQueuedRun(
+                    entry.runId,
+                    "QUEUE_TIMEOUT",
+                    `排队超时：Run 已在队列等待 ${nowMs - enqueuedAtMs}ms，超过 queueTtlMs=${queueTtlMs} 门限`,
+                    { waitedMs: nowMs - enqueuedAtMs, queueTtlMs },
+                );
+            } catch (error) {
+                console.error(`排队超时熔断失败：${entry.runId}`, error);
+                continue;
+            }
+            this.scheduler.removeQueued(entry.runId);
+            this.pendingResumeByRunId.delete(entry.runId);
+        }
+    }
 
     /**
      * Materialize scheduler-only blocking facts into each queued Run timeline.
@@ -148,10 +208,87 @@ export class RunQueueCoordinator  {
             runId:run.id,
             tenantId:run.tenantId,
             sessionId:run.harnessSessionId,
+            // B4：排队时间取 DB updatedAt（进入/回到 QUEUED 的时刻），
+            // 重启恢复不重置 TTL 时钟，等待时间跨重启累计。
+            enqueuedAt:run.updatedAt,
         });
         this.synchronizeQueueBlockers();
 
         return run;
+    }
+
+    /**
+     * B4/B5：队列对账（每次 drain 与启动恢复后都可安全重放）。
+     *
+     * 1. DB 中 QUEUED 但不在内存队列的 Run（claimNext 与 release+re-enqueue
+     *    之间崩溃、executeQueuedRun 启动前抛错等 TOCTOU 归档窗口的孤儿）
+     *    重新入队，enqueuedAt 取 DB updatedAt；
+     * 2. 对超过 queueTtlMs 的 DB QUEUED Run（无论是否在内存队列）执行
+     *    FAILED(QUEUE_TIMEOUT) 熔断——即使 pump 已停，下一次 drain/重启也会补上。
+     */
+    reconcileQueuedRuns(): { requeued: string[]; timedOut: string[] } {
+        const reader = this.options.queuedRunReader;
+        const requeued: string[] = [];
+        const timedOut: string[] = [];
+        if (reader === undefined) {
+            return { requeued, timedOut };
+        }
+
+        const nowMs = this.options.now?.() ?? Date.now();
+        const queueTtlMs = this.options.queueTtlMs;
+        const queuedInMemory = new Set(
+            this.scheduler.listQueue().map((entry) => entry.runId),
+        );
+
+        for (const run of reader.listQueuedRuns()) {
+            if (run.status !== "QUEUED") {
+                continue;
+            }
+
+            const enqueuedAtMs = Date.parse(run.updatedAt);
+            const waitedMs = Number.isFinite(enqueuedAtMs)
+                ? nowMs - enqueuedAtMs
+                : 0;
+
+            if (
+                queueTtlMs !== undefined
+                && waitedMs > queueTtlMs
+            ) {
+                try {
+                    this.runService.failQueuedRun(
+                        run.id,
+                        "QUEUE_TIMEOUT",
+                        `排队超时：Run 已在队列等待 ${waitedMs}ms，超过 queueTtlMs=${queueTtlMs} 门限`,
+                        { waitedMs, queueTtlMs, source: "RECONCILE" },
+                    );
+                } catch (error) {
+                    console.error(`排队超时熔断失败：${run.id}`, error);
+                    continue;
+                }
+                this.scheduler.removeQueued(run.id);
+                this.pendingResumeByRunId.delete(run.id);
+                timedOut.push(run.id);
+                continue;
+            }
+
+            if (queuedInMemory.has(run.id)) {
+                continue;
+            }
+
+            this.scheduler.enqueue({
+                runId:run.id,
+                tenantId:run.tenantId,
+                sessionId:run.harnessSessionId,
+                enqueuedAt:run.updatedAt,
+            });
+            requeued.push(run.id);
+        }
+
+        if (requeued.length > 0 || timedOut.length > 0) {
+            this.synchronizeQueueBlockers();
+        }
+
+        return { requeued, timedOut };
     }
 
     async attemptNext() : Promise<CoordinatorResult> {
@@ -237,7 +374,7 @@ export class RunQueueCoordinator  {
         // 处理start决策
         const resumeInput = this.pendingResumeByRunId.get(queuedRun.runId);
         try {
-            const run = 
+            const run =
             resumeInput === undefined
             ? await this.runService.executeQueuedRun(
                 queuedRun.runId,
@@ -251,6 +388,32 @@ export class RunQueueCoordinator  {
                 run,
                 decision,
             };
+        } catch (error) {
+            // N2：重启对账窗口里实例行 actual_state 尚未就绪，启动尝试是
+            // 瞬态失败。识别后重新入队（下一轮 pump 重试），不再把异常栈
+            // 抛进 pump 的 onError；其余错误维持原行为。
+            if (error instanceof InstanceSlotUnavailableError) {
+                console.warn(
+                    `实例暂未就绪，Run 重新入队等待下一轮调度：${queuedRun.runId}（${error.instanceId}）`,
+                );
+                // 与 admission 失败路径一致：先 release 再 enqueue，
+                // 否则 enqueue 会认为 Run 仍在执行而拒绝入队。
+                this.scheduler.release(queuedRun.runId);
+                this.scheduler.enqueue({
+                    runId : queuedRun.runId,
+                    tenantId : queuedRun.tenantId,
+                    ...(queuedRun.sessionId === undefined ? {} : { sessionId: queuedRun.sessionId }),
+                    reasonCode : "INSTANCE_NOT_READY",
+                    enqueuedAt : queuedRun.enqueuedAt,
+                });
+                this.synchronizeQueueBlockers();
+                return {
+                    kind:"DEFERRED",
+                    runId:queuedRun.runId,
+                    decision,
+                };
+            }
+            throw error;
         } finally {
             if (resumeInput !== undefined){
                 this.pendingResumeByRunId.delete(queuedRun.runId);
@@ -261,6 +424,13 @@ export class RunQueueCoordinator  {
     }
     
     private async drainOnce():Promise<CoordinatorResult[]> {
+        // 支柱 3：先熔断排队超时的 Run，再推进队列。
+        this.enforceQueueTtl();
+
+        // B4/B5：DB 对账——补回脱离内存队列的孤儿 QUEUED Run，并对
+        // DB 侧超 TTL 的 Run 熔断（不依赖内存队列是否还有它）。
+        this.reconcileQueuedRuns();
+
         const errors:unknown[] = [];
         // 看看当前有多少要处理的请求
         let remainingAttempts = this.scheduler.listQueue().length;
@@ -394,6 +564,8 @@ export class RunQueueCoordinator  {
                 runId:run.id,
                 tenantId:run.tenantId,
                 sessionId:run.harnessSessionId,
+                // B4：与 restoreQueuedRun 一致，重启/恢复不重置 TTL 时钟。
+                enqueuedAt:run.updatedAt,
             });
         } catch (error) {
             this.pendingResumeByRunId.delete(run.id);

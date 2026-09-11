@@ -11,8 +11,9 @@ import type {
     RuntimeStartRequest,
 } from "../runtime/agent-runtime.ts";
 import type { SandboxProfile } from "../sandbox/sandbox-profile.ts";
+import type { ExecuteToolInput } from "../tools/tool-gateway.ts";
 
-export const WORKER_PROTOCOL_VERSION = 1;
+export const WORKER_PROTOCOL_VERSION = 2;
 
 // ============================================================================
 // 1. Error Serialization
@@ -97,11 +98,29 @@ export interface ShutdownMessage {
     readonly timestamp?: string;
 }
 
+export interface ToolPrepareResponseMessage {
+    readonly type: "TOOL_PREPARE_RESPONSE";
+    readonly runId: string;
+    readonly requestId: number;
+    readonly decision: ToolPrepareDecisionPayload;
+    readonly timestamp?: string;
+}
+
+export interface ToolCompleteResponseMessage {
+    readonly type: "TOOL_COMPLETE_RESPONSE";
+    readonly runId: string;
+    readonly requestId: number;
+    readonly ok: boolean;
+    readonly timestamp?: string;
+}
+
 export type MasterToWorkerMessage =
     | StartRunMessage
     | ResumeRunMessage
     | InterruptRunMessage
-    | ShutdownMessage;
+    | ShutdownMessage
+    | ToolPrepareResponseMessage
+    | ToolCompleteResponseMessage;
 
 // ============================================================================
 // 4. Worker -> Master Messages
@@ -143,12 +162,48 @@ export interface RunInterruptedMessage {
     readonly timestamp?: string;
 }
 
+export interface ToolPrepareRequestMessage {
+    readonly type: "TOOL_PREPARE_REQUEST";
+    readonly runId: string;
+    readonly requestId: number;
+    readonly input: ExecuteToolInput;
+    readonly timestamp?: string;
+}
+
+export interface ToolCompleteRequestMessage {
+    readonly type: "TOOL_COMPLETE_REQUEST";
+    readonly runId: string;
+    readonly requestId: number;
+    readonly toolExecutionId: string;
+    readonly outcome:
+        | { readonly ok: true; readonly result: unknown }
+        | { readonly ok: false; readonly error: string };
+    readonly timestamp?: string;
+}
+
 export type WorkerToMasterMessage =
     | WorkerReadyMessage
     | RuntimeEventMessage
     | RunCompletedMessage
     | RunFailedMessage
-    | RunInterruptedMessage;
+    | RunInterruptedMessage
+    | ToolPrepareRequestMessage
+    | ToolCompleteRequestMessage;
+
+/**
+ * ToolGateway prepare 阶段跨 IPC 的裁决载荷。
+ * ALLOWED：Master 已写 PREPARED，Worker 可执行真实工具；
+ * REUSE：历史 SUCCEEDED 命中，直接复用缓存结果；
+ * DENIED：策略或恢复裁决拒绝，Worker 不得触碰真实工具。
+ */
+export type ToolPrepareDecisionPayload =
+    | {
+          readonly kind: "ALLOWED";
+          readonly toolExecutionId: string;
+          readonly lastEventSequence: number;
+      }
+    | { readonly kind: "REUSE"; readonly result: unknown }
+    | { readonly kind: "DENIED"; readonly reason: string };
 
 export type WorkerProtocolMessage = MasterToWorkerMessage | WorkerToMasterMessage;
 
@@ -163,7 +218,9 @@ export function isMasterToWorkerMessage(value: unknown): value is MasterToWorker
         type === "START_RUN" ||
         type === "RESUME_RUN" ||
         type === "INTERRUPT_RUN" ||
-        type === "SHUTDOWN"
+        type === "SHUTDOWN" ||
+        type === "TOOL_PREPARE_RESPONSE" ||
+        type === "TOOL_COMPLETE_RESPONSE"
     );
 }
 
@@ -175,7 +232,9 @@ export function isWorkerToMasterMessage(value: unknown): value is WorkerToMaster
         type === "RUNTIME_EVENT" ||
         type === "RUN_COMPLETED" ||
         type === "RUN_FAILED" ||
-        type === "RUN_INTERRUPTED"
+        type === "RUN_INTERRUPTED" ||
+        type === "TOOL_PREPARE_REQUEST" ||
+        type === "TOOL_COMPLETE_REQUEST"
     );
 }
 
@@ -286,6 +345,64 @@ export function createRunInterruptedMessage(
         type: "RUN_INTERRUPTED",
         runId,
         reason,
+        timestamp: new Date().toISOString(),
+    };
+}
+
+export function createToolPrepareRequestMessage(
+    runId: string,
+    requestId: number,
+    input: ExecuteToolInput,
+): ToolPrepareRequestMessage {
+    return {
+        type: "TOOL_PREPARE_REQUEST",
+        runId,
+        requestId,
+        input,
+        timestamp: new Date().toISOString(),
+    };
+}
+
+export function createToolCompleteRequestMessage(
+    runId: string,
+    requestId: number,
+    toolExecutionId: string,
+    outcome: ToolCompleteRequestMessage["outcome"],
+): ToolCompleteRequestMessage {
+    return {
+        type: "TOOL_COMPLETE_REQUEST",
+        runId,
+        requestId,
+        toolExecutionId,
+        outcome,
+        timestamp: new Date().toISOString(),
+    };
+}
+
+export function createToolPrepareResponseMessage(
+    runId: string,
+    requestId: number,
+    decision: ToolPrepareDecisionPayload,
+): ToolPrepareResponseMessage {
+    return {
+        type: "TOOL_PREPARE_RESPONSE",
+        runId,
+        requestId,
+        decision,
+        timestamp: new Date().toISOString(),
+    };
+}
+
+export function createToolCompleteResponseMessage(
+    runId: string,
+    requestId: number,
+    ok: boolean,
+): ToolCompleteResponseMessage {
+    return {
+        type: "TOOL_COMPLETE_RESPONSE",
+        runId,
+        requestId,
+        ok,
         timestamp: new Date().toISOString(),
     };
 }

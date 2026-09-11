@@ -70,11 +70,14 @@ export class OciSandboxSpecCompiler {
         const networkMode = profile === "development"
             ? (policy.allowNetwork ? "bridge" : "none")
             : "none";
-        // Docker's runsc integration on the currently supported server image
-        // rejects --pids-limit during container startup. Do not claim a PID
-        // cgroup limit that the runtime cannot enforce; the capability is
-        // represented explicitly in the compiled/audited spec instead.
-        const pidLimit = this.config.runtime === "runsc" ? null : 128;
+        // gVisor runsc 实测接受并执行 --pids-limit：release-20260817.0 上不传该
+        // 参数时 900/900 个子进程全部创建成功，传 --pids-limit 128 / 512 时分别在
+        // 约 40 / 229 个子进程处被拦停。旧注释声称 runsc 启动阶段会拒绝该参数，
+        // 与实测不符；跳过它会让沙箱进程数完全不设上限（本项目
+        // smoke:container:attacks 的 PID 项正是因此失败）。注意 gVisor 的进程计数
+        // 与 runc 不同，同一名义值下可并发的进程数明显更少，超限错误文本为
+        // "Out of memory" 而非 fork 失败。
+        const pidLimit = 128;
         const spec = freezeSandboxSpec({
             profile,
             runtime: this.config.runtime,
@@ -110,11 +113,12 @@ export class OciSandboxSpecCompiler {
         if (policy.resourceLimits.memoryMiB !== null) {
             args.push("--memory", `${policy.resourceLimits.memoryMiB}m`);
         }
-        for (const name of secretNames) {
-            // The caller replaces this marker with a value in the short-lived
-            // Docker argv. It cannot accidentally be persisted as evidence.
-            args.push("--env", `${name}=__HARNESS_SECRET_${name}__`);
-        }
+        // N13：Secret 不进入容器创建参数。历史上这里下发
+        // `--env NAME=__HARNESS_SECRET_NAME__`，再由 Provider 在 argv 里替换成明文，
+        // 结果是①创建期明文出现在 docker 进程参数中；②明文长期留在容器
+        // Config.Env，任何 docker 组成员 `docker inspect` 都能读出。
+        // 现在只把 Secret **名字**记进可审计 spec，明文在执行期经
+        // `docker exec --env NAME` 从客户端进程环境注入（见 ContainerSandboxProvider.execute）。
         args.push(this.config.image, "tail", "-f", "/dev/null");
 
         return Object.freeze({ spec, createArgs: Object.freeze(args) });

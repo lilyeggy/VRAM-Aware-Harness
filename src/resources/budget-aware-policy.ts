@@ -4,6 +4,7 @@ import type {
     PolicyDecision,
 } from "./execution-policy.ts";
 import type { ResourceLedger } from "./resource-ledger.ts";
+import type { TenantRunScheduler } from "../scheduling/tenant-run-scheduler.ts";
 import {
     computeFairShareUnits,
     type TenantBudget,
@@ -51,6 +52,43 @@ export class LedgerBudgetUsage implements TenantUsageResolver {
         const used = this.activeUnits(tenantId);
         const ceiling = Math.min(this.fairShareUnits(tenantId), this.maxUnits(tenantId));
         return Math.max(0, ceiling - used);
+    }
+}
+
+/**
+ * B7 组合根默认用量源：直接以调度器的活跃 Run 计数为准（units/run = 1）。
+ * 相比 ResourceLedger，它不需要在 Run 生命周期里另插 acquire/release 记账，
+ * 用量事实与调度器强一致；将来要引入 token/GPU 分钟等更细粒度单位时，
+ * 再换成 LedgerBudgetUsage + 独立账本。
+ */
+export class SchedulerCapacityBudgetUsage implements TenantUsageResolver {
+    constructor(
+        private readonly scheduler: Pick<TenantRunScheduler, "getCapacity">,
+        private readonly budgets: Readonly<Record<string, TenantBudget>>,
+        private readonly capacityUnits: number,
+        private readonly weights: Readonly<Record<string, number>> = {},
+    ) {}
+
+    activeUnits(tenantId: string): number {
+        return this.scheduler.getCapacity(tenantId).activeTenantRunCount;
+    }
+
+    fairShareUnits(tenantId: string): number {
+        return computeFairShareUnits({
+            tenantId,
+            capacityUnits: this.capacityUnits,
+            weights: this.weights,
+        });
+    }
+
+    maxUnits(tenantId: string): number {
+        const budget = this.budgets[tenantId];
+        return budget ? budget.maxUnits : Infinity;
+    }
+
+    availableUnits(tenantId: string): number {
+        const ceiling = Math.min(this.fairShareUnits(tenantId), this.maxUnits(tenantId));
+        return Math.max(0, ceiling - this.activeUnits(tenantId));
     }
 }
 

@@ -21,7 +21,6 @@ export * from "./events/run-event-timeline.ts";
 export * from "./events/runtime-event-bridge.ts";
 
 export * from "./http/harness-http-api.ts";
-export * from "./http/harness-dashboard.ts";
 export * from "./http/harness-http-server.ts";
 export * from "./http/harness-user-console.ts";
 

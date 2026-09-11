@@ -1,4 +1,12 @@
 // 它决定的是能不能恢复
+//
+// 支柱 3：副作用感知恢复（Side-Effect Aware Recovery）。
+// 自动恢复安全防线 fail closed：
+// - 只有「仍处 PREPARED 且 READ_ONLY」的工具允许自动重放 → AUTO_RESUME；
+// - UNKNOWN_EFFECT（如任意 bash 脚本）或未证明幂等的写入
+//   （IDEMPOTENT_WRITE 在幂等证据校验落地前同样不信任）→ 坚决禁止
+//   自动重试/自动重放，确定性落为 MANUAL_REVIEW，任务保持 INTERRUPTED，
+//   必须经人工确认后才能继续推进。
 
 import {
     canAutomaticallyReplay,

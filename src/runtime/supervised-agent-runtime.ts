@@ -1,5 +1,11 @@
 import type { SandboxProvider } from "../sandbox/sandbox-provider.ts";
-import type { AgentRuntime, RuntimeEventHandler, RuntimeResumeRequest, RuntimeStartRequest } from "./agent-runtime.ts";
+import {
+    isForceKillableRuntime,
+    type AgentRuntime,
+    type RuntimeEventHandler,
+    type RuntimeResumeRequest,
+    type RuntimeStartRequest,
+} from "./agent-runtime.ts";
 
 export interface ExecutionSupervisorConfig {
     readonly executionTimeoutMs: number;
@@ -20,7 +26,15 @@ export class RuntimeExecutionTimeoutError extends Error {
     }
 }
 
-/** Bounds runtime calls and converts an unresponsive abort into sandbox cleanup. */
+/**
+ * Bounds runtime calls and converts an unresponsive abort into sandbox cleanup.
+ *
+ * 支柱 3 两级强杀语义：执行超过 executionTimeoutMs 先触发优雅中断
+ * （Graceful Interrupt）；若 interruptGraceMs 宽限期内仍未退出，则升级为
+ * 物理强杀——对具备 ForceKillableRuntime 能力的 inner Runtime（如
+ * Worker 子进程）执行 SIGKILL，并强制 terminate 底层沙箱容器，释放
+ * 挂起的 CPU/内存与资源租约，防止僵尸进程。
+ */
 export class SupervisedAgentRuntime implements AgentRuntime {
     private readonly active = new Map<string, ActiveInvocation>();
 
@@ -45,6 +59,8 @@ export class SupervisedAgentRuntime implements AgentRuntime {
         const active = this.active.get(runId);
         await this.interruptWithinGrace(runId);
         if (active !== undefined && !(await settlesWithin(active.runtimePromise, this.config.interruptGraceMs))) {
+            // 宽限期内未退出：物理强杀执行载体，再强制清理沙箱。
+            await this.forceKillInner(runId);
             await this.terminate(active.sandboxId);
             active.forceStop(new Error(`Agent Runtime 未在中断宽限期内退出：${runId}`));
         }
@@ -69,7 +85,11 @@ export class SupervisedAgentRuntime implements AgentRuntime {
                 forced,
             ]);
             if (outcome === "DONE") return;
+            // 执行超时：先优雅中断；宽限期内仍未退出则物理强杀。
             await this.interruptWithinGrace(runId);
+            if (!(await settlesWithin(runtimePromise, this.config.interruptGraceMs))) {
+                await this.forceKillInner(runId);
+            }
             await this.terminate(sandboxId);
             void runtimePromise.catch(() => undefined);
             throw new RuntimeExecutionTimeoutError(runId, this.config.executionTimeoutMs);
@@ -82,6 +102,17 @@ export class SupervisedAgentRuntime implements AgentRuntime {
     private async interruptWithinGrace(runId: string): Promise<void> {
         const interrupt = this.inner.interrupt(runId);
         if (!(await settlesWithin(interrupt, this.config.interruptGraceMs))) void interrupt.catch(() => undefined);
+    }
+
+    /** 物理强杀 inner Runtime 的执行载体（Worker 子进程 SIGKILL 等）。 */
+    private async forceKillInner(runId: string): Promise<void> {
+        if (!isForceKillableRuntime(this.inner)) return;
+        try {
+            await this.inner.forceKill(runId);
+        } catch (error) {
+            // 强杀失败不掩盖原始超时事实，沙箱强制清理仍会继续。
+            console.error(`[SupervisedAgentRuntime] forceKill 失败：${runId}`, error);
+        }
     }
 
     private async terminate(sandboxId: string | undefined): Promise<void> {

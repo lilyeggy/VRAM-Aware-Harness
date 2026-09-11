@@ -1,5 +1,5 @@
 import { chownSync, mkdirSync, rmSync, statSync } from "node:fs";
-import { resolve } from "node:path";
+import { resolve, sep } from "node:path";
 import type { Workspace, WorkspaceStore } from "./workspace-store.ts";
 
 /** Maps a tenant-owned opaque ID to a server-controlled host directory. */
@@ -26,7 +26,9 @@ export class WorkspaceService {
             rootPath: resolve(this.root, tenantId, id),
             createdAt: new Date().toISOString(),
         };
-        if (!workspace.rootPath.startsWith(`${this.root}/`)) {
+        // D6：分隔符来自 path.sep（POSIX 为 "/"，Windows 为 "\"），
+        // 硬编码 "/" 在 Windows 上会把 `C:\root-evil` 误判为合法前缀。
+        if (!workspace.rootPath.startsWith(`${this.root}${sep}`)) {
             throw new Error("非法 Workspace 根目录");
         }
         mkdirSync(workspace.rootPath, { recursive: true, mode: 0o700 });

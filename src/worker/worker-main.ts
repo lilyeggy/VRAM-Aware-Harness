@@ -24,6 +24,7 @@ import {
     type WorkerRuntimeConfig,
     type WorkerToMasterMessage,
 } from "./worker-protocol.ts";
+import { WorkerToolGateway } from "./worker-tool-gateway.ts";
 
 // 1. Redirect standard logging to stderr to prevent corrupting IPC on stdout
 console.log = (...args: unknown[]) => console.error(...args);
@@ -41,6 +42,12 @@ function sendToMaster(msg: WorkerToMasterMessage): Promise<void> {
         }
     });
 }
+
+// 工具治理网关：所有真实工具执行前都经 Master 裁决并记账（PREPARED→COMPLETE），
+// 本进程内不存在旁路放行的工具调用路径。
+const toolGateway = new WorkerToolGateway((msg) => {
+    void sendToMaster(msg);
+});
 
 // 2. Ephemeral Sandbox Store for Worker Container Execution
 class EphemeralSandboxStore {
@@ -146,8 +153,8 @@ async function setupRuntime(config: WorkerRuntimeConfig, sandboxId?: string, thi
             ...(thinkingLevel ? { thinkingLevel } : {}),
         },
         {
-            gateway: { execute: async (_input, invokeTool) => invokeTool() },
-            getLastEventSequence: () => 0,
+            gateway: toolGateway,
+            getLastEventSequence: (runId: string) => toolGateway.getLastEventSequence(runId),
             ...(containerProvider ? { sandboxExecutor: containerProvider } : {}),
         },
     );
@@ -156,11 +163,18 @@ async function setupRuntime(config: WorkerRuntimeConfig, sandboxId?: string, thi
 }
 
 // 5. IPC Message Handler
+// D9：故障注入逻辑住在独立模块，仅在 HARNESS_WORKER_SIMULATE 显式设置时
+// 动态加载——默认生产入口不包含任何注入代码路径。
 const simulateMode = process.env.HARNESS_WORKER_SIMULATE;
-
-if (simulateMode === "corrupt_stdout") {
-    process.stdout.write("NON_JSON_CORRUPT_STDIO_LINE_FOR_RESILIENCE_TESTING\n");
-}
+const faultInjection = simulateMode === undefined
+    ? undefined
+    : (await import("./worker-fault-injection.ts")).installWorkerFaultInjection(simulateMode, {
+        sendToMaster,
+        toolGateway,
+        pendingInterruptRunIds,
+        pendingInterruptReasons,
+        notifyInterrupted,
+    });
 
 async function handleMasterMessage(msg: MasterToWorkerMessage): Promise<void> {
     if (!isMasterToWorkerMessage(msg)) {
@@ -178,54 +192,8 @@ async function handleMasterMessage(msg: MasterToWorkerMessage): Promise<void> {
                 return;
             }
 
-            if (simulateMode === "crash_exit") {
-                console.error(`[Worker PID ${process.pid}] Simulating abnormal exit 42`);
-                process.exit(42);
-            }
-            if (simulateMode === "crash_sigkill") {
-                console.error(`[Worker PID ${process.pid}] Simulating SIGKILL`);
-                process.kill(process.pid, "SIGKILL");
-                return;
-            }
-            if (simulateMode === "fail_run") {
-                console.error(`[Worker PID ${process.pid}] Simulating run failure`);
-                await sendToMaster(createRunFailedMessage(msg.runId, new Error("Simulated worker execution failure")));
-                setTimeout(() => process.exit(0), 10);
-                return;
-            }
-            if (simulateMode === "hang") {
-                console.error(`[Worker PID ${process.pid}] Simulating hang`);
-                return;
-            }
-            if (simulateMode === "hang_stubborn") {
-                console.error(`[Worker PID ${process.pid}] Simulating stubborn hang`);
-                return;
-            }
-            if (simulateMode === "mock_stream") {
-                if (pendingInterruptRunIds.has(msg.runId)) {
-                    await notifyInterrupted(msg.runId, pendingInterruptReasons.get(msg.runId) ?? "Interrupted before mock stream");
-                    setTimeout(() => process.exit(0), 10);
-                    return;
-                }
-                await sendToMaster(createRuntimeEventMessage(msg.runId, {
-                    type: "agent_started",
-                    runId: msg.runId,
-                    timestamp: new Date().toISOString(),
-                    runtimeSessionRef: "mock-session-ref",
-                }));
-                await sendToMaster(createRuntimeEventMessage(msg.runId, {
-                    type: "text_delta",
-                    runId: msg.runId,
-                    timestamp: new Date().toISOString(),
-                    delta: "Hello from isolated worker subprocess!",
-                }));
-                await sendToMaster(createRuntimeEventMessage(msg.runId, {
-                    type: "agent_completed",
-                    runId: msg.runId,
-                    timestamp: new Date().toISOString(),
-                }));
-                await sendToMaster(createRunCompletedMessage(msg.runId, "Done!"));
-                setTimeout(() => process.exit(0), 10);
+            // D9：故障注入分支已全部搬入 worker-fault-injection.ts（按需动态加载）。
+            if (faultInjection && await faultInjection.onStartRun(msg)) {
                 return;
             }
 
@@ -422,6 +390,12 @@ async function handleMasterMessage(msg: MasterToWorkerMessage): Promise<void> {
         case "SHUTDOWN": {
             process.exit(0);
         }
+
+        case "TOOL_PREPARE_RESPONSE":
+        case "TOOL_COMPLETE_RESPONSE": {
+            toolGateway.handleMasterMessage(msg);
+            break;
+        }
     }
 }
 
@@ -437,6 +411,8 @@ process.stdin.on("data", (chunk: Buffer | string) => {
 });
 
 process.stdin.on("end", () => {
+    // Master 断连时 fail-closed：拒绝所有在途工具裁决，不放过任何未受治执行。
+    toolGateway.failAllPending("Master IPC 已关闭，工具治理裁决不可用");
     for (const msg of parser.flush()) {
         handleMasterMessage(msg).catch((err) => {
             console.error(`[Worker PID ${process.pid}] Error handling flushed master message:`, err);

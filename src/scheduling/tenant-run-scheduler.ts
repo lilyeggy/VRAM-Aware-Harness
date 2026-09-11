@@ -15,7 +15,8 @@ export type QueueReasonCode =
     | "RESOURCE_CRITICAL"
     | "RESOURCE_UNKNOWN"
     | "RESOURCE_OBSERVATION_FAILED"
-    | "TENANT_BUDGET_EXCEEDED";
+    | "TENANT_BUDGET_EXCEEDED"
+    | "INSTANCE_NOT_READY";
 
 // 队列里面的 Run 的格式要求
 export interface EnqueueRunInput {

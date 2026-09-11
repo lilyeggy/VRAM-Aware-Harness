@@ -204,7 +204,11 @@ function createPiToolDefinition(
     ) {
         throw new Error("Sandbox 工具执行边界缺少 sandboxId 或命令执行器，拒绝回退宿主机");
     }
-    if (sandboxId !== undefined && sandboxExecutor === undefined) {
+    if (
+        enforcement?.toolExecutionBoundary !== "HOST"
+        && sandboxId !== undefined
+        && sandboxExecutor === undefined
+    ) {
         throw new Error("已有 Sandbox execution context 但缺少命令执行器，拒绝回退宿主机");
     }
     if (sandboxId !== undefined && sandboxExecutor !== undefined) {
@@ -212,6 +216,8 @@ function createPiToolDefinition(
             toolName, workspacePath, sandboxId, sandboxExecutor,
         );
     }
+    // HOST 边界（managed-local）：sandboxId 仅为 workspace 归属标识，
+    // 工具本就在宿主机受管目录执行，不需要容器命令执行器。
     switch (toolName) {
         case "read":
             return createReadToolDefinition(workspacePath);

@@ -142,10 +142,9 @@ export class ContainerSandboxProvider implements SandboxProvider, SandboxCommand
             createdAt: now, updatedAt: now, failureReason: null,
         };
         this.store.create(record);
-        const args = this.withSecretValues(
-            this.adapter.augmentCreateArgs(compiled.createArgs),
-            environment,
-        );
+        // N13：创建参数里不再有 Secret 明文（也没有占位符），明文只保留在
+        // Provider 内存中，执行期经客户端环境注入。
+        const args = [...this.adapter.augmentCreateArgs(compiled.createArgs)];
         const keyArgs = [...args];
         keyArgs[keyArgs.indexOf('--name') + 1] = '<resource>';
         const poolKey = JSON.stringify([input.policy.tenantId, keyArgs]);
@@ -217,9 +216,15 @@ export class ContainerSandboxProvider implements SandboxProvider, SandboxCommand
     async execute(sandboxId: string, command: readonly string[]) {
         const name = this.containerBySandboxId.get(sandboxId);
         if (name === undefined) throw new Error(`Sandbox 不可执行：${sandboxId}`);
+        // N13：只把 Secret **名字**放进 argv，明文通过 docker CLI 进程环境传递
+        // （`docker exec --env NAME` 的语义是"取客户端同名环境变量的值"）。
+        // 这样明文既不出现在 /proc/*/cmdline（同机任意用户可读），
+        // 也不会写进容器 Config.Env（docker 组成员可用 docker inspect 读出）。
+        const authorizedSecrets = this.secretValues.get(sandboxId) ?? {};
+        const secretArgs = Object.keys(authorizedSecrets).flatMap((secretName) => ["--env", secretName]);
         const result = await this.commands.run([
-            this.docker, "exec", "--workdir", "/workspace", name, ...command,
-        ]);
+            this.docker, "exec", "--workdir", "/workspace", ...secretArgs, name, ...command,
+        ], authorizedSecrets);
         if (result.exitCode !== 0 && isContainerMissing(result.stderr || result.stdout)) {
             this.markLost(sandboxId, redact(result.stderr || result.stdout));
         }
@@ -260,12 +265,6 @@ export class ContainerSandboxProvider implements SandboxProvider, SandboxCommand
         return () => this.handlers.delete(handler);
     }
 
-    private withSecretValues(args: readonly string[], environment: Readonly<Record<string, string>>): string[] {
-        return args.map((argument) => argument.replace(
-            /__HARNESS_SECRET_([A-Z][A-Z0-9_]*)__/, (_, name: string) => environment[name] ?? "",
-        ));
-    }
-
     private emit(record: SandboxRecord, status: "LOST" | "FAILED", reason: string): void {
         for (const handler of this.handlers) handler({
             sandboxId: record.id, runId: record.runId, instanceId: record.instanceId,
@@ -290,12 +289,19 @@ export class ContainerSandboxProvider implements SandboxProvider, SandboxCommand
 }
 
 export class BunContainerCommandRuntime implements ContainerCommandRuntime {
-    async run(args: readonly string[]) {
-        const process = Bun.spawn([...args], { stdout: "pipe", stderr: "pipe" });
+    async run(args: readonly string[], environment?: Readonly<Record<string, string>>) {
+        const child = Bun.spawn([...args], {
+            stdout: "pipe",
+            stderr: "pipe",
+            // N13：Secret 明文只经子进程环境传递，不落在 argv 上。
+            ...(environment === undefined
+                ? {}
+                : { env: { ...process.env, ...environment } }),
+        });
         const [exitCode, stdout, stderr] = await Promise.all([
-            process.exited,
-            new Response(process.stdout).text(),
-            new Response(process.stderr).text(),
+            child.exited,
+            new Response(child.stdout).text(),
+            new Response(child.stderr).text(),
         ]);
         return { exitCode, stdout, stderr };
     }

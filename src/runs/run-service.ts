@@ -9,6 +9,7 @@ import type {AgentRuntime} from "../runtime/agent-runtime.ts"
 import type { Checkpoint } from "../checkpoints/checkpoint.ts";
 import type {
     AgentRun,
+    AgentRunStatus,
     RunEvent,
     ThinkingLevel,
 } from "./agent-run.ts"
@@ -40,6 +41,52 @@ export interface ResumeRunInput {
     runId: string;
     checkpoint: Checkpoint;
     continuationInput: string;
+}
+
+/**
+ * B3：自动恢复的续跑输入必须携带用户原始任务语境。
+ * 只写"请从恢复点继续完成任务"会让模型丢失目标，续跑变成无的放矢。
+ */
+export function buildRecoveryContinuationInput(
+    userInput: string,
+    checkpointId: string,
+): string {
+    return [
+        `你此前在执行下面的任务时被中断，系统已从恢复点（Checkpoint ${checkpointId}）回滚。`,
+        "请从中断处继续，完成整个任务；已确认成功的工具结果会被自动复用，不要重复执行已完成的副作用。",
+        "原始任务：",
+        userInput,
+    ].join("\n");
+}
+
+/**
+ * QUEUED Run 在调度启动前后被并发处置（用户中断 / 排队超时熔断）后的
+ * 落点状态。启动方遇到这些状态时放弃启动并交还调度器释放 slot，
+ * 而不是把已被接管的 Run 强行推进 RUNNING（真机 A6000 抓到的
+ * INTERRUPTED -> RUNNING 非法转换毒丸，见 docs/known-issues A4）。
+ */
+function isTakenOverByConcurrentHandling(status: AgentRunStatus): boolean {
+    return status === "INTERRUPTED" || status === "FAILED";
+}
+
+/**
+ * N6：把上游（Pi/网关/模型后端）的原始错误归类成可诊断的失败原因。
+ *
+ * 真机实测暴露两个模糊消息，用户与运维都无从判断：
+ * - "Stream ended without finish_reason"：网关请求超时（默认 60s 且当时不可
+ *   配置）掐断流式响应；连续重试后以此信息告终，看不出是超时。
+ * - "400 status code (no body)"：模型后端拒绝请求（常见于输入超过上下文
+ *   上限），无 body 可读。
+ * 这里保留原文并前置归类，便于用户自助与排障；不改判定与重试语义。
+ */
+export function classifyModelFailure(message: string): string {
+    if (message.includes("Stream ended without finish_reason")) {
+        return `模型流式响应中断（多为单次请求超时或上游断流，原文：${message}）`;
+    }
+    if (/^4\d\d status code \(no body\)/.test(message.trim())) {
+        return `模型后端拒绝请求（HTTP ${message.trim().slice(0, 3)}，常见原因：输入超出模型上下文上限；原文：${message}）`;
+    }
+    return message;
 }
 
 export class RunService{
@@ -118,11 +165,67 @@ export class RunService{
         });
     }
 
+    /**
+     * 支柱 3：把一个仍在排队的 Run 熔断到 FAILED 终态。
+     *
+     * 用于排队 TTL：任务等待超过 queueTtlMs 仍未获得调度准入时，
+     * 与其永久饥饿死等占用队列与计数，不如安全流转到 FAILED 并记录
+     * QUEUE_TIMEOUT 失败原因。只允许 QUEUED 状态流转；Run 已经离开
+     * 队列（RUNNING/终态）时返回 null，不做任何修改。
+     */
+    failQueuedRun(
+        runId: string,
+        reason: string,
+        message?: string,
+        details?: Record<string, unknown>,
+    ): AgentRun | null {
+        const run = this.getRequiredRun(runId);
+
+        if (run.status !== "QUEUED") {
+            return null;
+        }
+
+        const finishedAt = new Date().toISOString();
+        const failedMessage =
+            message
+            ?? `排队超时：Run 等待调度超过 ${reason} 门限仍未获得准入`;
+
+        this.store.update(
+            {
+                ...run,
+                status: "FAILED",
+                updatedAt: finishedAt,
+                finishedAt,
+                failureReason: reason,
+            },
+            {
+                eventId: crypto.randomUUID(),
+                runId,
+                sequence: this.store.getLastEventSequence(runId) + 1,
+                type: "RUN_FAILED",
+                timestamp: finishedAt,
+                payloadVersion: 1,
+                payload: {
+                    reason,
+                    message: failedMessage,
+                    ...details,
+                },
+            },
+        );
+
+        return this.store.get(runId);
+    }
+
     async executeQueuedRun(runId:string) : Promise<AgentRun> {
         // 主要任务是：检验队列情况，判断是否具备执行情况
         const run = this.getRequiredRun(runId);
 
         if (run.status !== "QUEUED") {
+            // 队列启动与并发处置竞态：Run 在排队期间已被中断/熔断时，
+            // 不再启动 Runtime，返回当前状态由调度器释放 slot。
+            if (isTakenOverByConcurrentHandling(run.status)) {
+                return run;
+            }
             throw new Error(
                 `只有 QUEUED Run 可以开始执行:${runId}`,
             );
@@ -148,7 +251,20 @@ export class RunService{
             payload:{},
         };
 
-        this.store.update(runningRun,startedEvent);
+        try {
+            this.store.update(runningRun,startedEvent);
+        } catch (error) {
+            // QUEUED -> RUNNING 写入与并发中断竞争：状态机已拒绝本次启动。
+            // 此时尚未订阅 Runtime、未调用 start，安全放弃启动并交还当前状态。
+            const current = this.store.get(runId);
+            if (
+                current !== null
+                && isTakenOverByConcurrentHandling(current.status)
+            ) {
+                return current;
+            }
+            throw error;
+        }
 
         const unsubscribe = this.subscribeToRuntime(runId);
 
@@ -248,6 +364,11 @@ export class RunService{
     ):Promise<AgentRun> { 
         const queuedRun = this.getRequiredRun(input.runId);
         if (queuedRun.status !== "QUEUED") {
+            // 等待恢复执行期间被并发处置（用户中断 / 排队超时熔断）：
+            // 不再启动 Runtime，返回当前状态由调度器释放 slot。
+            if (isTakenOverByConcurrentHandling(queuedRun.status)) {
+                return queuedRun;
+            }
             throw new Error(
                 `只有QUEUED RUN可以执行恢复:${input.runId}`
             );
@@ -269,17 +390,30 @@ export class RunService{
             updatedAt: resumedAt,
         };
 
-        this.store.update(runningRun, {
-            eventId: crypto.randomUUID(),
-            runId: input.runId,
-            sequence: this.store.getLastEventSequence(input.runId) + 1,
-            type: "RUN_RESUMED",
-            timestamp: resumedAt,
-            payloadVersion: 1,
-            payload: {
-                checkpointId: input.checkpoint.id,
-            },
-        });
+        try {
+            this.store.update(runningRun, {
+                eventId: crypto.randomUUID(),
+                runId: input.runId,
+                sequence: this.store.getLastEventSequence(input.runId) + 1,
+                type: "RUN_RESUMED",
+                timestamp: resumedAt,
+                payloadVersion: 1,
+                payload: {
+                    checkpointId: input.checkpoint.id,
+                },
+            });
+        } catch (error) {
+            // QUEUED -> RUNNING 写入与并发中断竞争：状态机已拒绝本次恢复。
+            // 此时尚未订阅 Runtime、未调用 resume，安全放弃并交还当前状态。
+            const current = this.store.get(input.runId);
+            if (
+                current !== null
+                && isTakenOverByConcurrentHandling(current.status)
+            ) {
+                return current;
+            }
+            throw error;
+        }
 
         // 必须先订阅再调用 resume，否则同步发出的首批 RuntimeEvent 会丢失。
         const unsubscribe = this.subscribeToRuntime(input.runId);
@@ -396,8 +530,9 @@ export class RunService{
      * 每次订阅都从数据库最后一个 sequence 继续，恢复时不需要猜测序号。
      */
     private subscribeToRuntime(runId: string): () => void {
-        let nextEventSequence =
-            this.store.getLastEventSequence(runId) + 1;
+        // 每次插入都从数据库取最新序号：markToolPhase 等带外写入也会推进
+        // run_events，闭包内缓存计数器会与它们撞 (run_id, sequence) 唯一约束。
+        const nextSequence = () => this.store.getLastEventSequence(runId) + 1;
 
         return this.runtime.subscribe(runId, (event) => {
             if (event.type === "text_delta") {
@@ -411,15 +546,11 @@ export class RunService{
             const draft = this.eventBridge.map(event);
 
             if (draft !== null) {
-                const inserted = this.store.appendEventIfNew({
+                this.store.appendEventIfNew({
                     eventId: crypto.randomUUID(),
-                    sequence: nextEventSequence,
+                    sequence: nextSequence(),
                     ...draft,
                 });
-
-                if (inserted) {
-                    nextEventSequence += 1;
-                }
 
                 return;
             }
@@ -444,14 +575,13 @@ export class RunService{
                     {
                         eventId: crypto.randomUUID(),
                         runId,
-                        sequence: nextEventSequence,
+                        sequence: nextSequence(),
                         type: "RUN_COMPLETED",
                         timestamp: event.timestamp,
                         payloadVersion: 1,
                         payload: {},
                     },
                 );
-                nextEventSequence += 1;
                 return;
             }
 
@@ -471,21 +601,20 @@ export class RunService{
                         status: "FAILED",
                         updatedAt: event.timestamp,
                         finishedAt: event.timestamp,
-                        failureReason: event.message,
+                        failureReason: classifyModelFailure(event.message),
                     },
                     {
                         eventId: crypto.randomUUID(),
                         runId,
-                        sequence: nextEventSequence,
+                        sequence: nextSequence(),
                         type: "RUN_FAILED",
                         timestamp: event.timestamp,
                         payloadVersion: 1,
                         payload: {
-                            message: event.message,
+                            message: classifyModelFailure(event.message),
                         },
                     },
                 );
-                nextEventSequence += 1;
                 return;
             }
 
@@ -505,7 +634,7 @@ export class RunService{
                     {
                         eventId: crypto.randomUUID(),
                         runId,
-                        sequence: nextEventSequence,
+                        sequence: nextSequence(),
                         type: "RUN_INTERRUPTED",
                         timestamp: event.timestamp,
                         payloadVersion: 1,
@@ -514,7 +643,6 @@ export class RunService{
                         },
                     },
                 );
-                nextEventSequence += 1;
             }
         });
     }
@@ -567,8 +695,69 @@ export class RunService{
         );
     }
 
-    private getRequiredRun(runId: string): AgentRun {
-        const run = this.store.get(runId);
+    /**
+     * 支柱 1 × 支柱 2：Worker 模式下工具真正执行期间，Run 处于 WAITING_TOOL。
+     *
+     * 由 WorkerProcessAgentRuntime 在治理桥裁决放行（STARTED）与 COMPLETE 落账
+     * （ENDED）时驱动。Run 不在预期状态时静默忽略——Run 可能已被中断/终态化，
+     * 此时工具阶段的迟回执不得覆盖终态事实。Worker 在工具执行中崩溃时收不到
+     * ENDED，Run 停在 WAITING_TOOL，恢复扫描与 RUNNING 一样转 INTERRUPTED。
+     */
+    markToolPhase(
+        runId: string,
+        phase: "STARTED" | "ENDED",
+        info: { toolName: string; toolCallId: string },
+    ): void {
+        const run = this.getRequiredRun(runId);
+        const timestamp = new Date().toISOString();
+
+        if (phase === "STARTED") {
+            if (run.status !== "RUNNING") {
+                return;
+            }
+
+            this.store.update(
+                {
+                    ...run,
+                    status: "WAITING_TOOL",
+                    updatedAt: timestamp,
+                },
+                {
+                    eventId: crypto.randomUUID(),
+                    runId,
+                    sequence: this.store.getLastEventSequence(runId) + 1,
+                    type: "TOOL_STARTED",
+                    timestamp,
+                    payloadVersion: 1,
+                    payload: info,
+                },
+            );
+            return;
+        }
+
+        if (run.status !== "WAITING_TOOL") {
+            return;
+        }
+
+        this.store.update(
+            {
+                ...run,
+                status: "RUNNING",
+                updatedAt: timestamp,
+            },
+            {
+                eventId: crypto.randomUUID(),
+                runId,
+                sequence: this.store.getLastEventSequence(runId) + 1,
+                type: "TOOL_COMPLETED",
+                timestamp,
+                payloadVersion: 1,
+                payload: info,
+            },
+        );
+    }
+
+    private getRequiredRun(runId: string): AgentRun {        const run = this.store.get(runId);
 
         if (run === null) {
             throw new Error(`找不到 AgentRun:${runId}`);

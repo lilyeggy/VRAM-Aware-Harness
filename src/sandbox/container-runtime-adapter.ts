@@ -1,7 +1,11 @@
 import type { SandboxRuntime, SandboxRuntimeEvidence } from "./sandbox-profile.ts";
 
 export interface ContainerCommandRuntime {
-    run(args: readonly string[]): Promise<{
+    /**
+     * `environment` 合并进 docker CLI 子进程的环境，供
+     * `docker exec --env NAME` 取值——明文因此不进入 argv。
+     */
+    run(args: readonly string[], environment?: Readonly<Record<string, string>>): Promise<{
         exitCode: number;
         stdout: string;
         stderr: string;

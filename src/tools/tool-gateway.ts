@@ -1,6 +1,12 @@
-/** 
+/**
  * Tool Gateway 是决定是否执行工具的，
  * 它解决的是，如果底层 agent 要执行一个任务，那么我们是执行、复用还是阻止？
+ *
+ * 流水线在唯一的外部回调 invokeTool()（真实执行）处分为两个阶段：
+ * - prepare：策略守卫 → 历史幂等判断 → PREPARED 记账（副作用发生之前）；
+ * - complete：SUCCEEDED+Checkpoint 原子落库，或 FAILED。
+ * 跨进程（Worker）模式下，Master 通过这两个阶段在 IPC 两侧执行治理，
+ * Worker 只保留 invokeTool() 的真实沙箱执行。
  */
 
 import type { Checkpoint } from "../checkpoints/checkpoint.ts";
@@ -26,39 +32,45 @@ export interface ExecuteToolInput {
     sandboxEnforcement?:SandboxEnforcementCapabilities;
 }
 
+/** 真实工具的一次执行结果（成功带结果，失败带错误）。 */
+export type ToolGatewayOutcome =
+    | { readonly ok: true; readonly result: unknown }
+    | { readonly ok: false; readonly error: unknown };
+
+/**
+ * prepare 阶段的裁决。
+ * REUSE：历史 SUCCEEDED，直接复用缓存结果，不再执行；
+ * DENIED：不可自动重放等历史裁决原因（策略守卫错误仍直接抛出，保留原始错误）；
+ * PREPARED：已记账，等待真实执行。
+ */
+export type ToolPrepareDecision =
+    | { readonly kind: "REUSE"; readonly result: unknown }
+    | { readonly kind: "DENIED"; readonly reason: string }
+    | { readonly kind: "PREPARED"; readonly execution: ToolExecution };
+
 export class ToolGateway{
     constructor(
         private readonly store:ToolExecutionStore,
         private readonly policyGuard?:ToolPolicyGuard,
     ){}
 
-    async execute(
-        input:ExecuteToolInput,
-        invokeTool:() => Promise<unknown>,
-    ) : Promise<unknown>{
+    /**
+     * 执行前阶段：策略否决权 → 幂等历史判断 → PREPARED 记账。
+     * 策略守卫抛出的错误原样向上传播（与 in-process 历史行为一致）。
+     */
+    prepare(input:ExecuteToolInput):ToolPrepareDecision{
         // 策略检查必须发生在 PREPARED 写入和真实副作用之前。
         this.policyGuard?.assertAllowed(input);
 
-        const runId = input.runId;
-        const toolCallId = input.toolCallId;
-
-        // 整个流程就是，当工具的输入到来时，我们首先看看有没有对应的工具的历史执行情况
-        // 
-        // 如果没有对应的历史执行情况，我们先创建，说明是第一次调用，然后再进行下一步
-        // 如果有对应的历史执行情况，那么我们就可以直接进行下一步
-        // 下一步就是执行工具：invokeTtool()
-        // 执行工具会有两种结果：1. 成功 2. 失败 
-        
-        // 获取工具调用的历史
-        const history = this.store.getByToolCall(runId,toolCallId);
-        let preparedExecution : ToolExecution;
+        // 当工具的输入到来时，首先看看有没有对应的工具的历史执行情况：
+        // 没有则创建 PREPARED；有则按历史状态决定复用、重放或拒绝。
+        const history = this.store.getByToolCall(input.runId,input.toolCallId);
 
         if (history === null){
-            // 没有历史记录，说明是第一次调用，构建 PREPARED
-            preparedExecution = {
+            const preparedExecution : ToolExecution = {
                 id : crypto.randomUUID(),
-                runId,
-                toolCallId,
+                runId:input.runId,
+                toolCallId:input.toolCallId,
                 toolName:input.toolName,
                 arguments:input.arguments,
                 effect:input.effect,
@@ -67,64 +79,62 @@ export class ToolGateway{
                 errorMessage:null,
                 createdAt:new Date().toISOString(),
                 finishedAt:null,
-            }
+            };
             this.store.prepare(preparedExecution);
-        } else {
-            switch(history.status){
-                // 工具调用成功，返回结果
-                case "SUCCEEDED":
-                    return history.result;
-                // 调用失败，报错
-                case "FAILED":
-                    throw new Error(`工具执行失败:${history.errorMessage}`);
-                // 
-                case "PREPARED":
-                    if (
-                        !canAutomaticallyReplay(
-                            history.status,
-                            history.effect,
-                        ))
-                        {
-                            throw new Error(
-                                `不允许自动重放：${history.effect}`,
-                            );
-                        }
-                    // 允许重放时复用原来的执行记录，
-                    // 不能再次调用 store.prepare()，否则会违反唯一约束。
-                    preparedExecution = history;
-                    break;
-                    
-            }
+            return { kind:"PREPARED", execution:preparedExecution };
         }
 
-        let result : unknown;
+        switch(history.status){
+            case "SUCCEEDED":
+                return { kind:"REUSE", result:history.result };
+            case "FAILED":
+                return {
+                    kind:"DENIED",
+                    reason:`工具执行失败:${history.errorMessage}`,
+                };
+            case "PREPARED":
+                if (!canAutomaticallyReplay(history.status,history.effect)){
+                    return {
+                        kind:"DENIED",
+                        reason:`不允许自动重放：${history.effect}`,
+                    };
+                }
+                // 允许重放时复用原来的执行记录，
+                // 不能再次调用 store.prepare()，否则会违反唯一约束。
+                return { kind:"PREPARED", execution:history };
+        }
+    }
 
-        try{
-            // invokeTool就是启动工具
-            result = await invokeTool();
-        } catch(error){
-            // 如果出现错误
+    /**
+     * 执行后阶段：把真实执行结果落库。
+     * 成功 → SUCCEEDED + Checkpoint 原子写入；失败 → FAILED。
+     */
+    complete(
+        input:ExecuteToolInput,
+        execution:ToolExecution,
+        outcome:ToolGatewayOutcome,
+    ):void{
+        if (!outcome.ok){
             const failedExecution : ToolExecution = {
-                ...preparedExecution,
+                ...execution,
                 status:"FAILED",
                 result:null,
                 errorMessage:
-                    error instanceof Error
-                        ? error.message
-                        : String(error),
+                    outcome.error instanceof Error
+                        ? outcome.error.message
+                        : String(outcome.error),
                 finishedAt:new Date().toISOString(),
             };
-
-            // 保存确定失败的工具结果
             this.store.fail(failedExecution);
-            throw error;
+            return;
         }
+
         const finishedAt = new Date().toISOString();
 
         const succeededExecution:ToolExecution = {
-            ...preparedExecution,
+            ...execution,
             status : "SUCCEEDED",
-            result,
+            result: outcome.result,
             errorMessage:null,
             finishedAt,
         }
@@ -132,14 +142,38 @@ export class ToolGateway{
         const checkpoint:Checkpoint = {
             id:crypto.randomUUID(),
             runId:input.runId,
-            toolExecutionId:preparedExecution.id,
+            toolExecutionId:execution.id,
             runtimeSessionRef:input.runtimeSessionRef,
             lastEventSequence:input.lastEventSequence,
             createdAt:finishedAt,
         }
 
         this.store.completeWithCheckpoint(succeededExecution,checkpoint);
+    }
 
+    async execute(
+        input:ExecuteToolInput,
+        invokeTool:() => Promise<unknown>,
+    ) : Promise<unknown>{
+        const decision = this.prepare(input);
+
+        if (decision.kind === "REUSE"){
+            return decision.result;
+        }
+        if (decision.kind === "DENIED"){
+            throw new Error(decision.reason);
+        }
+
+        let result : unknown;
+        try{
+            // invokeTool就是启动工具
+            result = await invokeTool();
+        } catch(error){
+            this.complete(input,decision.execution,{ ok:false, error });
+            throw error;
+        }
+
+        this.complete(input,decision.execution,{ ok:true, result });
         return result;
     }
 

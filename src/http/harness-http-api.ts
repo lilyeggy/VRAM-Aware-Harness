@@ -11,16 +11,19 @@ import type {
     AgentRun,
     RunEvent,
 } from "../runs/agent-run.ts";
-import type {
-    ResumeRunInput,
-    StartRunInput,
+import {
+    buildRecoveryContinuationInput,
+    type ResumeRunInput,
+    type StartRunInput,
 } from "../runs/run-service.ts";
 import type {
     QueueEntry,
 } from "../scheduling/tenant-run-scheduler.ts";
 import type { RequestPrincipal } from "../auth/request-principal.ts";
+import { digest } from "../auth/api-credential-store.ts";
 import { hasScope } from "../auth/request-principal.ts";
 import type { WorkspaceService } from "../workspaces/workspace-service.ts";
+import type { RunLimitation } from "../policies/run-limitations.ts";
 import type { RunOutputChunk } from "../runs/run-output-store.ts";
 import type { WorkspaceDiff } from "../workspaces/workspace-snapshot.ts";
 import type { RunArtifact } from "../workspaces/run-artifact-store.ts";
@@ -42,6 +45,8 @@ export interface HarnessHttpApplication {
     getConversationsForWorkspace?(tenantId: string, workspaceId: string): Conversation[];
     getRunsForConversation?(tenantId: string, conversationId: string): AgentRun[];
     touchConversation?(id: string, tenantId: string): void;
+    /** B6：会话归属查询；未提供时跳过会话抢注校验（兼容最小装配）。 */
+    resolveSessionOwner?(harnessSessionId: string): string | null;
     getAgentsForTenant?(tenantId:string):HarnessInstance[];
     getRunEvents(runId:string):RunEvent[];
     getRunOutput(runId:string):{ chunks: RunOutputChunk[]; finalText: string; thinkingText?: string };
@@ -49,6 +54,8 @@ export interface HarnessHttpApplication {
     getRunArtifacts(runId:string):RunArtifact[];
     getRunArtifact(runId:string, path:string):Promise<Uint8Array | null>;
     getRunDecisions(runId:string):PolicyDecision[];
+    /** N3：完成但受限的 Run 的 DENY 聚合；未装配时为空数组。 */
+    getRunLimitations?(runId:string):RunLimitation[];
     getQueue():QueueEntry[];
     observeResources():Promise<ResourceObservation>;
     interruptRun(runId:string):Promise<AgentRun>;
@@ -61,9 +68,12 @@ export interface CheckpointLookup {
 
 export interface HttpAccessControl {
     authenticate(rawKey: string): RequestPrincipal | null;
-    registerUser?(email: string, password: string): { userId: string; tenantId: string };
-    loginUser?(email: string, password: string): { token: string; userId: string; tenantId: string; expiresAt: string } | null;
-    revokeSession?(token: string): void;
+    registerUser?(email: string, password: string): Promise<{ userId: string; tenantId: string }>;
+    loginUser?(email: string, password: string): Promise<{ token: string; userId: string; tenantId: string; expiresAt: string } | null>;
+    revokeSession?(token: string): boolean;
+    revokeAllSessions?(userId: string): number;
+    /** D4：会话归属查询，供登出审计归因。 */
+    sessionOwner?(token: string): string | null;
     workspaceService: WorkspaceService;
     auditStore?: AccessAuditStore;
 }
@@ -94,7 +104,36 @@ export class HarnessHttpApi {
         private readonly evaluation?:EvaluationAggregator,
         private readonly llmGateway?:LlmGateway,
         private readonly resourceMetrics?: ResourceMetricsSampler,
+        private readonly limits?: { maxUserInputChars: number },
     ) {}
+
+    /** N8：提交期输入校验——超限直接 413，不创建 Run。 */
+    private requireUserInput(body: Record<string, unknown>): string {
+        const value = requiredString(body, "userInput");
+        const max = this.limits?.maxUserInputChars;
+        if (max !== undefined && value.length > max) {
+            throw new HttpError(
+                413,
+                `任务输入过长：${value.length} 字符，超过上限 ${max} 字符（可用 HARNESS_MAX_USER_INPUT_CHARS 调整）`,
+            );
+        }
+        return value;
+    }
+
+    /**
+     * N8：提交响应只回显输入摘要，不再把全量输入回传一遍
+     * （客户端渲染走 /runs 查询，不依赖这里的回显）。
+     */
+    private runForResponse(run: AgentRun): Record<string, unknown> {
+        const preview = 200;
+        if (run.userInput.length <= preview) return { ...run };
+        return {
+            ...run,
+            userInput: run.userInput.slice(0, preview),
+            userInputTruncated: true,
+            userInputLength: run.userInput.length,
+        };
+    }
 
     async fetch(request:Request):Promise<Response> {
         try {
@@ -123,21 +162,46 @@ export class HarnessHttpApi {
             if (!this.accessControl?.registerUser) throw new HttpError(503, "账户服务未启用");
             const body = await readJsonObject(request);
             try {
-                return jsonResponse({ user: this.accessControl.registerUser(requiredString(body, "email"), requiredString(body, "password")) }, 201);
+                return jsonResponse({ user: await this.accessControl.registerUser(requiredString(body, "email"), requiredString(body, "password")) }, 201);
             } catch (error) { throw new HttpError(409, error instanceof Error ? error.message : String(error)); }
         }
         if (request.method === "POST" && segments.join("/") === "auth/login") {
             if (!this.accessControl?.loginUser) throw new HttpError(503, "账户服务未启用");
             const body = await readJsonObject(request);
-            const result = this.accessControl.loginUser(requiredString(body, "email"), requiredString(body, "password"));
+            const result = await this.accessControl.loginUser(requiredString(body, "email"), requiredString(body, "password"));
             if (result === null) throw new HttpError(401, "邮箱或密码错误");
             return jsonResponse(result);
         }
         if (request.method === "POST" && segments.join("/") === "auth/logout") {
             const authorization = request.headers.get("authorization");
             const token = authorization?.startsWith("Bearer ") ? authorization.slice(7).trim() : "";
-            this.accessControl?.revokeSession?.(token);
+            // D7：无效/已撤销的 token 不再静默成功——撤销失败返回 401，
+            // 让客户端能区分"已登出"与"本来就无效"。
+            if (this.accessControl?.revokeSession === undefined) {
+                throw new HttpError(503, "账户服务未启用");
+            }
+            if (token === "") {
+                this.audit("SESSION_REVOKE", "DENY", null, "missing_session_token");
+                throw new HttpError(401, "无效或已过期的会话");
+            }
+            // D4：登出动作的审计归因到会话所有者；resourceId 用 token 摘要而非明文。
+            const owner = this.accessControl.sessionOwner?.(token) ?? null;
+            if (!this.accessControl.revokeSession(token)) {
+                this.auditResource("SESSION", digest(token), "SESSION_REVOKE", "DENY", owner, "invalid_or_revoked_session");
+                throw new HttpError(401, "无效或已过期的会话");
+            }
+            this.auditResource("SESSION", digest(token), "SESSION_REVOKE", "ALLOW", owner, "session_revoked");
             return jsonResponse({ ok: true });
+        }
+        if (request.method === "DELETE" && segments.join("/") === "auth/sessions") {
+            // D7：撤销当前用户的全部活跃会话（"退出所有设备"）。
+            const principal = this.requirePrincipal(request, "auth:revoke");
+            if (this.accessControl?.revokeAllSessions === undefined) {
+                throw new HttpError(503, "账户服务未启用");
+            }
+            const revoked = this.accessControl.revokeAllSessions(principal.tenantId);
+            this.auditResource("SESSION", null, "SESSION_REVOKE_ALL", "ALLOW", principal.tenantId, `revoked_${revoked}_sessions`);
+            return jsonResponse({ ok: true, revoked });
         }
 
         if (request.method === "GET" && segments.length === 0) {
@@ -176,8 +240,12 @@ export class HarnessHttpApi {
                     return this.listWorkspaces(request);
                 case "resources": {
                     const principal = this.requirePrincipal(request, "resources:read");
-                    void principal;
+                    // D3：主机级资源遥测（共享 GPU 池/vLLM 后端）不含跨租户数据，
+                    // 但可见性是"有意的主机级"而非"遗漏的租户过滤"——显式标注，
+                    // 并保留 principal 供将来引入租户切片视图（如按租户 token 配额）。
                     return jsonResponse({
+                        visibility: "HOST_WIDE",
+                        requestedByTenant: principal.tenantId,
                         samples: this.resourceMetrics?.getSamples() ?? [],
                         observation:
                             await this.application.observeResources(),
@@ -292,6 +360,20 @@ export class HarnessHttpApi {
             return this.llmGateway.handleChatCompletions(request);
         }
 
+        // A6000 真机补齐：Pi 启动时经网关做 GET /v1/models 模型发现。
+        if (
+            request.method === "GET"
+            && segments.length === 2
+            && segments[0] === "v1"
+            && segments[1] === "models"
+        ) {
+            if (this.llmGateway === undefined) {
+                throw new HttpError(503, "LLM 网关未启用");
+            }
+            this.requirePrincipal(request, "models:generate");
+            return this.llmGateway.handleListModels();
+        }
+
         // 方向 C：LLM 网关路由统计与近期决策（观测用）。
         if (
             request.method === "GET"
@@ -307,6 +389,8 @@ export class HarnessHttpApi {
                 enabled:true,
                 ...this.llmGateway.router.stats(),
                 recentDecisions:this.llmGateway.router.recentDecisions(50),
+                // 支柱 2：前缀缓存命中指标（cached_tokens 采集）。
+                cacheMetrics:this.llmGateway.cacheMetrics(),
             });
         }
 
@@ -339,6 +423,7 @@ export class HarnessHttpApi {
                 return jsonResponse({
                     run,
                     decisions:this.application.getRunDecisions(runId),
+                    limitations:this.application.getRunLimitations?.(runId) ?? [],
                 });
             }
 
@@ -395,7 +480,13 @@ export class HarnessHttpApi {
                 && segments.length === 3
                 && segments[2] === "interrupt"
             ) {
-                this.getRequiredRun(runId, request, "tasks:write");
+                const principal = this.requirePrincipal(request, "tasks:write");
+                const run = this.getRequiredRun(runId);
+                if (this.accessControl !== undefined && run.tenantId !== principal.tenantId) {
+                    this.auditResource("RUN", runId, "RUN_INTERRUPT", "DENY", principal.tenantId, "run_not_owned");
+                    throw new HttpError(404, `找不到 AgentRun：${runId}`);
+                }
+                this.auditResource("RUN", runId, "RUN_INTERRUPT", "ALLOW", principal.tenantId, "interrupt_requested");
 
                 return jsonResponse({
                     run:await this.application.interruptRun(runId),
@@ -427,22 +518,40 @@ export class HarnessHttpApi {
             // Deliberately indistinguishable from an absent resource (anti-enumeration).
             throw new HttpError(404, "找不到 Workspace");
         }
+        const requestedSessionId =
+            optionalString(body, "sessionId")
+            ?? optionalString(body, "harnessSessionId");
+
+        // B6：会话归属校验——sessionId 首次使用即认领给提交租户；已被
+        // 其他租户使用过则拒绝。防止客户端自选 sessionId 抢注/污染他人会话。
+        if (requestedSessionId !== null) {
+            const sessionOwner = this.application.resolveSessionOwner?.(requestedSessionId);
+            if (sessionOwner !== null && sessionOwner !== undefined) {
+                const submitterTenantId = this.accessControl === undefined
+                    ? requiredString(body, "tenantId")
+                    : principal.tenantId;
+                if (sessionOwner !== submitterTenantId) {
+                    throw new HttpError(409, "harnessSessionId 已被其他租户占用");
+                }
+            }
+        }
+
         const run = this.application.submitRun({
             tenantId:this.accessControl === undefined
                 ? requiredString(body, "tenantId")
                 : principal.tenantId,
             harnessSessionId:
-                optionalString(body, "sessionId")
-                ?? optionalString(body, "harnessSessionId")
+                requestedSessionId
                 ?? crypto.randomUUID(),
-            userInput:requiredString(body, "userInput"),
+            userInput:this.requireUserInput(body),
             thinkingLevel: parseThinkingLevel(body),
             workspacePath:this.accessControl === undefined
                 ? requiredString(body, "workspacePath")
                 : (workspace as NonNullable<typeof workspace>).rootPath,
         });
+        this.auditResource("RUN", run.id, "RUN_SUBMIT", "ALLOW", principal.tenantId, "run_submitted");
 
-        return jsonResponse({ run }, 202);
+        return jsonResponse({ run: this.runForResponse(run) }, 202);
     }
 
     private async createConversation(request: Request, workspaceId: string): Promise<Response> {
@@ -512,27 +621,34 @@ export class HarnessHttpApi {
         const run = this.application.submitRun({
             tenantId: principal.tenantId,
             harnessSessionId: conversation.id,
-            userInput: requiredString(body, "userInput"),
+            userInput: this.requireUserInput(body),
             thinkingLevel: parseThinkingLevel(body),
             workspacePath: workspace.rootPath,
         });
         this.application.touchConversation?.(conversation.id, principal.tenantId);
-        return jsonResponse({ run }, 202);
+        return jsonResponse({ run: this.runForResponse(run) }, 202);
     }
 
     private async resumeRun(
         request:Request,
         runId:string,
     ):Promise<Response> {
-        const run = this.getRequiredRun(runId, request, "tasks:write");
+        const principal = this.requirePrincipal(request, "tasks:write");
+        const run = this.getRequiredRun(runId);
+        if (this.accessControl !== undefined && run.tenantId !== principal.tenantId) {
+            this.auditResource("RUN", runId, "RUN_RESUME", "DENY", principal.tenantId, "run_not_owned");
+            throw new HttpError(404, `找不到 AgentRun：${runId}`);
+        }
 
         if (run.checkpointId === null) {
+            this.auditResource("RUN", runId, "RUN_RESUME", "DENY", principal.tenantId, "no_checkpoint");
             throw new HttpError(409, `Run 没有可用 Checkpoint：${runId}`);
         }
 
         const checkpoint = this.checkpointLookup.get(run.checkpointId);
 
         if (checkpoint === null || checkpoint.runId !== runId) {
+            this.auditResource("RUN", runId, "RUN_RESUME", "DENY", principal.tenantId, "checkpoint_mismatch");
             throw new HttpError(
                 409,
                 `Run 的 Checkpoint 不存在或不匹配：${runId}`,
@@ -543,10 +659,12 @@ export class HarnessHttpApi {
         const queuedRun = this.application.resumeRun({
             runId,
             checkpoint,
+            // B3：手动恢复未提供续跑输入时，也携带原始任务语境。
             continuationInput:
                 optionalString(body, "continuationInput")
-                ?? "请从恢复点继续完成任务",
+                ?? buildRecoveryContinuationInput(run.userInput, checkpoint.id),
         });
+        this.auditResource("RUN", runId, "RUN_RESUME", "ALLOW", principal.tenantId, "run_resumed");
 
         return jsonResponse({ run:queuedRun }, 202);
     }
@@ -612,8 +730,14 @@ export class HarnessHttpApi {
         if (this.accessControl?.auditStore === undefined) {
             throw new HttpError(501, "未配置访问审计服务");
         }
+        const url = new URL(request.url);
+        const limitParam = Number(url.searchParams.get("limit") ?? undefined);
+        const offsetParam = Number(url.searchParams.get("offset") ?? undefined);
         return jsonResponse({
-            events: this.accessControl.auditStore.listForTenant(principal.tenantId),
+            events: this.accessControl.auditStore.listForTenant(principal.tenantId, {
+                ...(Number.isFinite(limitParam) ? { limit: limitParam } : {}),
+                ...(Number.isFinite(offsetParam) ? { offset: offsetParam } : {}),
+            }),
         });
     }
 
@@ -632,7 +756,11 @@ export class HarnessHttpApi {
         }
         const principal = this.accessControl.authenticate(rawKey);
         if (principal === null) {
-            this.audit("AUTHENTICATE", "DENY", null, "invalid_or_revoked_api_key");
+            // D4：DENY 记录被尝试密钥的摘要（不存明文），租户归属对
+            // 无效密钥天然不可知，因此 tenantId 保持 NULL。
+            this.audit("AUTHENTICATE", "DENY", null, "invalid_or_revoked_api_key", {
+                attemptedKeyDigest: digest(rawKey),
+            });
             throw new HttpError(401, "API Key 无效或已撤销");
         }
         if (!hasScope(principal, scope)) {
@@ -648,13 +776,37 @@ export class HarnessHttpApi {
         outcome: "ALLOW" | "DENY",
         principal: RequestPrincipal | null,
         reason: string,
+        extra: { resourceId?: string; attemptedKeyDigest?: string } = {},
     ): void {
         this.accessControl?.auditStore?.record({
             action, outcome,
             tenantId: principal?.tenantId ?? null,
             resourceType: "HTTP_REQUEST",
-            resourceId: null,
+            resourceId: extra.resourceId ?? null,
             reason,
+            attemptedKeyDigest: extra.attemptedKeyDigest ?? null,
+        });
+    }
+
+    /**
+     * D4：资源级审计——interrupt/resume/提交等动作直接落在具体资源上，
+     * 而不是只有 "HTTP_REQUEST + scope" 一层。
+     */
+    private auditResource(
+        resourceType: "RUN" | "SESSION",
+        resourceId: string | null,
+        action: string,
+        outcome: "ALLOW" | "DENY",
+        tenantId: string | null,
+        reason: string,
+    ): void {
+        this.accessControl?.auditStore?.record({
+            action, outcome,
+            tenantId,
+            resourceType,
+            resourceId,
+            reason,
+            attemptedKeyDigest: null,
         });
     }
 }
