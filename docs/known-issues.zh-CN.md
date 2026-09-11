@@ -543,13 +543,13 @@ X05 原本因"缺真实写盘夹具"记 BLOCKED。改用真实 bash 工具构造
 - **配置**：`LLM_CONTEXT_BUDGET_TOKENS`（默认 **24000**，= 模型窗口 32768 − 预留输出 4096 再留余量；**0 = 关闭压缩，回到旧行为**）。已写入 `.env.example` 与 `deploy/qwen38-harness.env.example`。
 - **可观测**：压缩时 `console.warn` 打出丢弃轮数/条数/token 变化，并可通过 `LlmGateway.lastCompactionStats()` 查询——N28 的另一半问题是"用户与运维都不知道被裁过"。
 - **回归**：新增 9 条用例（`tests/llm-gateway/context-budget.test.ts`，按本轮约定**只留在本地、未入库**），覆盖"不拆工具对""预算关闭即旧行为""极紧预算至少留 1 轮""网关转发前生效"；仓库自身全套 **412 pass / 0 fail**。
-- **仍未做（如实标注）**：① 当前是"**丢弃 + 告知**"，**不是 LLM 摘要式压缩**——被丢掉的信息不会以摘要形式保留；② 界面层仍没有"此会话已被裁剪"的提示，用户侧仍感知不到（只有服务端日志与 API 事实）。
+- **仍未做（如实标注）**：① 当前是"**丢弃 + 告知**"，**不是 LLM 摘要式压缩**——被丢掉的信息不会以摘要形式保留；② 界面层仍没有"此会话已被裁剪"的提示，用户侧仍感知不到（只有服务端日志与 `lastCompactionStats()` 事实）；③ **压缩只在网关按请求进行，Pi 侧存的历史不会被裁剪**——复验日志显示每个请求的量持续在 ~18k、压到 ~2.4k，即"每次请求都放得下"，而非"会话不再变大"。会话托管侧的无界增长是另一个问题，本轮未处理。
 
 | 修复项 | 内容 |
 | --- | --- |
 | 改动文件 | `src/llm-gateway/context-budget.ts`（新增）、`src/llm-gateway/llm-gateway.ts`、`src/app/harness-config.ts`、`src/app/create-harness-application.ts`、`.env.example`、`deploy/qwen38-harness.env.example` |
 | 验证 | `bun test ./tests` → 412 pass / 0 fail；`bun run typecheck` → `src/` 0 错误 |
-| 未在真机复验 | 尚未把该修复同步到测试主机重跑长稳，因此"真实会话不再撞 400"**暂无端到端证据**，只有单元与网关集成证据 |
+| 真机复验 | **通过**。实例 `campaign-n28-20260911`（端口 13030，container/runsc + `python:3.12-alpine`），故意把预算设成 **2000**（远小于默认 24000，即更苛刻的触发条件），负载用**单用户 t6**——正是 8h 长稳里 4/4 全死的那一族。结果：**同一会话 104 次运行、0 个上下文超限失败**（唯一 1 个失败是流中断，与上下文无关），压缩触发 **204 次**。对照修复前：t6 会话在第 ~58 次运行处开始 400，此后 **142 连败 0 成功**。证据 `/home/f630/homePLUS/soak-evidence/n28-verify-verdict.json`、`n28-compaction-samples.txt` |
 
 ### 同轮修掉的测试工具缺陷
 - **T6（测试工具）**：`provision-instance.sh` 生成的 `start.sh` 用相对路径定位 `campaign.env`——`cd code` 之后 `$(dirname "$0")` 仍指向原相对路径，**只有绝对路径调用才能启动**。已同时修实例与模板。
