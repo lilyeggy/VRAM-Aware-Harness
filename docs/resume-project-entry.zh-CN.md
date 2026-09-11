@@ -1,8 +1,18 @@
 # VRAM-Aware Agent Harness：简历项目经历与倒推学习清单
 
 > 目标岗位：Agent Infra / AI 平台后端 / 后端开发。  
-> 证据基线：当前工作区 `bun run test` 为 **269 pass / 0 fail（59 files）**；T4、runsc 数据来自已保存的真机验收记录。  
+> 证据基线：当前工作区 `bun run test` 为 **476 pass / 0 fail（98 files）**；T4、runsc 数据来自已保存的真机验收记录。  
 > 使用原则：简历上的每句话都必须能沿源码、测试和边界说明三层自证。
+>
+> **2026-09-11 事实同步（只改数字，未改措辞）**：测试基线 269 → 476（59 → 98 files）。
+> 本文的 Bullet 仍是较早一版的写法，尚未纳入以下更新的事实（写入简历前请自行取舍）：
+> ① **定位是单机多租户实验室项目**，不做多机/HA，也**不是生产级**；
+> ② 全场景 campaign **86 个场景跑了 84 个**（67 完整通过 / 8 部分 / 8 FAIL / 1 INCONCLUSIVE）；
+> ③ 容量 **λ\*=1.146 任务/s**、8h 长稳 3505 次沙箱 0 残留；
+> ④ **N28 两层上下文压缩**（Pi 摘要式压缩为主、网关截断兜底）经真机验证：单会话 134 次运行 21 次压缩、0 上下文超限失败；
+> ⑤ **N27 是上游 vLLM 缺陷**（流式工具调用参数丢末字符 26%），已在网关 SSE 层兜底修复；
+> ⑥ N 系列缺陷**已全部收口**（[known-issues](known-issues.zh-CN.md) §23–§25）。
+> 交叉索引见 [`scenario-test-index.zh-CN.md`](scenario-test-index.zh-CN.md)。
 
 ## 一、推荐写入简历的最终版本
 
@@ -15,7 +25,7 @@
 - **受管 Agent Runtime：**设计 `Session → Run → Attempt → Sandbox` 生命周期模型，统一编排模型推理、工具调用、运行事件与隔离环境；打通异步任务提交、实时输出、最终回答、Workspace Diff 和 Artifact 交付链路。
 - **资源调度与背压：**实现 Tenant 内 FIFO、Tenant 间 Round-Robin、全局/租户并发 slot、同会话串行及 single-flight QueuePump；融合 vLLM Metrics 与 NVIDIA GPU 指标进行资源分类和 `START / QUEUE` 准入，在 T4 16 GB + vLLM 的 120 并发压力场景中验证 `CRITICAL → QUEUE → 资源恢复后自动推进` 闭环。
 - **可靠执行与恢复：**通过 SQLite 事务、追加式 RunEvent、稳定去重键和工具执行账本维护执行事实；按只读、幂等写、未知副作用划分恢复策略，结合 Checkpoint 与启动对账自动恢复安全任务并拦截高风险重放。
-- **多租户隔离：**建立 API Key → Principal → Tenant 的可信身份链，将平台、Tenant、Template、Workspace、Run 五层策略交集落实到 ToolGateway 与 runsc Sandbox，控制文件、进程、网络、Secret 和计算资源边界；通过 9 项真机隔离攻击验证及 **269 项自动化测试**。
+- **多租户隔离：**建立 API Key → Principal → Tenant 的可信身份链，将平台、Tenant、Template、Workspace、Run 五层策略交集落实到 ToolGateway 与 runsc Sandbox，控制文件、进程、网络、Secret 和计算资源边界；通过 9 项真机隔离攻击验证及 **476 项自动化测试**。
 
 ## 二、一页简历空间不足时的压缩版
 
@@ -26,7 +36,7 @@
 - 在 Pi 与 vLLM 之上构建多租户受管 Agent Runtime，设计 `Session → Run → Attempt → Sandbox` 生命周期，打通模型/工具执行、最终回答、Workspace Diff 与 Artifact 交付链路。
 - 实现 Tenant 内 FIFO、Tenant 间 Round-Robin、公平 slot 与 single-flight QueuePump，结合 vLLM/GPU 指标进行资源准入；在 T4 + vLLM 120 并发压力场景中验证 `CRITICAL → QUEUE → 自动推进` 背压闭环。
 - 基于 SQLite 事务、追加式事件、工具执行账本和 Checkpoint 实现副作用感知恢复，以稳定 ID 去重并复用结果，自动恢复安全任务并拦截高风险重放。
-- 建立 Principal 驱动的多租户数据边界和五层策略交集，将文件/Shell 工具限制在 runsc Sandbox；通过 9 项真机隔离攻击验证及 269 项自动化测试。
+- 建立 Principal 驱动的多租户数据边界和五层策略交集，将文件/Shell 工具限制在 runsc Sandbox；通过 9 项真机隔离攻击验证及 476 项自动化测试。
 
 ## 三、不同岗位的第一句话
 
@@ -54,7 +64,7 @@
 | runsc 普遍只慢 1.22 倍 | 指定真机环境的冷启动对照约 1.22 倍 |
 | 完整 Event Sourcing | 状态快照 + 追加式 Run Event Timeline |
 | Exactly-once 工具执行 | 稳定 ID、事务与结果复用实现业务幂等；不确定副作用转人工处理 |
-| 269 项真机测试 | 269 项自动化测试；GPU 与隔离另有独立真机验收 |
+| 476 项真机测试 | 476 项自动化测试；GPU 与隔离另有独立真机验收 |
 
 ## 五、从简历倒推的源码学习顺序
 
@@ -184,15 +194,15 @@
 2. 单元、组件、集成和真机测试分别覆盖哪些风险？
 3. 为什么普通 CI 不依赖真实 GPU？
 4. 为什么选择 SQLite，迁移多 Worker 时哪些机制先失效？
-5. 269 项测试中最有价值的五个失败路径是什么？
+5. 476 项测试中最有价值的五个失败路径是什么？
 
 当前可引用基线：
 
 ```text
 bun run test
-269 pass / 0 fail
-972 expect() calls
-59 test files
+476 pass / 0 fail
+4890 expect() calls
+98 test files
 ```
 
 ## 六、投递前必须掌握的优先级
@@ -209,7 +219,7 @@ bun run test
 
 ### 30 秒版本
 
-> 我做了一个面向团队共享本地大模型的多租户 Agent 任务控制面。Pi 负责模型和工具循环，我主要解决真实任务执行中的资源准入、公平调度、工具副作用恢复和 runsc 隔离。系统根据 vLLM 与 GPU 指标决定任务启动或排队，通过状态机、工具账本和 Checkpoint 避免故障后重复危险副作用；当前 269 项自动化测试全绿，并完成了 T4 资源背压和 9 项 runsc 隔离攻击的真机验证。
+> 我做了一个面向团队共享本地大模型的多租户 Agent 任务控制面。Pi 负责模型和工具循环，我主要解决真实任务执行中的资源准入、公平调度、工具副作用恢复和 runsc 隔离。系统根据 vLLM 与 GPU 指标决定任务启动或排队，通过状态机、工具账本和 Checkpoint 避免故障后重复危险副作用；当前 476 项自动化测试全绿，并完成了 T4 资源背压和 9 项 runsc 隔离攻击的真机验证。
 
 ### 诚实边界结尾
 

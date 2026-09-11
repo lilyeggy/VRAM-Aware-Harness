@@ -348,6 +348,8 @@ export async function createHarnessApplication(
     const scheduler = new TenantRunScheduler({
         maxActiveRuns:config.maxActiveRuns,
         maxActiveRunsPerTenant:config.maxActiveRunsPerTenant,
+        // N10：老化插队，给被洪泛租户挡住的正常租户一个确定的等待上界。
+        agingMs:config.schedulerAgingMs ?? 0,
     });
     const basePolicy = new DeterministicExecutionPolicy({
         maxActiveRuns:config.maxActiveRuns,
@@ -478,6 +480,10 @@ export async function createHarnessApplication(
         instanceStore,
         conversationStore,
         effectivePolicyStore,
+        // N15：策略管理面（/admin/policies）背后的注册表。
+        policyRegistry,
+        // N16：UNKNOWN_EFFECT 人工消解需要读写 tool_executions。
+        toolExecutionStore,
     );
     const evaluationAggregator = new EvaluationAggregator(database);
     // Separate observer instance: token-rate counters must not race admission probes.
@@ -610,6 +616,9 @@ function createContainerSandboxRouter(
         profile: config.sandboxProfile,
         sandboxRuntime: config.sandboxRuntime,
         userId: config.containerUserId,
+        ...(config.containerPidsLimit === undefined
+            ? {}
+            : { pidsLimit: config.containerPidsLimit }),
         warmPoolSize: config.sandboxWarmPoolSize,
         warmPoolOwner: `port-${config.httpPort}`,
     });

@@ -36,7 +36,7 @@ function decide(label: string, tenantId: string, pressure: ExecutionPolicyInput[
     const decision = policy.decide({
         runId: label,
         tenantId,
-        classification: { pressure, snapshotId: "snap", reasons: [], gpuMemoryUsagePercent: null },
+        classification: { pressure, snapshotId: "snap", reasons: [], gpuMemoryUsagePercent: null, gpuMemoryPressurePercent: null },
         activeRunCount: 0,
         activeTenantRunCount: 0,
     });

@@ -23,6 +23,8 @@ export interface HarnessConfig {
     sandboxRuntime:"runsc" | "runc";
     containerImage:string;
     containerUserId:number;
+    /** N14：沙箱容器的 PID 上限（docker --pids-limit）。未配置时沿用 128。 */
+    containerPidsLimit?:number;
     sandboxWarmPoolSize?:number;
 
     piProvider:string;
@@ -45,6 +47,12 @@ export interface HarnessConfig {
      * 状态机安全流转到 FAILED（QUEUE_TIMEOUT），杜绝任务永久饥饿死等。
      */
     queueTtlMs:number;
+    /**
+     * N10：调度老化阈值（ms）。队首 Run 等待超过该时长即可插队优先调度，
+     * 给被洪泛租户挡在后面的正常租户一个确定的等待上界；0 = 关闭老化。
+     * 未配置时不启用（保持纯轮转），生产由 harness-config 默认注入。
+     */
+    schedulerAgingMs?:number;
     executionTimeoutMs?:number;
     interruptGraceMs?:number;
     /** Master-Worker 进程隔离模式："process" 为独立子进程隔离，"in-process" 为主进程内运行 */
@@ -195,6 +203,11 @@ export function loadHarnessConfig(
             "HARNESS_CONTAINER_USER_ID",
             65532,
         ),
+        containerPidsLimit:positiveInteger(
+            environment,
+            "HARNESS_CONTAINER_PIDS_LIMIT",
+            128,
+        ),
 
         piProvider:environment.PI_PROVIDER ?? "local-vllm",
         piModelId,
@@ -292,6 +305,13 @@ export function loadHarnessConfig(
                 "HARNESS_CRITICAL_GPU_MEMORY_PERCENT",
                 90,
             ),
+            // N5：同机推理服务（如 vLLM，默认预占 90% 显存）的稳态基线。
+            // 准入按「基线之上的增量」判定；无同机推理服务的部署应显式设为 0。
+            gpuMemoryBaselinePercent:numberValue(
+                environment,
+                "HARNESS_GPU_MEMORY_BASELINE_PERCENT",
+                90,
+            ),
             busyKvCachePercent:numberValue(
                 environment,
                 "HARNESS_BUSY_KV_CACHE_PERCENT",
@@ -335,6 +355,11 @@ export function loadHarnessConfig(
             environment,
             "HARNESS_QUEUE_TTL_MS",
             300_000,
+        ),
+        schedulerAgingMs:nonNegativeInteger(
+            environment,
+            "HARNESS_SCHEDULER_AGING_MS",
+            60_000,
         ),
         executionTimeoutMs:positiveInteger(
             environment,

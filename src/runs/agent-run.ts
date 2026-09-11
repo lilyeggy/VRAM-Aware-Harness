@@ -77,7 +77,9 @@ export type RunEventType =
     | "TOOL_STARTED"
     | "TOOL_COMPLETED"
     | "TOOL_FAILED"
-    | "CHECKPOINT_SAVED";
+    | "CHECKPOINT_SAVED"
+    // N16：人工核对 UNKNOWN_EFFECT（副作用是否已发生）后的消解记录。
+    | "MANUAL_REVIEW_RESOLVED";
 
 export interface RunEvent{
     eventId:string;

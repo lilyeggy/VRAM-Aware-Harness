@@ -12,6 +12,13 @@ export interface OciSandboxCompilerConfig {
     readonly userId: number;
     readonly profile: SandboxProfile;
     readonly runtime: SandboxRuntime;
+    /**
+     * N14：容器 PID 上限（docker --pids-limit）。未配置时沿用 128。
+     * gVisor（runsc）在触达该上限时会**终结整个沙箱**，runsc 的全局进程
+     * 上限比 runc 低得多，因此需要把它调到 gVisor 内部上限之下，让本平台
+     * 配置的这条限制先触发（触发后 harness 会把沙箱对账为 LOST，fail-closed）。
+     */
+    readonly pidsLimit?: number;
 }
 
 export interface CompiledOciSandboxSpec {
@@ -77,7 +84,14 @@ export class OciSandboxSpecCompiler {
         // smoke:container:attacks 的 PID 项正是因此失败）。注意 gVisor 的进程计数
         // 与 runc 不同，同一名义值下可并发的进程数明显更少，超限错误文本为
         // "Out of memory" 而非 fork 失败。
-        const pidLimit = 128;
+        //
+        // N14：两种 runtime 的**爆炸半径**不同——runc 下只是 fork 失败、容器继续
+        // 存活；gVisor 下触达 PID 上限会终结整个沙箱（随后 `docker exec` 报
+        // "container ... is not running"）。harness 能把后者正确对账为 LOST 并发
+        // INTERRUPTED（fail-closed 收敛正确），但"一条命令吃满 PID"会连带中断该
+        // Run。因此该值应当配置在 gVisor 内部上限之下（默认 128，可用
+        // HARNESS_CONTAINER_PIDS_LIMIT 覆盖），让本平台配置的限制先触发。
+        const pidLimit = this.config.pidsLimit ?? 128;
         const spec = freezeSandboxSpec({
             profile,
             runtime: this.config.runtime,

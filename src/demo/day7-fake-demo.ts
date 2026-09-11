@@ -69,7 +69,10 @@ export async function runDay7FakeDemo():Promise<Day7FakeDemoReport> {
         const runtime = new DemoAgentRuntime();
         const resourceObserver = new DemoResourceObserver({
             ok:true,
-            snapshot:createSnapshot("demo-critical", 95),
+            // N5：显存压力按「同机推理服务稳态基线（默认 90%）之上的增量」度量。
+            // 基线内（如 vLLM 预占的 90%）是预期稳态，不再判 CRITICAL；因此这里
+            // 用一个真正把余量吃干净的 99% 快照来表达"资源紧张 → 排队"。
+            snapshot:createSnapshot("demo-critical", 99),
         });
         const config = loadHarnessConfig({
             VLLM_MODEL_ID:"demo-model",

@@ -38,6 +38,8 @@ export interface ContainerSandboxConfig {
     readonly dockerCommand?: string;
     readonly profile?: SandboxProfile;
     readonly userId?: number;
+    /** N14：容器 PID 上限（docker --pids-limit），未配置时 128。 */
+    readonly pidsLimit?: number;
 }
 
 /**
@@ -99,6 +101,7 @@ export class ContainerSandboxProvider implements SandboxProvider, SandboxCommand
             userId: config.userId ?? 65532,
             profile: this.profile,
             runtime: this.runtime,
+            ...(config.pidsLimit === undefined ? {} : { pidsLimit: config.pidsLimit }),
         });
         if (config.warmPoolSize) this.warmPool = new ContainerWarmPool(commands, this.docker, config.warmPoolSize, 60_000, config.warmPoolOwner);
     }

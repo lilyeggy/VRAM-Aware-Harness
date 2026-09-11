@@ -386,6 +386,30 @@ function resumeRun(runId){
     .then(function(){ toast('恢复任务已进入队列'); return refreshConversation(false); })
     .catch(function(e){ toast(e.message, true); });
 }
+// N16：工具停在 PREPARED/UNKNOWN_EFFECT 时，"副作用是否已发生"系统判不了，
+// 只能由人核对。此前界面完全没有这个出口，Run 会一直停在"已中断"。
+function resolveUnknownEffect(runId){
+  api('/runs/' + encodeURIComponent(runId)).then(function(detail){
+    var pending = detail.unknownEffects || [];
+    if(!pending.length){ toast('该任务没有待核对的不确定副作用'); return null; }
+    var names = pending.map(function(x){ return x.toolName; }).join('、');
+    var answer = window.prompt(
+      '该任务有 ' + pending.length + ' 次工具的副作用结果不确定（' + names + '）。\n\n'
+      + '请先人工核对（日志/文件/远端系统）后选择：\n'
+      + '1 = 确认没有产生副作用（该次执行作废，任务可继续恢复）\n'
+      + '2 = 确认副作用已经发生（该次执行作废，任务终结为失败，避免重放二次生效）\n\n'
+      + '请输入 1 或 2：', '');
+    if(answer !== '1' && answer !== '2'){ toast('已取消核对'); return null; }
+    var payload = { resolution: answer === '1' ? 'NO_EFFECT' : 'EFFECT_OCCURRED' };
+    var note = window.prompt('补充说明（可留空）：', '');
+    if(note && note.trim()) payload.note = note.trim();
+    return api('/runs/' + encodeURIComponent(runId) + '/resolve-unknown-effect', { method:'POST', body:payload });
+  }).then(function(result){
+    if(!result) return;
+    toast('已记录人工核对结论');
+    return refreshConversation(false);
+  }).catch(function(e){ toast(e.message, true); });
+}
 function createWorkspace(){
   var name = window.prompt('Workspace 名称（例如 my-project）');
   if(!name || !name.trim()) return;
@@ -524,6 +548,7 @@ function agentMessageHtml(run, isLast){
   } else if(status === 'INTERRUPTED'){
     parts.push('<div class="runnote"><span class="pill interrupted">已中断</span>'
       + (run.checkpointId ? '已保存 Checkpoint，可从恢复点继续。' : '任务在安全边界停止。') + '</div>');
+    parts.push('<div class="runnote">若该任务是因工具副作用结果不确定而中断，请先人工核对，再在下方记录核对结论。</div>');
   } else if(status === 'FAILED'){
     parts.push('<div class="failednote">任务失败：' + esc(run.failureReason || '未知原因') + '</div>');
   } else if(status === 'COMPLETED'){
@@ -540,6 +565,7 @@ function agentMessageHtml(run, isLast){
     var acts = '';
     if(ACTIVE.indexOf(status) >= 0) acts += '<button class="mini danger" data-act="stop" data-run="' + esc(run.id) + '" type="button">■ 中断任务</button>';
     if(status === 'INTERRUPTED' && run.checkpointId) acts += '<button class="mini" data-act="resume" data-run="' + esc(run.id) + '" type="button">↻ 从 Checkpoint 恢复</button>';
+    if(status === 'INTERRUPTED') acts += '<button class="mini" data-act="resolve" data-run="' + esc(run.id) + '" type="button">⚠ 核对不确定副作用</button>';
     if(acts) parts.push('<div class="runactions">' + acts + '</div>');
   }
   return '<div class="msg-agent">' + parts.join('') + '</div>';
@@ -620,6 +646,7 @@ $('thread').onclick = function(e){
   var act = btn.getAttribute('data-act'), runId = btn.getAttribute('data-run');
   if(act === 'stop') interruptRun(runId);
   else if(act === 'resume') resumeRun(runId);
+  else if(act === 'resolve') resolveUnknownEffect(runId);
   else if(act === 'diff'){ S.expanded[runId] = !S.expanded[runId]; renderThread(); }
   else if(act === 'events'){ S.expanded['ev:' + runId] = !S.expanded['ev:' + runId]; if(S.expanded['ev:' + runId]) loadEvents(runId); else renderThread(); }
   else if(act === 'loadfacts'){ loadFacts(runId).then(renderThread).catch(function(err){ toast(err.message, true); }); }

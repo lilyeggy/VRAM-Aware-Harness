@@ -890,17 +890,69 @@ drain"。而关闭顺序是 `application.stop()` → `llmHealthMonitor.stop()` �
 
 ---
 
-### §24 之后的未修清单（全部非本项目代码缺陷或明确非目标）
+### §24 之后的未修清单（**已在 §25 全部收口**）
 
-| 项 | 级别 | 性质 | 为什么不修 |
-| --- | --- | --- | --- |
-| **N27** | 高 | **上游依赖** | vLLM 流式工具调用参数丢末字符（26%），绕过 Harness 直连 18000 即复现。不是本项目代码 |
-| N5 | 中 | 部署校准 | 资源准入按显存**已用**比例判定，而 vLLM 预占约 90% → 默认阈值下长期判 CRITICAL。**刻意不改默认值**（会影响其他部署），按部署校准（真机用 93/98），并要求文档写明校准要求 |
-| N15 | 中 | 产品范围外 | 没有配置租户资源限额/Secret 的产品入口。单机学习项目的管理面，明确非目标 |
-| N16 | 中 | 产品设计选择 | `UNKNOWN_EFFECT` 无人工消解出口。补它需要新 API + UI，属功能扩展而非收尾 |
-| N9 / N10 / N14 | 记录 | 非缺陷 | 未知模型 503、洪泛尾延迟 215s（无永久饥饿）、gVisor 下 PID 耗尽会终结整个沙箱——都是"记录下来供文档写明"的环境语义/真实现象 |
+| 项 | 级别 | 性质 | §24 时的处置 | §25 的收口方式 |
+| --- | --- | --- | --- | --- |
+| **N27** | 高 | **上游依赖** | vLLM 流式工具调用参数丢末字符（26%），绕过 Harness 直连 18000 即复现。不是本项目代码 | **网关侧兜底**：SSE 层累计参数、流尾判定截断并补发闭合增量（只做纯追加） |
+| N5 | 中 | 部署校准 | 资源准入按显存**已用**比例判定，而 vLLM 预占约 90% → 默认阈值下长期判 CRITICAL。刻意不改默认值（会影响其他部署），按部署校准（真机用 93/98） | **改为基线语义**：新增 `HARNESS_GPU_MEMORY_BASELINE_PERCENT`（默认 90），准入只看基线之上的增量；无同机推理服务设为 0 |
+| N15 | 中 | 产品范围外 | 没有配置租户资源限额/Secret 的产品入口 | **补管理面**：`GET/PUT /admin/policies[/platform|/tenants/:id]` + `POST /runs` 接受 `runPolicy` |
+| N16 | 中 | 产品设计选择 | `UNKNOWN_EFFECT` 无人工消解出口 | **补出口**：`POST /runs/:id/resolve-unknown-effect`（NO_EFFECT / EFFECT_OCCURRED）+ 新事件类型 + 控制台按钮 |
+| N9 | 记录 | 非缺陷 | 未知模型返回 503 `no_available_backend` | **改为 404 `model_not_found`**（配了但全熔断才是 503） |
+| N10 | 记录 | 非缺陷 | 洪泛下正常租户尾延迟可达 215s（无永久饥饿） | **加老化插队**：`HARNESS_SCHEDULER_AGING_MS`（默认 60s），给正常租户确定的等待上界 |
+| N14 | 记录 | 非缺陷 | gVisor 下 PID 耗尽会终结整个沙箱（runc 只是 fork 失败） | **上限可配置** + 注释写明两种 runtime 的爆炸半径差异，便于把平台限制调到 gVisor 内部上限之下 |
 
-**结论**：本项目代码范围内的缺陷已全部修复；未修项要么是上游、要么是明确非目标、
-要么是记录性观察。测试驱动的 T1–T5（测量有效性）仍只登记未修，见
+**结论**：本项目代码范围内（含此前被列为"记录/非目标"的 7 项）已全部收口。
+仍未修的只剩**测量有效性**（测试驱动的 T1–T5）与**明确不做**的多机/生产级能力，见
 [`scenario-coverage-consolidated.zh-CN.md`](scenario-coverage-consolidated.zh-CN.md) §3 与
 缺陷登记表 §2。
+
+---
+
+## §25 第十二轮：收口剩下 7 项（2026-09-11，最后一轮）
+
+用户要求"剩下的 7 项都修复一下，这轮是最后一次修复"。§24 结尾列的 7 项（N27/N5/N15/N16/N9/N10/N14）
+全部落地，本文件不再新增未修项。
+
+### 总览
+
+| 项 | 改动 | 回归测试 |
+| --- | --- | --- |
+| N9 | `src/llm-gateway/llm-gateway.ts`：未配置该逻辑模型 → 404 `model_not_found`；配置了但全部熔断/不可用仍 503 `no_available_backend`，并列出每个后端的冷却剩余与连续失败次数 | 改写 `tests/llm-gateway/llm-gateway.test.ts`、`load-balancing.test.ts` |
+| N27 | 新增 `src/llm-gateway/tool-call-argument-repair.ts`；重写 `wrapUpstreamStream` 为"输出队列 + 扣住流尾"模型，在 finish 之前补发闭合增量 | 新增 `tests/llm-gateway/tool-call-argument-repair.test.ts`（13 例） |
+| N5 | `resource-classifier.ts` 新增 `gpuMemoryBaselinePercent` 与 `gpuMemoryPressurePercent`；`harness-config.ts` 新增 `HARNESS_GPU_MEMORY_BASELINE_PERCENT`（默认 90） | 新增 3 例 + 配置默认/覆盖 2 例；`tests/integration/day7-fake-demo.test.ts` 的快照 95%→99% |
+| N15 | `harness-http-api.ts` 新增 `/admin/policies` 三个路由 + `parsePolicyConstraints`；`POST /runs` 接受 `runPolicy`；`harness-application.ts` 暴露注册表读写 | 新增 5 例（含越租户 404、缺 scope 403、类型错误 400） |
+| N16 | 状态机加 `INTERRUPTED → FAILED`；新增事件 `MANUAL_REVIEW_RESOLVED`；`HarnessApplication.resolveUnknownEffect`；HTTP `POST /runs/:id/resolve-unknown-effect`；`GET /runs/:id` 返回 `unknownEffects`；控制台加"⚠ 核对不确定副作用"按钮 | 新增 `tests/app/manual-review-resolution.test.ts`（5 例）+ HTTP 3 例 |
+| N10 | `tenant-run-scheduler.ts` 新增 `claimAged()`（老化插队，不越过租户并发上限与会话串行）；新增 `HARNESS_SCHEDULER_AGING_MS`（默认 60s） | 新增 `tests/scheduling/scheduler-aging.test.ts`（4 例） |
+| N14 | `OciSandboxSpecCompiler` 的 `pidLimit` 由硬编码 128 改为可配置（`HARNESS_CONTAINER_PIDS_LIMIT`），并写明 runsc/runc 的爆炸半径差异 | 新增 `tests/sandbox/oci-pids-limit.test.ts`（2 例） |
+
+### N27 的修复边界（必须一起讲清楚）
+
+- **只在三种条件下补发**：① 该轮确实收到 `finish_reason`（提前断流属于失败轮，交由 N17 裁决与重试，不修）；
+  ② 累计参数不是合法 JSON；③ 修复结果只是在原文**尾部追加**闭合符（`repaired.startsWith(original)`），
+  不改写、不删除已发出的内容。任一不满足即不动作。
+- **补发 chunk 不带 tool_call 的 `id`/`name`**：Pi（`@earendil-works/pi-ai` 的 `ensureToolCallBlock`）
+  先按 `index` 匹配已有 block，带新 id 会被当成第二个工具调用。
+- **流尾会被扣住**：为实现"修复增量排在 finish chunk 之前"，`finish_reason` 与 `[DONE]` 先入
+  `heldTail`，见到 `[DONE]`（或流结束）时先发修复增量再原样发出流尾。这不改变客户端可见的内容，
+  但 `wrapUpstreamStream` 从"字节零改动透传"变成"逐行重发 + 必要时插一条增量"——这是修复的代价，
+  已在此记录。
+- **可观测**：`LlmGateway.toolCallRepairStats()` 暴露进程内修复次数；每次修复打一条 `console.warn`。
+- **仍未做**：没有在真机（vLLM 18000）上重跑 T3/T6 复验修复率；回归只覆盖了构造出的截断流。
+  这是本轮最需要如实标注的边界。
+
+### N16 的状态语义变化
+
+`INTERRUPTED` 原先只能转 `QUEUED`（恢复）。现在多了 `INTERRUPTED → FAILED`，用于
+"人工核对确认副作用已发生"——该 Run 不可能安全续跑，明确终结比留在"可恢复"的假象里诚实。
+`NO_EFFECT` 则只作废 `PREPARED` 执行并追加 `MANUAL_REVIEW_RESOLVED` 事件，Run 留在
+`INTERRUPTED`，继续走既有 `/resume`。
+
+### 本轮验证
+
+- `bun test ./tests`：**476 pass / 0 fail**（98 个文件，4890 次断言）。
+- `npx tsc --noEmit`：本项目源码与测试干净；`scripts/campaign/*` 是未纳入版本库的
+  跑测脚本，有既存的严格模式告警（不由本轮引入）。
+- **未做真机复验**：以上 7 项都在本地确定性环境验证（含构造出的 SSE 截断流、HTTP 路由、
+  调度器单测、OCI argv 断言）。N5/N10/N27 在真机上的行为变化尚未重跑 campaign。
+

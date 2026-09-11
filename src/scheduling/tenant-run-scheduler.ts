@@ -3,6 +3,14 @@
 export interface TenantRunSchedulerConfig {
     maxActiveRuns: number;
     maxActiveRunsPerTenant: number;
+    /**
+     * N10：老化阈值（ms）。某个租户的队首 Run 等待超过该值时，它不再等
+     * 轮转排到，而是直接插队优先调度——给「被洪泛租户挡在后面的正常租户」
+     * 一个确定的等待上界。未配置 / <= 0 = 关闭（纯轮转，旧行为）。
+     */
+    agingMs?: number;
+    /** 时钟注入（测试用），默认 Date.now。 */
+    now?: () => number;
 }
 
 // 队列情况说明
@@ -144,6 +152,14 @@ export class TenantRunScheduler {
             return null;
         }
 
+        // N10：老化插队。先看有没有等太久的 Run，有就先调度它，
+        // 避免正常租户被洪泛租户的轮转顺序挡住长尾（真机观察 215s）。
+        const aged = this.claimAged();
+
+        if (aged !== null) {
+            return aged;
+        }
+
         // 记录最多检查多少个tenant
         const tenantsToInspect = this.tenantOrder.length;
 
@@ -216,6 +232,91 @@ export class TenantRunScheduler {
      
         // 有等待任务，但是所有tenant都达到了自己的并发上限;
         return null;
+    }
+
+    /**
+     * N10：老化插队。扫描所有租户的队首，选出「等待时间最长、且已超过
+     * agingMs」并当前有资格启动的 Run（未达本租户并发上限、无会话串行冲突）。
+     * 没有任何 Run 超过阈值时返回 null，交由原有轮转逻辑处理（行为不变）。
+     */
+    private claimAged(): QueuedRun | null {
+        const agingMs = this.config.agingMs ?? 0;
+
+        if (agingMs <= 0) {
+            return null;
+        }
+
+        const now = (this.config.now ?? Date.now)();
+        let bestTenantId: string | null = null;
+        let bestIndex = -1;
+        let bestWaitedMs = agingMs;
+
+        for (let index = 0; index < this.tenantOrder.length; index += 1) {
+            const tenantId = this.tenantOrder[index];
+
+            if (tenantId === undefined) {
+                continue;
+            }
+
+            const tenantQueue = this.queuesByTenant.get(tenantId);
+            const head = tenantQueue?.[0];
+
+            if (tenantQueue === undefined || head === undefined) {
+                continue;
+            }
+
+            if (
+                this.getActiveTenantRunCount(tenantId)
+                >= this.config.maxActiveRunsPerTenant
+            ) {
+                continue;
+            }
+
+            if (
+                head.sessionId !== undefined
+                && this.hasActiveSession(head.sessionId)
+            ) {
+                continue;
+            }
+
+            const waitedMs = now - Date.parse(head.enqueuedAt);
+
+            if (!Number.isFinite(waitedMs) || waitedMs < bestWaitedMs) {
+                continue;
+            }
+
+            bestTenantId = tenantId;
+            bestIndex = index;
+            bestWaitedMs = waitedMs;
+        }
+
+        if (bestTenantId === null || bestIndex < 0) {
+            return null;
+        }
+
+        const queue = this.queuesByTenant.get(bestTenantId);
+        const run = queue?.[0];
+
+        if (queue === undefined || run === undefined) {
+            return null;
+        }
+
+        this.tenantOrder.splice(bestIndex, 1);
+        queue.shift();
+
+        if (queue.length > 0) {
+            this.tenantOrder.push(bestTenantId);
+        } else {
+            this.queuesByTenant.delete(bestTenantId);
+        }
+
+        this.activeTenantByRunId.set(run.runId, run.tenantId);
+
+        if (run.sessionId !== undefined) {
+            this.activeSessionByRunId.set(run.runId, run.sessionId);
+        }
+
+        return run;
     }
 
     private getActiveTenantRunCount(tenantId:string):number {

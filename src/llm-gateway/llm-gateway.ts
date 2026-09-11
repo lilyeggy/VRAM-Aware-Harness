@@ -29,6 +29,11 @@ import {
     estimateToolsTokens,
     type CompactionOutcome,
 } from "./context-budget.ts";
+import {
+    buildToolCallRepairChunk,
+    ToolCallArgumentTracker,
+    type StreamChunkMeta,
+} from "./tool-call-argument-repair.ts";
 
 /** 单次请求的缓存命中样本（供持久化 sink 消费）。 */
 export interface LlmCacheSample {
@@ -113,6 +118,8 @@ export class LlmGateway {
     private cacheSampleCount = 0;
     private cachePromptTokensTotal = 0;
     private cacheCachedTokensTotal = 0;
+    /** N27 观测：本进程内补发过修复增量的工具调用数。 */
+    private toolCallRepairs = 0;
 
     constructor(
         public readonly router: ModelRouter,
@@ -132,6 +139,14 @@ export class LlmGateway {
     /** N28 观测：最近一次上下文压缩的事实；未曾压缩时为 null。 */
     lastCompactionStats(): CompactionOutcome | null {
         return this.lastCompaction;
+    }
+
+    /**
+     * N27 观测：本进程内被上游截断、并由网关补发闭合增量的工具调用次数。
+     * 该计数 > 0 是"上游缺陷确实命中过、但被网关兜住"的直接证据。
+     */
+    toolCallRepairStats(): { repairedToolCalls: number } {
+        return { repairedToolCalls: this.toolCallRepairs };
     }
 
     /**
@@ -220,26 +235,46 @@ export class LlmGateway {
             // 冷却中。真机上"流式断流 + 重试耗尽"正是第 ② 种，原先被笼统写成
             // "未配置或全部熔断"，用户会误以为根本没配后端。
             const described = this.router.describeModelBackends(logicalModel);
-            const reason = described.length === 0
-                ? `逻辑模型 ${logicalModel || "(空)"} 没有配置任何后端`
-                : `逻辑模型 ${logicalModel || "(空)"} 的 ${described.length} 个后端全部不可用：`
-                    + described.map((backend) =>
-                        `${backend.id}`
-                        + `(熔断${backend.circuitOpen ? "中" : "否"}`
-                        + `，冷却剩余 ${backend.cooldownRemainingMs}ms`
-                        + `，连续失败 ${backend.consecutiveFailures} 次)`,
-                    ).join("；");
+            // N9：区分"这个逻辑模型根本没配"与"配了但暂时全不可用"。
+            // 前者是资源不存在（404 model_not_found），后者才是服务不可用（503）。
+            // 旧实现一律 503，客户端会把拼错的模型名当成"服务抖动"去重试。
+            if (described.length === 0) {
+                const known = this.router.logicalModels();
+                const reason = `逻辑模型 ${logicalModel || "(空)"} 没有配置任何后端`;
+                this.router.recordDecision({
+                    ...base,
+                    chosenBackendId: null,
+                    status: "FAILED",
+                    httpStatus: 404,
+                    latencyMs: this.now() - startedAt,
+                    error: reason,
+                });
+                return json(404, {
+                    error: {
+                        message: `模型 ${logicalModel || "(空)"} 不存在：网关未配置该逻辑模型。`
+                            + `可用模型：${known.length > 0 ? known.join(", ") : "(无)"}`,
+                        type: "model_not_found",
+                    },
+                });
+            }
+            const reason = `逻辑模型 ${logicalModel} 的 ${described.length} 个后端全部不可用：`
+                + described.map((backend) =>
+                    `${backend.id}`
+                    + `(熔断${backend.circuitOpen ? "中" : "否"}`
+                    + `，冷却剩余 ${backend.cooldownRemainingMs}ms`
+                    + `，连续失败 ${backend.consecutiveFailures} 次)`,
+                ).join("；");
             this.router.recordDecision({
                 ...base,
                 chosenBackendId: null,
                 status: "FAILED",
-                httpStatus: null,
+                httpStatus: 503,
                 latencyMs: this.now() - startedAt,
                 error: reason,
             });
             return json(503, {
                 error: {
-                    message: `模型 ${logicalModel || "(空)"} 暂无可用后端。${reason}`,
+                    message: `模型 ${logicalModel} 暂无可用后端。${reason}`,
                     type: "no_available_backend",
                 },
             });
@@ -349,119 +384,225 @@ export class LlmGateway {
     }
 
     /**
-     * SSE 透传 + usage 采集：响应字节原样转发，同时逐行扫描
-     * `data:` 行，在（include_usage 注入后出现的）末尾 usage chunk
-     * 上记录一次缓存命中样本。非 JSON 行与 [DONE] 静默跳过。
+     * SSE 透传 + usage 采集 + N27 工具调用参数截断修复。
+     *
+     * 逐行扫描 `data:` 行：旁路采集 usage 缓存命中样本；同时累计 tool_call
+     * 的 arguments，并在流尾判定是否被上游截断。为把补发的闭合符排在
+     * finish chunk 之前，finish_reason 与 [DONE] 会先被扣住（heldTail），
+     * 到流结束（或见到 [DONE]）时先发修复增量再原样发出流尾。
+     * 提前断流（未收到 finish_reason）不做修复，交由 N17 的失败裁决与重试。
      */
-    /**
-     * 字节原样透传，旁路观察每个 chunk；只有"上游异常结束"才回调
-     * `onIncomplete`——下游主动取消（客户端断开）不算后端失败。
-     */
-    private passthroughStream(
-        source: ReadableStream<Uint8Array>,
-        onChunk: (chunk: Uint8Array) => void,
-        onIncomplete: () => void,
-    ): ReadableStream<Uint8Array> {
-        const reader = source.getReader();
-        let cancelled = false;
-        return new ReadableStream<Uint8Array>({
-            async pull(controller) {
-                try {
-                    const { done, value } = await reader.read();
-                    if (done) {
-                        if (!cancelled) onIncomplete();
-                        controller.close();
-                        return;
-                    }
-                    onChunk(value);
-                    controller.enqueue(value);
-                } catch (error) {
-                    if (!cancelled) onIncomplete();
-                    controller.error(error);
-                }
-            },
-            cancel(reason) {
-                cancelled = true;
-                return reader.cancel(reason);
-            },
-        },
-        // highWaterMark: 0 —— 保持与旧 TransformStream 相同的"按需拉取"语义：
-        // 下游不读就不预读上游，也不提前记台账。
-        { highWaterMark: 0 });
-    }
-
     private wrapUpstreamStream(
         upstream: Response,
         backendId: string,
         context: { requestId: string; logicalModel: string; prefixCacheKey: string | null },
         sampleUsage: boolean,
     ): Response {
+        const self = this;
         const decoder = new TextDecoder();
+        const encoder = new TextEncoder();
+        const reader = upstream.body?.getReader() ?? null;
         let buffer = "";
         let sampled = false;
         let finished = false;
-        // N17：只有看到 finish_reason 或 [DONE] 才算这一轮被完整交付。
-        // 否则流一旦提前结束（上游断流/超时），必须记到该后端头上——
-        // 旧实现只看 HTTP 首包状态，断流不算失败，导致熔断器永不打开、
-        // 健康的备用后端永远不被使用，每次重试都再撞同一个坏后端。
-        const inspectLine = (line: string): void => {
-            if (finished || !line.startsWith("data:")) return;
-            const payload = line.slice(5).trim();
-            if (payload === "[DONE]") {
-                finished = true;
+        let holdingTail = false;
+        let tailFlushed = false;
+        let cancelled = false;
+        const heldTail: string[] = [];
+        const tracker = new ToolCallArgumentTracker();
+        const chunkMeta: StreamChunkMeta = {};
+        // 输出队列：handleLine/flushTail 只负责"产出字节"，pull 负责"交付字节"。
+        // 这样即使某个上游 chunk 全部是"被扣住的流尾"（本次没有产出），
+        // pull 也能继续往下读，而不会因为一次 pull 没 deliver 就永久停滞
+        // （highWaterMark: 0 下，未 enqueue 的 pull 不会自动再次触发）。
+        const outbox: Uint8Array[] = [];
+
+        const flushTail = (): void => {
+            if (tailFlushed) {
                 return;
             }
-            if (payload.length === 0) return;
-            try {
-                const parsed = JSON.parse(payload) as {
-                    choices?: Array<{ finish_reason?: string | null }>;
-                } & Record<string, unknown>;
-                if ((parsed.choices ?? []).some(
-                    (choice) => choice.finish_reason !== null
-                        && choice.finish_reason !== undefined,
-                )) {
-                    finished = true;
+
+            tailFlushed = true;
+
+            if (finished) {
+                for (const repair of tracker.repairs()) {
+                    const chunk = buildToolCallRepairChunk(
+                        repair,
+                        chunkMeta,
+                        self.now(),
+                    );
+                    outbox.push(
+                        encoder.encode(`data: ${JSON.stringify(chunk)}\n\n`),
+                    );
+                    self.toolCallRepairs += 1;
+                    console.warn(
+                        "[llm-gateway] N27 上游截断了工具调用参数，已补发闭合增量："
+                        + `backend=${backendId}`
+                        + ` choice=${repair.choiceIndex}`
+                        + ` toolCall=${repair.toolCallIndex}`
+                        + ` suffix=${JSON.stringify(repair.suffix)}`
+                        + `（requestId=${context.requestId}）`,
+                    );
                 }
-                if (!sampled) {
-                    const usage = extractCachedTokensFromResponse(parsed);
-                    if (usage.promptTokens !== null) {
-                        sampled = true;
-                        if (sampleUsage) {
-                            this.recordCacheSample({
-                                requestId: context.requestId,
-                                backendId,
-                                logicalModel: context.logicalModel,
-                                prefixCacheKey: context.prefixCacheKey,
-                                promptTokens: usage.promptTokens,
-                                cachedTokens: usage.cachedTokens,
-                                recordedAt: new Date(this.now()).toISOString(),
-                            });
+            }
+
+            for (const line of heldTail) {
+                outbox.push(encoder.encode(`${line}\n`));
+            }
+
+            heldTail.length = 0;
+        };
+
+        const handleLine = (rawLine: string): void => {
+            if (holdingTail) {
+                heldTail.push(rawLine);
+                return;
+            }
+
+            const line = rawLine.trim();
+
+            if (finished || !line.startsWith("data:")) {
+                outbox.push(encoder.encode(`${rawLine}\n`));
+                return;
+            }
+
+            const payload = line.slice(5).trim();
+
+            if (payload === "[DONE]") {
+                finished = true;
+                holdingTail = true;
+                heldTail.push(rawLine);
+                // [DONE] 之后不会再有内容，立刻收尾（不依赖上游关闭连接）。
+                flushTail();
+                return;
+            }
+
+            if (payload.length > 0) {
+                try {
+                    const parsed = JSON.parse(payload) as {
+                        id?: unknown;
+                        created?: unknown;
+                        model?: unknown;
+                        choices?: Array<{ finish_reason?: string | null }>;
+                    } & Record<string, unknown>;
+
+                    if (typeof parsed.id === "string") chunkMeta.id = parsed.id;
+                    if (typeof parsed.created === "number") {
+                        chunkMeta.created = parsed.created;
+                    }
+                    if (typeof parsed.model === "string") chunkMeta.model = parsed.model;
+
+                    tracker.observe(parsed);
+
+                    if (!sampled) {
+                        const usage = extractCachedTokensFromResponse(parsed);
+
+                        if (usage.promptTokens !== null) {
+                            sampled = true;
+
+                            if (sampleUsage) {
+                                self.recordCacheSample({
+                                    requestId: context.requestId,
+                                    backendId,
+                                    logicalModel: context.logicalModel,
+                                    prefixCacheKey: context.prefixCacheKey,
+                                    promptTokens: usage.promptTokens,
+                                    cachedTokens: usage.cachedTokens,
+                                    recordedAt: new Date(self.now()).toISOString(),
+                                });
+                            }
                         }
                     }
+
+                    const isFinish = (parsed.choices ?? []).some(
+                        (choice) => choice.finish_reason !== null
+                            && choice.finish_reason !== undefined,
+                    );
+
+                    if (isFinish) {
+                        finished = true;
+                        holdingTail = true;
+                        heldTail.push(rawLine);
+                        return;
+                    }
+                } catch {
+                    // 非 JSON 的 SSE 行（注释/心跳）按原样透传，不计入。
                 }
-            } catch {
-                // 非 JSON 的 SSE 行（注释/心跳）按原样透传，不计入。
             }
+
+            outbox.push(encoder.encode(`${rawLine}\n`));
         };
-        const body = upstream.body === null
+
+        const body = reader === null
             ? null
-            : this.passthroughStream(
-                upstream.body,
-                (chunk: Uint8Array) => {
-                    buffer += decoder.decode(chunk, { stream: true });
-                    let newlineIndex: number;
-                    while ((newlineIndex = buffer.indexOf("\n")) !== -1) {
-                        const line = buffer.slice(0, newlineIndex).trim();
-                        buffer = buffer.slice(newlineIndex + 1);
-                        inspectLine(line);
+            : new ReadableStream<Uint8Array>({
+                async pull(controller) {
+                    try {
+                        // 持续读，直到本次 pull 能交付一个 chunk（或流结束）。
+                        for (;;) {
+                            const buffered = outbox.shift();
+
+                            if (buffered !== undefined) {
+                                controller.enqueue(buffered);
+                                return;
+                            }
+
+                            const { done, value } = await reader.read();
+
+                            if (done) {
+                                // 上游最后一行可能没有换行符（常见于收尾的 [DONE]）。
+                                const residual = buffer.trim();
+                                buffer = "";
+
+                                if (residual.length > 0) {
+                                    handleLine(residual);
+                                }
+
+                                if (!cancelled) {
+                                    flushTail();
+                                    // N17：流真正结束才裁决这一轮成败。
+                                    if (finished) {
+                                        self.router.recordSuccess(backendId);
+                                    } else {
+                                        self.router.recordFailure(backendId);
+                                    }
+                                }
+
+                                const tail = outbox.shift();
+
+                                if (tail !== undefined) {
+                                    controller.enqueue(tail);
+                                    return;
+                                }
+
+                                controller.close();
+                                return;
+                            }
+
+                            buffer += decoder.decode(value, { stream: true });
+
+                            let newlineIndex: number;
+
+                            while ((newlineIndex = buffer.indexOf("\n")) !== -1) {
+                                const rawLine = buffer.slice(0, newlineIndex);
+                                buffer = buffer.slice(newlineIndex + 1);
+                                handleLine(rawLine);
+                            }
+                        }
+                    } catch (error) {
+                        if (!cancelled) self.router.recordFailure(backendId);
+                        controller.error(error);
                     }
                 },
-                () => {
-                    // N17：流真正结束才裁决这一轮成败。
-                    if (finished) this.router.recordSuccess(backendId);
-                    else this.router.recordFailure(backendId);
+                cancel(reason) {
+                    // 下游主动取消（客户端断开）不算后端失败，不做修复补发。
+                    cancelled = true;
+                    return reader.cancel(reason);
                 },
-            );
+            },
+            // highWaterMark: 0 —— 保持与旧实现相同的"按需拉取"语义。
+            { highWaterMark: 0 });
+
         return new Response(
             body,
             {

@@ -42,6 +42,22 @@ export interface ResourceThresholds {
 
     busyWaitingRequests : number;
     criticalWaitingRequests : number;
+
+    /**
+     * N5：同机推理服务的「稳态预分配基线」（占整卡百分比）。
+     *
+     * vLLM 之类框架默认 `--gpu-memory-utilization 0.9`，启动即把约 90% 显存
+     * 一次占满（其中大部分是 KV cache 空池）。若直接拿「显存已用比例」做准入，
+     * 平台只看自己的模型服务就会长期判 CRITICAL，把所有 Run 无差别排队到 TTL
+     * 熔断——真机上 13 字符的小任务也被排掉。
+     *
+     * 设定基线后，显存压力按「基线之上的增量」度量：
+     *   adjusted = (used% - baseline) / (100 - baseline) * 100
+     * 基线内是预期稳态，不构成压力；基线之上才按 BUSY/CRITICAL 阈值判定。
+     * 未配置（undefined/0）= 旧行为（按原始已用比例判定）。
+     * 无同机推理服务的部署应设为 0。
+     */
+    gpuMemoryBaselinePercent? : number;
 }
 
 // 定义输出结构
@@ -50,7 +66,14 @@ export interface ResourceClassification {
     pressure:ResourcePressure;
     reasons:readonly ResourcePressureReason[];
 
+    /** 原始「显存已用 / 总显存」比例（观测事实，不因基线配置而变化）。 */
     gpuMemoryUsagePercent:number | null;
+
+    /**
+     * N5：扣掉同机推理服务稳态基线之后的「增量压力」比例，准入真正看的就是它。
+     * 未配置基线时与 gpuMemoryUsagePercent 相等（旧行为）。
+     */
+    gpuMemoryPressurePercent:number | null;
 }
 
 // 计算显存比例
@@ -69,6 +92,30 @@ function calculateGpuMemoryUsagePercent (
     
 }
 
+/**
+ * N5：把「已用比例」折算成「基线之上的增量压力比例」。
+ * baseline <= 0 或 >= 100 时退化为原值（不做度量变换）。
+ */
+function calculateGpuMemoryPressurePercent (
+    usagePercent : number | null,
+    baselinePercent : number | undefined,
+)   : number | null {
+    if (usagePercent === null) {
+        return null;
+    }
+    const baseline = baselinePercent;
+    if (
+        baseline === undefined ||
+        baseline <= 0 ||
+        baseline >= 100
+    ) {
+        return usagePercent;
+    }
+    const headroom = 100 - baseline;
+    const delta = Math.max(0, usagePercent - baseline);
+    return (delta / headroom) * 100;
+}
+
 // 定义分类函数框架
 export function classifyResource(
     snapshot:ResourceSnapshot,
@@ -78,6 +125,12 @@ export function classifyResource(
 
     const gpuMemoryUsagePercent = 
     calculateGpuMemoryUsagePercent(snapshot);
+
+    // N5：准入判定用「基线之上的增量」，观测事实仍原样保留 usage。
+    const gpuMemoryPressurePercent = calculateGpuMemoryPressurePercent(
+        gpuMemoryUsagePercent,
+        thresholds.gpuMemoryBaselinePercent,
+    );
 
     // 先判断是否有可用数据
     const hasUsableSignal = 
@@ -92,17 +145,18 @@ export function classifyResource(
             pressure:"UNKNOWN",
             reasons:["INSUFFICIENT_DATA"],
             gpuMemoryUsagePercent,
+            gpuMemoryPressurePercent,
         };
     }
 
     // GPU Memory 情况判断
-    if (gpuMemoryUsagePercent !== null) {
+    if (gpuMemoryPressurePercent !== null) {
         if (
-            gpuMemoryUsagePercent >= thresholds.criticalGpuMemoryPercent
+            gpuMemoryPressurePercent >= thresholds.criticalGpuMemoryPercent
         )   {
             reasons.push("GPU_MEMORY_CRITICAL");
         }   else if (
-            gpuMemoryUsagePercent >= thresholds.busyGpuMemoryPercent
+            gpuMemoryPressurePercent >= thresholds.busyGpuMemoryPercent
         )   {
             reasons.push("GPU_MEMORY_BUSY");
         }
@@ -154,6 +208,7 @@ export function classifyResource(
             pressure:"CRITICAL",
             reasons,
             gpuMemoryUsagePercent,
+            gpuMemoryPressurePercent,
         }
     }
 
@@ -167,6 +222,7 @@ export function classifyResource(
             pressure:"BUSY",
             reasons,
             gpuMemoryUsagePercent,
+            gpuMemoryPressurePercent,
         }
     }
     
@@ -176,5 +232,6 @@ export function classifyResource(
         pressure:"NORMAL",
         reasons:["WITHIN_THRESHOLDS"],
         gpuMemoryUsagePercent,
+        gpuMemoryPressurePercent,
     };
 }

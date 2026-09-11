@@ -21,7 +21,11 @@ const allowedTransitions : Record<AgentRunStatus,readonly AgentRunStatus[]>={
         "FAILED",
     ],
     INTERRUPTED:[
-        "QUEUED"
+        // N16：人工核对 UNKNOWN_EFFECT 之后，Run 只有两条出路——
+        // 确认无副作用 → QUEUED（复用既有 /resume 继续推进）；
+        // 确认副作用已发生 → FAILED，明确终结，不再假装"可以恢复"。
+        "QUEUED",
+        "FAILED",
     ],
     COMPLETED:[],
     FAILED:[]

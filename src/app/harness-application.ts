@@ -40,6 +40,18 @@ import type { Conversation } from "../conversations/conversation.ts";
 import { createConversation } from "../conversations/conversation.ts";
 import type { ConversationStore } from "../conversations/conversation-store.ts";
 import { summarizeToolDenials, type RunLimitation } from "../policies/run-limitations.ts";
+import type { PolicyConstraints, PolicyLayer } from "../policies/effective-policy.ts";
+import type { PolicyRegistry } from "../policies/policy-registry.ts";
+import type { ToolExecution } from "../tools/tool-execution.ts";
+
+/**
+ * N16：人工消解 UNKNOWN_EFFECT 只需要"读未决执行 + 作废它"两个能力，
+ * 这里用结构化接口表达，便于测试注入最小替身。
+ */
+export interface ToolExecutionReviewStore {
+    listPreparedForRun(runId: string): ToolExecution[];
+    fail(execution: ToolExecution): void;
+}
 
 
 export interface StartupRecoveryCoordinator {
@@ -71,6 +83,10 @@ export class HarnessApplication {
         private readonly instanceStore?: HarnessInstanceStore,
         private readonly conversationStore?: ConversationStore,
         private readonly toolPolicyStore?: { listToolDecisions(runId: string): readonly { toolName: string; action: string; reason: string; decidedAt: string }[] },
+        /** N15：租户/平台策略注册表（策略管理面）。 */
+        private readonly policyRegistry?: PolicyRegistry,
+        /** N16：工具执行库（人工消解 UNKNOWN_EFFECT）。 */
+        private readonly toolExecutions?: ToolExecutionReviewStore,
     ) {}
 
     private async startOnce() : Promise<void> {
@@ -259,5 +275,125 @@ export class HarnessApplication {
     interruptRun(runId:string) : Promise<AgentRun> {
         this.assertStarted();
         return this.coordinator.interrupt(runId);
+    }
+
+    // ------------------------------------------------------------------
+    // N15：策略管理面。HTTP /admin/policies 背后的读写入口。
+    // 注册表未装配时 get* 返回 null、set* 返回 false，由协议层决定 503。
+    // ------------------------------------------------------------------
+
+    getPlatformPolicy():PolicyLayer | null {
+        return this.policyRegistry?.getPlatformPolicy() ?? null;
+    }
+
+    getTenantPolicy(tenantId:string):PolicyLayer | null {
+        return this.policyRegistry?.getTenantPolicy(tenantId) ?? null;
+    }
+
+    setPlatformPolicy(id:string, policy:PolicyConstraints):boolean {
+        if (this.policyRegistry === undefined) return false;
+        this.policyRegistry.setPlatformPolicy(id, policy);
+        return true;
+    }
+
+    setTenantPolicy(tenantId:string, id:string, policy:PolicyConstraints):boolean {
+        if (this.policyRegistry === undefined) return false;
+        this.policyRegistry.setTenantPolicy(tenantId, id, policy);
+        return true;
+    }
+
+    // ------------------------------------------------------------------
+    // N16：UNKNOWN_EFFECT 的人工消解出口。
+    // ------------------------------------------------------------------
+
+    /** 该 Run 上仍"结果不确定"（PREPARED）的工具调用，供界面表达"请人工核对"。 */
+    getRunUnknownEffects(runId:string):ToolExecution[] {
+        return this.toolExecutions?.listPreparedForRun(runId) ?? [];
+    }
+
+    /**
+     * 人工核对 UNKNOWN_EFFECT 后消解：
+     * - NO_EFFECT：确认该命令没有产生副作用 → 作废 PREPARED 记录（否则
+     *   ToolGateway 会一直以"不允许自动重放"拒绝后续同类调用），Run 留在
+     *   INTERRUPTED，可继续走既有 /resume。
+     * - EFFECT_OCCURRED：确认副作用已经发生 → 同样作废 PREPARED 以避免重放
+     *   二次生效，并把 Run 明确终结为 FAILED（不再假装可恢复）。
+     */
+    resolveUnknownEffect(
+        runId:string,
+        input:{
+            resolution:"NO_EFFECT" | "EFFECT_OCCURRED";
+            note?:string;
+            actor:string | null;
+        },
+    ): { run:AgentRun; resolvedExecutionIds:string[] } {
+        const run = this.runStore.get(runId);
+
+        if (run === null) {
+            throw new Error(`找不到 AgentRun：${runId}`);
+        }
+        if (run.status !== "INTERRUPTED") {
+            throw new Error(
+                `只有 INTERRUPTED 的 Run 需要人工消解不确定副作用，当前状态：${run.status}`,
+            );
+        }
+
+        const prepared = this.toolExecutions?.listPreparedForRun(runId) ?? [];
+
+        if (prepared.length === 0) {
+            throw new Error("该 Run 没有待人工核对的不确定工具调用");
+        }
+
+        const now = new Date().toISOString();
+        const resolvedExecutionIds: string[] = [];
+
+        for (const execution of prepared) {
+            this.toolExecutions!.fail({
+                ...execution,
+                status: "FAILED",
+                result: null,
+                errorMessage: input.resolution === "NO_EFFECT"
+                    ? "人工核对：确认无副作用，已作废该次不确定执行"
+                    : "人工核对：确认副作用已发生，已作废该次执行以避免重放",
+                finishedAt: now,
+            });
+            resolvedExecutionIds.push(execution.id);
+        }
+
+        const baseEvent = {
+            eventId: crypto.randomUUID(),
+            runId,
+            sequence: this.runStore.getLastEventSequence(runId) + 1,
+            timestamp: now,
+            payloadVersion: 1,
+            payload: {
+                resolution: input.resolution,
+                note: input.note ?? null,
+                resolvedExecutionIds,
+                actor: input.actor,
+            },
+        } as const;
+
+        if (input.resolution === "EFFECT_OCCURRED") {
+            const failedRun: AgentRun = {
+                ...run,
+                status: "FAILED",
+                failureReason:
+                    `人工核对确认 UNKNOWN_EFFECT 的副作用已发生：${input.note ?? "无备注"}`,
+                finishedAt: now,
+                updatedAt: now,
+            };
+            this.runStore.update(failedRun, {
+                ...baseEvent,
+                type: "RUN_FAILED",
+            });
+            return { run: failedRun, resolvedExecutionIds };
+        }
+
+        this.runStore.appendEvent({
+            ...baseEvent,
+            type: "MANUAL_REVIEW_RESOLVED",
+        });
+        return { run, resolvedExecutionIds };
     }
 }

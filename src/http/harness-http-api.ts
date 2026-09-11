@@ -34,6 +34,11 @@ import type { LlmGateway } from "../llm-gateway/llm-gateway.ts";
 import { platformDashboardResponse } from "./harness-platform-dashboard.ts";
 import { userConsoleResponse } from "./harness-user-console.ts";
 import type { Conversation } from "../conversations/conversation.ts";
+import type { PolicyConstraints, PolicyLayer, ResourceLimits } from "../policies/effective-policy.ts";
+import type { ToolExecution } from "../tools/tool-execution.ts";
+
+/** N16：人工消解 UNKNOWN_EFFECT 的两种结论。 */
+export type UnknownEffectResolution = "NO_EFFECT" | "EFFECT_OCCURRED";
 
 export interface HarnessHttpApplication {
     isStarted():boolean;
@@ -60,6 +65,17 @@ export interface HarnessHttpApplication {
     observeResources():Promise<ResourceObservation>;
     interruptRun(runId:string):Promise<AgentRun>;
     resumeRun(input:ResumeRunInput):AgentRun;
+    /** N15：策略管理面（读写租户/平台策略层）。未装配时相关路由返回 503。 */
+    getPlatformPolicy?():PolicyLayer | null;
+    getTenantPolicy?(tenantId:string):PolicyLayer | null;
+    setPlatformPolicy?(id:string, policy:PolicyConstraints):boolean;
+    setTenantPolicy?(tenantId:string, id:string, policy:PolicyConstraints):boolean;
+    /** N16：UNKNOWN_EFFECT 的人工消解出口。 */
+    getRunUnknownEffects?(runId:string):ToolExecution[];
+    resolveUnknownEffect?(
+        runId:string,
+        input:{ resolution:UnknownEffectResolution; note?:string; actor:string | null },
+    ):{ run:AgentRun; resolvedExecutionIds:string[] };
 }
 
 export interface CheckpointLookup {
@@ -335,6 +351,13 @@ export class HarnessHttpApi {
             }
         }
 
+        // N15：策略管理面——租户资源限额与授权 Secret 的配置入口。
+        // 此前 PolicyRegistry.setTenantPolicy/setPlatformPolicy 只被测试调用，
+        // 真实产品路径没有任何地方能表达"受限租户"。
+        if (segments[0] === "admin" && segments[1] === "policies") {
+            return this.handlePolicyAdmin(request, segments);
+        }
+
         if (
             request.method === "POST"
             && segments.length === 1
@@ -420,10 +443,23 @@ export class HarnessHttpApi {
             ) {
                 const run = this.getRequiredRun(runId, request, "tasks:read");
 
+                // N16：把"结果不确定的副作用"显式暴露给界面，否则用户只看到
+                // 一个 INTERRUPTED 的 Run，不知道需要人工核对什么。
+                const unknownEffects = (
+                    this.application.getRunUnknownEffects?.(runId) ?? []
+                ).map((execution) => ({
+                    executionId: execution.id,
+                    toolCallId: execution.toolCallId,
+                    toolName: execution.toolName,
+                    effect: execution.effect,
+                    createdAt: execution.createdAt,
+                }));
+
                 return jsonResponse({
                     run,
                     decisions:this.application.getRunDecisions(runId),
                     limitations:this.application.getRunLimitations?.(runId) ?? [],
+                    unknownEffects,
                 });
             }
 
@@ -500,6 +536,14 @@ export class HarnessHttpApi {
             ) {
                 return this.resumeRun(request, runId);
             }
+
+            if (
+                request.method === "POST"
+                && segments.length === 3
+                && segments[2] === "resolve-unknown-effect"
+            ) {
+                return this.resolveUnknownEffect(request, runId);
+            }
         }
 
         throw new HttpError(404, "找不到 HTTP 路由");
@@ -536,6 +580,9 @@ export class HarnessHttpApi {
             }
         }
 
+        // N15：请求级策略层（RUN 层）。此前 StartRunInput.runPolicy
+        // 没有任何产品调用方，受限运行只能靠测试直接调 Runtime。
+        const runPolicy = parseRunPolicy(body);
         const run = this.application.submitRun({
             tenantId:this.accessControl === undefined
                 ? requiredString(body, "tenantId")
@@ -545,6 +592,7 @@ export class HarnessHttpApi {
                 ?? crypto.randomUUID(),
             userInput:this.requireUserInput(body),
             thinkingLevel: parseThinkingLevel(body),
+            ...(runPolicy === undefined ? {} : { runPolicy }),
             workspacePath:this.accessControl === undefined
                 ? requiredString(body, "workspacePath")
                 : (workspace as NonNullable<typeof workspace>).rootPath,
@@ -667,6 +715,158 @@ export class HarnessHttpApi {
         this.auditResource("RUN", runId, "RUN_RESUME", "ALLOW", principal.tenantId, "run_resumed");
 
         return jsonResponse({ run:queuedRun }, 202);
+    }
+
+    /**
+     * N16：人工核对 UNKNOWN_EFFECT 后的消解出口。
+     *
+     * 背景：工具在 PREPARED 之后崩溃/超时，"副作用是否已发生"无法由系统
+     * 判定（canAutomaticallyReplay 对 UNKNOWN_EFFECT 一律 fail-closed），
+     * Run 停在 INTERRUPTED。此前没有任何产品流程能消解它，界面也无法表达
+     * "该命令可能已执行过，请人工核对"。
+     */
+    private async resolveUnknownEffect(
+        request:Request,
+        runId:string,
+    ):Promise<Response> {
+        const principal = this.requirePrincipal(request, "tasks:write");
+        const run = this.getRequiredRun(runId);
+
+        if (this.accessControl !== undefined && run.tenantId !== principal.tenantId) {
+            this.auditResource("RUN", runId, "RUN_RESOLVE_UNKNOWN_EFFECT", "DENY", principal.tenantId, "run_not_owned");
+            throw new HttpError(404, `找不到 AgentRun：${runId}`);
+        }
+        if (this.application.resolveUnknownEffect === undefined) {
+            throw new HttpError(503, "人工消解服务未装配");
+        }
+
+        const body = await readJsonObject(request);
+        const resolution = requiredString(body, "resolution");
+
+        if (resolution !== "NO_EFFECT" && resolution !== "EFFECT_OCCURRED") {
+            throw new HttpError(
+                400,
+                "resolution 必须是 NO_EFFECT（确认无副作用）或 EFFECT_OCCURRED（确认副作用已发生）",
+            );
+        }
+
+        try {
+            const result = this.application.resolveUnknownEffect(runId, {
+                resolution,
+                note: optionalString(body, "note") ?? undefined,
+                actor: principal.tenantId,
+            });
+            this.auditResource(
+                "RUN", runId, "RUN_RESOLVE_UNKNOWN_EFFECT", "ALLOW",
+                principal.tenantId, `resolution=${resolution}`,
+            );
+            return jsonResponse(result);
+        } catch (error) {
+            this.auditResource(
+                "RUN", runId, "RUN_RESOLVE_UNKNOWN_EFFECT", "DENY",
+                principal.tenantId, "resolution_rejected",
+            );
+            throw new HttpError(
+                409,
+                error instanceof Error ? error.message : String(error),
+            );
+        }
+    }
+
+    /**
+     * N15：租户/平台策略管理面。
+     *
+     * 读用 `policies:read`，写用 `policies:write`；非通配 scope 的调用方
+     * 只能读写自己租户的策略，避免越权改配额或授权 Secret。
+     */
+    private async handlePolicyAdmin(
+        request:Request,
+        segments:readonly string[],
+    ):Promise<Response> {
+        const principal = this.requirePrincipal(request, "policies:read");
+        const platform = this.application.getPlatformPolicy?.();
+
+        if (request.method === "GET" && segments.length === 2) {
+            if (platform === undefined) {
+                throw new HttpError(503, "策略管理面未装配");
+            }
+            return jsonResponse({
+                platform,
+                tenant: this.application.getTenantPolicy?.(principal.tenantId) ?? null,
+            });
+        }
+
+        if (segments.length === 3 && segments[2] === "platform") {
+            const writer = this.requirePrincipal(request, "policies:write");
+
+            if (request.method === "GET") {
+                if (platform === undefined) {
+                    throw new HttpError(503, "策略管理面未装配");
+                }
+                return jsonResponse({ platform });
+            }
+
+            if (request.method === "PUT") {
+                const body = await readJsonObject(request);
+                const policy = parsePolicyConstraints(body.policy, "policy");
+                const applied = this.application.setPlatformPolicy?.(
+                    "platform:http-admin",
+                    policy,
+                ) ?? false;
+
+                if (!applied) {
+                    throw new HttpError(503, "策略管理面未装配");
+                }
+                this.audit("PLATFORM_POLICY_SET", "ALLOW", writer, "platform_policy_updated");
+                return jsonResponse({
+                    platform: this.application.getPlatformPolicy?.() ?? null,
+                });
+            }
+
+            throw new HttpError(405, "不支持的请求方法");
+        }
+
+        if (segments.length === 4 && segments[2] === "tenants") {
+            const tenantId = segments[3] ?? "";
+            const writer = this.requirePrincipal(request, "policies:write");
+            const isWildcard = writer.scopes.includes("*");
+
+            if (!isWildcard && writer.tenantId !== tenantId) {
+                this.audit("TENANT_POLICY_ACCESS", "DENY", writer, "tenant_not_owned");
+                throw new HttpError(404, `找不到租户：${tenantId}`);
+            }
+
+            if (request.method === "GET") {
+                const tenantPolicy = this.application.getTenantPolicy?.(tenantId);
+
+                if (tenantPolicy === undefined || tenantPolicy === null) {
+                    throw new HttpError(503, "策略管理面未装配");
+                }
+                return jsonResponse({ tenant: tenantPolicy });
+            }
+
+            if (request.method === "PUT") {
+                const body = await readJsonObject(request);
+                const policy = parsePolicyConstraints(body.policy, "policy");
+                const applied = this.application.setTenantPolicy?.(
+                    tenantId,
+                    `tenant:${tenantId}:http-admin`,
+                    policy,
+                ) ?? false;
+
+                if (!applied) {
+                    throw new HttpError(503, "策略管理面未装配");
+                }
+                this.audit("TENANT_POLICY_SET", "ALLOW", writer, `tenant_policy_updated:${tenantId}`);
+                return jsonResponse({
+                    tenant: this.application.getTenantPolicy?.(tenantId) ?? null,
+                });
+            }
+
+            throw new HttpError(405, "不支持的请求方法");
+        }
+
+        throw new HttpError(404, "找不到 HTTP 路由");
     }
 
     private getRequiredRun(
@@ -890,6 +1090,97 @@ function parseThinkingLevel(body:Record<string,unknown>): StartRunInput["thinkin
         throw new HttpError(400, "thinkingLevel 必须是 off、minimal、low、medium 或 high");
     }
     return value as StartRunInput["thinkingLevel"];
+}
+
+/**
+ * N15：解析 PolicyConstraints。策略管理面（PUT /admin/policies/*）与请求级
+ * `runPolicy` 共用同一套校验：未提供的字段按 unrestricted 语义取默认值，
+ * 类型错误一律 400（不静默降级成"无限额"）。
+ */
+function parsePolicyConstraints(value:unknown, field:string):PolicyConstraints {
+    if (typeof value !== "object" || value === null || Array.isArray(value)) {
+        throw new HttpError(400, `${field} 必须是 JSON 对象`);
+    }
+
+    const raw = value as Record<string, unknown>;
+
+    return {
+        allowedTools: optionalStringArray(raw.allowedTools, `${field}.allowedTools`),
+        allowedSkills: optionalStringArray(raw.allowedSkills, `${field}.allowedSkills`),
+        allowedModels: optionalStringArray(raw.allowedModels, `${field}.allowedModels`),
+        workspaceRoots: optionalStringArray(raw.workspaceRoots, `${field}.workspaceRoots`),
+        allowNetwork: optionalBoolean(raw.allowNetwork, `${field}.allowNetwork`, true),
+        allowProcess: optionalBoolean(raw.allowProcess, `${field}.allowProcess`, true),
+        allowedSecrets: optionalStringArray(raw.allowedSecrets, `${field}.allowedSecrets`),
+        resourceLimits: parseResourceLimits(raw.resourceLimits, `${field}.resourceLimits`),
+    };
+}
+
+function parseRunPolicy(body:Record<string,unknown>):PolicyConstraints | undefined {
+    if (body.runPolicy === undefined) {
+        return undefined;
+    }
+    return parsePolicyConstraints(body.runPolicy, "runPolicy");
+}
+
+function optionalStringArray(value:unknown, field:string):string[] | null {
+    if (value === undefined || value === null) {
+        return null;
+    }
+    if (
+        !Array.isArray(value)
+        || value.some((item) => typeof item !== "string" || item.length === 0)
+    ) {
+        throw new HttpError(400, `${field} 必须是非空字符串数组`);
+    }
+    return value as string[];
+}
+
+function optionalBoolean(value:unknown, field:string, fallback:boolean):boolean {
+    if (value === undefined || value === null) {
+        return fallback;
+    }
+    if (typeof value !== "boolean") {
+        throw new HttpError(400, `${field} 必须是布尔值`);
+    }
+    return value;
+}
+
+function parseResourceLimits(value:unknown, field:string):ResourceLimits {
+    if (value === undefined || value === null) {
+        return { cpuCores: null, memoryMiB: null, diskMiB: null };
+    }
+    if (typeof value !== "object" || Array.isArray(value)) {
+        throw new HttpError(400, `${field} 必须是 JSON 对象`);
+    }
+
+    const raw = value as Record<string, unknown>;
+
+    return {
+        cpuCores: optionalPositiveNumber(raw.cpuCores, `${field}.cpuCores`),
+        memoryMiB: optionalPositiveInteger(raw.memoryMiB, `${field}.memoryMiB`),
+        diskMiB: optionalPositiveInteger(raw.diskMiB, `${field}.diskMiB`),
+    };
+}
+
+function optionalPositiveNumber(value:unknown, field:string):number | null {
+    if (value === undefined || value === null) {
+        return null;
+    }
+    if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
+        throw new HttpError(400, `${field} 必须是正数`);
+    }
+    return value;
+}
+
+function optionalPositiveInteger(value:unknown, field:string):number | null {
+    if (value === undefined || value === null) {
+        return null;
+    }
+    if (typeof value !== "number" || !Number.isInteger(value) || value <= 0) {
+        throw new HttpError(400, `${field} 必须是正整数`);
+    }
+    return value;
 }
 
 function jsonResponse(value:unknown, status = 200):Response {
