@@ -293,12 +293,19 @@ export class WorkerProcessAgentRuntime implements AgentRuntime {
             }
         }, handshakeTimeoutMs);
 
-        // 2. Consume stderr lines for crash forensics
+        // 2. Consume stderr lines: 既保留尾部用于崩溃取证，也转发到 Master 日志。
+        //
+        // worker-main.ts 把 console.* 全部重定向到 stderr 以免污染 stdout 上的
+        // NDJSON 协议，因此 worker 侧的一切诊断（含 Pi 会话压缩）都只走 stderr。
+        // 原先这里只留最后 50 行在内存里、只有崩溃时才吐出来——后果是
+        //「worker 里到底发生了什么」在正常运行期完全不可见：8 小时长稳中
+        // Pi 压缩静默失效，正是因为这条链路看不到任何 worker 侧信号。
         void this.consumeStreamLines(child.stderr as ReadableStream<Uint8Array>, (line) => {
             stderrLines.push(line);
             if (stderrLines.length > 50) {
                 stderrLines.shift();
             }
+            process.stderr.write(`[worker ${child.pid}] ${line}\n`);
         });
 
         // 3. Read IPC messages from child stdout

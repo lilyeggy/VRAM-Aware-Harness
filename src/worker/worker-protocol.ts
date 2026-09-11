@@ -10,6 +10,7 @@ import type {
     RuntimeResumeRequest,
     RuntimeStartRequest,
 } from "../runtime/agent-runtime.ts";
+import type { PiCompactionConfig } from "../runtime/pi-adapter.ts";
 import type { SandboxProfile } from "../sandbox/sandbox-profile.ts";
 import type { ExecuteToolInput } from "../tools/tool-gateway.ts";
 
@@ -63,6 +64,12 @@ export interface WorkerRuntimeConfig {
     readonly containerImage: string;
     readonly containerUserId: number;
     readonly dockerCommand?: string;
+    /**
+     * N28 主机制：Pi 会话压缩参数必须随 workerConfig 下发。默认 worker 隔离
+     * 模式下 Pi 会话是在 worker 子进程里建的——只在 Master 侧装配会漏掉这条
+     * 占绝大多数的执行路径。
+     */
+    readonly piCompaction?: PiCompactionConfig;
 }
 
 // ============================================================================

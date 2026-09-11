@@ -9,6 +9,7 @@ import {
     createAgentSession,
     DefaultResourceLoader,
     SessionManager,
+    SettingsManager,
     type ModelRuntime,
     type AgentSession,
 }from "@earendil-works/pi-coding-agent";
@@ -33,11 +34,37 @@ import type {
     SandboxEnforcementCapabilities,
 } from "../sandbox/sandbox-provider.ts";
 
+/**
+ * Pi 的全局配置目录。资源加载（技能/扩展）与设置读取（压缩参数）必须指向
+ * 同一处，否则会出现「按 A 目录找技能、按 B 目录读设置」的割裂。
+ */
+function piAgentDir():string {
+    return join(homedir(), ".pi", "agent");
+}
+
+/**
+ * N28 主机制：Pi 会话摘要式压缩参数（Harness 视角的显式契约）。
+ */
+export interface PiCompactionConfig {
+    enabled: boolean;
+    reserveTokens: number;
+    keepRecentTokens: number;
+}
+
 export interface PiAdapterConfig{
     provider:string;
     modelId:string;
     tools:string[];
     thinkingLevel?: "off" | "minimal" | "low" | "medium" | "high";
+    /**
+     * N28 主机制：Pi 会话自身的摘要式压缩参数。
+     *
+     * 不传 = 沿用 Pi 文件配置与上游默认（会在大窗口假设下退化成空操作，
+     * 见 HarnessConfig.piCompactionReserveTokens 的说明）。传入时通过
+     * SettingsManager.applyOverrides 叠加到「全局 + 项目」文件配置之上，
+     * 只覆盖 compaction 子树，不影响部署方写在 settings.json 里的其它项。
+     */
+    compaction?: PiCompactionConfig;
 }
 
 /**
@@ -180,6 +207,9 @@ export class PiAdapter implements AgentRuntime{
             tools:[...config.tools],
             customTools,
             sessionManager,
+            settingsManager:this.createSessionSettingsManager(
+                request.run.workspacePath,
+            ),
             ...(resourceLoader === undefined ? {} : { resourceLoader }),
             thinkingLevel: request.execution?.runtimeConfig.thinkingLevel ?? this.config.thinkingLevel ?? "off",
             // 创建一个可以持久化 Pi 对话历史的 SessionManager。
@@ -410,13 +440,16 @@ export class PiAdapter implements AgentRuntime{
                 case "tool_execution_update":
                 case "agent_settled":
                 case "queue_update":
-                case "compaction_start":
-                case "compaction_end":
                 case "entry_appended":
                 case "session_info_changed":
                 case "thinking_level_changed":
                 case "auto_retry_start":
                 case "auto_retry_end":
+                    break;
+
+                case "compaction_start":
+                case "compaction_end":
+                    this.logPiCompaction(runId, piEvent);
                     break;
 
                 default:
@@ -506,6 +539,9 @@ export class PiAdapter implements AgentRuntime{
             tools:[...config.tools],
             customTools,
             sessionManager,
+            settingsManager:this.createSessionSettingsManager(
+                request.run.workspacePath,
+            ),
             ...(resourceLoader === undefined ? {} : { resourceLoader }),
             thinkingLevel: request.execution?.runtimeConfig.thinkingLevel ?? this.config.thinkingLevel ?? "off",
         })
@@ -730,13 +766,16 @@ export class PiAdapter implements AgentRuntime{
                 case "tool_execution_update":
                 case "agent_settled":
                 case "queue_update":
-                case "compaction_start":
-                case "compaction_end":
                 case "entry_appended":
                 case "session_info_changed":
                 case "thinking_level_changed":
                 case "auto_retry_start":
                 case "auto_retry_end":
+                    break;
+
+                case "compaction_start":
+                case "compaction_end":
+                    this.logPiCompaction(runId, piEvent);
                     break;
 
                 default:
@@ -818,12 +857,72 @@ export class PiAdapter implements AgentRuntime{
         const allowed = new Set(skillNames);
         return new DefaultResourceLoader({
             cwd: workspacePath,
-            agentDir: join(homedir(), ".pi", "agent"),
+            agentDir: piAgentDir(),
             noSkills: allowed.size === 0,
             skillsOverride: (base) => ({
                 ...base,
                 skills: base.skills.filter((skill) => allowed.has(skill.name)),
             }),
         });
+    }
+
+    /**
+     * N28 主机制：会话压缩不产生 Harness 业务事实，但它决定会话能否长期存活。
+     * 真机 8 小时长稳中正是因为压缩静默失效（保留目标大于触发点 → 切点退到
+     * 会话开头 → 无可摘要内容 → prepareCompaction 返回 undefined），一个会话
+     * 连续失败 142 次才被发现。这里把它打到运行日志，使「压缩是否真的发生、
+     * 压掉了多少 token」可被外部观测，而不是只能靠翻 Pi 的 session JSONL。
+     */
+    private logPiCompaction(
+        runId: string,
+        event: {
+            type: "compaction_start";
+            reason: string;
+        } | {
+            type: "compaction_end";
+            reason: string;
+            result?: {
+                tokensBefore?: number;
+                estimatedTokensAfter?: number;
+            } | undefined;
+            aborted: boolean;
+            willRetry: boolean;
+            errorMessage?: string;
+        },
+    ): void {
+        if (event.type === "compaction_start") {
+            console.log(
+                `[pi-adapter] 会话压缩开始：runId=${runId} reason=${event.reason}`,
+            );
+            return;
+        }
+
+        const detail = event.result === undefined
+            ? `未产生摘要（${event.errorMessage ?? "原因未上报"}）`
+            : `token ${event.result.tokensBefore ?? "?"} → `
+                + `${event.result.estimatedTokensAfter ?? "?"}`;
+        console.log(
+            `[pi-adapter] 会话压缩结束：runId=${runId} reason=${event.reason}`
+            + ` ${detail} aborted=${event.aborted} willRetry=${event.willRetry}`,
+        );
+    }
+
+    /**
+     * N28 主机制：为每个 Pi 会话构造设置管理器。
+     *
+     * 先按 Pi 自身规则加载「全局 <agentDir>/settings.json + 项目 <cwd>/.pi/settings.json」，
+     * 再用 applyOverrides 在内存里叠加 Harness 下发的 compaction 参数。
+     * applyOverrides 只改内存副本、不落盘，因此不会污染部署方的 settings.json，
+     * 也不需要往每个 Run 的临时工作区里写 .pi/settings.json。
+     */
+    private createSessionSettingsManager(
+        workspacePath: string,
+    ): SettingsManager {
+        const manager = SettingsManager.create(workspacePath, piAgentDir());
+        const compaction = this.config.compaction;
+        if (compaction !== undefined) {
+            manager.applyOverrides({ compaction });
+        }
+        return manager;
     }
 }

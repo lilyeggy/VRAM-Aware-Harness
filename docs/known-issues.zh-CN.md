@@ -553,3 +553,62 @@ X05 原本因"缺真实写盘夹具"记 BLOCKED。改用真实 bash 工具构造
 
 ### 同轮修掉的测试工具缺陷
 - **T6（测试工具）**：`provision-instance.sh` 生成的 `start.sh` 用相对路径定位 `campaign.env`——`cd code` 之后 `$(dirname "$0")` 仍指向原相对路径，**只有绝对路径调用才能启动**。已同时修实例与模板。
+
+## §22 第九轮：N28 主机制——让 Pi 自己的摘要式压缩真正生效（2026-09-11）
+
+> §21 的修复把压缩放在**网关**（丢弃 + 告知），能止血，但机制层级低：按时间砍、不做摘要、且 Pi 侧历史仍无界增长。
+> 本轮改成**分层**：Pi 会话内的**摘要式压缩当主机制**，网关截断降级为**兜底**。
+> 实例 `campaign-pi-compact-20260911`（端口 13031，container/runsc + `python:3.12-alpine`）。
+
+### 根因：上游默认参数在 32k 窗口下**退化成空操作**（不是"没配压缩"）
+| 项 | 内容 |
+| --- | --- |
+| 默认值 | Pi `DEFAULT_COMPACTION_SETTINGS = {enabled:true, reserveTokens:16384, keepRecentTokens:20000}` |
+| 触发条件 | `shouldCompact(tokens, window, s)` → `tokens > window − reserveTokens` |
+| 32k 窗口的后果 | 触发点 = 32768 − 16384 = **16384**，而它被要求**至少保留 20000** 的近期历史——**保留目标比触发点还大** |
+| 静默退化链 | `findCutPoint` 从尾部往前累计 token 永远够不到 20000 → 切点一路退到会话开头 → `messagesToSummarize` 为空 → `prepareCompaction` 返回 `undefined` |
+| 为什么长期没被发现 | `_runAutoCompaction` 在 `preparation === undefined` 时**静默 `return false`**，不报错不告警；且 overflow 恢复路径 `_overflowRecoveryAttempted` **只允许重试一次**，失败后该会话永久不可用 |
+| 8h 长稳实证 | 87 个 Pi 会话文件中**只有 7 个**含 `compaction` 记录（~8%）；会话 `36e566bd` 撞窗后 **142 连败、0 成功** |
+
+**关键是：这不是"没配置压缩"，而是配置了却退化成空操作**——比不配置更难发现。
+
+### 修复（三处）
+1. **配置契约**（`src/app/harness-config.ts`）：新增 `piCompactionEnabled` / `piCompactionReserveTokens`（默认 **12288**）/ `piCompactionKeepRecentTokens`（默认 **8192**），对应环境变量 `PI_COMPACTION_ENABLED` / `PI_COMPACTION_RESERVE_TOKENS` / `PI_COMPACTION_KEEP_RECENT_TOKENS`。
+   标定依据：窗口 32768、单次输出上限 4096 → 触发点 **20480**、压缩后保留 ~8192、为输出留 12288。
+   两条**不变量**（违反任一条即退化成空操作）：`reserve > keepRecent`，且 `reserve > 单次输出上限`。
+2. **注入方式**（`src/runtime/pi-adapter.ts`）：`SettingsManager.create(cwd, ~/.pi/agent)` + `applyOverrides({compaction})`，再经 `createAgentSession({settingsManager})` 下发。`applyOverrides` **只改内存副本、不落盘**（已用测试锁定），因此不污染部署方的 `settings.json`，也不必往每个 Run 的临时工作区写 `.pi/settings.json`。`start` 与 `resume` 两处建会话调用都改。
+3. **装配路径**（`src/app/create-harness-application.ts` + `src/worker/worker-protocol.ts` + `src/worker/worker-main.ts`）：压缩参数**随 `workerConfig` 经 IPC 下发**。默认隔离模式是 `process`，Pi 会话建在 worker 子进程里——只在 Master 侧装配会漏掉**占绝大多数的执行路径**。
+
+### 顺带修掉：worker 模式下的"观测盲区"（`src/runtime/worker-process-runtime.ts`）
+- `worker-main.ts` 把 `console.*` 全部重定向到 stderr 以免污染 stdout 上的 NDJSON IPC，因此 **worker 侧的一切诊断只走 stderr**；而原先 stderr 只保留**最后 50 行在内存里**、仅崩溃时才吐出来。
+- 后果：**worker 里到底发生了什么，在正常运行期完全不可见**——8h 长稳里 Pi 压缩静默失效，正是因为这条链路没有任何信号。
+- 修法：消费 stderr 时同时 `process.stderr.write("[worker <pid>] <line>")`，转发进 Master 日志。
+- 另外把 `compaction_start` / `compaction_end` 从"显式忽略"里提出来，打印 `reason` 与 `token X → Y`（此前这两个事件被适配器直接吞掉）。
+
+### 验证证据
+**本地**：`bun test ./tests` → **417 pass / 0 fail**（新增 5 条）；`bun run typecheck` → 已入库源码 0 错误。
+- `tests/runtime/pi-compaction-defaults.test.ts`（新增 4 条）**用 Pi 自己导出的 `shouldCompact` / `findCutPoint` 复现根因**：默认参数下、恰好在 `shouldCompact` 返回 `true` 的上下文规模处，`findCutPoint().firstKeptEntryIndex === 0`（无可摘要内容）；换成 Harness 参数后切点落在历史中部、`historyEnd > 0`。第 4 条锁定 `applyOverrides` 生效且**文件字节不变**。
+- `tests/app/harness-config.test.ts`（新增 1 条）：锁定默认值与两条不变量。
+
+**真机 · 实验臂 A（决定性设计）**：负载与 N28 复验**同一份** `load-driver.ts`（md5 `218273de…`），单用户 t6、0.15 任务/s、900s。
+- **把网关兜底彻底关掉**（`LLM_CONTEXT_BUDGET_TOKENS=0`）——若仍 0 超限，则只可能是 Pi 压缩在起作用，**不存在"兜底替 Pi 背锅"的解释空间**。
+- 结果：**1 个会话**跑完 **134 次运行**（94 完成 / 4 失败 / 36 收尾中断）；**21 次 Pi 压缩**，全部落在 `tokensBefore = 20486–21247`，**与配置的触发点 20480 精确吻合**；每次摘要 1.1k–1.6k 字符（真实 LLM 摘要，不是丢弃）。
+- 会话共 422 条消息，`stopReason` 分布 `toolUse 97 / stop 94 / 无(用户与工具结果) 231`，**`error` 为 0**；最大 input **21173**，从未接近 32768。
+- 4 个失败**全部是 `QUEUE_TIMEOUT`**（0.15/s 灌进 `max_active_runs=4` 的容量产物），**0 个上下文超限**。
+- 对照修复前：同族会话在第 ~58 次运行处开始 400、此后 **142 连败**。
+
+**真机 · 观测链路验证（非参数验证）**：临时把 `PI_COMPACTION_RESERVE_TOKENS=26000` / `KEEP_RECENT_TOKENS=3000` 压低触发点，令压缩在 1–2 个 Run 内必然发生。Master 日志出现：
+```
+[worker 3269447] [pi-adapter] 会话压缩结束：runId=8e8399aa… reason=threshold token 9298 → 3173 aborted=false willRetry=false
+```
+→ worker stderr 转发与 compaction 事件映射**均已打通**，默认 worker 模式下压缩事实可见。
+
+### 清理（本轮结束状态）
+- 实例已停：端口 13031 释放；`agent-harness-*` 容器 **0** 个；共享 22 个 `polar-*` 容器、共享 Harness（13000）、vLLM（18000）**全程未动**。
+- 期间**再次复现 N19**：Master 被 SIGTERM 时仍有 1 个正在跑任务的沙箱容器未被回收（mount 指向本实例工作区），按归属确认后手工回收。这是 N19 的第 3 次独立复现，**仍未修**。
+
+### 仍未做（如实标注）
+1. N23（预算层重复计数导致 `ceiling=1` 租户恒被拒）、N19（恢复活锁 + 沙箱泄漏）、N18（静默损坏的 Checkpoint）**仍未修**；
+2. 压缩阈值是按**本部署** 32768/4096 标定的常量，换模型窗口需重算——依据与不变量已写进代码注释和 `.env.example`，但**没有做成自动推导**；
+3. 界面层仍不展示"本会话被压缩过"，用户侧依旧只有服务端日志可查；
+4. 24h 耐久档、R07 长任务档等仍在本轮冻结的边界之外（见 `docs/scenario-coverage-consolidated.zh-CN.md` §0.5）。

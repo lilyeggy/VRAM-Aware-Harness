@@ -45,6 +45,7 @@ import type {
     AgentRuntime,
 } from "../runtime/agent-runtime.ts";
 import { PiAdapter } from "../runtime/pi-adapter.ts";
+import type { PiCompactionConfig } from "../runtime/pi-adapter.ts";
 import { RuntimeCapabilityProfileStore } from "../runtime/runtime-capability-store.ts";
 import type { RuntimeCapabilityProfile } from "../runtime/runtime-capability.ts";
 import { ManagedAgentRuntime } from "../runtime/managed-agent-runtime.ts";
@@ -278,6 +279,7 @@ export async function createHarnessApplication(
                     sandboxRuntime: config.sandboxRuntime,
                     containerImage: config.containerImage,
                     containerUserId: config.containerUserId,
+                    piCompaction: piCompactionConfig(config),
                 },
                 orphanSandboxCleaner: async (sandboxId: string) => {
                     await (sandboxProvider as SandboxProvider).terminate(sandboxId).catch(() => undefined);
@@ -598,6 +600,20 @@ function createContainerSandboxRouter(
     }, config.sandboxProfile);
 }
 
+/**
+ * N28 主机制：把 Harness 配置翻译成 Pi 压缩参数。
+ *
+ * 进程隔离 worker 与进程内 runtime 两条装配路径共用同一份翻译，避免默认值
+ * 在某一侧漂移——长稳里绝大多数 Run 走的是 worker 路径。
+ */
+function piCompactionConfig(config:HarnessConfig):PiCompactionConfig {
+    return {
+        enabled:config.piCompactionEnabled,
+        reserveTokens:config.piCompactionReserveTokens,
+        keepRecentTokens:config.piCompactionKeepRecentTokens,
+    };
+}
+
 async function createPiRuntime(
     config:HarnessConfig,
     injectedModelRuntime:ModelRuntime | undefined,
@@ -628,6 +644,7 @@ async function createPiRuntime(
         provider:config.piProvider,
         modelId:config.piModelId,
         tools:config.piTools,
+        compaction: piCompactionConfig(config),
     }, {
         gateway:toolGateway,
         getLastEventSequence(runId) {

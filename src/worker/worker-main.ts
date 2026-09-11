@@ -151,6 +151,9 @@ async function setupRuntime(config: WorkerRuntimeConfig, sandboxId?: string, thi
             modelId: config.piModelId,
             tools: [...config.piTools],
             ...(thinkingLevel ? { thinkingLevel } : {}),
+            // N28 主机制：worker 进程内的 Pi 会话同样要拿到 Harness 下发的
+            // 压缩参数，否则长会话在这条路径上仍会静默退化。
+            ...(config.piCompaction ? { compaction: config.piCompaction } : {}),
         },
         {
             gateway: toolGateway,

@@ -74,6 +74,33 @@ export interface HarnessConfig {
      * 部署时应按所用模型上下文校准（默认 100000 字符，远高于常规任务）。
      */
     maxUserInputChars:number;
+    /**
+     * N28 主机制：Pi 会话自身的摘要式压缩开关。
+     *
+     * Pi 侧原先沿用上游默认 reserveTokens=16384 / keepRecentTokens=20000。
+     * 那组默认是给大窗口模型调的：在 32768 窗口下触发点是 16384，而它被要求
+     * 「至少保留 20000 token 的近期历史」——保留目标比触发点还大，切点只能一路
+     * 退到会话开头，prepareCompaction 判定「无可摘要内容」返回 undefined，
+     * 压缩静默不执行。真机 8 小时长稳里 87 个 Pi 会话只有 7 个产生过压缩记录，
+     * 会话撞窗后每个请求被上游 400 拒绝，且 _overflowRecoveryAttempted 只允许
+     * 重试一次，失败后该会话永久不可用（实测出现过 142 次连续失败）。
+     *
+     * 因此这里必须由 Harness 显式下发适合本部署窗口的参数。
+     */
+    piCompactionEnabled:boolean;
+    /**
+     * N28 主机制：Pi 压缩触发时预留给「模型输出 + 下一轮新增内容」的 token 数。
+     * 触发点 = 模型窗口 − reserveTokens。必须同时满足：
+     *   1) > 单次输出上限（本部署 maxTokens=4096），否则触发时已无输出空间；
+     *   2) 大于 keepRecentTokens，否则保留目标够不到切点，压缩退化成空操作。
+     */
+    piCompactionReserveTokens:number;
+    /**
+     * N28 主机制：压缩后保留的近期历史 token 数。必须是「切点能落在历史中间」
+     * 的量级：取值越小保留越少、摘要越频繁；取值接近触发点则压缩又会退化成
+     * 空操作（见 piCompactionReserveTokens 的说明）。
+     */
+    piCompactionKeepRecentTokens:number;
     /** 支柱 2：是否启用稳定前缀规范化（vLLM Prefix Caching 优化）。 */
     llmPrefixCacheEnabled:boolean;
     /** 支柱 2：流式请求是否由网关注入 include_usage 并采集末尾 usage chunk。 */
@@ -220,6 +247,22 @@ export function loadHarnessConfig(
             environment,
             "HARNESS_MAX_USER_INPUT_CHARS",
             100_000,
+        ),
+        // N28 主机制：Pi 自身摘要式压缩。默认值按本部署的模型窗口（32768）与
+        // 单次输出上限（4096）标定——触发点 32768-12288=20480，压缩后保留约
+        // 8192，为输出留出 12288 的余量。详见 HarnessConfig 字段注释。
+        piCompactionEnabled:environment.PI_COMPACTION_ENABLED
+            !== "false"
+            && environment.PI_COMPACTION_ENABLED !== "0",
+        piCompactionReserveTokens:positiveInteger(
+            environment,
+            "PI_COMPACTION_RESERVE_TOKENS",
+            12_288,
+        ),
+        piCompactionKeepRecentTokens:positiveInteger(
+            environment,
+            "PI_COMPACTION_KEEP_RECENT_TOKENS",
+            8_192,
         ),
         llmPrefixCacheEnabled:environment.LLM_PREFIX_CACHE
             !== "false"
