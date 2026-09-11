@@ -2,6 +2,7 @@
 
 > **读项目从这里开始 👇 先看这份图：**
 > - 快速读懂整个项目：**[docs/project-handbook.zh-CN.md](docs/project-handbook.zh-CN.md)**（唯一技术主文档）
+> - **全场景测试总索引：**[docs/scenario-test-index.zh-CN.md](docs/scenario-test-index.zh-CN.md)（86 个场景 → 跑了哪些实验 → 结果在哪份文档 → 原始证据路径）
 > - 面试准备：**[docs/interview-prep-guide.zh-CN.md](docs/interview-prep-guide.zh-CN.md)**
 > - 完成度对账：**[docs/completion-status.zh-CN.md](docs/completion-status.zh-CN.md)**
 > - 已知问题清单：**[docs/known-issues.zh-CN.md](docs/known-issues.zh-CN.md)**（缺陷/漂移逐条对账，含修复记录）
