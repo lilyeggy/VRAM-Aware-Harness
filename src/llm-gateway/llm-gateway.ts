@@ -22,7 +22,13 @@ import {
     computePrefixFingerprint,
     extractCachedTokensFromResponse,
     normalizePromptForPrefixCache,
+    type ChatMessage,
 } from "./prompt-prefix.ts";
+import {
+    compactConversation,
+    estimateToolsTokens,
+    type CompactionOutcome,
+} from "./context-budget.ts";
 
 /** 单次请求的缓存命中样本（供持久化 sink 消费）。 */
 export interface LlmCacheSample {
@@ -49,6 +55,12 @@ export interface LlmGatewayOptions {
     streamUsageCapture?: boolean;
     /** 缓存命中样本外接持久化 sink（SQLite 落库）。 */
     cacheSampleSink?: LlmCacheSampleSink;
+    /**
+     * N28：上下文预算（token）。> 0 时，转发前按轮次边界压缩过长的会话历史，
+     * 避免会话撞上模型窗口后每个请求都被上游 400 拒绝且永不恢复。
+     * 0（默认）= 不压缩，保持旧行为。
+     */
+    contextBudgetTokens?: number;
     /** fetch 实现（测试注入假后端）。 */
     fetchImpl?: typeof fetch;
     /** 决策 id 生成（测试注入）。 */
@@ -86,6 +98,12 @@ export class LlmGateway {
     private readonly prefixCacheEnabled: boolean;
     private readonly streamUsageCapture: boolean;
     private readonly cacheSampleSink: LlmCacheSampleSink | undefined;
+    private readonly contextBudgetTokens: number;
+    /**
+     * 最近一次上下文压缩的结果。N28 的另一半问题是"静默"——用户与运维都
+     * 不知道会话已经被裁剪过，这里保留可查询的事实，供观测与测试断言。
+     */
+    private lastCompaction: CompactionOutcome | null = null;
     private readonly fetchImpl: typeof fetch;
     private readonly newRequestId: () => string;
     private readonly now: () => number;
@@ -104,10 +122,16 @@ export class LlmGateway {
         this.prefixCacheEnabled = options.prefixCacheEnabled ?? true;
         this.streamUsageCapture = options.streamUsageCapture ?? true;
         this.cacheSampleSink = options.cacheSampleSink;
+        this.contextBudgetTokens = options.contextBudgetTokens ?? 0;
         this.fetchImpl = options.fetchImpl ?? fetch;
         this.newRequestId =
             options.requestId ?? (() => crypto.randomUUID());
         this.now = options.now ?? (() => Date.now());
+    }
+
+    /** N28 观测：最近一次上下文压缩的事实；未曾压缩时为 null。 */
+    lastCompactionStats(): CompactionOutcome | null {
+        return this.lastCompaction;
     }
 
     /**
@@ -137,6 +161,25 @@ export class LlmGateway {
             return json(400, {
                 error: { message: "请求体不是合法 JSON", type: "invalid_request" },
             });
+        }
+        // N28：会话历史超预算时按轮次边界压缩。必须在 prefix 规范化之前做：
+        // 规范化会重排 messages，压缩要按原始轮次结构判断边界。
+        if (this.contextBudgetTokens > 0 && Array.isArray(body.messages)) {
+            const compaction = compactConversation(
+                body.messages as ChatMessage[],
+                estimateToolsTokens(body.tools),
+                { budgetTokens: this.contextBudgetTokens },
+            );
+            if (compaction.compacted) {
+                body.messages = compaction.messages;
+                this.lastCompaction = compaction;
+                console.warn(
+                    `[llm-gateway] N28 上下文压缩：丢弃 ${compaction.droppedTurns} 轮`
+                    + `（${compaction.droppedMessages} 条历史消息），估计 token `
+                    + `${compaction.estimatedTokensBefore} → ${compaction.estimatedTokensAfter}`
+                    + `（预算 ${this.contextBudgetTokens}，requestId=${requestId}）`,
+                );
+            }
         }
         // Prefix Caching：把 Prompt 规范化为稳定前缀结构，并计算前缀指纹。
         const outboundBody = this.prefixCacheEnabled

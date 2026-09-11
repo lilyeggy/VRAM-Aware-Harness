@@ -526,7 +526,7 @@ X05 原本因"缺真实写盘夹具"记 BLOCKED。改用真实 bash 工具构造
 - **沙箱生命周期健康**：3,505 次创建/回收，终态全部 TERMINATED，无孤儿容器。
 - → 此前"长稳完全没跑，所以不能声称没有内存/FD/队列泄漏"的空白**由 8 小时档补齐**（24h 档仍未跑）。
 
-### N28（**高，未修**）：会话上下文撑爆后**永久不可用**
+### N28（**高，已修**）：会话上下文撑爆后**永久不可用**
 | 项 | 内容 |
 | --- | --- |
 | 现象 | 会话累积上下文超过模型窗口后，该会话**之后每个任务都在模型侧 400**，且永不恢复。783 个失败里 **746 个（21.3%）**属于此类，其余 37 个是流中断 |
@@ -535,6 +535,21 @@ X05 原本因"缺真实写盘夹具"记 BLOCKED。改用真实 bash 工具构造
 | 三个可修点 | ① 无上下文压缩/截断/滚动，会话撞墙后不自愈，也没有"开启新会话"的引导；② **提交期不校验**（与 N8 同源），先 202 接受再在模型侧失败；③ 失败只散落在该会话的每个 run 上，**没有"此会话已不可用"的整体信号** |
 | 如实标注 | 本轮的"一族一会话连发 200 条"放大了该问题（真实用户不会这样用）；但底层行为真实——**长会话必然撞墙且撞墙后不可恢复**。短时会话（跑道 A 的 30min 档）不会暴露，属**只有长稳才能发现的问题** |
 | 证据 | `/home/f630/homePLUS/soak-evidence/README-soak-8h.md`、`session-analysis.py`、`family-analysis.py`、`monitor.jsonl` |
+
+#### 修复（2026-09-11）
+- **新增 `src/llm-gateway/context-budget.ts`**：按**轮次边界**丢弃最老的对话历史，并插入一条显式说明（`DEFAULT_COMPACTION_NOTICE`），让模型知道早前内容已被省略——**不静默降级**。token 数为保守估计（CJK 约 1 字/token，其余 4 字符/token），不引入 tokenizer 依赖。
+- **为什么在网关做**：会话历史由 Pi 持有，Harness 只在模型边界能看到完整 messages，这里是唯一能压缩的地方，也是 400 的产生点。压缩在 prefix 规范化**之前**执行（规范化会重排 messages，压缩需要原始轮次结构）。
+- **边界安全**：一轮 = 一条 user 消息及其后到下一 user 之前的全部消息，因此 `assistant.tool_calls` 与其 `tool` 结果**永远同轮存亡**；压缩后再丢弃开头可能残留的孤立 `tool` 消息（孤立工具结果会被上游直接拒绝）。
+- **配置**：`LLM_CONTEXT_BUDGET_TOKENS`（默认 **24000**，= 模型窗口 32768 − 预留输出 4096 再留余量；**0 = 关闭压缩，回到旧行为**）。已写入 `.env.example` 与 `deploy/qwen38-harness.env.example`。
+- **可观测**：压缩时 `console.warn` 打出丢弃轮数/条数/token 变化，并可通过 `LlmGateway.lastCompactionStats()` 查询——N28 的另一半问题是"用户与运维都不知道被裁过"。
+- **回归**：新增 9 条用例（`tests/llm-gateway/context-budget.test.ts`，按本轮约定**只留在本地、未入库**），覆盖"不拆工具对""预算关闭即旧行为""极紧预算至少留 1 轮""网关转发前生效"；仓库自身全套 **412 pass / 0 fail**。
+- **仍未做（如实标注）**：① 当前是"**丢弃 + 告知**"，**不是 LLM 摘要式压缩**——被丢掉的信息不会以摘要形式保留；② 界面层仍没有"此会话已被裁剪"的提示，用户侧仍感知不到（只有服务端日志与 API 事实）。
+
+| 修复项 | 内容 |
+| --- | --- |
+| 改动文件 | `src/llm-gateway/context-budget.ts`（新增）、`src/llm-gateway/llm-gateway.ts`、`src/app/harness-config.ts`、`src/app/create-harness-application.ts`、`.env.example`、`deploy/qwen38-harness.env.example` |
+| 验证 | `bun test ./tests` → 412 pass / 0 fail；`bun run typecheck` → `src/` 0 错误 |
+| 未在真机复验 | 尚未把该修复同步到测试主机重跑长稳，因此"真实会话不再撞 400"**暂无端到端证据**，只有单元与网关集成证据 |
 
 ### 同轮修掉的测试工具缺陷
 - **T6（测试工具）**：`provision-instance.sh` 生成的 `start.sh` 用相对路径定位 `campaign.env`——`cd code` 之后 `$(dirname "$0")` 仍指向原相对路径，**只有绝对路径调用才能启动**。已同时修实例与模板。

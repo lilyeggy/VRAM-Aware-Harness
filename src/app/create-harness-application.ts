@@ -483,6 +483,7 @@ export async function createHarnessApplication(
             prefixCacheEnabled: config.llmPrefixCacheEnabled,
             streamUsageCapture: config.llmStreamUsageCapture,
             requestTimeoutMs: config.llmRequestTimeoutMs,
+            contextBudgetTokens: config.llmContextBudgetTokens,
         });
         if (config.llmHealthProbeIntervalMs > 0) {
             llmHealthMonitor = new BackendHealthMonitor(

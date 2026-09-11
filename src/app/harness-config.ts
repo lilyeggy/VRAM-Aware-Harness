@@ -63,6 +63,12 @@ export interface HarnessConfig {
     llmHealthProbePath:string;
     llmRequestTimeoutMs:number;
     /**
+     * N28：会话上下文预算（token）。> 0 时网关在转发前按轮次边界压缩过长的
+     * 会话历史，避免会话撞上模型窗口后每个请求都被上游 400 拒绝且永不恢复。
+     * 0 = 关闭压缩（保持旧行为）。部署时应设在「模型上下文窗口 − 预留输出」以内。
+     */
+    llmContextBudgetTokens:number;
+    /**
      * N8：提交期单次任务输入的上界（字符数）。超过即在提交时拒绝，
      * 不再先 202 接受、等模型侧 400 才失败。
      * 部署时应按所用模型上下文校准（默认 100000 字符，远高于常规任务）。
@@ -198,6 +204,15 @@ export function loadHarnessConfig(
             environment,
             "LLM_REQUEST_TIMEOUT_MS",
             300_000,
+        ),
+        // N28：会话历史超预算时按轮次边界压缩。旧行为下会话累积超过模型窗口后
+        // 每个请求都会被上游 400 拒绝且永不恢复（8h 长稳实测 21.3% 的任务因此失败，
+        // 最惨会话 142 连败 0 成功）。默认 24000：本部署模型窗口 32768、预留输出
+        // 4096，留出安全余量。0 = 关闭压缩。
+        llmContextBudgetTokens:nonNegativeInteger(
+            environment,
+            "LLM_CONTEXT_BUDGET_TOKENS",
+            24_000,
         ),
         // N8：提交期输入上界。旧实现不校验，78 万字符会被 202 接受，
         // 直到模型侧返回 400 才失败，且提交响应回显全量输入。
