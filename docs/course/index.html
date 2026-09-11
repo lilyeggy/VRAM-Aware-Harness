@@ -2822,11 +2822,11 @@
         </div>
       </section>
 
-      <!-- ══════════════ SCREEN 2 · 观测驾驶舱 ══════════════ -->
+      <!-- ══════════════ SCREEN 2 · 观测 Observe ══════════════ -->
       <section class="screen animate-in">
-        <h2 class="screen-heading">B · 观测驾驶舱：一眼看见执行质量</h2>
+        <h2 class="screen-heading">B · 观测：一眼看见执行质量</h2>
 
-        <p>指标算出来了，还要让人一眼看懂。方向 B 做了一个独立的观测页 <code>/observe</code>：它和任务操作台 <code>/</code> 完全解耦，只读，不会误触任务。数据来自同一个 <code>GET /eval</code> 端点，支持按租户过滤。</p>
+        <p>指标算出来了，还要让人一眼看懂。方向 B 的观测以 <code>GET /eval</code> 数据端点为底座：任务操作台 <code>/</code> 内置了只读的运行级观测抽屉（排队/模型/端到端时延、GPU 与 KV-cache 走势），与任务操作互不干扰，支持按租户查看。（早期曾有独立 <code>/observe</code> 页，重构后由运行级抽屉替代。）</p>
 
         <p>关键设计是「用图表说话，而不是堆数字卡片」：</p>
 
@@ -2865,7 +2865,7 @@
           <div class="callout-icon">👁️</div>
           <div class="callout-content">
             <strong class="callout-title">面试可讲</strong>
-            <p>「观测页走独立路由 /observe，不动现有任务操作台。注入走 HarnessHttpApi 的可选参数，没有改 HarnessApplication 的构造。这是最小侵入原则：观测只是旁路，不能影响主链路。」</p>
+            <p>「观测以只读数据端点 + 操作台内的只读抽屉呈现，不动主链路。数据全部来自落库事实，没有任何采集是为展示而新加的。这是最小侵入原则：观测只是旁路，不能影响主链路。」</p>
           </div>
         </div>
       </section>

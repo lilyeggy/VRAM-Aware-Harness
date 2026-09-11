@@ -1,0 +1,601 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VRAM-Aware Harness · 测试证据对照</title>
+<style>
+  :root{
+    --bg:#FBFAF7; --card:#FFFFFF; --line:#E3E1DA; --line2:#CFCCC3;
+    --tx:#26261F; --tx2:#5F5E5A; --tx3:#8A8880;
+    --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--tx);
+       font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+       font-size:14px;line-height:1.65}
+  .wrap{max-width:1120px;margin:0 auto;padding:40px 24px 90px}
+  h1{font-size:24px;font-weight:500;margin:0 0 6px}
+  .sub{color:var(--tx2);font-size:13px;margin-bottom:20px}
+  h2{font-size:17px;font-weight:500;margin:42px 0 6px;padding-bottom:6px;border-bottom:1px solid var(--line)}
+  h3{font-size:14px;font-weight:500;margin:24px 0 6px}
+  .h2note{color:var(--tx3);font-size:12px;margin:8px 0 12px}
+  code{font-family:var(--mono);background:#F1EFE8;padding:1px 5px;border-radius:4px;font-size:12px}
+  table{width:100%;border-collapse:collapse;font-size:12.5px;margin:8px 0 18px}
+  th,td{text-align:left;padding:7px 9px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{color:var(--tx3);font-size:11.5px;font-weight:400;background:#F7F6F2}
+  td code{font-size:11.5px;background:#F1EFE8}
+  .f{font-family:var(--mono);font-size:11.5px;color:#185FA5;white-space:nowrap}
+  .l{font-family:var(--mono);font-size:11.5px;color:#BA7517;white-space:nowrap}
+  .ev{font-family:var(--mono);font-size:11px;color:#3A3A33;background:#F7F6F2;
+      border-left:3px solid #97C459;border-radius:4px;padding:5px 8px;display:block;white-space:pre-wrap}
+  .stats{display:flex;gap:12px;flex-wrap:wrap;margin:18px 0 8px}
+  .stat{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px 16px;min-width:130px}
+  .stat b{display:block;font-size:20px;font-weight:500;line-height:1.25}
+  .stat span{color:var(--tx3);font-size:12px}
+  .note{background:#E6F1FB;border:1px solid #B5D4F4;border-radius:10px;padding:12px 16px;font-size:13px;color:#0C447C;margin:14px 0}
+  .warn{background:#FAEEDA;border:1px solid #FAC775;border-radius:10px;padding:12px 16px;font-size:13px;color:#633806;margin:14px 0}
+  .danger{background:#FCEBEB;border:1px solid #F7C1C1;border-radius:10px;padding:12px 16px;font-size:13px;color:#791F1F;margin:14px 0}
+  .tag{display:inline-block;font-size:10.5px;border-radius:999px;padding:1px 7px;white-space:nowrap}
+  .t-u{background:#F1EFE8;color:#5F5E5A;border:1px solid #B4B2A9}
+  .t-c{background:#E6F1FB;color:#185FA5;border:1px solid #85B7EB}
+  .t-e{background:#EAF3DE;color:#639922;border:1px solid #97C459}
+  ul{margin:8px 0 8px 18px;padding:0}
+  li{margin:3px 0}
+  .foot{color:var(--tx3);font-size:12px;margin-top:40px;border-top:1px solid var(--line);padding-top:14px}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<h1>VRAM-Aware Harness · 测试证据对照</h1>
+<div class="sub">
+  这一层回答的问题：<strong>每一条不变量，究竟是哪个测试文件、哪个用例、哪一行的断言在守它。</strong>
+  所有行号取自当前工作树；所有用例名与统计取自本机 <code>bun run test</code> 的真实输出。
+</div>
+
+<div class="stats">
+  <div class="stat"><b>403</b><span>用例通过 / 0 失败</span></div>
+  <div class="stat"><b>4620</b><span>expect 调用</span></div>
+  <div class="stat"><b>90</b><span>测试文件</span></div>
+  <div class="stat"><b>12.57s</b><span>全量耗时</span></div>
+</div>
+
+<div class="note">
+  <strong>分层标签：</strong>
+  <span class="tag t-u">单元</span>纯逻辑，无 IO ·
+  <span class="tag t-c">组件</span>真实 SQLite / 真实子进程 ·
+  <span class="tag t-e">集成 e2e</span>真实 HTTP 进程 + 真实 Worker。
+  <br>
+  <strong>为什么需要这张表：</strong>机制文档说"系统保证 X"，测试证据表说"X 由 <code>文件:行</code> 保证"。
+  两者咬合后，<strong>任何一条设计承诺都可以被反驳或被证实</strong>——而不是只能相信描述。
+</div>
+
+<h2>§1 不变量 → 测试证据</h2>
+
+<h3>A. 调度与公平</h3>
+<table>
+<tr><th>不变量</th><th>测试文件</th><th>断言行</th><th>断言内容</th></tr>
+
+<tr>
+<td>A1 每个 Run 的全局 <code>position</code> 等于 <code>claimNext()</code> 的返回顺序</td>
+<td class="f">tests/scheduling/tenant-run-scheduler.test.ts</td>
+<td class="l">:128-130</td>
+<td><span class="ev">expect(claimNext()?.runId).toBe("run-a1")
+expect(claimNext()?.runId).toBe("run-b1")
+expect(claimNext()).toBeNull()</span></td>
+</tr>
+
+<tr>
+<td>A2 全局并发为 1 时，单个 Tenant 的连续提交不会让另一 Tenant 永久饥饿</td>
+<td class="f">tests/scheduling/run-queue-coordinator.test.ts</td>
+<td class="l">:1108-1115</td>
+<td><span class="ev">expect(runtime.startRequests.map(r =&gt; r.run.runId))
+  .toEqual([runA1.id, runB1.id, runA2.id, runA3.id])
+expect(scheduler.listQueue()).toEqual([])</span></td>
+</tr>
+
+<tr>
+<td>A3 单 Tenant 并发上限独立生效（30 槽位下单租户最多 10）</td>
+<td class="f">tests/scheduling/pillar2-concurrency-simulation.test.ts</td>
+<td class="l">用例「每租户上限独立生效」</td>
+<td>30 槽位模拟：单租户最多同时 10；两租户各 15；全生命周期领取/执行/释放/补位无泄漏</td>
+</tr>
+
+<tr>
+<td>A4 同一 Conversation 的 Run 串行，不同 Conversation 可并行</td>
+<td class="f">tests/scheduling/tenant-run-scheduler.test.ts</td>
+<td class="l">用例「同一 Conversation 的 Run 串行…」</td>
+<td><code>hasActiveSession(sessionId)</code> 命中时该 Run 原样放回队列头部</td>
+</tr>
+
+<tr>
+<td>A5 Runtime 启动失败不泄漏 slot，且 drain 继续推进后续 Run</td>
+<td class="f">tests/scheduling/run-queue-coordinator.test.ts</td>
+<td class="l">:1037-1046</td>
+<td><span class="ev">expect(store.get(failedRun.id)?.status).toBe("INTERRUPTED")
+expect(store.get(followingRun.id)?.status).toBe("COMPLETED")
+expect(scheduler.getCapacity("tenant-a"))
+  .toEqual({activeRunCount:0, activeTenantRunCount:0})
+expect(scheduler.listQueue()).toEqual([])</span></td>
+</tr>
+
+<tr>
+<td>A6 真实并发不超过全局 slot</td>
+<td class="f">tests/scheduling/run-queue-coordinator.test.ts</td>
+<td class="l">用例「drain 的真实并发不会超过 Scheduler 全局 slot」</td>
+<td>用并发计数器观测最大同时在跑数 ≤ <code>maxActiveRuns</code></td>
+</tr>
+
+<tr>
+<td>A7 <code>release</code> 幂等；释放不存在的 Run 不会误伤别人</td>
+<td class="f">tests/scheduling/tenant-run-scheduler.test.ts</td>
+<td class="l">用例「release 幂等释放 slot…」/「释放不存在的 Run…」</td>
+<td>二次 <code>release</code> 返回 <code>false</code>；轮转顺序不被打乱</td>
+</tr>
+
+<tr>
+<td>A8 <code>listQueue()</code> 是只读查询，不得改变真实 claim 顺序</td>
+<td class="f">tests/scheduling/tenant-run-scheduler.test.ts</td>
+<td class="l">用例「listQueue 是只读查询，不会改变真实 claim 顺序」</td>
+<td>先查队列再看 <code>claimNext()</code> 结果，仍与不查时一致</td>
+</tr>
+
+<tr>
+<td>A9 排队阻塞原因只在"原因发生变化"时写一条事件（防事件洪水）</td>
+<td class="f">tests/scheduling/run-queue-coordinator.test.ts</td>
+<td class="l">用例「scheduler-only queue blockers are persisted once per reason transition」</td>
+<td>同一原因连续 drain 不重复追加；原因变化才追加</td>
+</tr>
+
+<tr>
+<td>A10 single-flight：并发 drain 复用同一循环；异常后清理状态</td>
+<td class="f">tests/scheduling/run-queue-coordinator.test.ts</td>
+<td class="l">用例「并发 drain 调用复用同一个推进循环」/「drain 异常结束后会清理 single-flight 状态」</td>
+<td>并发调用返回同一 promise；reject 后 <code>drainPromise</code> 归 null，可重新启动</td>
+</tr>
+
+<tr>
+<td>A11 Pump：启动即 tick 一次，之后按间隔 tick，stop 幂等</td>
+<td class="f">tests/scheduling/run-queue-pump.test.ts</td>
+<td class="l">用例「start 会立即请求一次 drain」等 7 条</td>
+<td>含「tick 报告 drain 错误后仍可继续下一次推进」</td>
+</tr>
+
+<tr>
+<td>A12 <strong>资源从 CRITICAL 恢复为 NORMAL 后，排队 Run 无需人工操作自动启动</strong></td>
+<td class="f">tests/scheduling/run-queue-pump.test.ts</td>
+<td class="l">用例「资源从 CRITICAL 恢复为 NORMAL 后 Pump 自动启动排队 Run」</td>
+<td>这是场景 4 的单元级证据；场景 4 的进程级证据见 §2</td>
+</tr>
+
+<tr>
+<td>A13 排队超 TTL → <code>FAILED(QUEUE_TIMEOUT)</code>，且队列计数与 slot 一并释放</td>
+<td class="f">tests/scheduling/queue-ttl.test.ts</td>
+<td class="l">:110-126</td>
+<td><span class="ev">expect(failed?.status).toBe("FAILED")
+expect(failed?.failureReason).toBe("QUEUE_TIMEOUT")
+expect(failedEvent.payload.reason).toBe("QUEUE_TIMEOUT")
+expect(scheduler.listQueue()).toHaveLength(0)
+expect(scheduler.getCapacity("tenant-a").activeRunCount).toBe(0)</span></td>
+</tr>
+
+<tr>
+<td>A14 孤儿 QUEUED Run 被对账补回，且排队时钟取自 DB（跨重启累计）</td>
+<td class="f">tests/scheduling/queue-reconcile.test.ts</td>
+<td class="l">:118-124</td>
+<td><span class="ev">expect(result.requeued).toEqual([orphan.id])
+expect(entry?.enqueuedAt).toBe(orphan.updatedAt)</span></td>
+</tr>
+
+<tr>
+<td>A15 重启后 DB 侧已超 TTL 的 QUEUED Run 被熔断，不重置 TTL 时钟</td>
+<td class="f">tests/scheduling/queue-reconcile.test.ts</td>
+<td class="l">:162-169</td>
+<td><span class="ev">expect(result.timedOut).toEqual([run.id])
+expect(failed?.failureReason).toBe("QUEUE_TIMEOUT")</span></td>
+</tr>
+
+<tr>
+<td>A16 实例未就绪是瞬态：重新入队而不是抛错给 Pump</td>
+<td class="f">tests/scheduling/instance-not-ready-defer.test.ts</td>
+<td class="l">用例「N2：实例未就绪是瞬态，重新入队而非抛错」</td>
+<td>避免 <code>onError</code> 打满日志；下轮可再次尝试</td>
+</tr>
+</table>
+
+<h3>B. 准入与资源</h3>
+<table>
+<tr><th>不变量</th><th>测试文件</th><th>断言行</th><th>断言内容</th></tr>
+
+<tr><td>B1 四组信号 × 三档阈值分类正确（含临界值、缺失、全部缺失）</td>
+<td class="f">tests/resources/resource-classifier.test.ts</td><td class="l">8 个用例</td>
+<td>含「指标恰好达到 busy 阈值时收集全部 busy 原因」「所有压力指标都缺失时分类为 UNKNOWN」「总显存为零时忽略显存信号并继续使用其他指标」</td></tr>
+
+<tr><td>B2 三档策略分支：NORMAL / BUSY / CRITICAL / UNKNOWN 的 START 与 QUEUE</td>
+<td class="f">tests/resources/execution-policy.test.ts</td><td class="l">9 个用例</td>
+<td>含「BUSY 时同一 Tenant 已有活跃 Run 则排队」「BUSY 时全局并发上限仍是不可突破的硬约束」</td></tr>
+
+<tr><td>B3 观测失败必须 fail-closed：跳过分类与 Policy</td>
+<td class="f">tests/resources/resource-admission-service.test.ts</td><td class="l">用例「观测失败会跳过分类和 Policy 并采用 fail-closed」</td>
+<td>返回 <code>classification === null</code> + <code>QUEUE / RESOURCE_OBSERVATION_FAILED</code></td></tr>
+
+<tr><td>B4 决策与资源快照必须原子写入，且证据不能自相矛盾</td>
+<td class="f">tests/resources/policy-decision-store.test.ts</td><td class="l">:98-102 / :176-182</td>
+<td><span class="ev">expect(store.get(decision.decisionId)).toEqual(decision)
+expect(store.getSnapshot(snapshot.snapshotId)).toEqual(...)
+// 证据不一致：
+expect(() =&gt; store.save(...)).toThrow()
+expect(store.getSnapshot("snapshot-1")).toBeNull()  // 已回滚</span></td></tr>
+
+<tr><td>B5 历史证据不可改写：相同 Snapshot ID 不同内容必须被拒</td>
+<td class="f">tests/resources/policy-decision-store.test.ts</td><td class="l">:202-209</td>
+<td><code>expect(store.get("decision-2")).toBeNull()</code></td></tr>
+
+<tr><td>B6 vLLM 与 NVIDIA 双源合并；单源失败时保留另一部分</td>
+<td class="f">tests/resources/vllm-resource-observer.test.ts</td><td class="l">6 个用例</td>
+<td>含「两个来源都失败时返回稳定的 Observation Failure」「都返回非法内容时标记 INVALID_RESPONSE」</td></tr>
+
+<tr><td>B7 指标解析拒绝越界值，不把任意文本当 Metrics</td>
+<td class="f">tests/resources/vllm-metrics-parser.test.ts</td><td class="l">6 个用例</td>
+<td>含「拒绝越界 KV 比例和非法请求数量」「完全无目标指标时拒绝当作 vLLM Metrics」</td></tr>
+
+<tr><td>B8 租户预算 fair-share：超出 <code>min(fairShare, maxUnits)</code> 时 START 降级</td>
+<td class="f">tests/resources/resource-budget-ledger.test.ts<br>+ budget-policy-wiring.test.ts</td><td class="l">10 + 3 个用例</td>
+<td>含「账本：同一 run 重复 commit 被拒绝」「基础策略本就 QUEUE 时保持 QUEUE（不叠加预算）」</td></tr>
+</table>
+
+<h3>C. 状态机、事务与启动顺序</h3>
+<table>
+<tr><th>不变量</th><th>测试文件</th><th>断言行</th><th>断言内容</th></tr>
+
+<tr><td>C1 非法状态转换被拒绝</td>
+<td class="f">tests/runs/run-state-machine.test.ts</td><td class="l">用例「COMPLETED 不能转化为 RUNNING」</td><td><code>assertValidTransition</code> 抛错</td></tr>
+
+<tr><td>C2 <code>create</code> 原子保存 Run + 第一条事件</td>
+<td class="f">tests/runs/runstore.test.ts</td><td class="l">:63-64</td>
+<td><span class="ev">expect(store.get(run.id)).toEqual(run)
+expect(store.listEvents(run.id)).toEqual([initialEvent])</span></td></tr>
+
+<tr><td>C3 <strong>追加事件失败时，Run 状态变更必须回滚</strong></td>
+<td class="f">tests/runs/runstore.test.ts</td><td class="l">:170-175</td>
+<td><span class="ev">expect(() =&gt; store.update(...)).toThrow()
+expect(store.get(queuedRun.id)?.status).toBe("QUEUED")   // 没变
+expect(store.listEvents(queuedRun.id)).toHaveLength(1)</span></td></tr>
+
+<tr><td>C4 去重只忽略相同 <code>dedupeKey</code> 的重复事实</td>
+<td class="f">tests/runs/runstore.test.ts</td><td class="l">:181-205</td>
+<td><code>appendEventIfNew</code> 首次返回 <code>true</code>，相同 key 再次返回 <code>false</code></td></tr>
+
+<tr><td>C5 事件排序依据是 <code>sequence</code> 而非 timestamp</td>
+<td class="f">tests/runs/runstore.test.ts</td><td class="l">:97-102</td>
+<td><code>expect(store.getLastEventSequence(run.id)).toBe(3)</code></td></tr>
+
+<tr><td>C6 <strong>毒丸防护：排队 Run 被并发处置后，调度启动必须安全放弃</strong>（5 条路径）</td>
+<td class="f">tests/runs/run-service-queued-start-race.test.ts</td><td class="l">:78-82 / :104-109 / :132-133 / :200-204 / :265-266</td>
+<td><span class="ev">expect(result.status).toBe("INTERRUPTED")
+expect(runtime.startRequests).toHaveLength(0)   // 绝不启动
+expect(types).not.toContain("RUN_STARTED")      // 绝不写 RUN_STARTED
+// 恢复路径同理：
+expect(runtime.resumeRequests).toHaveLength(0)
+expect(types).not.toContain("RUN_RESUMED")</span></td></tr>
+
+<tr><td>C7 启动顺序：恢复完成之后才启动 QueuePump</td>
+<td class="f">tests/app/harness-application.test.ts</td><td class="l">用例「start 在恢复完成后才启动 QueuePump」</td>
+<td>对应的场景 0 不变量</td></tr>
+
+<tr><td>C8 恢复失败时不得启动 Pump，且允许再次启动</td>
+<td class="f">tests/app/harness-application.test.ts</td><td class="l">用例「恢复失败时不启动 Pump，并允许再次启动」</td>
+<td>失败不留半启动状态</td></tr>
+
+<tr><td>C9 Runtime 启动即抛错 → Run 退回 <code>INTERRUPTED</code>（Checkpoint 仍有效）</td>
+<td class="f">tests/runs/run-service.test.ts</td><td class="l">用例「Runtime 启动直接抛错时 Run 会退回 INTERRUPTED」</td>
+<td>对应 <code>markRuntimeInvocationFailureInterrupted</code></td></tr>
+
+<tr><td>C10 终态 Run 拒绝 interrupt；interrupt 对 QUEUED 幂等且不调用 Runtime</td>
+<td class="f">tests/runs/run-service.test.ts</td><td class="l">用例「终态 Run 拒绝 interrupt」/「interrupt 幂等中断 QUEUED Run」</td>
+<td>—</td></tr>
+
+<tr><td>C11 <code>WAITING_TOOL ⇄ RUNNING</code> 往返；迟到回执不得覆盖终态</td>
+<td class="f">tests/runs/run-service-tool-phase.test.ts</td><td class="l">2 个用例</td>
+<td>「markToolPhase 在非预期状态下静默忽略迟到的阶段回执」</td></tr>
+</table>
+
+<h3>D. 工具副作用与恢复</h3>
+<table>
+<tr><th>不变量</th><th>测试文件</th><th>断言行</th><th>断言内容</th></tr>
+
+<tr><td>D1 首次调用：真实执行 1 次 + SUCCEEDED + Checkpoint</td>
+<td class="f">tests/tools/tool-gateway.test.ts</td><td class="l">:115-126</td>
+<td><span class="ev">expect(invokeCount).toBe(1)
+expect(savedExecution?.status).toBe("SUCCEEDED")</span></td></tr>
+
+<tr><td>D2 <strong>重复调用复用历史结果，真实工具不再执行</strong></td>
+<td class="f">tests/tools/tool-gateway.test.ts</td><td class="l">:181-182</td>
+<td><span class="ev">expect(secondResult).toEqual(firstResult)
+expect(invokeCount).toBe(1)   // ← 仍是 1，副作用未重复发生</span></td></tr>
+
+<tr><td>D3 真实工具抛错 → 落 <code>FAILED</code> 并保留错误原文</td>
+<td class="f">tests/tools/tool-gateway.test.ts</td><td class="l">:222-223</td>
+<td><code>expect(saved?.errorMessage).toBe("文件不存在")</code></td></tr>
+
+<tr><td>D4 <code>PREPARED + READ_ONLY</code> 允许自动重放</td>
+<td class="f">tests/tools/tool-gateway.test.ts</td><td class="l">:270</td>
+<td>返回 <code>PREPARED</code> 并复用原执行记录（不再 INSERT）</td></tr>
+
+<tr><td>D5 <strong><code>PREPARED + UNKNOWN_EFFECT</code> 禁止自动重放，真实工具一次都不执行</strong></td>
+<td class="f">tests/tools/tool-gateway.test.ts</td><td class="l">:320-331</td>
+<td><span class="ev">expect(invoked).toBe(false)   // ← fail closed</span></td></tr>
+
+<tr><td>D6 结果 + Checkpoint + Run 引用在同一事务；Checkpoint 失败则回滚工具成功状态</td>
+<td class="f">tests/tools/tool-execution-store.test.ts</td><td class="l">4 个用例</td>
+<td>含「fail 只允许把 PREPARED 更新为确定失败」</td></tr>
+
+<tr><td>D7 恢复判定：无 Checkpoint 即使工具可重放也不能自动恢复</td>
+<td class="f">tests/checkpoints/recovery-decision.test.ts</td><td class="l">3 个用例</td>
+<td>含「存在未知副作用或缺少幂等证明的写入时要求人工处理」</td></tr>
+
+<tr><td>D8 <strong>恢复前重校验：声称 AUTO_RESUME 但存在 UNKNOWN_EFFECT → 拦截为 MANUAL_REVIEW</strong></td>
+<td class="f">tests/checkpoints/recovery-hardening.test.ts</td><td class="l">:115-118</td>
+<td><span class="ev">expect(results[0]!.status).toBe("MANUAL_REVIEW")
+expect(submitResumeCalls).toEqual([])   // 绝不提交恢复
+expect(audited).toEqual([...])           // 且留下审计</span></td></tr>
+
+<tr><td>D9 MANUAL_REVIEW 审计写进 Run 事件时间线</td>
+<td class="f">tests/checkpoints/recovery-hardening.test.ts</td><td class="l">:248-263</td>
+<td>事件 <code>reason === "MANUAL_REVIEW_REQUIRED"</code>，带 <code>blockingToolExecutionId</code></td></tr>
+
+<tr><td>D10 启动恢复严格顺序：先回收 Sandbox，再恢复队列与中断 Run</td>
+<td class="f">tests/checkpoints/recovery-startup-coordinator.test.ts</td><td class="l">:25</td>
+<td><code>expect(order).toEqual([...])</code> 顺序敏感</td></tr>
+
+<tr><td>D11 Sandbox 对账失败时，不恢复也不调度任何 Run</td>
+<td class="f">tests/checkpoints/recovery-startup-coordinator.test.ts</td><td class="l">:41-42</td>
+<td><span class="ev">await expect(coordinator.recover()).rejects.toThrow("orphan still running")
+expect(order).toEqual([])</span></td></tr>
+</table>
+
+<h3>E. 进程隔离与 Worker</h3>
+<table>
+<tr><th>不变量</th><th>测试文件</th><th>断言行</th><th>断言内容</th></tr>
+
+<tr><td>E1 崩溃看门狗：非零退出 → 合成 <code>agent_failed</code> + 调用孤儿清理</td>
+<td class="f">tests/runtime/worker-process-runtime.test.ts</td><td class="l">:158+</td>
+<td>用例「Crash Watchdog: Non-zero exit code emits agent_failed and calls orphan cleaner」</td></tr>
+
+<tr><td>E2 SIGKILL 不炸 Master；SIGKILL 掩码正确归属</td>
+<td class="f">...同上 + tests/integration/blast-radius-stress-challenge.e2e.test.ts</td><td class="l">Challenge 2 / 4</td>
+<td><code>exitCode=137</code> 归因为 <code>signal=SIGKILL</code>；外部 OS SIGKILL 也能干净收敛</td></tr>
+
+<tr><td>E3 <strong>顽固 Worker：宽限 → SIGTERM → SIGKILL，有界升级</strong></td>
+<td class="f">tests/runtime/worker-process-runtime.test.ts</td><td class="l">用例「Stubborn Worker Interrupt: Master escalates to SIGTERM and SIGKILL within bounds」</td>
+<td>对应 WARN 里那条实测行为</td></tr>
+
+<tr><td>E4 握手看门狗：超时 SIGKILL 并清理孤儿沙箱</td>
+<td class="f">...同上 + worker-process-runtime.challenge.test.ts</td><td class="l">用例 6</td>
+<td>—</td></tr>
+
+<tr><td>E5 stdout 脏行（非 JSON）不得破坏 IPC 解析</td>
+<td class="f">...同上</td><td class="l">用例「Stdio Purity &amp; Corruption Resilience」</td>
+<td>注入 <code>corrupt_stdout</code> 模式</td></tr>
+
+<tr><td>E6 IPC 分帧：跨多字节 UTF-8 分片 / 5MB 单消息 / 1000 条突爆</td>
+<td class="f">tests/runtime/worker-process-runtime.challenge.test.ts</td><td class="l">Challenge 1–4b</td>
+<td><code>JsonLineParser</code> 用 <code>TextDecoder({stream:true})</code> 避免多字节被切断</td></tr>
+
+<tr><td>E7 <strong>Worker 崩溃期间 Master <code>/health</code> 仍 200；且不干扰并发租户</strong></td>
+<td class="f">tests/integration/blast-radius-stress-challenge.e2e.test.ts</td><td class="l">Challenge 5 / 6 / 7 / 8</td>
+<td>「Tenant A worker killed by SIGKILL does not disrupt concurrent Tenant B run」</td></tr>
+
+<tr><td>E8 执行超时 → 优雅中断 → （宽限后）forceKill + 沙箱 terminate</td>
+<td class="f">tests/runtime/execution-hard-kill.test.ts</td><td class="l">:95-96</td>
+<td><span class="ev">expect(events).toEqual(["interrupt", "forceKill:run-timeout"])
+expect(terminateLog).toEqual(["sandbox-1"])</span></td></tr>
+
+<tr><td>E9 宽限期内退出则不升级强杀，也不强制清理</td>
+<td class="f">tests/runtime/execution-hard-kill.test.ts</td><td class="l">:125-127</td>
+<td><span class="ev">expect(events).toEqual(["interrupt"])
+expect(forceKillCalls).toBe(0)
+expect(terminateLog).toEqual([])</span></td></tr>
+
+<tr><td>E10 Runtime 不具备强杀能力时保持旧行为（仅优雅中断 + 清理）</td>
+<td class="f">tests/runtime/execution-hard-kill.test.ts</td><td class="l">:166-174</td>
+<td><code>isForceKillableRuntime(inner) === false</code></td></tr>
+
+<tr><td>E11 <strong>Worker 内工具裁决经 IPC 到 Master；未装配治理桥则 fail-closed</strong></td>
+<td class="f">tests/runtime/worker-tool-governance.test.ts</td><td class="l">3 个用例</td>
+<td>含「REUSE 裁决：Worker 直接复用缓存结果，不再回报 COMPLETE」</td></tr>
+
+<tr><td>E12 Worker 侧网关：ALLOWED / REUSE / DENIED / 超时 / Master 断连 五种收场</td>
+<td class="f">tests/worker/worker-tool-gateway.test.ts</td><td class="l">6 个用例</td>
+<td>含「Master 裁决超时：fail-closed 拒绝执行」「Master 断连：failAllPending 拒绝所有在途裁决」</td></tr>
+</table>
+
+<h3>F. 身份与租户边界</h3>
+<table>
+<tr><th>不变量</th><th>测试文件</th><th>断言行</th><th>断言内容</th></tr>
+
+<tr><td>F1 <strong>伪造 <code>tenantId</code> 与跨租户 Run ID 都不能穿透</strong></td>
+<td class="f">tests/http/tenant-boundary.test.ts</td><td class="l">用例「认证身份绑定 Tenant…」</td>
+<td>Tenant 由服务端凭证派生，不信任请求体</td></tr>
+
+<tr><td>F2 审计 API 按 Principal Tenant 收口，并要求 <code>audits:read</code></td>
+<td class="f">tests/http/tenant-boundary.test.ts</td><td class="l">同文件</td>
+<td>—</td></tr>
+
+<tr><td>F3 会话抢注：已被其他租户认领的 <code>harnessSessionId</code> → 409</td>
+<td class="f">tests/http/session-squatting.e2e.test.ts</td><td class="l">用例 1</td>
+<td>真实 HTTP 进程下验证</td></tr>
+
+<tr><td>F4 401 / 403 分层：无 key 401，作用域不足 403</td>
+<td class="f">tests/http/harness-http-api.test.ts</td><td class="l">用例「LLM 网关入口走统一身份主干」</td>
+<td>—</td></tr>
+
+<tr><td>F5 超出提交期上界的输入 → 413 且<strong>不创建 Run</strong>；响应不回显全量输入</td>
+<td class="f">tests/http/harness-http-api.test.ts</td><td class="l">:456 / :465</td>
+<td><span class="ev">expect(response.status).toBe(413)
+// 上界 1000 字符，但回显只保留 200 字符摘要</span></td></tr>
+
+<tr><td>F6 未知邮箱登录也走 scrypt（不因短路泄漏"是否已注册"）</td>
+<td class="f">tests/auth/api-credential-store.test.ts</td><td class="l">用例 2</td>
+<td>同时「密码哈希使用随机盐」</td></tr>
+
+<tr><td>F7 DENY 事件只记被尝试密钥的 SHA-256 摘要，<strong>不存明文</strong></td>
+<td class="f">tests/audit/access-audit-store.test.ts</td><td class="l">D4 用例</td>
+<td>—</td></tr>
+</table>
+
+<h3>G. 数据层兜底（第二道防线）</h3>
+<table>
+<tr><th>不变量</th><th>测试文件</th><th>断言行</th><th>断言内容</th></tr>
+
+<tr><td>G1 Checkpoint 归属由 FK 兜底：孤儿 run 与跨 run 工具执行都被拒</td>
+<td class="f">tests/storage/checkpoint-ownership.test.ts</td><td class="l">:40 / :75 / :88</td>
+<td>三处 <code>expect(() =&gt; ...).toThrow()</code></td></tr>
+
+<tr><td>G2 migration 幂等：新库建齐表，重复运行不重复应用</td>
+<td class="f">tests/storage/database.test.ts</td><td class="l">2 个用例</td>
+<td>—</td></tr>
+
+<tr><td>G3 模板版本：首版必须为 1，后续严格连续递增，禁止覆盖</td>
+<td class="f">tests/templates/template-version-policy.test.ts<br>+ harness-template-store.test.ts</td><td class="l">各 3 / 5 个用例</td>
+<td>含「模板和版本在关闭并重新打开数据库后仍可恢复」</td></tr>
+
+<tr><td>G4 Instance 只允许显式生命周期转换；FAILED 必须带失败原因</td>
+<td class="f">tests/instances/harness-instance.test.ts</td><td class="l">2 个用例</td>
+<td>—</td></tr>
+</table>
+
+<h3>H. 隔离证据（fail-closed 方向）</h3>
+<table>
+<tr><th>不变量</th><th>测试文件</th><th>断言行</th><th>断言内容</th></tr>
+
+<tr><td>H1 spec 指纹确定性；资源限制 / 网络权限变化会改变指纹</td>
+<td class="f">tests/evidence/isolation-evidence.test.ts</td><td class="l">13 个用例</td>
+<td>含「secret 列表排序稳定，顺序不影响指纹」</td></tr>
+
+<tr><td>H2 <strong>runtime 未证实 → FAIL；观测 runtime ≠ 请求 runtime → FAIL</strong></td>
+<td class="f">tests/evidence/isolation-evidence.test.ts</td><td class="l">—</td>
+<td>「不把配置声明当证据」</td></tr>
+
+<tr><td>H3 <code>default</code> profile 必须取得 <code>docker inspect</code> 的 runsc 实证据</td>
+<td class="f">tests/sandbox/sandbox-runtime-profile.test.ts</td><td class="l">:55-57</td>
+<td><span class="ev">expect(runtime.calls[0]).toContain("runsc")
+expect(runtime.calls.some(c =&gt; c[1] === "inspect")).toBe(true)
+expect(record.runtimeEvidence.verified).toBe(true)</span></td></tr>
+
+<tr><td>H4 用 runc 或 inspect 结果非 runsc → <code>FAILED</code>，不回退</td>
+<td class="f">tests/sandbox/sandbox-runtime-profile.test.ts</td><td class="l">:80-81</td>
+<td><span class="ev">expect(record.status).toBe("FAILED")
+expect(record.runtimeEvidence.observedRuntime).toBe("runc")</span></td></tr>
+
+<tr><td>H5 <code>strict</code> 缺少 microVM Provider 时不静默回退</td>
+<td class="f">tests/sandbox/sandbox-runtime-profile.test.ts</td><td class="l">:87-90</td>
+<td><code>await expect(router.create(...)).rejects</code></td></tr>
+
+<tr><td>H6 Secret 只在 Handle 回调出现，持久化只存名称；Tenant namespace 不碰撞</td>
+<td class="f">tests/sandbox/managed-local-sandbox.test.ts</td><td class="l">3 个用例</td>
+<td>含「本地 Provider 无法落实硬资源限制时 fail closed」</td></tr>
+
+<tr><td>H7 容器参数可审计；容器消失识别为 <code>LOST</code> 而非普通工具失败</td>
+<td class="f">tests/sandbox/container-sandbox-provider.test.ts</td><td class="l">4 个用例</td>
+<td>含「无法强制 bind mount 磁盘配额或越出 Workspace 根时拒绝执行」</td></tr>
+</table>
+
+<h2>§2 场景 → 测试 → 代码 三方对照</h2>
+<div class="h2note">把前面三份文档串起来：每个实测场景，它的进程级证据在哪、单元级证据在哪、代码在哪。</div>
+<table>
+<tr><th>场景</th><th>进程级 e2e 证据</th><th>单元 / 组件级证据</th><th>代码</th></tr>
+<tr><td>0 启动顺序</td><td class="f">tests/integration/harness-process-http.test.ts</td><td class="f">tests/app/harness-application.test.ts（3 条）</td><td class="f">harness-application.ts:76</td></tr>
+<tr><td>1 边界归位</td><td class="f">tests/http/harness-http-api.test.ts<br>tests/http/tenant-boundary.test.ts</td><td class="f">tests/audit/access-audit-store.test.ts</td><td class="f">harness-http-api.ts:508</td></tr>
+<tr><td>2 START</td><td class="f">tests/integration/harness-process-http.test.ts</td><td class="f">execution-policy.test.ts · resource-admission-service.test.ts</td><td class="f">execution-policy.ts:73</td></tr>
+<tr><td>3 QUEUE</td><td class="f">—（本机以 e2e-walkthrough 场景 B 实测）</td><td class="f">queue-ttl.test.ts · policy-decision-store.test.ts · resource-classifier.test.ts</td><td class="f">run-queue-coordinator.ts:351</td></tr>
+<tr><td>4 自动续跑</td><td class="f">tests/integration/day7-recovery-resource.e2e.test.ts</td><td class="f">run-queue-pump.test.ts（A12）</td><td class="f">run-queue-pump.ts:43</td></tr>
+<tr><td>5 公平轮转</td><td class="f">—（本机以 e2e-walkthrough 场景 C 实测）</td><td class="f">tenant-run-scheduler.test.ts:128 · run-queue-coordinator.test.ts:1108</td><td class="f">tenant-run-scheduler.ts:140</td></tr>
+<tr><td>6 证据链</td><td class="f">tests/integration/stage1-stage2-control-plane.e2e.test.ts</td><td class="f">tool-execution-store.test.ts · policy-compilation.test.ts</td><td class="f">managed-agent-runtime.ts:104</td></tr>
+<tr><td>7 审计</td><td class="f">tests/http/session-squatting.e2e.test.ts（审计语义）</td><td class="f">access-audit-store.test.ts（3 条）</td><td class="f">harness-http-api.ts:552</td></tr>
+<tr><td>8 关闭</td><td class="f">tests/integration/harness-process-http.test.ts</td><td class="f">harness-application.test.ts（stop 幂等）</td><td class="f">harness-application.ts:99</td></tr>
+<tr><td>F1 崩溃</td><td class="f">blast-radius-isolation.e2e.test.ts<br>blast-radius-stress-challenge.e2e.test.ts</td><td class="f">worker-process-runtime.test.ts:158</td><td class="f">worker-process-runtime.ts:353</td></tr>
+<tr><td>F2 主动失败</td><td class="f">worker-tool-governance.e2e.test.ts</td><td class="f">worker-process-runtime.test.ts:137（仅断言错误透传）</td><td class="f">run-service.ts:655</td></tr>
+<tr><td>F3 卡死超时</td><td class="f">—（本机以 e2e-walkthrough failure 实测）</td><td class="f">execution-hard-kill.test.ts:95 · worker-process-runtime.test.ts（Stubborn）</td><td class="f">worker-process-runtime.ts:140</td></tr>
+<tr><td>D1 恢复</td><td class="f">day7-recovery-resource.e2e.test.ts<br>tests/integration/day7-fake-demo.test.ts</td><td class="f">recovery-decision / recovery-hardening / recovery-executor / queue-reconcile（共 14 条）</td><td class="f">run-service.ts:467</td></tr>
+</table>
+<div class="warn">
+  表中标 <strong>—</strong> 的三处（场景 3 排队、场景 5 公平轮转、场景 F3 卡死超时）说明：这几条链路的<strong>进程级</strong>证据
+  目前只存在于走查脚本 <code>scripts/e2e-walkthrough.ts</code> 与 <code>demo:day7</code>，
+  <strong>没有进入 <code>bun run test</code> 的断言集合</strong>。它们的组件级证据是充分的，但进程级只能靠脚本人工判读
+  <code>RESULT: PASS</code>。这是一个真实的可改进点。
+</div>
+
+<h2>§3 覆盖缺口（诚实清单）</h2>
+
+<div class="danger">
+<strong>缺口 1：F2 的语义不一致没有任何测试断言。</strong>
+两个分支<strong>各自</strong>都有测试——Worker 主动报失败见
+<code>tests/runtime/worker-process-runtime.test.ts:137</code>，但它只断言
+<code>caughtError?.message</code> 含 <code>"Simulated worker execution failure"</code>（即错误确实透传到 Runtime 层）；
+崩溃分支见同文件 <code>:158</code>。
+<strong>没有任何测试断言"这两个分支在 Run 级终态语义上应当一致"</strong>，所以
+<code>RUN_FAILED → INTERRUPTED + failureReason=null</code> 这个差异可以长期存在而不报警。
+</div>
+
+<div class="danger">
+<strong>缺口 2：single-flight <code>onError</code> 重复计数没有断言。</strong>
+<code>tests/scheduling/run-queue-pump.test.ts:118</code> 使用了 <code>onError</code> 探针，但断言的是
+"报错后仍能继续下一次推进"，<strong>不是调用次数</strong>；
+<code>run-queue-coordinator.test.ts</code> 覆盖了 single-flight 的复用与清理，
+但没有测试在"并发 tick + 一次失败"的组合下数 <code>onError</code> 被调了几次。
+实测该值为 9（去重后 1）。
+</div>
+
+<div class="warn">
+<strong>缺口 3：真机验收未执行。</strong>以下内容不是"没写测试"，而是"没在具备条件的环境跑过"：
+<code>smoke:container</code> / <code>smoke:container:attacks</code> /
+<code>e2-sandbox-limits</code> / <code>e2-warm-pool</code> / <code>e2-container-failure</code> /
+<code>sandbox-runtime-benchmark</code> / <code>e2-gateway-fault-matrix</code> /
+<code>e2e-gpu-pressure</code>。本机无 Docker daemon、无 runsc、无 vLLM。
+<strong>与之相对，"有测试"的部分并不因此打折</strong>：§1 里 H 组（隔离证据方向）的 fail-closed 逻辑
+是纯逻辑可测的，已全部有断言。
+</div>
+
+<div class="warn">
+<strong>缺口 4：MANUAL_REVIEW 之后的人工确认闭环缺端到端。</strong>
+已有：拦截为 MANUAL_REVIEW（<code>recovery-hardening.test.ts:115</code>）、
+审计写入事件时间线（<code>:248</code>）。
+尚无：一个"人工确认 → 继续推进 → 终态"的端到端用例。
+</div>
+
+<h2>§4 覆盖率的另一种读法</h2>
+<div class="h2note">不按文件数看，按"每条设计承诺是否有断言"看。</div>
+<table>
+<tr><th>方向</th><th>设计承诺</th><th>是否有断言</th></tr>
+<tr><td rowspan="4">执行可靠性</td><td>Run 状态与事件同事务</td><td><span class="tag t-e">有</span> runstore.test.ts:170</td></tr>
+<tr><td>工具副作用不重复发生</td><td><span class="tag t-e">有</span> tool-gateway.test.ts:182</td></tr>
+<tr><td>不确定副作用不自动重放</td><td><span class="tag t-e">有</span> tool-gateway.test.ts:331</td></tr>
+<tr><td>恢复不绕过准入</td><td><span class="tag t-e">有</span> run-queue-coordinator.test.ts（恢复 Run 用例）</td></tr>
+<tr><td rowspan="3">资源与公平</td><td>资源压力改变 START / QUEUE</td><td><span class="tag t-e">有</span> execution-policy.test.ts（9 条）</td></tr>
+<tr><td>观测失败 fail-closed</td><td><span class="tag t-e">有</span> resource-admission-service.test.ts</td></tr>
+<tr><td>多租户不被单一提交方饿死</td><td><span class="tag t-e">有</span> run-queue-coordinator.test.ts:1108</td></tr>
+<tr><td rowspan="3">多租户安全</td><td>伪造 tenantId 不穿透</td><td><span class="tag t-e">有</span> tenant-boundary.test.ts</td></tr>
+<tr><td>跨租户 Run 访问 → 404</td><td><span class="tag t-e">有</span> tenant-boundary.test.ts</td></tr>
+<tr><td>Session 抢注 → 409</td><td><span class="tag t-e">有</span> session-squatting.e2e.test.ts</td></tr>
+<tr><td rowspan="3">隔离</td><td>profile 与 runtime 必须一致</td><td><span class="tag t-e">有</span> sandbox-runtime-profile.test.ts:80</td></tr>
+<tr><td>未证实证据不当作隔离证据</td><td><span class="tag t-e">有</span> isolation-evidence.test.ts</td></tr>
+<tr><td>真实容器边界（非 root / 只读 RootFS / 无网络）</td><td><span class="tag t-c">仅容器 smoke（未跑）</span></td></tr>
+<tr><td rowspan="3">故障恢复</td><td>Worker 崩溃不炸 Master</td><td><span class="tag t-e">有</span> blast-radius-*.e2e.test.ts</td></tr>
+<tr><td>执行超时 → 强杀阶梯</td><td><span class="tag t-e">有</span> execution-hard-kill.test.ts:95</td></tr>
+<tr><td>F2 分支语义一致性</td><td><span class="tag t-c">无断言（缺口 1）</span></td></tr>
+</table>
+
+<div class="foot">
+  统计与用例名来自本机 <code>bun run test</code>（Bun 1.4.2 / macOS）；完整输出留档于
+  <code>tmp/e2e-evidence/test-full.txt</code>。
+  本文行号以当前工作树为准，代码变动后需重新核对。
+  配套：<code>docs/scenario-atlas.zh-CN.html</code>（场景）、
+  <code>docs/scenario-technical-anatomy.zh-CN.html</code>（机制）、
+  <code>docs/e2e-real-run-walkthrough.zh-CN.md</code>（逐阶段走查）。
+</div>
+
+</div>
+</body>
+</html>

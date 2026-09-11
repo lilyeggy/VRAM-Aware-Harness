@@ -1,0 +1,472 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-page-node-id="Z1fj9DPevSlYdwPMpVNnUw">
+<head data-page-node-id="3HgtPABTpDLlpnYHeBLByi">
+<meta charset="utf-8" data-page-node-id="SRk1442Hok9OQwqDV1ptt1">
+<meta name="viewport" content="width=device-width, initial-scale=1" data-page-node-id="QzBsXEIjVudWEj8yFKgiuM">
+<title>VRAM-Aware Harness · 场景图谱</title>
+<style>
+  :root{
+    --bg:#FBFAF7; --card:#FFFFFF; --line:#E3E1DA; --line2:#CFCCC3;
+    --tx:#26261F; --tx2:#5F5E5A; --tx3:#8A8880;
+    --blue:#185FA5; --blue-bg:#E6F1FB;
+    --amber:#BA7517; --amber-bg:#FAEEDA;
+    --green:#639922; --green-bg:#EAF3DE;
+    --red:#A32D2D; --red-bg:#FCEBEB;
+    --gray-bg:#F1EFE8;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--tx);
+       font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+       font-size:14px;line-height:1.65}
+  .wrap{max-width:1080px;margin:0 auto;padding:40px 24px 80px}
+  h1{font-size:24px;font-weight:500;margin:0 0 6px}
+  .sub{color:var(--tx2);font-size:13px;margin-bottom:22px}
+  h2{font-size:16px;font-weight:500;margin:38px 0 4px}
+  .h2note{color:var(--tx3);font-size:12px;margin-bottom:14px}
+  .stats{display:flex;gap:12px;flex-wrap:wrap;margin:18px 0 4px}
+  .stat{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px 16px;min-width:126px}
+  .stat b{display:block;font-size:20px;font-weight:500;line-height:1.25}
+  .stat span{color:var(--tx3);font-size:12px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px 18px;margin-bottom:12px}
+  .chead{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:2px}
+  .no{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;color:var(--tx3);
+      background:var(--gray-bg);border-radius:5px;padding:1px 7px}
+  .ctitle{font-size:15px;font-weight:500}
+  .badge{margin-left:auto;font-size:11px;border-radius:999px;padding:2px 9px;white-space:nowrap}
+  .b-ok{background:var(--green-bg);color:var(--green);border:1px solid #C0DD97}
+  .b-warn{background:var(--amber-bg);color:var(--amber);border:1px solid #FAC775}
+  .b-bad{background:var(--red-bg);color:var(--red);border:1px solid #F7C1C1}
+  .b-ext{background:var(--gray-bg);color:var(--tx2);border:1px solid var(--line2)}
+  .goal{color:var(--tx2);font-size:13px;margin:6px 0 10px}
+  .flow{display:flex;align-items:center;flex-wrap:wrap;gap:6px;margin:10px 0 12px}
+  .chip{font-size:12px;border-radius:7px;padding:5px 10px;border:1px solid;white-space:nowrap}
+  .c-n{background:var(--gray-bg);border-color:var(--line2);color:var(--tx2)}
+  .c-b{background:var(--blue-bg);border-color:#85B7EB;color:var(--blue)}
+  .c-a{background:var(--amber-bg);border-color:#EF9F27;color:var(--amber)}
+  .c-g{background:var(--green-bg);border-color:#97C459;color:var(--green)}
+  .c-r{background:var(--red-bg);border-color:#F09595;color:var(--red)}
+  .arw{color:var(--tx3);font-size:12px}
+  .kv{display:grid;grid-template-columns:74px 1fr;gap:4px 12px;font-size:13px}
+  .kv dt{color:var(--tx3);font-size:12px}
+  .kv dd{margin:0;color:var(--tx)}
+  code,pre{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+  .ev{background:#F7F6F2;border:1px solid var(--line);border-left:3px solid var(--line2);
+      border-radius:6px;padding:9px 12px;font-size:12px;color:var(--tx2);
+      white-space:pre-wrap;overflow-x:auto;margin:10px 0 0;line-height:1.55}
+  .ev.g{border-left-color:#97C459}
+  .ev.a{border-left-color:#EF9F27}
+  .ev.r{border-left-color:#F09595}
+  .ref{color:var(--tx3);font-size:12px;margin-top:8px}
+  .ref code{background:var(--gray-bg);padding:1px 5px;border-radius:4px}
+  table{width:100%;border-collapse:collapse;font-size:13px;margin-top:8px}
+  th,td{text-align:left;padding:7px 10px;border-bottom:1px solid var(--line)}
+  th{color:var(--tx3);font-size:12px;font-weight:400}
+  td code{font-size:11.5px}
+  .note{background:var(--blue-bg);border:1px solid #B5D4F4;border-radius:10px;
+        padding:12px 16px;font-size:13px;color:#0C447C;margin:14px 0}
+  .foot{color:var(--tx3);font-size:12px;margin-top:34px;border-top:1px solid var(--line);padding-top:14px}
+</style>
+</head>
+<body data-page-node-id="APGb8vsGdIMN6IXRHFHmtE">
+<div class="wrap" data-page-node-id="AGyRPvuMq86ZKp3w1lYU5G">
+
+<h1 data-page-node-id="ePQInVpHOXnbD5w86YWsa8">VRAM-Aware Harness · 场景图谱</h1>
+<div class="sub" data-page-node-id="qxxRGCEw7wWVaWu53Nh6Eu">
+  按<strong data-page-node-id="FErZY0trK7h2sX3E31ldXz">实际执行顺序</strong>编号：场景 0–8 来自 <code data-page-node-id="Q2bVyhRf4zktWdN4cJoEpf">bun run scripts/e2e-walkthrough.ts</code>，
+  F1–F3 来自 <code data-page-node-id="BV4GKEIRzhF8VSqynUpMC0">... failure</code>，D1 来自 <code data-page-node-id="McPDHK51wEjFLU7g4dTtb1">bun run demo:day7</code>。
+  圆角标签的流程条是每个场景真正的路径，末节点颜色 = 结局。
+</div>
+
+<div class="stats" data-page-node-id="n5GrmAERObxUp3SUUoEL7g">
+  <div class="stat" data-page-node-id="JPoFlhY2tDN0poqWhRhSBC"><b data-page-node-id="LXvr2GbOBjFdNT7XnYdZK5">403</b><span data-page-node-id="uzcHCDJx5iL1T3z3eBQiSM">自动化测试通过</span></div>
+  <div class="stat" data-page-node-id="iRS1uxjJKkNYi8wa5mZJ8V"><b data-page-node-id="bNC75gjsiKKZ7G6I7OIowt">4620</b><span data-page-node-id="3LvAsvMeFO76GA0PSkALQO">断言（expect 调用）</span></div>
+  <div class="stat" data-page-node-id="C3vUwnRFBqbEk8n8CZPmC5"><b data-page-node-id="7MQbXDYaQKkckj1Pti4wh5">90</b><span data-page-node-id="1wIR61eLr9K0sS5Xg33SWW">测试文件</span></div>
+  <div class="stat" data-page-node-id="u7fLYck0024WhwkvbqMHuC"><b data-page-node-id="3ErMMwrXpyqUixeERKLEwN">13</b><span data-page-node-id="7IzAuX7Rcig7bjDkJ9F0DF">已实跑端到端场景</span></div>
+  <div class="stat" data-page-node-id="8NF1PNoRVbJ4IVY0sC2SHR"><b data-page-node-id="rPmQbPbCWzoz6FDaqA2NM0">20</b><span data-page-node-id="zOR1GmjrZkvygzZnxqmcgk">未执行的脚本入口</span></div>
+</div>
+
+<div class="note" data-page-node-id="4G2VHnVnUEtfipacBQf6sf">
+  <strong data-page-node-id="qOfMQHCOMv01bbLAaW27op">怎么读这张图：</strong>绿色 = 实测符合预期；黄色 = 通过但暴露出已知缺陷（脚本自己打印的 <code data-page-node-id="jAlGFdQHJ1wMR4EoO0IDHR">[WARN]</code>）；
+  红色 = 失败。灰底 <code data-page-node-id="G1rNSeu2BnukSPVkxSQYS2">需外部环境</code> 的场景本机没有 GPU / Docker / 真实模型，
+  <strong data-page-node-id="jIMMaieiGh5SI4yDRQewxE">我没有跑，也不替它们下结论</strong>。
+</div>
+
+<h2 data-page-node-id="uiU1EoytHJFVg337gJvAvB">一、已实跑的 13 个场景</h2>
+<div class="h2note" data-page-node-id="Y2MY9WNCDnPfGIoMw8vo48">以下每一项的「实测」都是本次运行的真实 stdout。配套技术剖面见 <code>docs/scenario-technical-anatomy.zh-CN.html</code>（真实 SQL / 源码分支 / 参数全表 / 竞态窗口）。</div>
+
+<div class="card" data-page-node-id="Ljj6evF6XR4GluwaHyzD8l">
+  <div class="chead" data-page-node-id="BNuIZQSFauUvY2jlngZ8qw"><span class="no" data-page-node-id="zM9g6cF5aGRqzETOLmlzko">场景 0</span><span class="ctitle" data-page-node-id="zyCc2sKNXr3XbJiFTDPbN0">进程启动与组合根</span><span class="badge b-ok" data-page-node-id="xGDmcNg36JjSl21q2iDdaS">PASS</span></div>
+  <div class="goal" data-page-node-id="bsRwpFN09tTSdINLHCSyog">验证启动顺序不变量：恢复扫描与队列 Pump 就绪之后，才允许开放 HTTP 端口。</div>
+  <div class="flow" data-page-node-id="DrM68vXHBbCkrYsk3D3FfB">
+    <span class="chip c-n" data-page-node-id="wZ9c9EWsvMe85bYDOvbSmc">loadHarnessConfig</span><span class="arw" data-page-node-id="C1CEEhyEaCXxLExFVG7jRB">→</span>
+    <span class="chip c-b" data-page-node-id="A9FuGq1ixHFFe9tD8HEvUJ">createHarnessApplication（约 30 个组件）</span><span class="arw" data-page-node-id="xvPMDSHtrGwAYSL8Dum4xN">→</span>
+    <span class="chip c-b" data-page-node-id="yHldBXmbyN52sbYcAWMHHn">application.start（重建队列 + 恢复扫描）</span><span class="arw" data-page-node-id="7XHwrlDwSB9JvxEw98hU5H">→</span>
+    <span class="chip c-b" data-page-node-id="jFaDgY5Dod3lLITkDBZ5Dt">resourceMetrics.start</span><span class="arw" data-page-node-id="zZ50KK3NLVLsODPsm4hfpg">→</span>
+    <span class="chip c-g" data-page-node-id="LAitJlpiRvz5YJ8PZ9BIfS">HTTP 监听</span><span class="arw" data-page-node-id="XvloQpDF1sIBsP3zcWbjeW">→</span>
+    <span class="chip c-g" data-page-node-id="9b1HAsjwzVT7QtrNKsPSeO">GET /health 200</span>
+  </div>
+  <div class="ev g" data-page-node-id="E7R03oV6NWNz2NANROmv4P">baseUrl        = http://127.0.0.1:50031
+sandboxProvider= managed-local      sandboxProfile = development
+workerIsolation= process            pumpIntervalMs = 1000
+maxActiveRuns  = 30                 阈值 busy/critical GPU% = 70/90
+GET /health -> 200 {"ok":true,"started":true}</div>
+  <div class="ref" data-page-node-id="jFocQ9mEkGCjWP64y7e9dH">代码锚点：<code data-page-node-id="RIOVluMNh3yUcO96dLQhGG">src/main.ts:52-58</code> · <code data-page-node-id="jFIIHMcwBZmJiGJOvzjhw9">src/app/create-harness-application.ts</code></div>
+</div>
+
+<div class="card" data-page-node-id="bcoMgYLHfE63SsYCZCMGBt">
+  <div class="chead" data-page-node-id="lEwMcVmpNTgD8FdrSPcwHW"><span class="no" data-page-node-id="M4E4uHNFC5kTGw2gIH84m2">场景 1</span><span class="ctitle" data-page-node-id="THcB3WujPiV5nf2R3WDMuC">边界与异常：六个非法输入各归其位</span><span class="badge b-ok" data-page-node-id="R37S0zv3UEVYnZrhddg1WJ">PASS</span></div>
+  <div class="goal" data-page-node-id="k3Omi0VvF17Rqkzkn3xroK">证明失败发生在正确的层、返回正确的状态码，并且全部落入审计表。</div>
+  <div class="flow" data-page-node-id="yDB01wR9MTkzdbB3ujNAGk">
+    <span class="chip c-r" data-page-node-id="pn4NNyFaWb9BFUlEBEtXDa">空 body → 400</span><span class="arw" data-page-node-id="hGUtOs67OgqsdJmzvdf8yl">→</span>
+    <span class="chip c-r" data-page-node-id="v9oCwu3wbVomtGJsAbEc8S">无凭证 → 401</span><span class="arw" data-page-node-id="S2fT4aMIdWeVezv6V0BaRo">→</span>
+    <span class="chip c-r" data-page-node-id="lntu51f3e1aYniuVlfFi4G">错密钥 → 401</span><span class="arw" data-page-node-id="iFQBNUJVKgbzyTwfvpEUjM">→</span>
+    <span class="chip c-r" data-page-node-id="BfaGEdGGcGxFuI3jkJgh5y">仅 models:generate → 403</span><span class="arw" data-page-node-id="CBlc8TDnBR1Rwpug4VLr8q">→</span>
+    <span class="chip c-r" data-page-node-id="2thvfNn2QlGd29KF1O2E4F">未知路由 → 404</span><span class="arw" data-page-node-id="LfLuHWX3ychds98owxuAVO">→</span>
+    <span class="chip c-r" data-page-node-id="QyFGmoS0GmDl8nu6JlyP4b">不存在 Run → 404</span><span class="arw" data-page-node-id="x0APj8b0A71kb6GgzFG1a3">→</span>
+    <span class="chip c-r" data-page-node-id="nlCV79OGfTN4NZMlDuJQFj">超长输入 2001 → 413</span>
+  </div>
+  <div class="ev r" data-page-node-id="gQRbfomOxMHjH77OrPApYN">空 body、无凭证         -> HTTP 400 {"error":"请求体必须是有效 JSON"}
+合法 JSON、无凭证       -> HTTP 401 {"error":"缺少 API Key"}
+错误密钥                -> HTTP 401 {"error":"API Key 无效或已撤销"}
+仅 models:generate 密钥 -> HTTP 403 {"error":"缺少权限：tasks:write"}
+未知路由 POST /nope     -> HTTP 404 {"error":"找不到 HTTP 路由"}
+查询不存在的 Run       -> HTTP 404 {"error":"找不到 AgentRun：does-not-exist"}
+超长输入 2001 字符     -> HTTP 413 {"error":"任务输入过长：2001 字符，超过上限 2000 字符"}</div>
+  <div class="ref" data-page-node-id="ZP6hfBUSFeGVMwUEsCc31f">顺序：<code data-page-node-id="KMTLGsDJ4Lebm2csgT60RB">readJsonObject → requirePrincipal → workspace 解析 → 会话归属 → 输入上界</code>（<code data-page-node-id="XCBB0WL2ILPK7bxVHNewwZ">src/http/harness-http-api.ts:508-555</code>）。<br data-page-node-id="4GajUbhMerIO2TPY9hI1uy">
+  注意 413 在 workspace 解析<strong data-page-node-id="HnzMipblYHRNl1Svdn41EQ">之后</strong>，所以必须带真实 workspaceId 才会命中。</div>
+</div>
+
+<div class="card" data-page-node-id="7xgDl76HFuQetXFBqdu4Rr">
+  <div class="chead" data-page-node-id="8F33GVbNJcc5aXUEJHZDGM"><span class="no" data-page-node-id="ssfOpB6lGPGzjHPS4KiUzm">场景 2</span><span class="ctitle" data-page-node-id="ElYDoGROgAV7KAURrmDsBh">GPU 空闲（NORMAL）→ 直接 START</span><span class="badge b-ok" data-page-node-id="ZCpdXmWZDMGri040fdP35a">PASS</span></div>
+  <div class="goal" data-page-node-id="dB0DTPy9JpYMUKrUWg114A">资源充足时，提交即入队、准入即启动，全链路一次通过。</div>
+  <div class="flow" data-page-node-id="QAL6vnGTfHBx5MrLDAmpHx">
+    <span class="chip c-b" data-page-node-id="kaDGwSsw42SWZGKR9GlKIu">POST /runs</span><span class="arw" data-page-node-id="Gcca23KCXU6ATQOzPrJbbT">→</span>
+    <span class="chip c-n" data-page-node-id="3n5B11cqdDFV49D3jdEFBv">QUEUED (202)</span><span class="arw" data-page-node-id="2m0x8CjP9OTkNg0dwqXz05">→</span>
+    <span class="chip c-b" data-page-node-id="eaQaqnzU9PvZayTHiWX2b4">pump.tick → drain</span><span class="arw" data-page-node-id="Qei6mCMV0Qo0Iq6g8Hcjdz">→</span>
+    <span class="chip c-g" data-page-node-id="Yi3iInKCcbDTYCwE652GwR">START / RESOURCE_NORMAL</span><span class="arw" data-page-node-id="3959A7TrFtXfjn6qLEeHVf">→</span>
+    <span class="chip c-g" data-page-node-id="MPNWC6SgQV5JKBZ2O56Mt3">RUN_COMPLETED</span>
+  </div>
+  <div class="ev g" data-page-node-id="2EG0HIRTdwU3y3OyKTXosm">run = {"id":"23ac085f-...","status":"QUEUED",
+        "templateVersionId":"default-pi-template-version:bootstrap:1",
+        "harnessInstanceId":"default-pi-instance:bootstrap"}
+decisions = [{"action":"START","reasonCode":"RESOURCE_NORMAL",
+              "pressure":"NORMAL","snapshot":"snap-normal-1"}]
+limitations = []
+
+0001 RUN_CREATED → 0002 RUN_STARTED → 0003 CONTROL_PREPARED
+     → 0004 SANDBOX_ACQUIRED → 0005 RUN_COMPLETED
+finalText = "Hello from isolated worker subprocess!"
+queue_wait_ms = 8    e2e_ms = 384</div>
+  <div class="ref" data-page-node-id="EG9dQhAeMl2ycCEAfPFy3Q">代码锚点：<code data-page-node-id="BD34tm44CHJAFO3tP5zpcj">RunQueueCoordinator.attemptNext()</code> · <code data-page-node-id="Uur4dY2WO7Qr3solKw5GaN">ResourceAdmissionService.evaluate()</code> · <code data-page-node-id="6MZdnG6AYv7Oh8KnKPO9AQ">ManagedAgentRuntime.execute()</code></div>
+</div>
+
+<div class="card" data-page-node-id="AbcDlA2rlG6uDDbZvULkVa">
+  <div class="chead" data-page-node-id="P6Vnv62j7nFQWNbQiRnHM1"><span class="no" data-page-node-id="d1WcWYLO0oWHdtkcy0ir4r">场景 3</span><span class="ctitle" data-page-node-id="7lwVvr5eTs9asXK22jkd5U">GPU 打满（CRITICAL）→ QUEUE</span><span class="badge b-ok" data-page-node-id="IWnjDvCLFRHPUDE1hWd0mW">PASS</span></div>
+  <div class="goal" data-page-node-id="MSCAogdOHsPib0tL4j4xox">资源压力必须真实改变准入决策，并且排队原因可解释、可查询。</div>
+  <div class="flow" data-page-node-id="InZUvvj8paSCZeosQfwN1L">
+    <span class="chip c-b" data-page-node-id="nP6wB5RHvUqWIVaG4znWsn">观测器切到 95%</span><span class="arw" data-page-node-id="esSEZVYmN2kfghjwGRclX7">→</span>
+    <span class="chip c-a" data-page-node-id="d3xDOGOqFHJOIc70t9TVc5">classifyResource → CRITICAL</span><span class="arw" data-page-node-id="KeYlt6WjPld6savTPOvJW9">→</span>
+    <span class="chip c-a" data-page-node-id="My3ZJdFBsbCJfogfIGb78Q">QUEUE / RESOURCE_CRITICAL</span><span class="arw" data-page-node-id="lbulKlnM1WHNLup08tSrlE">→</span>
+    <span class="chip c-a" data-page-node-id="bhEJGZChMyYRyIk8AupqJK">QUEUE_BLOCKED 事件落库</span><span class="arw" data-page-node-id="lJcAe4rpQN8gAlpDhchjZJ">→</span>
+    <span class="chip c-a" data-page-node-id="BTAOgHaj6V5X6MhKED4Qvg">release slot + 重新入队</span>
+  </div>
+  <div class="ev a" data-page-node-id="QzREDX1MD3LmvbmIVzhW88">POST /runs -> 202 status=QUEUED
+GET /queue 命中排队项 = {"runId":"9351cc47-...","tenantId":"bootstrap",
+  "reasonCode":"RESOURCE_CRITICAL","position":1,"tenantPosition":1}
+排队中的 decisions = [{"action":"QUEUE","reasonCode":"RESOURCE_CRITICAL","pressure":"CRITICAL"}]
+
+事件时间线：0001 RUN_CREATED → 0002 QUEUE_BLOCKED → （…回落后才继续）</div>
+  <div class="ref" data-page-node-id="iv89cTn3DZHRx2lWnXbPKl">关键：<strong data-page-node-id="HPK3r3CCFyNZ9Xz1scgB2J">重新入队保留原 enqueuedAt</strong>，所以排队 TTL 时钟不会被准入重排重置（<code data-page-node-id="fOeBuF91CrNtuKfbJOzd4O">run-queue-coordinator.ts:356-362</code>）。</div>
+</div>
+
+<div class="card" data-page-node-id="gy0T42sGv8C9lZSccLC0uf">
+  <div class="chead" data-page-node-id="xfvQeCzL4cy8pPgvyqysFW"><span class="no" data-page-node-id="GAY7xP8s7dZU6dZ0YxfB9P">场景 4</span><span class="ctitle" data-page-node-id="a9uNyBJFXrcX4kki3yY0xf">资源回落 → 无需人工操作自动续跑</span><span class="badge b-ok" data-page-node-id="7DaKlPFT96FfabF0tFsazi">PASS</span></div>
+  <div class="goal" data-page-node-id="iGsSRX5wz6W2wCqzebhrBr">压力解除后，排队任务必须由系统自动推进——这是「背压」成立与否的分水岭。</div>
+  <div class="flow" data-page-node-id="4UkyjHKaSTdCHoD5FZaMqJ">
+    <span class="chip c-b" data-page-node-id="5B5INWD5zWWaWbnYh1q5kv">观测器切回 20%（NORMAL）</span><span class="arw" data-page-node-id="Yv9jUGkYcEi2ImYvLSjhDi">→</span>
+    <span class="chip c-b" data-page-node-id="S5CaQrS8i8UGVYTXEFMehf">下一次 pump tick</span><span class="arw" data-page-node-id="c9QxaWFwJmt9segs9VeGnN">→</span>
+    <span class="chip c-b" data-page-node-id="C0sXIgKgkS0KLsPUCgn43B">drain → claimNext</span><span class="arw" data-page-node-id="f1xfrPoKW9iipwv3kE7fQm">→</span>
+    <span class="chip c-g" data-page-node-id="TlpTCdhDJ2ZR58hlhOGJ6T">START / RESOURCE_NORMAL</span><span class="arw" data-page-node-id="kT2HADkn8f0Ece8U8hbezw">→</span>
+    <span class="chip c-g" data-page-node-id="YHfbur9XK5WINqEg7J8tG1">RUN_COMPLETED</span>
+  </div>
+  <div class="ev g" data-page-node-id="HArAZSOQ6SBRxwR7x6Mfqj">>>> 切换观测器：GPU 回落到 20%（NORMAL），等待下一次 pump tick
+终态 status = COMPLETED
+decisions = [{"action":"QUEUE","reasonCode":"RESOURCE_CRITICAL","pressure":"CRITICAL","snapshot":"snap-critical-1"},
+             {"action":"START","reasonCode":"RESOURCE_NORMAL","pressure":"NORMAL","snapshot":"snap-normal-2"}]
+
+0003 16:14:38.568 RUN_STARTED      ← 提交在 38.019，约 550ms 后自动启动</div>
+  <div class="ref" data-page-node-id="CJW7D6pV1xCgGo2fItfVp8">同一个 Run 留下 <strong data-page-node-id="sUEuyJ2KLc97VRAVhFdefc">QUEUE 与 START 两条决策记录</strong>（追加式，不覆盖），这就是「可解释」的具体含义。</div>
+</div>
+
+<div class="card" data-page-node-id="4KBu1zOBrnCkKPWLGAwA3F">
+  <div class="chead" data-page-node-id="CYTkKAZIhAb93aTek7WfMw"><span class="no" data-page-node-id="tzv0nOIaGpT1u8wHnx3Ezh">场景 5</span><span class="ctitle" data-page-node-id="SOyFRtIAfBQ8PCxGr1PDgn">双租户并发排队 → 租户内 FIFO、租户间轮转</span><span class="badge b-ok" data-page-node-id="Nc7EoR1Lkhonf7ZkxpgjBv">PASS</span></div>
+  <div class="goal" data-page-node-id="kdQN6FB2mV2tV516DSKurz">证明单一提交方无法靠连续提交把另一个租户饿死。</div>
+  <div class="flow" data-page-node-id="eu1u34Gdn8q3Hx40Cg2kUw">
+    <span class="chip c-b" data-page-node-id="CsgGwsAxlsotr3yvLeJye6">A1</span><span class="arw" data-page-node-id="SEiIAFSg2x89cx1wkgrAWh">→</span>
+    <span class="chip c-a" data-page-node-id="KUYMaTvyODC7PLxk4GHpOM">B1</span><span class="arw" data-page-node-id="DWVkk7XxFEEVEB0DYEvxrq">→</span>
+    <span class="chip c-b" data-page-node-id="s9YMuSdvzC6IcE5e24tp20">A2</span><span class="arw" data-page-node-id="BLvRtpTD8G5YDwT2JGGz67">→</span>
+    <span class="chip c-a" data-page-node-id="EPfryHBT1jgG8cHTOWim8z">B2</span><span class="arw" data-page-node-id="yCSF2MKf2ODQfAgmw7VFOF">→</span>
+    <span class="chip c-g" data-page-node-id="ICW5xNswHC9eoP51VAC4Xd">四个 Run 全部 COMPLETED</span>
+  </div>
+  <div class="ev g" data-page-node-id="ADr7rUdFgPRNV33WWd587l">租户 A 视角：position=1 tenantPosition=1 … / position=3 tenantPosition=2 …
+租户 B 视角：position=2 tenantPosition=1 … / position=4 tenantPosition=2 …
+（全局投影顺序为 A1, B1, A2, B2 —— 每租户内部 FIFO，租户之间轮转）
+
+run=1e4aa45b status=COMPLETED tenant=bootstrap
+run=4aacdad8 status=COMPLETED tenant=bootstrap
+run=572cdc8c status=COMPLETED tenant=bad19157-4083-4867-97cc-800c87422d8e
+run=fa198122 status=COMPLETED tenant=bad19157-4083-4867-97cc-800c87422d8e</div>
+  <div class="ref" data-page-node-id="0YhduZNzbDQ34nTbUCqkQ3">算法：<code data-page-node-id="8Q8aCsCRp8HilHf2Hz1boL">TenantRunScheduler.claimNext()</code> —— <strong data-page-node-id="o9fTMuxI3gNiBULZQRoJuI">选择与占用 slot 合并为一个同步动作</strong>，否则多个调度尝试会同时看到空闲容量而超额启动。</div>
+</div>
+
+<div class="card" data-page-node-id="9kGRF7LtEoHgS5UeMIjDMd">
+  <div class="chead" data-page-node-id="F9GjSKHqAx70FZrRXKihso"><span class="no" data-page-node-id="xJw9AtI8zA7nuWD7J6ZTkJ">场景 6</span><span class="ctitle" data-page-node-id="36SRIQ8oYauKrngYYwr3kE">落库证据链：Attempt / Sandbox / 策略快照 / 输出</span><span class="badge b-ok" data-page-node-id="EJSgGmdBKBMfz6Jk8xt2M1">PASS</span></div>
+  <div class="goal" data-page-node-id="t0kY1JOz8tpdS8ZdekBI7B">证明「跑过」不是日志说的，而是可以逐层追到不可变记录。</div>
+  <div class="flow" data-page-node-id="ChdLl0hGzF9NRT2SgH6wEO">
+    <span class="chip c-b" data-page-node-id="rQ63OVkAQ8nzXvNyRvS54e">Attempt #1 kind=START</span><span class="arw" data-page-node-id="Nbly6TEQ0TkxRyP546Jv4w">→</span>
+    <span class="chip c-b" data-page-node-id="9c4bvNsrJkG7QLfrF8OAbY">sandboxId 绑定</span><span class="arw" data-page-node-id="CRhb6zd5fimGyd7q3EZIkW">→</span>
+    <span class="chip c-n" data-page-node-id="rqYxYAH6hBpIhjDKsOviHC">spec + runtimeEvidence</span><span class="arw" data-page-node-id="400V5NhPdEbQgaNoflQzpC">→</span>
+    <span class="chip c-b" data-page-node-id="m2OyaRIYAUK1mJTPpf4SvS">policySnapshot</span><span class="arw" data-page-node-id="JFjiMHOGWjSJLhVu7xVegd">→</span>
+    <span class="chip c-g" data-page-node-id="9xagaMvPsh8OK4MxPk1HTl">outputChunks → finalText</span>
+  </div>
+  <div class="ev g" data-page-node-id="6R3SlTHqMp5iC9EB6IJzYr">attempt#1 kind=START status=SUCCEEDED sandboxId=d47b1a12-... reason=none
+  sandbox provider=MANAGED_LOCAL status=TERMINATED runtime=managed-local
+  spec = {"profile":"development","runtime":"managed-local","networkMode":"bridge",
+          "readOnlyRootfs":false,"droppedCapabilities":"NONE","pidLimit":null}
+  runtimeEvidence = {"requestedRuntime":"managed-local","observedRuntime":"managed-local",
+                     "verified":true,
+                     "verificationReason":"仅开发/测试生命周期证据；不代表内核隔离"}
+policySnapshot id=ec9e7a13-... profile=development allowNetwork=true
+  allowedTools=["read","bash","edit","write","grep","find","ls"]
+  compilation status=APPLIED reasons=[]
+outputChunks = 1 条，finalText="Hello from isolated worker subprocess!"</div>
+  <div class="ref" data-page-node-id="k0mWOGblny1asR5spXu149">Attempt 在<strong data-page-node-id="oRdVF411Q16cHCXNrn1ZfB">创建时</strong>就绑定 policySnapshotId，所以即使沙箱创建失败，拒绝记录也能解释用的是哪份策略。</div>
+</div>
+
+<div class="card" data-page-node-id="fQwznEj32cCQtnKGJuNNuX">
+  <div class="chead" data-page-node-id="aGZNGfIGvFjwTfXDP5J3iA"><span class="no" data-page-node-id="B4GGn2UgAZRgtYizhBk1EB">场景 7</span><span class="ctitle" data-page-node-id="bH3RXZXCq1RwSTYQ77t83l">审计：ALLOW / DENY 都留痕，且按租户隔离</span><span class="badge b-ok" data-page-node-id="o2iWwprDwtViQmcYxadJix">PASS</span></div>
+  <div class="goal" data-page-node-id="WnHQEuFzgIU2Ys0jZWImvO">失败尝试与被拒绝的越权同样要可追溯，且不能把未知调用方甩给某个租户。</div>
+  <div class="flow" data-page-node-id="xVkXi8e1aW91QG4rEL5Dw4">
+    <span class="chip c-n" data-page-node-id="XHwACySe41y6NBJ5eZ0ens">全库 63 条</span><span class="arw" data-page-node-id="9DW4I35wSTVzezvWzq7ixn">→</span>
+    <span class="chip c-b" data-page-node-id="h753zTBSlBBtMEeCUfRXHz">bootstrap 视角 50 条</span><span class="arw" data-page-node-id="uwYVUXYDqBBYahKLcVK3YM">+</span>
+    <span class="chip c-a" data-page-node-id="ehfwttFfCENv89yrh98jSP">租户 B 视角 10 条</span><span class="arw" data-page-node-id="BHpbcvmytT9Nxp3ORVEjEJ">+</span>
+    <span class="chip c-r" data-page-node-id="qbNj2KhZlLQTuviFHUjIXo">tenant=NULL 3 条（无归属）</span>
+  </div>
+  <div class="ev a" data-page-node-id="oAbFDVSt9qQr6beNhWiBP2">GET /audit（bootstrap 视角）-> 200，共 50 条
+GET /audit（租户 B 视角）    -> 200，共 10 条（租户隔离）
+全库审计共 63 条
+
+DENY：action=AUTHENTICATE tenant=NULL reason=missing_api_key keyDigest=none
+      action=AUTHENTICATE tenant=NULL reason=invalid_or_revoked_api_key
+                          keyDigest=5e179de47cd13ded…（SHA-256 摘要，不存明文）
+      action=tasks:write  tenant=agent-runtime reason=missing_scope</div>
+  <div class="ref" data-page-node-id="eoV7iR7XsE9tvKazi5st0d">63 = 50 + 10 + 3。那 3 条 <code data-page-node-id="DHEmQ0hKfOYa80ysBjvGn3">tenant=NULL</code> 的鉴权失败<strong data-page-node-id="tEnvLBA5CxFHlam1JhIXCK">刻意不出现在任何租户视图</strong>——不能把未知攻击尝试归给随机租户。</div>
+</div>
+
+<div class="card" data-page-node-id="QAmlkDcM85A21i7UTZKlul">
+  <div class="chead" data-page-node-id="BHyJbIueRqgEHkgHosOtIK"><span class="no" data-page-node-id="3tNMHcB7ibH667btkPxvkD">场景 8</span><span class="ctitle" data-page-node-id="1wMp4368Fm08cOGf6bdle2">安全关闭：顺序与启动严格相反</span><span class="badge b-ok" data-page-node-id="dwLTu68HHfM0iDUELKmN2k">PASS</span></div>
+  <div class="goal" data-page-node-id="bIHwjhNLUisYWy3JA42IlS">关闭时先停止接收新请求，再停 Pump，最后关 SQLite，避免半途写入。</div>
+  <div class="flow" data-page-node-id="ZpLBkylNDVMEq9h7hwatva">
+    <span class="chip c-g" data-page-node-id="bHJSRY00U4HyzPPY5bv6hE">server.stop(true)</span><span class="arw" data-page-node-id="ZfDiaiCX6XSmKfpjgv8CXZ">→</span>
+    <span class="chip c-g" data-page-node-id="vmxB0pjTS7rc8c1lYgfFaV">队列 Pump 停止</span><span class="arw" data-page-node-id="5yFHTuVSBm4hHKmcqie78V">→</span>
+    <span class="chip c-g" data-page-node-id="CxLsqWfiBDEAH7Ptw3MXuO">SQLite 关闭</span>
+  </div>
+  <div class="ev g" data-page-node-id="5q3s5WN7LcOuq1ogKkduG5">close() 完成：HTTP 停止 → 队列 Pump 停止 → SQLite 关闭
+RESULT: PASS</div>
+  <div class="ref" data-page-node-id="WKsbheARVowsjlROUvB7WD"><code data-page-node-id="NBBfMK6dIPwXykFpCf1e1n">close()</code> 幂等：重复调用复用同一个 promise；同时摘掉 SIGINT/SIGTERM 处理器。</div>
+</div>
+
+<div class="card" data-page-node-id="NiGaI2KNbEk34wo3e5WUEq">
+  <div class="chead" data-page-node-id="szNMG8TGAlUzzKFgh8V3nr"><span class="no" data-page-node-id="jadNI2o7pREyzhc7wpWy8q">场景 F1</span><span class="ctitle" data-page-node-id="Li9CWpyEyznRQyxVT3Dt70">Worker 崩溃（SIGKILL 自身）</span><span class="badge b-ok" data-page-node-id="YtYF4Hd0DLTgEWoK0YJKx3">PASS → FAILED</span></div>
+  <div class="goal" data-page-node-id="EKmJ5ZJ3pW662V0f91ldYX">子进程被强杀时，Run 必须收敛到终态，且孤儿沙箱不能泄漏。</div>
+  <div class="flow" data-page-node-id="zD9C4a4EXVfQLB9jBiUTFK">
+    <span class="chip c-b" data-page-node-id="y3EFoBAIruAXpbFxvlzfxY">RUN_STARTED</span><span class="arw" data-page-node-id="Rexy6dEpa0JioY6jwGc8yP">→</span>
+    <span class="chip c-n" data-page-node-id="fgKI6PBJlxnNL8XNLtMma0">CONTROL_PREPARED</span><span class="arw" data-page-node-id="8tM46zYa9V4ubbjPxjjc98">→</span>
+    <span class="chip c-n" data-page-node-id="pGcACjcT13Rl7xRSIudt4H">SANDBOX_ACQUIRED</span><span class="arw" data-page-node-id="CdF8rQeYI4j6oT6fXjAR4e">→</span>
+    <span class="chip c-r" data-page-node-id="1gKm0qhi1wRQKw3SVcsVSp">Worker exit 137</span><span class="arw" data-page-node-id="pUpnG5pKuDfEhWfvTWMXzE">→</span>
+    <span class="chip c-r" data-page-node-id="rSlEwvE4p5yQCEFoQp3S33">RUN_FAILED</span><span class="arw" data-page-node-id="7s42zbr5u3rec9VpCJRHLj">→</span>
+    <span class="chip c-g" data-page-node-id="rCVZc3XytXVS78YWyY6dWa">sandbox TERMINATED</span>
+  </div>
+  <div class="ev r" data-page-node-id="sqtOfGIkt8nkXDOJNBTH0p">终态 status = FAILED
+failureReason = "WORKER_CRASHED: exitCode=137, signal=SIGKILL
+                 Stderr: [Worker PID 26981] Simulating SIGKILL"
+attempt#1 status=FAILED reason=WORKER_CRASHED: exitCode=137, signal=SIGKILL
+  sandbox status=TERMINATED failureReason=none      ← 异常路径也没留下未回收环境</div>
+  <div class="ref" data-page-node-id="zvdaeSmk9msJrsrplm1HEq">exitCode 137 = 128 + 9；Master 的 <code data-page-node-id="ygmJXxt49q7I24k7jIc6xy">child.exited</code> 看门狗把它翻译成 <code data-page-node-id="dy2Gq6NDDVlHbVuS6lrIbm">agent_failed → RUN_FAILED</code>。</div>
+</div>
+
+<div class="card" data-page-node-id="mVyZNiD1lV0rVM9NrzMHhn">
+  <div class="chead" data-page-node-id="xs0hbcJMzuGTyUY3utT2dY"><span class="no" data-page-node-id="Fy0KXy9CpNkK3DaeUkaj2P">场景 F2</span><span class="ctitle" data-page-node-id="nw9f7JaUJnzUvE9yXRGlHn">Worker 主动回报失败</span><span class="badge b-warn" data-page-node-id="CclJrXrMBTT6yCC5u3sgQY">PASS 但暴露不一致</span></div>
+  <div class="goal" data-page-node-id="3B8G4XNSDNrSMU5YC0Wc1w">Worker 经 IPC 发 RUN_FAILED 时，Run 的落点应当与崩溃分支一致。</div>
+  <div class="flow" data-page-node-id="vGpOUeosBg1Z2dJ3fMRBHx">
+    <span class="chip c-b" data-page-node-id="AvVF5ha35ZxKZ8npczCMvp">RUN_STARTED</span><span class="arw" data-page-node-id="CFDL58mm3ET4BRT48DaSjO">→</span>
+    <span class="chip c-a" data-page-node-id="IQbEmBPw9d6YJeHsF2bevE">Worker 发 RUN_FAILED</span><span class="arw" data-page-node-id="dpLxIL3PlKeNBGqHvR9mZY">→</span>
+    <span class="chip c-a" data-page-node-id="G44bpGUlQAZISygHH77QGB">Master 只 reject(start)</span><span class="arw" data-page-node-id="ChLNIAHVrqcaKY2xWgMY9K">→</span>
+    <span class="chip c-a" data-page-node-id="ZSlKtsv9kDHH0I3Cuy4ncR">RUN_INTERRUPTED</span><span class="arw" data-page-node-id="PSLA5RG7FLpPZDJQnOwMl4">→</span>
+    <span class="chip c-r" data-page-node-id="PWPg7ZAEY7d0EoEL0NqpcJ">failureReason = null</span>
+  </div>
+  <div class="ev a" data-page-node-id="npW5czn2VA0JTWGy1wHT7x">终态 status = INTERRUPTED
+failureReason = null
+attempt#1 status=FAILED reason=Simulated worker execution failure
+
+[WARN] 行为不一致：RUN_FAILED 分支只 rejectPromise，不发 agent_failed 事件，
+       于是走 markRuntimeInvocationFailureInterrupted → Run 变成 INTERRUPTED
+       且 failureReason=null，而不是像崩溃分支那样 FAILED。失败原因只留在
+       RUN_INTERRUPTED 事件的 payload.message 与 attempt.failureReason 里，
+       Run 级 API 看不到。此差异无测试覆盖。</div>
+  <div class="ref" data-page-node-id="BomHdK4diF0DMUS7XfxNLC">这段 <code data-page-node-id="9FD1I5ngC6HATtQvvxErja">[WARN]</code> 是<strong data-page-node-id="97O7Wxf9ItB2HrDimb7Wb2">脚本自己打印的</strong>，不是我的推断。项目把缺陷以告警形式随证据输出。</div>
+</div>
+
+<div class="card" data-page-node-id="xpZVUxXIcAlF8wXEP9FvLh">
+  <div class="chead" data-page-node-id="gIriSEV8bnxtBY1j6HikAB"><span class="no" data-page-node-id="DexLBRCr0UTQdJiDiFuSRp">场景 F3</span><span class="ctitle" data-page-node-id="EA4LxRSNHF3YjHaNj8ZDER">Worker 卡死且忽略中断（超时兜底）</span><span class="badge b-warn" data-page-node-id="AtMJ4FZ8yMdPBXwooXqiRM">PASS 但重复计数</span></div>
+  <div class="goal" data-page-node-id="RZKCDegS1VuAaBHPhI55zP">验证「优雅中断 → SIGTERM → SIGKILL」升级阶梯能在超时后收敛。</div>
+  <div class="flow" data-page-node-id="GMg6PkpL90FNMXu3by7Ggb">
+    <span class="chip c-b" data-page-node-id="yJ4nexhpUC4p3RyySNZPe9">START</span><span class="arw" data-page-node-id="nsRh3q2bHIUIEi3XiuBhP9">→</span>
+    <span class="chip c-a" data-page-node-id="nA0bnrrtktrixa4Vy9Sob3">3s 超时（注入）</span><span class="arw" data-page-node-id="73bJaIJ0jGywN1UBDZaLyO">→</span>
+    <span class="chip c-a" data-page-node-id="mrYYgRAy3jSABDJDTtg6Q4">宽限 1s</span><span class="arw" data-page-node-id="a8WXFCg9E1n2MZFKMFdrBc">→</span>
+    <span class="chip c-a" data-page-node-id="agdfggwTG6B28vlohVFPZO">SIGTERM → SIGKILL</span><span class="arw" data-page-node-id="MdC5IAZlkDBxmEqcOgkrEC">→</span>
+    <span class="chip c-a" data-page-node-id="PVxES2SDZxRLlKJioO0hb0">RUN_INTERRUPTED</span>
+  </div>
+  <div class="ev a" data-page-node-id="xC8uUMtVW5M0TTsDPS9drq">HARNESS_WORKER_SIMULATE = hang_stubborn
+[WorkerProcessRuntime] Worker for run 5c7d69e2-... timed out in grace. Escalating to SIGTERM.
+
+终态 status = INTERRUPTED
+attempt#1 status=FAILED reason=Agent Runtime 执行超时：5c7d69e2-... (3000ms)
+
+RunQueuePump onError 触发次数 = 9，去重后 = 1
+  [WARN] 同一次 drain 失败被重复上报 9 次：drain() 会把同一个 in-flight promise
+         返回给每个等待的 tick，它 reject 时所有等待者各自调用一次 onError。</div>
+  <div class="ref" data-page-node-id="8vFMmHMoc4yH0EnWzJcVJT">生产默认 <code data-page-node-id="9fq7vmKMd0fGxqKqMS8Bsi">executionTimeoutMs = 30 分钟</code>、<code data-page-node-id="vCHrL1KZlYfsAYrk6ONgES">interruptGraceMs = 10s</code>；本走查压到 3s/1s 才能在几秒内验证阶梯。</div>
+</div>
+
+<div class="card" data-page-node-id="GKLrQIPlmANKyDsCisau5B">
+  <div class="chead" data-page-node-id="LpoqTgqBiqfB0E3oMnvpUR"><span class="no" data-page-node-id="3zt9ShQa2uJPoxSMjQ6yVm">场景 D1</span><span class="ctitle" data-page-node-id="ylYsuoFWyMQNnqO7WrFWeh">进程重启后的 Checkpoint 恢复</span><span class="badge b-ok" data-page-node-id="7tbYuX2bf4j1ELB6bImlw1">PASS</span></div>
+  <div class="goal" data-page-node-id="jtI1J9wPoBhL2QxIqbdm9V">跨进程重启后，恢复任务必须重新过准入，且 start / resume 分流判定正确。</div>
+  <div class="flow" data-page-node-id="Lr7rOXpRRUE5fzMc6UN7yt">
+    <span class="chip c-n" data-page-node-id="H7eFDNbYbyrVguRkKMB9oa">进程 1：种入中断 Run + 排队 Run</span><span class="arw" data-page-node-id="YrG0pgqkPuffk9bGdymwEE">→</span>
+    <span class="chip c-a" data-page-node-id="joMACh8fCTDque29NNcDy9">进程 2：RUN_INTERRUPTED → RUN_QUEUED</span><span class="arw" data-page-node-id="y9rekPX7M4CaDe3FMfI4ky">→</span>
+    <span class="chip c-a" data-page-node-id="upGWlomDNSePobNzKEr0cf">QUEUE_BLOCKED ×2（CRITICAL）</span><span class="arw" data-page-node-id="yogFeGsT13vmdvTiAsHjRG">→</span>
+    <span class="chip c-b" data-page-node-id="DZX4TLyX0GOkSFqB0Ri9hn">RUN_RESUMED / RUN_STARTED 分流</span><span class="arw" data-page-node-id="7zQSsqtQiNC8LvJqExDi5W">→</span>
+    <span class="chip c-g" data-page-node-id="xQ6Fq5Eqe9ZqNiCozKv8bR">两者 COMPLETED</span>
+  </div>
+  <div class="ev g" data-page-node-id="Dcjwk8KzxctutSQHAM4HmP">[CRITICAL] queue snapshot
+1. tenant-b 596290fa-... reason=RESOURCE_CRITICAL
+2. tenant-a 72f402d5-... reason=RESOURCE_CRITICAL
+
+[NORMAL] runtime.start  -> 596290fa-...     ← 排队 Run 走 start
+[NORMAL] runtime.resume -> 72f402d5-...     ← 中断 Run 走 resume
+
+--- Tenant A / Checkpoint Recovery ---  status=COMPLETED
+0001 RUN_CREATED → 0002 RUN_STARTED → 0003 RUN_INTERRUPTED → 0004 RUN_QUEUED
+  → 0005 QUEUE_BLOCKED → 0006 QUEUE_BLOCKED → 0007 RUN_RESUMED → 0008 RUN_COMPLETED
+
+RESULT: PASS</div>
+  <div class="ref" data-page-node-id="KQSpAm82D4eSLAE0X4DzqR">三个不变量：① 恢复不绕过调度器（所以有 QUEUE_BLOCKED）；② start/resume 分流正确；③ sequence 1..8 连续无空洞，恢复未重置事件计数。</div>
+</div>
+
+<h2 data-page-node-id="f79nSOMNWEAcsDSoF4UWFq">二、需要外部环境、本次未执行的验收入口</h2>
+<div class="h2note" data-page-node-id="IpJIJEW3MPLGaMu8qCAfwm"><code data-page-node-id="5XeKUQ8G39b8iPd4SlmWb6">scripts/</code> 下共 21 个可执行入口，本次只跑了 <code data-page-node-id="9bkrr2iEXoVYTQniOFLzxy">e2e-walkthrough.ts</code>（含 failure 模式），
+其余 <strong data-page-node-id="wK4IPcRwy1FZTpeSHLZ270">20 个</strong>未在本机执行。本机没有 GPU / Docker daemon / runsc，
+<strong data-page-node-id="yg7poJSUmixN0VCckmp3Fn">我不为它们的结果背书</strong>。列出它们是为了让「测过什么」和「还没测什么」一样清楚。
+（下列 12 张卡片覆盖这 20 个入口，部分卡片含 2–3 个脚本。）</div>
+
+<div class="card" data-page-node-id="QwTkRSKnZCYDDzAfZl5AmH">
+  <div class="chead" data-page-node-id="B4lBK0Gyac0b4QA6fQyl91"><span class="no" data-page-node-id="pZCKkX4WvCRbxIoK2IuGGD">E1</span><span class="ctitle" data-page-node-id="dOhDRwVH1NXnswMvZ0LXwV">e2e-gpu-pressure.ts</span><span class="badge b-ext" data-page-node-id="4tx5o2Ms7iSemdHD3Au9H4">需真实 vLLM /metrics</span></div>
+  <div class="goal" data-page-node-id="nIBRapagNBcHjgyMSJazGX">用真实 <code data-page-node-id="5w9SjEBSp7QlbaOHedrkct">VllmResourceObserver</code> 拉取 GPU 机 /metrics，观察并发压力如何真实驱动 NORMAL → BUSY/CRITICAL → QUEUE。</div>
+  <div class="flow" data-page-node-id="FXrC3IXayH8Hen0fFzpxDT"><span class="chip c-n" data-page-node-id="N1rFglfzJhyTm4SInVDqvl">curl /metrics</span><span class="arw" data-page-node-id="fbrzqj6qCCdUjzqXZJiDdR">→</span><span class="chip c-n" data-page-node-id="eRmIWMUflOR9e6A64Yp3Lg">真实观测</span><span class="arw" data-page-node-id="zcqrPaGk8PJHXOE8cJf53G">→</span><span class="chip c-n" data-page-node-id="T65sEPC9qqE8HizzkkkyiH">分类</span><span class="arw" data-page-node-id="QVoaj4JjmHKXKuZP4e4iJB">→</span><span class="chip c-n" data-page-node-id="oVmzeGLDuiHD56rKEqEXnP">准入决策落库</span></div>
+  <div class="ref" data-page-node-id="wpiMDJasTREkTwOMOmvEgI">与已跑场景 3 的区别：<strong data-page-node-id="IoiQl7bg8Hd9OrlHpgh79t">观测源从 Fake 换成真实 /metrics</strong>，这正是它没被替代的原因。</div>
+</div>
+
+<div class="card" data-page-node-id="5UcbfpJJYEdZ3cWw8LJawp">
+  <div class="chead" data-page-node-id="JwU64bcNG6QDl4O5U2exAt"><span class="no" data-page-node-id="9MpxqHuwbIlxcdMpmQuXmH">E2</span><span class="ctitle" data-page-node-id="JnpvnhGqv7XBglqFbr1GYC">e2-gateway-fault-matrix.ts · G04 网关错误分类全矩阵</span><span class="badge b-ext" data-page-node-id="q2OJVDnoEOMPMx7C5W7jbs">仅需本地 HTTP 夹具</span></div>
+  <div class="goal" data-page-node-id="RxTfXROabMYiPmJeTyaSQJ">401/400 不回退原样透传；429/5xx 可回退且有界；坏 JSON / 坏 SSE 不崩；usage 缺失不计数、重复不累加。</div>
+  <div class="flow" data-page-node-id="4JYms2mvNgaP9IPVoYZSCB"><span class="chip c-n" data-page-node-id="SD4OEHRQR0dib6Fi24fhoT">本地故障夹具</span><span class="arw" data-page-node-id="LZ6f5zaZehuqGS9lU5M4l7">→</span><span class="chip c-n" data-page-node-id="FBlbA6IYDKlrihyOwZrvIF">LlmGateway + ModelRouter</span><span class="arw" data-page-node-id="hGrVn8nBSrtXWFXjqYdxeQ">→</span><span class="chip c-n" data-page-node-id="GhRl1tYE8Y78pcFAZBQW3F">路由台账 / 缓存台账</span></div>
+  <div class="ref" data-page-node-id="eoaiBR0RAZn8vTKx6wV6Rf">判定依据是 HTTP 语义 + 台账 + 重试是否有界，<strong data-page-node-id="R5AvMvC3tS8xLMIZrLDg3H">不是「请求成功与否」</strong>。</div>
+</div>
+
+<div class="card" data-page-node-id="jAnP3FiaM3PK5nPG3HhDQC">
+  <div class="chead" data-page-node-id="mgaNYnpL7JQ0FnPVy6fIyw"><span class="no" data-page-node-id="wUqKqLfExcdI9exs6B9tGv">E3</span><span class="ctitle" data-page-node-id="VDNdm6Go78bLEP6749mAR7">container-sandbox-smoke.ts / :attacks</span><span class="badge b-ext" data-page-node-id="JRPdnr8tWXOaXjWMgJLbbT">需 Docker + runsc</span></div>
+  <div class="goal" data-page-node-id="vGIu0v0JHCNuFb0UekCpoM">前者验证非 root UID、只读 RootFS、仅挂载 Workspace、默认无网络；后者额外覆盖两租户 Workspace/Secret/路径越权、PID/tmpfs 上限、意外 kill → LOST。</div>
+  <div class="flow" data-page-node-id="s1Sel6zgVM2yNsDZyoCjN8"><span class="chip c-n" data-page-node-id="QJ4orLKJtCkueNs4G5ZoSA">docker run --runtime=runsc</span><span class="arw" data-page-node-id="TRPlu4RdcfyazrdSlLcmhB">→</span><span class="chip c-n" data-page-node-id="9qVGMA4fjXKknDwqxRT0Jq">docker inspect 取证</span><span class="arw" data-page-node-id="BWS7nM6MrDMiH1h272ZnSB">→</span><span class="chip c-n" data-page-node-id="ybIdkm4XcKDcKxCCskJt98">攻击用例</span></div>
+  <div class="ref" data-page-node-id="y8mGKHbmz0IRASYGkw8MOy">源码注释明确：<strong data-page-node-id="Lmdfd7AcPFsrYhoiqBhOB4">fake Docker runtime 无法证明这些边界</strong>，所以本机没有 daemon 时这些命令应当失败，而不是把 fake 单测当证据。</div>
+</div>
+
+<div class="card" data-page-node-id="Qg9XwqzIJQpCfAZw24GkQF">
+  <div class="chead" data-page-node-id="L1RJyLDuzdGEOWkztqqGQm"><span class="no" data-page-node-id="wCbx8aXD5rnfAI7OYFygXv">E4</span><span class="ctitle" data-page-node-id="V4VqVL4rDl0ITCQDylgjXp">e2-sandbox-limits.ts · S06/S08/X10</span><span class="badge b-ext" data-page-node-id="ZhcKbVFbFRcNqhUn8whDlk">需 Docker + runsc</span></div>
+  <div class="goal" data-page-node-id="AcxflKFaVQDXDQFkbXnIKZ">CPU / 内存 / PID / tmpfs 四类限额必须「由运行环境实际执行」；并检查 Secret 是否经宿主可读路径（docker argv / inspect）泄漏。</div>
+  <div class="ref" data-page-node-id="KZlB1DT1qgReaU4qxJAZ2S">破坏性压力（内存超额 / PID 风暴）会终结被压沙箱本身，所以每种压力用独立沙箱，避免污染对照。</div>
+</div>
+
+<div class="card" data-page-node-id="tvidJR49aFV2f2EjjJjMG9">
+  <div class="chead" data-page-node-id="2rWIEVysPAjs8mIgXwmm1h"><span class="no" data-page-node-id="HYQmWZZiW6rhimMpxKzZYI">E5</span><span class="ctitle" data-page-node-id="TIQv9Ga1yy3LKFFQnaXCTh">e2-container-failure.ts · G09 Provider 边界</span><span class="badge b-ext" data-page-node-id="a5cyxzQtxGBFyYVcoTfbrS">需 Docker</span></div>
+  <div class="goal" data-page-node-id="tk6zLEmkcMBRYXDDzXrRSQ">镜像缺失 / 创建失败 → create 必须抛错且收敛为 FAILED、不留残留；运行中容器消失 → 识别为 LOST 而非普通工具失败；失败后同一 Provider 仍能创建新沙箱。</div>
+</div>
+
+<div class="card" data-page-node-id="rUlwHDqJRQOBQHvOie8MxF">
+  <div class="chead" data-page-node-id="rAtwJp6RWo2rKCmGj5MmGW"><span class="no" data-page-node-id="rydR3Y0NQmh59k3HdofJTC">E6</span><span class="ctitle" data-page-node-id="kg4TUqJ2SCAsBpz6TMHAFU">e2-warm-pool.ts · G10 容器热池</span><span class="badge b-ext" data-page-node-id="cwyJI6YAIC0LRIRqYVpaHD">需 Docker</span></div>
+  <div class="goal" data-page-node-id="SBL5sqtEE0NFNyzC3m0i9r">冷/热启动耗时对比（热启动必须显著更快且 warmHit=true）；另一租户不能租到别人的热容器；热容器里看不到上次残留的文件/环境变量/Secret；结束后不遗留 <code data-page-node-id="6D6CgvVZ7DpqgUMOh4Y1Ay">agent-harness-warm-*</code>。</div>
+</div>
+
+<div class="card" data-page-node-id="RplbjcmBEyJKt7DuBfui0U">
+  <div class="chead" data-page-node-id="vQWNFPlP3Gu3NJz4ZisON2"><span class="no" data-page-node-id="IMD3E0RIr2jU5YrvKvm1xH">E7</span><span class="ctitle" data-page-node-id="EwdcUnlQCWRyEbze2aJ9wK">sandbox-runtime-benchmark.ts</span><span class="badge b-ext" data-page-node-id="BkUBVnUcyjVrLTT0oOTZik">需 Docker + runsc</span></div>
+  <div class="goal" data-page-node-id="8QhKFcUYj1MJ0WXZaE6A1X">在同一台机器、同一镜像上比较 runc 与 runsc 的冷启动 / 命令执行 / IO / 清理耗时，为 Kata、Firecracker Provider 预留同一套实验方法。</div>
+</div>
+
+<div class="card" data-page-node-id="gm8S26NaRaymM9HxIUczrS">
+  <div class="chead" data-page-node-id="CYrDzCrbuLciMYFpcllLeh"><span class="no" data-page-node-id="3FTKjp9LmtMhWau6krkm6D">E8</span><span class="ctitle" data-page-node-id="u0PT4zyE3YQ61DFVDH3qVg">tenant-budget-demo.ts / server-budget-control.ts</span><span class="badge b-ext" data-page-node-id="s1BxQyu8FYW7O9rgLFrL5z">可本地跑，本次未跑</span></div>
+  <div class="goal" data-page-node-id="3AykYoH0cCylWWEXg2g3pD">三段式租户预算：每租户上限 + fair-share 权重 + 台账（commit/settle/chargeback）；后者把预算接到<strong data-page-node-id="2F6iX6LbGXTjtC1wjl4iR2">真实</strong> admission 与 SQLite 决策Store 上。</div>
+  <div class="flow" data-page-node-id="vgv3MMGo7ll9dqiFkGkqJP"><span class="chip c-n" data-page-node-id="86b0HnAXAu5vBpQKiVptQj">weight/maxUnits</span><span class="arw" data-page-node-id="9346E6UjQ4aSQ9ZO8EbQHD">→</span><span class="chip c-n" data-page-node-id="UQPtFsd8kAME0iV0DyeJns">fair-share 计算</span><span class="arw" data-page-node-id="cqudKCSV4NydOLlEmeQLDA">→</span><span class="chip c-n" data-page-node-id="xtPXIjfT6vRu5af4CHWcbW">超限 START 降级为 QUEUE/TENANT_BUDGET_EXCEEDED</span></div>
+  <div class="ref" data-page-node-id="IHqTXii5LejA9E4ruAIkz9">默认<strong data-page-node-id="FOHOEb286i5HVdRuDzCq2c">不开启</strong>（<code data-page-node-id="0aCS5ECPLx3F0EU6UyK1u5">tenantBudgets</code> 为空时行为与历史完全一致），属于 opt-in 组合。</div>
+</div>
+
+<div class="card" data-page-node-id="fUC8KybgKJwrPjYNUelWCn">
+  <div class="chead" data-page-node-id="9XmICEjhS4jS4Sa9DKsPgw"><span class="no" data-page-node-id="5hmxTMeOivFKU7niYDRNsz">E9</span><span class="ctitle" data-page-node-id="AGhsIZhJhJlmo0Y0R5qsCf">day7-http-smoke.ts / server-model-api-demo.ts</span><span class="badge b-ext" data-page-node-id="QQM4k3Z4H83QFTzYK6PDSx">需已启动的 Harness / 真实模型</span></div>
+  <div class="goal" data-page-node-id="BXq28J9tswhxAT0PAlu3kw">前者对已启动进程做 HTTP 纵向切片（提交 → 轮询终态 → 打印策略决策与事件）；后者用真实 OpenAI 兼容 API 打通 <strong data-page-node-id="tcjovGH7rZkyJwzEGkPmrm">Pi → 模型 → 工具 → runsc 沙箱</strong>全路径。</div>
+  <div class="ref" data-page-node-id="FD2vzjHtMaU5uD04mZWhFT"><code data-page-node-id="SXNEnSLedeWlfLzIdnTAxm">server-model-api-demo</code> 明确标注注入的 NORMAL 观测器<strong data-page-node-id="D1Wt55qq3Er31sQ7n4UnrL">不是真实 GPU 观测</strong>，不得当作 VRAM 准入证据。</div>
+</div>
+
+<div class="card" data-page-node-id="tNu4IFBsSfBedcg2oTgKvg">
+  <div class="chead" data-page-node-id="Mo2n7katxY1RGrW8q1JkDb"><span class="no" data-page-node-id="G4n3qBFsEL1buelDaI5GwA">E10</span><span class="ctitle" data-page-node-id="42snOFqi2uBbE3QwRfOaRB">campaign/load-driver.ts · runway-d-gate.sh</span><span class="badge b-ext" data-page-node-id="fHj6BJfxHH3Y5SC7StPW7Q">需服务器</span></div>
+  <div class="goal" data-page-node-id="9xHkEZeaTpoKQHWor28pae">负载驱动 + D 阶段门禁；配套 <code data-page-node-id="35H8F34AQxBBeoIhJ7UeyY">provision-instance.sh</code> 与 <code data-page-node-id="HR1DNdTwMlvveFR4qq9ITJ">fixtures/</code>。</div>
+</div>
+
+<div class="card" data-page-node-id="AmnCdoSOBojuJlpCuPvXic">
+  <div class="chead" data-page-node-id="yrK8NTlV9wWvM0uORLHBht"><span class="no" data-page-node-id="cu825AVtDcrMiXPdujBFP0">E11</span><span class="ctitle" data-page-node-id="0fuxUz9HhCDuLdAxMCwwYS">isolation-evidence-report.ts / eval-report.ts</span><span class="badge b-ext" data-page-node-id="CyvEHZnszxpy1wwJnWVLgT">需已有运行数据</span></div>
+  <div class="goal" data-page-node-id="alLAVWXku9eIfzSQjY0IgI">前者产出隔离证据三元组（策略 ↔ 编译 ↔ 观测）并交叉校验；后者从落库数据算执行质量指标（token/cost/latency/quality + 背压/副作用/自治/完成度）。</div>
+</div>
+
+<div class="card" data-page-node-id="5uzqID7CM4ehAqOWBMsK5K">
+  <div class="chead" data-page-node-id="0EPXviqjedYu99qmkn1pMk"><span class="no" data-page-node-id="lk4ArQ7LGQGXfjVg0H1Amk">E12</span><span class="ctitle" data-page-node-id="X6lzgfSAGS1NP1txp9GrzJ">user-console-demo-server.ts / user-console-smoke.ts / server-preflight.sh</span><span class="badge b-ext" data-page-node-id="t7aBZUAvmON3rB9aDaObin">可本地跑，本次未跑</span></div>
+  <div class="goal" data-page-node-id="CgsKlC93IpW8XNJGocweoi">用户工作台演示服务（<code data-page-node-id="HdbmuLH2xxmXBKhrAreLJo">/app</code>，Fake Runtime，无 GPU 依赖）；端到端冒烟（注册 → 登录 → Workspace → 对话 → 任务 → 结果）；上线前环境自检。</div>
+  <div class="flow" data-page-node-id="TrYOqjpLsm6YHG3wnXKRnY"><span class="chip c-n" data-page-node-id="cZMgr85CloZISIXmN0Fpcl">register</span><span class="arw" data-page-node-id="Gcjmodrl3pMlkTOrdHujkm">→</span><span class="chip c-n" data-page-node-id="8GqydnffJZsFXFZE6Bh4ne">login</span><span class="arw" data-page-node-id="z5HHMUHZykKDNX8Z1LFgaA">→</span><span class="chip c-n" data-page-node-id="xuSn9bH43csZXBFzfdAHPz">workspace</span><span class="arw" data-page-node-id="Yz52nb0NWwSD7jymSGniJh">→</span><span class="chip c-n" data-page-node-id="6oqdW0JEhDQJYFDUUpJNlH">conversation</span><span class="arw" data-page-node-id="tUWJjc9NBtz5xK5j8EKZhH">→</span><span class="chip c-n" data-page-node-id="ouIRg4SszMRCGGNTWSiQfX">run</span><span class="arw" data-page-node-id="756rsh1JfYt5doTPk8YjLO">→</span><span class="chip c-n" data-page-node-id="NaHNwywTeGPjPYtNw68Mz5">result</span></div>
+  <div class="ref" data-page-node-id="K7jiSLymEdWqV6WhWm8G8T">演示账号 <code data-page-node-id="CpiGqTkebmtxUPDRrSvhDn">demo@team.local / demo-password-123</code>；<code data-page-node-id="hWzI1k6skDO59tNmgvBMVY">Ctrl+C</code> 会关闭服务并删除临时数据。</div>
+</div>
+
+<h2 data-page-node-id="GYiGddObJcDD359y0CFtAC">三、自动化测试网（本次已全量执行）</h2>
+<div class="h2note" data-page-node-id="B7VuSFbx70lT6hWZEpp7ZO"><code data-page-node-id="4z4ypmjT5QKjszEYC2diVh">bun run test</code> 的真实输出。</div>
+<div class="ev g" data-page-node-id="0hl0aPOeEmtpy0QHvL8BFu"> 403 pass
+ 0 fail
+ 4620 expect() calls
+Ran 403 tests across 90 files. [12.62s]</div>
+
+<table data-page-node-id="hXHOS5JcArrsautGYjqWXb">
+  <tr data-page-node-id="1vs9gEYNftAAWRhtkiyhdi"><th data-page-node-id="5XeQAW9yzhBQkhz9BB8NKp">层</th><th data-page-node-id="zjJtNw504l75uAg2trdcLR">范围</th><th data-page-node-id="wfTlLtEj4KhM2xRybr8RkA">代表场景</th></tr>
+  <tr data-page-node-id="HBa9sdAewLGEpCIuBrR0TG"><td data-page-node-id="XFiEyBwWXbcsXjSgOwVYlA">单元</td><td data-page-node-id="g6oFGNmzPnrIr0qNWReDeM">状态机、策略、队列、事件映射、副作用分类</td><td data-page-node-id="Pl7zOAMBA7Y8wVbAD4qvT1">非法转换被拒、三档压力分类、dedupe 去重</td></tr>
+  <tr data-page-node-id="6DyjxtL0Lu7SFEKhzfiRSR"><td data-page-node-id="mKzjynYbQdwh9I0Zc5qs4Z">组件</td><td data-page-node-id="Aryio7i6Q8FVroC7VLgnDg">SQLite Store、ToolGateway、Checkpoint、Fake Runtime 驱动的 RunService</td><td data-page-node-id="gH5sqJSnRNLPCj7Gdhobug">事务回滚、工具幂等复用、恢复扫描</td></tr>
+  <tr data-page-node-id="bvcHHWVacFhVPk43hUE0tK"><td data-page-node-id="A5UAk0zVF7rIuXRxqtwIFo">集成 e2e（7 个）</td><td data-page-node-id="WCkKGCThpl0jlHFR2OpTS8">全进程 + 真 HTTP + 真 Worker</td><td data-page-node-id="DP5wXkZELAlhHjg3AgjSHg">blast-radius-isolation、blast-radius-stress-challenge、worker-tool-governance、stage1-stage2-control-plane、day7-recovery-resource、session-squatting、harness-process-http</td></tr>
+</table>
+
+<div class="ref" style="margin-top:14px" data-page-node-id="sj8z6QZIUQAMUcmdxaYjE5">
+  ⚠ 一处文档漂移：<code data-page-node-id="MGBCj2TFENnRMzvZ8cbh5Y">README.md</code> 写的是「396 项测试、4591 个断言」，本次实测为 <strong data-page-node-id="vMEHxlvz4PDMtI5OmtAjRG">403 / 4620</strong>。
+  README 自己也说明了「以最近一次全量 <code data-page-node-id="OkEpYHp9Kx2xh3xTYISrpb">bun run test</code> 输出为准」，所以是快照过期而非故障。
+</div>
+
+<div class="foot" data-page-node-id="GtrZEq39rFbvBHJBCaiY7B">
+  场景 0–8 / F1–F3 / D1 的证据来自本机真实执行（Bun 1.4.2，macOS，无 GPU、无 Docker）。
+  原始 stdout 留档于 <code data-page-node-id="KpfW3lufChA6HKkk3RQUh7">tmp/e2e-evidence/</code>，完整技术解析见
+  <code data-page-node-id="eHFDevo8Ft5lxFfYTZoQzC">docs/e2e-real-run-walkthrough.zh-CN.md</code>。
+</div>
+
+</div>
+</body>
+</html>

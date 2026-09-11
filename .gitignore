@@ -40,14 +40,20 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 
 # build artifacts
 artifacts/
+output/
 data/*.sqlite
 data/*.sqlite-*
 
 # 独立的其他项目目录（不属于本仓库）
 agentic-rl-rollout-explorer/
 ax-code-atlas/
+project-roadmap-atlas/
 
 # 本地学习、八股问答与实验目录
 计算机基础实验/
 面试问答/
 项目核心思路伪代码/
+
+# 本地临时与工具目录
+tmp/
+.workbuddy/

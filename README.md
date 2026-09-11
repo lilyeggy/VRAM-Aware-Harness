@@ -4,6 +4,7 @@
 > - 快速读懂整个项目：**[docs/project-handbook.zh-CN.md](docs/project-handbook.zh-CN.md)**（唯一技术主文档）
 > - 面试准备：**[docs/interview-prep-guide.zh-CN.md](docs/interview-prep-guide.zh-CN.md)**
 > - 完成度对账：**[docs/completion-status.zh-CN.md](docs/completion-status.zh-CN.md)**
+> - 已知问题清单：**[docs/known-issues.zh-CN.md](docs/known-issues.zh-CN.md)**（缺陷/漂移逐条对账，含修复记录）
 > - 对外展示：`docs/course/index.html`（课程网站）
 > - 历史/中间产物已归档到 `docs/archive/`，不必通读。
 
@@ -40,8 +41,8 @@ Workspace、提交 Agent 任务、查看执行过程和文件修改，并中断�
 | 已完成深化 | Template、Instance、Capability、Effective Policy 与最小 Sandbox 已进入 Pi 主路径 | 保留，不继续平台化扩张 |
 | 当前产品深化 | 可信身份、Tenant Workspace、真实 Sandbox、任务结果与最小用户界面 | 当前唯一主线 |
 | 真实验收 | GPU T4 + vLLM 资源背压、多租户隔离攻击、故障恢复、公平调度和用户端到端流程 | T4 真机已完成；A6000 未验证 |
-| 已完成深化（agent infra 差异化） | A 执行质量评测闭环 + B 观测驾驶舱 + C LLM 路由网关第一步 | 可度量、可看见、可路由，均完成第一步并测试全绿 |
-| 秋招后候选 | 第二 Runtime、多 Worker/K8s、异构资源池、vLLM 深化、LLM 网关第二步与 GPU 压力联动路由 | 只按目标岗位和真实数据选择 |
+| 已完成深化（agent infra 差异化） | A 执行质量评测闭环 + B 观测（eval 聚合 + 运行级观测抽屉）+ C LLM 路由网关（Pi 主流量已接入） | 可度量、可看见、可路由，均测试全绿；真机 vLLM 端到端复验待补 |
+| 秋招后候选 | 第二 Runtime、多 Worker/K8s、异构资源池、vLLM 深化、GPU 压力联动路由、RouteDecision 持久化 | 只按目标岗位和真实数据选择 |
 
 多租户是用户、项目、数据、权限、资源和审计归属的一等边界。第一版不会建设复杂
 组织管理、企业 SSO 或计费，但必须提供可信身份、Tenant-scoped 数据访问以及文件、
@@ -218,7 +219,7 @@ Agentic Policy 仅作为候选研究路线，见
 | ToolGateway、Checkpoint、安全恢复 | 已完成 | 工具幂等、副作用分类、原子 Checkpoint、恢复扫描与执行器已完成 |
 | ResourceObserver、ExecutionPolicy | 已完成 | 已建立资源快照、状态分类、准入决策与持久化基线 |
 | 资源队列、slot 与最小 Tenant 公平性 | 已完成 | Day 6：原子占位、Tenant 轮转、故障隔离与资源恢复自动推进已通过确定性验收 |
-| HTTP API、应用组装与本地端到端演示 | 已完成 | Day 7：8 个端点、Composition Root、队列重建、Fake 恢复演示和真实 HTTP 进程 smoke |
+| HTTP API、应用组装与本地端到端演示 | 已完成 | Day 7 基线（当时 8 个端点）、Composition Root、队列重建、Fake 恢复演示和真实 HTTP 进程 smoke；当前 API 已扩展到 30+ 路由（会话/凭证/Workspace/对话/Run/网关/评测/审计） |
 | A6000 + Pi/vLLM 对照实验 | 待服务器执行 | 本地执行入口与实验手册已就绪，不在没有真实数据时声明性能收益 |
 | Stage 1：Template / Instance / Capability | 已完成 | 新 Run 固定版本并贯穿 Instance、Session、Attempt；Pi 能力门已进入主路径 |
 | Stage 2：Effective Policy / Sandbox | 已完成（最小实现） | 五层交集进入 Pi、ToolGateway 与 ManagedLocal；不支持的硬隔离 fail closed |
@@ -238,8 +239,10 @@ ToolGateway、Checkpoint、安全恢复、ResourceObserver 与 ExecutionPolicy �
 建立，并已形成公平队列、Run 级 slot、single-flight drain 与资源恢复自动推进闭环。
 应用启动时会重建等待队列并扫描可恢复 Run，恢复任务仍须重新经过资源准入和 slot
 占用。HTTP API、进程生命周期、Fake 端到端演示和本地真实 HTTP smoke 已完成；
-Harness 自身 184 项测试、690 个断言和严格 TypeScript 检查通过。尚未完成的外部验证包括
-A6000 上的 Pi/vLLM 固定任务对照实验。
+Harness 自身 396 项测试、4591 个断言和严格 TypeScript 检查通过。尚未完成的外部验证包括
+A6000 上的 Pi/vLLM 固定任务对照实验。当前测试/断言数以最近一次全量 `bun run test`
+输出为准（历史文档中的 184/254 均为旧快照）；逐条完成度对账与已知问题清单见
+`docs/completion-status.zh-CN.md` 与 `docs/known-issues.zh-CN.md`。
 
 ## Day 7 本地闭环
 
@@ -274,7 +277,7 @@ Workspace，再提交任务即可看到 Run 终态和持久化输出。该命令
 - 邮箱 + 密码注册 / 登录（`/auth/register`、`/auth/login` 会话 Token），也可用租户
   签发的 API Key 直接进入；Token 只保存在本浏览器 localStorage；
 - 按 Workspace 组织对话，发送任务后自动创建 Run，实时展示排队位置、执行状态、
-  流式输出、Workspace Diff 汇总、Artifact 下载与 RunEvent 时间线；
+  准实时输出（持久化分片轮询，非 SSE 推送）、Workspace Diff 汇总、Artifact 下载与 RunEvent 时间线；
 - 支持中断运行中的任务、从 Checkpoint 恢复中断任务；
 - 所有请求仍由服务端凭证派生 Tenant，页面不接受 tenantId。
 
@@ -328,7 +331,8 @@ bun run smoke:http
 ```
 
 `smoke:http` 会提交固定任务、轮询到终态，再打印策略决策和事件时间线。完整 API
-包括 `POST /runs`、Run 查询/事件、中断/恢复、队列、资源和健康检查共 8 个端点。
+包括 `POST /runs`、Run 查询/事件/输出/Workspace Diff/Artifact、中断/恢复、Workspace 与对话、
+队列、资源、LLM 网关代理与统计、评测和审计共 30+ 路由（全部经 `requirePrincipal` 鉴权）。
 
 ## 快速开始：Pi Spike
 
@@ -382,10 +386,15 @@ bun run verify:stage0
 ```text
 src/
 ├── app/          # HarnessApplication、配置与 Composition Root
+├── auth/         # API Key/密码账户/会话 Token 与 Principal
+├── audit/        # 访问审计（租户级记录与查询）
+├── conversations/# 会话（对话）与持久化
 ├── demo/         # 不依赖 GPU 的 Day 7 固定恢复演示
-├── http/         # 最小 HTTP API 与 Bun Server
+├── eval/         # 执行质量评测聚合与 LLM 缓存指标落库
+├── evidence/     # 隔离证据三元组（策略↔编译↔观测）
+├── http/         # HTTP API、用户工作台、平台仪表盘与 Bun Server
 ├── spikes/       # Pi + vLLM + read 工具真实模型实验
-├── runtime/      # AgentRuntime 接口、PiAdapter 与 Pi ToolGateway 包装
+├── runtime/      # AgentRuntime 接口、PiAdapter、Managed/Supervised/Worker 运行时
 ├── runs/         # AgentRun 状态机、RunStore、RunService
 ├── events/       # RuntimeEventBridge 与 RunEvent 时间线
 ├── tools/        # ToolGateway、ToolExecution 与持久化 Store
@@ -398,6 +407,9 @@ src/
 ├── sandbox/      # 可替换 Sandbox Provider、生命周期与 Secret 边界
 ├── scheduling/   # 资源准入后的队列、slot 与最小 Tenant 公平性
 ├── resources/    # 真实/Fake GPU 观测、分类与 ExecutionPolicy
+├── llm-gateway/  # OpenAI 兼容路由网关（回退/熔断/前缀缓存/流式采集）
+├── worker/       # Worker 子进程入口与 Master-Worker 协议
+├── workspaces/   # 受管 Workspace、Diff/Artifact/结果
 └── storage/      # SQLite 打开器、migration 与 schema
 
 scripts/          # HTTP smoke 等可执行验收入口

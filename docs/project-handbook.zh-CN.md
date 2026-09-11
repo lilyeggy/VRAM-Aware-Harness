@@ -1,8 +1,8 @@
 # 项目手册（Project Handbook）
 
 > **本文件是项目唯一技术主文档。** 从这份开始读，读懂了这份，就能看懂整个项目。  
-> 最后同步：2026-08-19（项目已完成第一阶段闭环）。  
-> 面试准备另有 `docs/interview-prep-guide.zh-CN.md`；完成度对账见 `docs/completion-status.zh-CN.md`；对外展示网页见 `docs/course/index.html`。  
+> 最后同步：2026-09-09（文档↔代码对账清理：测试数、观测形态、网关接线、会话登录、A1/A2/A3 修复均已同步到代码事实）。  
+> 面试准备另有 `docs/interview-prep-guide.zh-CN.md`；完成度对账见 `docs/completion-status.zh-CN.md`；已知问题与修复记录见 `docs/known-issues.zh-CN.md`；对外展示网页见 `docs/course/index.html`。  
 > 历史设计/中间产物已归档到 `docs/archive/`，需要时可查，不必通读。
 
 ---
@@ -101,7 +101,7 @@ Tenant → Workspace → Session → Run → Attempt → Sandbox → ToolExecuti
 | 资源背压 | AutoDL Tesla T4 + vLLM 0.7.3 | 120 并发 → CRITICAL → QUEUE 落库 |
 | 隔离性能 | runc vs runsc | 冷启动开销约 1.22x |
 | 端到端 | 真实 Pi + runsc | Run 事件链 COMPLETED → workspace diff → finalText |
-| 自动化测试 | bun test | **254 tests pass / 0 fail** |
+| 自动化测试 | bun test | **385 tests pass / 0 fail（2026-09-09 快照，随开发增长）** |
 
 ---
 
@@ -115,9 +115,12 @@ Tenant → Workspace → Session → Run → Attempt → Sandbox → ToolExecuti
 - 控制面护城河：背压触发率、无人值守率、危险拦截率、cache 命中率。
 输出：`scripts/eval-report.ts` 文本报表 + `GET /eval` JSON。
 
-### B · 观测驾驶舱（Observe）
-独立只读页 `/observe`，和任务操作台 `/` 解耦，多租户切换，数据来自 `GET /eval`。
-可视化：状态环形图、完成度渐变条、租户对比条形、资源背压堆叠条、任务明细表。
+### B · 观测（Observe）
+- 数据层：`GET /eval` 只读 JSON，按租户拆分成功率、完成度、Token、成本、P95、背压触发率等指标。
+- 展示层：`/` 平台仪表盘内的**运行级观测抽屉**（排队/模型启动/TTFT/端到端时延、Sandbox 获取、
+  GPU/KV-cache 走势，2s 轮询）。早期独立的 `/observe` 只读页已在 commit `4a1ae49` 移除，
+  由运行级抽屉替代——**不要再引用 /observe**。
+- 诚实边界：`GET /llm-gateway/stats` 目前只有 API 没有 UI 消费。
 
 ### C · LLM 路由网关（LLM Gateway）
 在 Pi 和真实模型后端之间加 OpenAI 兼容代理：
@@ -126,7 +129,35 @@ Tenant → Workspace → Session → Run → Attempt → Sandbox → ToolExecuti
 - **Agent、控制面、沙箱都不变**，只改 `models.json` 的 `baseUrl` 指向网关。
 - 配置：`LLM_BACKENDS` 环境变量。
 
-**诚实边界**：C 第一步完成（网关逻辑 + mock 测试 10 个 + 端到端冒烟）；第二步（Pi 真实调用经网关）未完成，决策记录未持久化。
+支柱 2（算力利用率与计算/I/O 解耦）在其上扩展：
+- 双卡负载均衡：`VLLM_BASE_URLS` 展开为 vllm-gpu0 / vllm-gpu1，策略
+  `LLM_GATEWAY_STRATEGY=round-robin / least-active / priority`；健康探测
+  `LLM_HEALTH_PROBE_INTERVAL_MS`（GET /health，全挂时降级放行）。
+- Prefix Caching：转发前把 Prompt 规范化为「System Prompt -> 稳定工具定义 ->
+  动态上下文」的稳定前缀，`LLM_PREFIX_CACHE=0` 可关。
+- 用量可观测：非流式响应提取 `usage.prompt_tokens_details.cached_tokens`，
+  落库 `llm_cache_metrics` 表，`GET /eval` 聚合器与 `/llm-gateway/stats`
+  均输出命中率；并发上限默认放开到 30（每租户 10，均可配）。
+- 流式用量采集（2026-09-09）：网关为流式请求注入 `stream_options.include_usage`
+  并在 SSE 透传时旁路扫描末尾 usage chunk（响应字节零改动），计入同一张
+  `llm_cache_metrics` 台账；`LLM_STREAM_USAGE_CAPTURE=0` 可关。
+
+**诚实边界**：Pi 经网关的接线已完成（deploy models.json baseUrl 指向网关端口、
+`HARNESS_AGENT_API_KEY` 专用低权限凭证、流式 usage 采集），真机 vLLM 端到端
+复验待补；RouteDecision 仍未持久化（重启即丢），流式响应的决策记录不含 token 数。
+
+### D · 异常与容错兜底（支柱 3）
+两级超时 + 副作用感知恢复，防止单任务挂死或盲目重试破坏用户 Workspace：
+- **排队 TTL**：`HARNESS_QUEUE_TTL_MS`（默认 300s）。队列等待超门限仍未获得
+  准入的 Run 状态机安全流转到 `FAILED`（`QUEUE_TIMEOUT`），事件带等待时长证据，
+  队列与并发计数同步释放。
+- **容器强杀**：执行超 `executionTimeoutMs` 先优雅中断；`interruptGraceMs`
+  宽限期内未退出 → Worker 子进程 `SIGKILL`（ForceKillableRuntime 能力）+
+  沙箱 `terminate` 强制清理，杜绝僵尸进程。
+- **副作用感知恢复**：自动恢复 fail closed——只有仍 PREPARED 的 READ_ONLY
+  工具可自动重放；`UNKNOWN_EFFECT`（如 bash）或未证明幂等写入一律
+  `MANUAL_REVIEW`，Run 保持 INTERRUPTED 并把阻断证据写入事件时间线，
+  人工确认后才能经恢复 API 继续推进。
 
 ---
 
@@ -147,7 +178,7 @@ Tenant → Workspace → Session → Run → Attempt → Sandbox → ToolExecuti
 
 - **不是生产级**：单机、单数据库、无 K8s/多机/高可用、无企业 SSO/计费。
 - **不用 runsc/Kata strict**：无 KVM，不声称 MicroVM 隔离通过。
-- **LLM 网关**：第一步完成，第二步未完成，决策记录未持久化。
+- **LLM 网关**：Pi 主流量已接入（deploy models.json 指向网关 + `HARNESS_AGENT_API_KEY` 专用凭证 + 流式 usage 采集，2026-09-09）；真机 vLLM 端到端复验待补，RouteDecision 未持久化。
 - **外部模型 Fake observer**：明确标注"非 VRAM 证据"；真机证据来自真实 vLLM 链路。
 - **A6000 性能结论**：真机在 T4 完成，未在 A6000 重复验证。
 
@@ -163,13 +194,14 @@ Tenant → Workspace → Session → Run → Attempt → Sandbox → ToolExecuti
 
 ## 11. 文档结构速览
 
-**当前要看的（约 4 份）：**
+**当前要看的（约 5 份）：**
 | 文档 | 作用 |
 |---|---|
 | `README.md` | 项目门面 + 技术重点 |
 | `docs/project-handbook.zh-CN.md` | **唯一技术主文档（本文件）** |
 | `docs/interview-prep-guide.zh-CN.md` | 面试准备 |
 | `docs/completion-status.zh-CN.md` | 完成度对账 |
+| `docs/known-issues.zh-CN.md` | 已知缺陷/漂移清单与修复记录 |
 
 **对外展示：** `docs/course/index.html`（课程网站，发链接用）
 
@@ -177,11 +209,17 @@ Tenant → Workspace → Session → Run → Attempt → Sandbox → ToolExecuti
 
 ---
 
-## 12. 后续演进（待办笔记 · 未实现）
+## 12. 后续演进（待办笔记 · 部分已实现）
 
 > 本节记录方向性结论与落点，**均已设计确认但尚未实现**，实现时以本节为准再同步回正文。
 
 ### 12.1 账号登录 + 会话（Web 优先）
+
+**实现状态（2026-09-09 核实）：已实现**。`/auth/register`、`/auth/login`、`/auth/logout` 已上线
+（`src/auth/api-credential-store.ts`：scrypt 密码 + 随机盐；会话 token 只存 SHA-256 摘要、7 天过期、
+可撤销，落 `user_sessions` 表）；`/app` 工作台已接入注册登录。**尚未做**：refresh token、
+HttpOnly/Secure/SameSite cookie（当前 token 在 localStorage + Bearer header，CSRF 因此基本不适用）、
+"撤销该用户全部会话"。以下为当初的设计结论，保留作背景：
 
 **结论**：项目面向网页产品（用户多网页工作、少 CLI），应走向**用户账号 + 会话登录**；这不是“替换”现有的静态 API Key，而是**在同一个身份主干（域1）上加第二种认证器**：
 
@@ -279,12 +317,12 @@ drain → attemptNext
 
 ### 14.5 已识别的设计缺口 / 待定（未实现）
 
-| # | 缺口 | 影响 | 结论倾向 |
+| # | 缺口 | 影响 | 状态 |
 |---|---|---|---|
-| ① | **harnessSessionId 由客户端自选/自报**（body 缺省才随机） | 会话固定/抢注：任意客户端可占某 sessionId，撞车即互相触发「归属不匹配」→ 对指定 id DoS | **服务端鉴权后签发 session id**，与 §12.1 的 域1→RequestPrincipal 闭环；run 引用服务端 id，再 bind 真实 Pi runtimeSessionRef |
-| ② | **队列 reasonCode 仅存内存** | 重启后一律以 `AWAITING_SCHEDULING` 重新入队，`GET /queue` 的排队原因不可复现 | 队列事实入 `policy_decisions`/run 记录，恢复时可还原 reason |
-| ③ | **run_events 缺 `RUN_DEFERRED/REQUEUED` 事件类型** | 反复被 defer 的 run 其"排队—再试"过程在 run 事件链上是空白 | 补 `RUN_DEFERRED` 事件，携带 reasonCode，使「一次任务的一生」事件链完整 |
-| ④ | **TOCTOU 归档窗口**：claimNext 与 release+re-enqueue 之间崩溃，run 从内存队列消失但 DB 仍 QUEUED | 需等待下次进程重启的 recovery 才回队（进程内不会自动补） | 记录为已知边界；低风险 |
+| ① | ~~harnessSessionId 由客户端自选/自报~~ | 会话固定/抢注 DoS | **已修复（2026-09-09，B6）**：`POST /runs` 对客户端自选的 sessionId 做归属校验——首次使用即认领给提交租户，已被其他租户使用则 409（`RunStore.findSessionOwner` + HTTP 层拦截；对话路径本就经 conversation 归属校验） |
+| ② | ~~队列 reasonCode 仅存内存~~ | 重启后排队原因不可复现 | **已修复（2026-09-09，B4）**：排队原因由 `QUEUE_BLOCKED` 事件持久化在 run 时间线；排队时钟（enqueuedAt）重启恢复/孤儿补回时取 DB `updated_at`，TTL 等待跨重启累计不重置 |
+| ③ | **run_events 缺 `RUN_DEFERRED/REQUEUED` 事件类型** | 反复被 defer 的 run 其"排队—再试"过程在 run 事件链上是空白 | 未实现（`QUEUE_BLOCKED` 事件已覆盖"为什么在排队"，差异在"每次 re-enqueue"粒度） |
+| ④ | ~~TOCTOU 归档窗口：claimNext 与 release+re-enqueue 之间崩溃~~ | run 从内存队列消失但 DB 仍 QUEUED | **已修复（2026-09-09，B5）**：coordinator 新增 `reconcileQueuedRuns()`——每次 drain 对账 DB QUEUED 与内存队列，孤儿自动补回；超 TTL 的 DB QUEUED Run 一并熔断（不依赖 pump 存活） |
 | ⑤ | **准入是 point-in-time**：决策 t0、派发 t1，中间资源可变 | — | 明确为「去耦的准入点」而非「实时保证」 |
 
 ---
@@ -383,9 +421,9 @@ HTTP 请求 (Authorization: Bearer <key>)
 | 冒充/伪造 tenant | ✅ 已防 | tenant 只来自身份 |
 | 跨租户 IDOR | ✅ 已防 | 404 + 查询收口 |
 | Session 劫持/复用 | ✅ 已防 | 归属校验 |
-| **API key 泄露** | ⚠️ 弱点 | **无 TTL**，泄露即长期有效；见 12.1 |
-| **网关 DoS/无配额** | ⚠️ 缺口 | 网关已锁域1，但**没有 per-tenant 限流/配额**；恶意调用可消耗共享 GPU |
-| **浏览器会话** | ⏳ 未做 | 尚无会话/CSRF（因为没有 Web 会话，故现阶段不适用） |
+| **API key 泄露** | ⚠️ 弱点 | **无 TTL**，泄露即长期有效；会话 token 已有 7 天 TTL（12.1），但 API 凭证未做；见 12.1 |
+| **网关 DoS/无配额** | ⚠️ 缺口 | 网关已锁域1 + agent 专用凭证，但**没有 per-tenant 限流/配额**；恶意调用可消耗共享 GPU |
+| **浏览器会话** | ✅ 已实现 | 注册/登录/登出 + 7 天摘要存储会话（12.1）；token 在 localStorage，无轮换/全局撤销，为已知边界 |
 | 文件系统逃逸 | ⚠️ 开发profile弱 | 默认 `managed-local`/`development` 隔离弱；产品化须 container/`strict` |
 | **跨用户回退到他人云 key** | ✅ 设计上消除 | 本地无 per-user key；云端若做 BYO 则按 12.3 无状态透传，天然无跨用户 |
 
@@ -397,9 +435,10 @@ HTTP 请求 (Authorization: Bearer <key>)
 
 ---
 
-## 14. Harness ↔ Pi 边界：会话句柄式，记忆归 Pi（定稿设计 · 待实现）
+## 14. Harness ↔ Pi 边界：会话句柄式，记忆归 Pi（核心已实现 · 2026-09-09 核实）
 
-> 本节定调“先写再改”这类多轮对话的能力边界与目标设计。**当前不可用（见 14.3），以下为“要改”的方向**，实现时以此为准。
+> 本节定调"先写再改"这类多轮对话的能力边界。**核心接线已实现并有测试证据**（见 14.3 更新）；
+> 剩余待办只有 14.3#2（COMPLETED 续接 API）与 14.4（compact 透传）。
 
 ### 14.1 定稿模型
 
@@ -419,15 +458,15 @@ Pi 内部：上下文累积 + 压缩都在 S 里，落盘到会话文件
 - 因此压缩结果**不需要 harness 注入**：它已持久化在 Pi 会话文件里，harness 只要 `open` 同一个文件，Pi 自己恢复（含压缩过的）上下文。
 - harness 对 Pi 只暴露窄且不透明的接口：`open/continue 会话(ref) + 喂 userInput + 流式事件`；harness 一律不碰消息内容 / 编译 / 压缩。
 
-### 14.3 需要改的三处接线（现状 → 目标）
+### 14.3 三处接线的落实状态（2026-09-09 核实）
 
-| # | 现状 | 目标 |
+| # | 原设计目标 | 状态 |
 |---|---|---|
-| 1 | `PiAdapter.start` 用 `SessionManager.create` 每次新建空白会话，`finally` 里 `session.dispose()` 销毁 | 按 `runtimeSessionRef` **`open` 同一会话**执行，且**不销毁**、供下一个 Run 复用 |
-| 2 | `resume` 只接受 INTERRUPTED（中断恢复同一场） | 增加**会话级 continue**：COMPLETED 的 Run 也能“续接”，不走终态 resume |
-| 3 | `sessionsByRunId` 以 runId 为键、每 run 一个临时 Pi 会话 | 会话句柄归 **HarnessSession（会话）**所有，每个 Run 只是“借用”，键位从 run 维度挪到会话维度 |
+| 1 | 按 `runtimeSessionRef` `open` 同一会话，不销毁、供下一 Run 复用 | ✅ 已实现：`PiAdapter.start` 按 `request.run.runtimeSessionRef` 分支 `SessionManager.open`（src/runtime/pi-adapter.ts:143-175）；run 结束的 `session.dispose()` 只清理内存对象，会话文件持久保留，下一 Run 重新打开即恢复全部上下文 |
+| 2 | 会话级 continue：COMPLETED 的 Run 也能"续接" | ⏳ 待实现。注：对话流程本身已可续上下文（新消息 → 新 Run → open 同一会话），此项只是 API 便利性增强 |
+| 3 | 会话句柄归 HarnessSession 所有，键位挪到会话维度 | ✅ 以等效且更安全的机制实现：句柄事实由 HarnessSession 持有——`agent_started` 事件触发 `bindRuntimeSession` 落库（src/runtime/managed-agent-runtime.ts:245-254），START 类 Run 注入 `session.runtimeSessionRef`（:269）；每 Run 从会话文件重新打开，避免跨 Run 共享内存句柄的并发风险 |
 
-核心：**Run 生命周期（每轮终态）与 会话生命周期（持久）解耦**——Run 终态不代表会话结束。
+核心结论：**Run 生命周期（每轮终态）与会话生命周期（持久）已解耦**——Run 终态不代表会话结束。
 
 ### 14.4 待补：用户显式 compact 指令
 
@@ -437,5 +476,12 @@ Pi 内部：上下文累积 + 压缩都在 S 里，落盘到会话文件
 
 ### 14.5 诚实标注
 
-- **现状**：跨 Run 不续上下文（每 Run 独立新建空白），多轮“先写再改”不可用。
-- **方向**：按 14.3 + 14.4 改，属“要改”范围；记忆/压缩本身仍归 Pi，harness 只做“选会话 + 复用句柄 + 转事件”。
+- **已实现（2026-09-09 核实）**：跨 Run 续上下文。证据链：对话消息统一使用 `conversation.id` 作为
+  `harnessSessionId`（harness-http-api.ts:516）→ 同会话 Run 由调度器串行化（会话文件无并发打开）→
+  ManagedAgentRuntime 在 `agent_started` 时绑定 `runtimeSessionRef` 并在后续 START 注入 →
+  PiAdapter `open` 同一 Pi 会话文件。测试：`tests/integration/stage1-stage2-control-plane.e2e.test.ts`
+  「连续对话：后续 Run 将已持久化的 Runtime Session 注入 Adapter」（第二个 Run 的请求携带
+  第一个 Run 绑定的会话引用）。
+- **剩余待办**：14.3#2（COMPLETED 续接 API）、14.4（用户显式 compact 透传）；PiAdapter 的
+  `OPEN_EXISTING` 分支尚无真实 Pi 会话文件的集成测试（现有证据止于请求注入层，README
+  「PiAdapter 真实集成测试后续补」仍然有效）。

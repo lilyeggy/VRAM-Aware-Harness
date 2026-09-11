@@ -1,0 +1,577 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-page-node-id="ACiJhluTvbgWBubd2hh3wS">
+<head data-page-node-id="wmVPNzLYAqktm9Qyr2YZaK">
+<meta charset="utf-8" data-page-node-id="AUdDMoG3dPJmt9ekrrQo7B">
+<meta name="viewport" content="width=device-width, initial-scale=1" data-page-node-id="JcK8hCmnCEB1YGtyZ9gPeG">
+<title>VRAM-Aware Harness · 技术剖面</title>
+<style>
+  :root{
+    --bg:#FBFAF7; --card:#FFFFFF; --line:#E3E1DA; --line2:#CFCCC3;
+    --tx:#26261F; --tx2:#5F5E5A; --tx3:#8A8880;
+    --blue:#185FA5; --amber:#BA7517; --green:#639922; --red:#A32D2D;
+    --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--tx);
+       font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+       font-size:14px;line-height:1.65}
+  .wrap{max-width:1080px;margin:0 auto;padding:40px 24px 90px}
+  h1{font-size:24px;font-weight:500;margin:0 0 6px}
+  .sub{color:var(--tx2);font-size:13px;margin-bottom:20px}
+  h2{font-size:17px;font-weight:500;margin:44px 0 6px;padding-bottom:6px;border-bottom:1px solid var(--line)}
+  h3{font-size:14px;font-weight:500;margin:26px 0 8px}
+  .h2note{color:var(--tx3);font-size:12px;margin:8px 0 14px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px 18px;margin:12px 0}
+  code{font-family:var(--mono);background:#F1EFE8;padding:1px 5px;border-radius:4px;font-size:12.5px}
+  pre{font-family:var(--mono);font-size:12px;line-height:1.6;background:#F7F6F2;border:1px solid var(--line);
+      border-radius:8px;padding:12px 14px;overflow-x:auto;margin:10px 0;color:#3A3A33}
+  pre code{background:none;padding:0;font-size:12px;color:inherit}
+  pre .c{color:#8A8880}
+  pre .k{color:#185FA5}
+  pre .s{color:#639922}
+  pre .r{color:#A32D2D}
+  table{width:100%;border-collapse:collapse;font-size:12.5px;margin:10px 0}
+  th,td{text-align:left;padding:7px 9px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{color:var(--tx3);font-size:11.5px;font-weight:400;background:#F7F6F2}
+  td code{font-size:11.5px;background:#F1EFE8}
+  .mono{font-family:var(--mono);font-size:11.5px}
+  .pill{display:inline-block;font-size:11px;border-radius:999px;padding:1px 8px;margin-right:4px;white-space:nowrap}
+  .p-blue{background:#E6F1FB;color:#185FA5;border:1px solid #85B7EB}
+  .p-amber{background:#FAEEDA;color:#BA7517;border:1px solid #EF9F27}
+  .p-green{background:#EAF3DE;color:#639922;border:1px solid #97C459}
+  .p-red{background:#FCEBEB;color:#A32D2D;border:1px solid #F09595}
+  .p-gray{background:#F1EFE8;color:#5F5E5A;border:1px solid #B4B2A9}
+  .note{background:#E6F1FB;border:1px solid #B5D4F4;border-radius:10px;padding:12px 16px;font-size:13px;color:#0C447C;margin:14px 0}
+  .warn{background:#FAEEDA;border:1px solid #FAC775;border-radius:10px;padding:12px 16px;font-size:13px;color:#633806;margin:14px 0}
+  .danger{background:#FCEBEB;border:1px solid #F7C1C1;border-radius:10px;padding:12px 16px;font-size:13px;color:#791F1F;margin:14px 0}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  @media(max-width:760px){.grid2{grid-template-columns:1fr}}
+  .kv{display:grid;grid-template-columns:120px 1fr;gap:3px 12px;font-size:12.5px}
+  .kv dt{color:var(--tx3);font-size:12px}
+  .kv dd{margin:0}
+  .sig{font-family:var(--mono);font-size:12px;color:#0C447C;background:#E6F1FB;border-radius:5px;padding:2px 7px;display:inline-block}
+  ul{margin:8px 0 8px 18px;padding:0}
+  li{margin:3px 0}
+  .foot{color:var(--tx3);font-size:12px;margin-top:40px;border-top:1px solid var(--line);padding-top:14px}
+  .anchor{font-family:var(--mono);font-size:11.5px;color:var(--tx3)}
+</style>
+</head>
+<body data-page-node-id="lesBCxV36wdWaapRJ0bcP4">
+<div class="wrap" data-page-node-id="uBaiBJYma7kvbzCswQH2PI">
+
+<h1 data-page-node-id="toBX8p6cRVNF9xvfoLdYM4">VRAM-Aware Harness · 技术剖面</h1>
+<div class="sub" data-page-node-id="j71jmgSFtJN405cWXGE80a">
+  这份文档不画流程走向，只放<strong data-page-node-id="jykOIi9XUQZLnFiDW4Lvq2">真实调用签名、真实 SQL、真实代码分支、真实参数与真实错误串</strong>。
+  所有片段都可在仓库中按 <span class="anchor" data-page-node-id="Hbgkuxf3TIP3R4h1NQ87ds">文件:行</span> 直接定位；所有数据来自本机真实执行。
+</div>
+
+<div class="note" data-page-node-id="2gK9Q75B2RKgKBi29F1xdy">
+  <strong data-page-node-id="Gs4NaNxLTFIPcjHJ0tDzrR">与《场景图谱》的分工：</strong>图谱回答「测了什么、结果如何」；本文回答「为什么是这个结果、机制长什么样」。
+  流程图只保留两处（运行时分层、跨进程工具治理），其余全部换成表与代码。
+  <br><br>
+  <strong>第四层：</strong>每条不变量由哪个测试、哪一行断言在守，见
+  <code>docs/test-evidence-map.zh-CN.html</code>。
+</div>
+
+<h2 data-page-node-id="Y5IyguNnj2aDY8vNNHk9Rb">§1 一次 Run 的真实调用链</h2>
+<div class="h2note" data-page-node-id="BLibFn4gKiQTZfnsQBG2bt">按执行顺序排列。每行给出真实方法签名、它写入了什么、以及失败时的落点。</div>
+
+<h3 data-page-node-id="YhEfO7TLwmEWxcLIEIvAH7">1.1 入口与入队（同步，HTTP 请求内完成）</h3>
+<table data-page-node-id="Ug5aE59tdl80NKeZ0Jt8Lx">
+<tr data-page-node-id="OCOwBK7gu7GQefEWwcg0dc"><th data-page-node-id="Gi3EZ96v85ZrP9ZSEJY3Ui">#</th><th data-page-node-id="605DPZMNvBaBMgC9b2odeV">调用 / 位置</th><th data-page-node-id="3b6MSkGcEAOSBeC769XBvM">写入或效果</th><th data-page-node-id="YXEN7OZVWXBtvpbVGWCx7G">失败落点</th></tr>
+<tr data-page-node-id="DBDvGC51PrP9Bl2FBLhmaC"><td data-page-node-id="G8SRaSTTO3ASUz54sMKPT1">1</td><td data-page-node-id="BFk3lcq3dTnEq8w6v8os2L"><span class="sig" data-page-node-id="vllmDUwubo0EhXaWRF16wW">readJsonObject(request)</span><br data-page-node-id="XA0ADIHkKb3TteDKfH9PCX"><span class="anchor" data-page-node-id="iFbHAUrKU19PEAXXV7jK7N">harness-http-api.ts:509</span></td><td data-page-node-id="rg8XpchDdw7MeH7xIlV9np">—</td><td data-page-node-id="OAYC13Xr4oTWEAAWd7ZGyb">400「请求体必须是有效 JSON」</td></tr>
+<tr data-page-node-id="qvNqOMOlW9u6Bo7AAvPaIS"><td data-page-node-id="n6k6c0X4T7spcvdY0WCtVo">2</td><td data-page-node-id="ly89NYUgXJyg1Kr6HWRHUx"><span class="sig" data-page-node-id="TZ2visisT5g31uzLDYElrT">requirePrincipal(request,"tasks:write")</span><br data-page-node-id="SynR4FCmO1LzrVWQqLt7bl"><span class="anchor" data-page-node-id="KeEGvr24nKkhvduyiFaXak">:510</span></td><td data-page-node-id="tuGRkA5Sk1O24WrkC35SBy">写 <code data-page-node-id="Yk5wz0BL3XYh4LYHHrpnEh">access_audit_events</code> DENY</td><td data-page-node-id="L2To9mCoiAjhbDmYLYCYNv">401 / 403 + 审计</td></tr>
+<tr data-page-node-id="1LqQVftvkKkAG8scCNVyjj"><td data-page-node-id="IqpgfyKegSreOt4328vfXX">3</td><td data-page-node-id="YbluACef1BDyPr4w7OHOa9"><span class="sig" data-page-node-id="BWhelQGCPfDfTz1VsnF63l">workspaceService.getForTenant(workspaceId, tenantId)</span><br data-page-node-id="T4tZOgmYeY6Gvel5NHTddu"><span class="anchor" data-page-node-id="l5TgoZ7ISCGR8H0hXDKUwK">:513</span></td><td data-page-node-id="skOHVqFoylLo0Nr1a9LV90">—</td><td data-page-node-id="YFqJVgJVbv4VviEw3SAZFf">404（与「不存在」同码，反枚举）</td></tr>
+<tr data-page-node-id="LTF8zVA8GKiwUhNWxSZ0VR"><td data-page-node-id="2yKyDmf2ps9yxHBlK8B4cw">4</td><td data-page-node-id="3S1JpCsvpqD5hnOtQu0uNf"><span class="sig" data-page-node-id="qHm3YHbsjKw9HWZApB3l6N">application.resolveSessionOwner(sessionId)</span><br data-page-node-id="9VUwOCtYZ9wH5mNTzoCzRj"><span class="anchor" data-page-node-id="XN6PqpooXpDvUUv95rea6k">:528</span></td><td data-page-node-id="TYEBGT27ZSwU2lNrih3YrO">—</td><td data-page-node-id="EWyQo19oipBRI7Dl3DX2R6">409「已被其他租户占用」</td></tr>
+<tr data-page-node-id="BhdaqYXsjXwOlQzv14zJUG"><td data-page-node-id="9J7dDxDMF3X6D8MEs9VUpz">5</td><td data-page-node-id="JGpjEoglYpmYx2wBnxUC8H"><span class="sig" data-page-node-id="IaiprjF8McTVmkUj56So7v">requireUserInput(body)</span> → <code data-page-node-id="nIKA4SJTFkfFle835rm9z1">maxUserInputChars</code><br data-page-node-id="FETn8C4pUISuGBiDDTxh6b"><span class="anchor" data-page-node-id="SaKbCNEJcyxPoTpzEJgkTN">:546</span></td><td data-page-node-id="okhPbE4qAM1q8P2rYg46S4">—</td><td data-page-node-id="lgdvrYKBYwstsg40qgjQ8h">413（在 workspace 解析之后）</td></tr>
+<tr data-page-node-id="7uAsOPGNTG9pXYQ9860iRG"><td data-page-node-id="cTHcDg0z4vtIjzFit2KBp8">6</td><td data-page-node-id="L1TbFxdlSRxjeCkGcuIwd9"><span class="sig" data-page-node-id="0EpUEzXlBReJQqW84YkmUX">coordinator.submit(input)</span><br data-page-node-id="PO8uUBypYGkx9NHECrx4ej"><span class="anchor" data-page-node-id="gc64EhNpaeLqIxi2ZQFcNV">run-queue-coordinator.ts:186</span></td><td data-page-node-id="PiJci0sfmNik1ejezMK4bV">—</td><td data-page-node-id="hycCxpFwgbXw4xPRA9dPhF">—</td></tr>
+<tr data-page-node-id="xH0APY5vfG5s9ySKXadYom"><td data-page-node-id="gmP8xHbeeKPcboKQTxRu4k">7</td><td data-page-node-id="e1ccczmncidvGi6M0BaF4n"><span class="sig" data-page-node-id="yQUhdG7EYQkO4fCA95JekZ">runService.createQueuedRun(input)</span><br data-page-node-id="96BJxXCqKlzSZZxgwngkKq"><span class="anchor" data-page-node-id="tbtQWFkw4RGlfF6akbUq1I">run-service.ts:103</span></td><td data-page-node-id="sfuZE8fDwgwRNnoGaNaCe5"><strong data-page-node-id="2FPzhwMp8KkCENNk35ZSmg">一个事务</strong>：<code data-page-node-id="NEn03OPUmtgIqvc3xrOw7K">INSERT agent_runs</code> + <code data-page-node-id="UrCjzBlUDrdkSaQonHP8xg">INSERT run_events(sequence=1, RUN_CREATED)</code></td><td data-page-node-id="r8zbk9IOKPAGUgoF4YOvf9">事务回滚，不留孤立事件</td></tr>
+<tr data-page-node-id="AEDdRGMPtAZx06U1ezs09c"><td data-page-node-id="iYnlPnsYue3jMWTHE6loOv">8</td><td data-page-node-id="iSad3kZKgB5WPTQEF46owK"><span class="sig" data-page-node-id="7b9SltmknhRotK2pfi5niD">scheduler.enqueue({runId,tenantId,sessionId})</span><br data-page-node-id="JBYugUp1U1LSwruu2kd3DX"><span class="anchor" data-page-node-id="mLTkIBmU1F5zRGlf6LcHPc">:191</span></td><td data-page-node-id="WMjSXG5unUKQcRmA5ZGD6m">仅内存：<code data-page-node-id="6dLlrLqR4nqtxe7btwvsfr">queuesByTenant</code> / <code data-page-node-id="LIwVzbZKhxAqtqAjxE9b9q">tenantOrder</code></td><td data-page-node-id="aHTTJa4WcdC4Dz4Z5qMAj3">Run 已在执行或已在队列 → 抛错</td></tr>
+<tr data-page-node-id="rrt8mDlUIaFKPBl21LrybL"><td data-page-node-id="yUGSan8WO3RrvGe4Eu2iZr">9</td><td data-page-node-id="1XpQS5abpyzlWsD5pQYvsk"><span class="sig" data-page-node-id="myjC5QNIX51989h6MefpEi">synchronizeQueueBlockers()</span><br data-page-node-id="pHcwCeShic3MpfsgiKBDqS"><span class="anchor" data-page-node-id="eKmqw2HVyyygsTViLa8rRe">:196</span></td><td data-page-node-id="WSSyRXCpbJAs1oc7bycg9T">物化 <code data-page-node-id="WPQ45y1aVbjQkROiojxTWy">QUEUE_BLOCKED</code>（相同原因连续出现则折叠）</td><td data-page-node-id="0eCrFuN3Zb2BSCAcK38N7y">—</td></tr>
+<tr data-page-node-id="Iru7EPrZyXbDgbZkv5H5P7"><td data-page-node-id="firAvNT4BL8Ly00hxIyBi2">10</td><td data-page-node-id="yNZQeCRmUgFRWBF8vs3LWG"><span class="sig" data-page-node-id="C9R7hNFEihmwaPupq4qhX8">auditResource("RUN", run.id, "RUN_SUBMIT", "ALLOW", …)</span><br data-page-node-id="cHzsJxieLwVEQsF3ewcvIF"><span class="anchor" data-page-node-id="btDNJTF5i3ocCkXN0GEqLZ">:552</span></td><td data-page-node-id="whN7HhXfkLZyBVCEmeTMFN">写 ALLOW 审计</td><td data-page-node-id="4UEcD2OAo5PASz6RvWWP1g">—</td></tr>
+</table>
+<div class="note" data-page-node-id="8xIZSIdOJrbsqhgMjQdpvX">注意第 7 步与第 8 步的<strong data-page-node-id="q3RYElfUvqGiS9L97pg8HB">顺序</strong>：先落库（权威状态），再入内存队列。中间若崩溃，Run 是 <code data-page-node-id="jWWK3AHsBaktxzxIbnaFcv">QUEUED</code> 但不在队列 —— 这正是 §3.3 <code data-page-node-id="blVvxNZAkbAOj9lCrNxQPa">reconcileQueuedRuns()</code> 要补的孤儿。</div>
+
+<h3 data-page-node-id="L7cbHIlHFBGbmKEjkiZZ7E">1.2 调度与准入（每个 pump tick）</h3>
+<table data-page-node-id="7oR8f7AmlOAxbxswJqD8TX">
+<tr data-page-node-id="DoSjA5gjMNAgXQiwFUtzBG"><th data-page-node-id="3nD7ySYwcujJ7o6F4mx1At">#</th><th data-page-node-id="311SFyRLt8QyYuwna0Gyal">调用 / 位置</th><th data-page-node-id="yaMEzr4VQoSdt1yp0E56zY">写入或效果</th><th data-page-node-id="VWbPM0sfxiUS1UwoMzmok4">失败落点</th></tr>
+<tr data-page-node-id="HIHs9dX6WLb55Bh0P7GOKA"><td data-page-node-id="LcAAOSE92UNQShNVAYKZY2">11</td><td data-page-node-id="kZZDZFbmxyGEWUf8IBGuyU"><span class="sig" data-page-node-id="jkSFlk8hRyUnlDAiJboD5F">queuePump.tick() → coordinator.drain()</span><br data-page-node-id="DLHTbCqwaGTL8DAvB5QCQ9"><span class="anchor" data-page-node-id="IjtMIApwyFPgJIogJUeSKo">run-queue-pump.ts:29</span></td><td data-page-node-id="r7q3WYzncuOYJTFQyQU4VB">—</td><td data-page-node-id="xtNCCUT1kiWFNjcHjTu9Py"><code data-page-node-id="EcRmmPHSZcFDN9YoSDsApa">onError</code> 回调（不崩进程）</td></tr>
+<tr data-page-node-id="r9N4FyeT0V2110zWPHusen"><td data-page-node-id="il2lBrW39HhAbKavixGCwx">12</td><td data-page-node-id="qU99AlCF223GjS9UBOwFNL"><span class="sig" data-page-node-id="PVyzuj3ZPcyRSXhEEIkwdP">enforceQueueTtl()</span><br data-page-node-id="3mWxd0BwOjI1YelG3scml3"><span class="anchor" data-page-node-id="zxvS3CvEZpGJvyRsM1cxNC">run-queue-coordinator.ts:114</span></td><td data-page-node-id="nkGFBCLDN7uzG7hHomWIBX"><code data-page-node-id="cqX7lOUQnsbrnpguUqGPSY">QUEUED → FAILED(QUEUE_TIMEOUT)</code></td><td data-page-node-id="AO7v83FteXBkyR585J0f3O">落库失败 → 保留排队，下一轮重试</td></tr>
+<tr data-page-node-id="lkoEveL4q1MRe522taO0hK"><td data-page-node-id="PtfFaC1sBmNapaKeAOCU0s">13</td><td data-page-node-id="Fn3BJ57xXWnyPMH7ZKHCcR"><span class="sig" data-page-node-id="O2OXvzYxJRHsjO13TZKlsP">reconcileQueuedRuns()</span><br data-page-node-id="LeMMwGwFWDMzFk7CjHERi5"><span class="anchor" data-page-node-id="hEzXDEBis6W5G0Lp6x2tnV">:229</span></td><td data-page-node-id="X4CPgsUrOsfEfexEMwoTBC">孤儿重入队 + DB 侧 TTL 熔断</td><td data-page-node-id="ApmpPFDCm6iHDj6w4zMQJD">同上</td></tr>
+<tr data-page-node-id="tbhNpOODQTcvrZEYoJHdPT"><td data-page-node-id="lnHtHxvWPoAvEDDRLQKyjH">14</td><td data-page-node-id="Hxe0imITyIgyFuka6U1M7u"><span class="sig" data-page-node-id="8EbWI2QckHRz64EW8s6SV4">scheduler.claimNext()</span><br data-page-node-id="Z0WMrtXifmg5pnKWEsEYek"><span class="anchor" data-page-node-id="PyJJzoHdVxk1KylbeA8rXx">tenant-run-scheduler.ts:140</span></td><td data-page-node-id="Wvt586k9PKiNL5qoBRibFs">内存：<code data-page-node-id="SmPVoAXuQQpMs9ksTxT1IY">activeTenantByRunId.set(runId, tenantId)</code> <strong data-page-node-id="FsW3Ze3TBRpoqnsbcFBGfR">占 slot</strong></td><td data-page-node-id="LpfZ4CQVm13kWFPBu2NdDu">返回 <code data-page-node-id="nvoJBZpQNHkog1Nr4YDb58">null</code> → <code data-page-node-id="Dt0I7TyIguLue4pt1Qd0Va">{kind:"EMPTY"}</code></td></tr>
+<tr data-page-node-id="ipOiN8vZpq1wkcVDdCyQtz"><td data-page-node-id="BFwnBlO8BHYujQj5hWyERM">15</td><td data-page-node-id="sqcnkHrqBXEHHgTRnBepcY"><span class="sig" data-page-node-id="pfcrXPy2QH6HscAOcbQzKQ">admission.evaluate({runId, activeRunCount: cap-1, …})</span><br data-page-node-id="1LEh7Ao3gWOft6hNbJ2lK7"><span class="anchor" data-page-node-id="CPGwFhobInS4XvK0QrkXg2">resource-admission-service.ts:54</span></td><td data-page-node-id="8pJG6NU0cmbxC6BOA76C8K"><code data-page-node-id="hKv7D2IpKEw5Hzdz9EUgGp">policy_decisions</code> + <code data-page-node-id="ebD21JAVVVT5CkO0VqTC1x">resource_snapshots</code>（同事务）</td><td data-page-node-id="xCweVoQfYZzMrfHjSBgFSZ">抛出 → <code data-page-node-id="H9hPlFgkc3y2DbbZ2GlQN4">release</code> + 以 <code data-page-node-id="viWsCUA5lFf9jqi1oyj20T">RESOURCE_OBSERVATION_FAILED</code> 重新入队</td></tr>
+<tr data-page-node-id="iuEu40ETHkQrh3Gdqz2ef3"><td data-page-node-id="FsFFhsqaf3E0KKp6pkGtsT">16</td><td data-page-node-id="M1qprDx77qirHGzdhGmwcV"><span class="sig" data-page-node-id="ZdfFE2npDqhphXb6CoHEwQ">observer.observe()</span><br data-page-node-id="uOrQNvdBQBkqTAiiQUauuA"><span class="anchor" data-page-node-id="hHSawVvpmEzkkMbA9Sf5jz">:59</span></td><td data-page-node-id="BViA6IQL2VX5AS7FjQzzgO">—</td><td data-page-node-id="VtajF5qg2fwSHJue6OkM81"><code data-page-node-id="YlKQFoEObM5QX5AeSztCab">ok:false</code> → QUEUE / <code data-page-node-id="7GXSayFS1RyuCXWqw1mr07">RESOURCE_OBSERVATION_FAILED</code></td></tr>
+<tr data-page-node-id="dL0Th1DjEPpiFCG8tbmDLu"><td data-page-node-id="T5H8Fzq7LUdV5uv8XsBETX">17</td><td data-page-node-id="Xwjaa0ysZnuGoE5cA7NsZZ"><span class="sig" data-page-node-id="yyX5Gi4WRYyWACzqoq7dil">classifyResource(snapshot, thresholds)</span><br data-page-node-id="kCA6Q1YkX06ZPAf6V6vJFp"><span class="anchor" data-page-node-id="jhOU9SuL8AGDZdtoYWT8WY">resource-classifier.ts:73</span></td><td data-page-node-id="D9ZT0ZAShEoBS4WaTKzHpW">—</td><td data-page-node-id="dKbl2H4QHgD9mXsU9WJwsX">无可用信号 → <code data-page-node-id="RqpJ0T4lJLfn3QJsDHcCAW">UNKNOWN / INSUFFICIENT_DATA</code></td></tr>
+<tr data-page-node-id="YiAaYvnofRs8muvGWX8njr"><td data-page-node-id="YPOQB7zGHPFmAVc1SNo35A">18</td><td data-page-node-id="FkEftiAyZ2ERxN7qE7G5h4"><span class="sig" data-page-node-id="pMb8Bj6suafKxG2UlO74co">policy.decide(input)</span><br data-page-node-id="RSrjTGb50ETSDDALsF0jBq"><span class="anchor" data-page-node-id="SNDQdIEobPv4MMGok76x0S">execution-policy.ts:73</span></td><td data-page-node-id="WTvnkEGRHRQIIW8Q4lDiTe">返回 <code data-page-node-id="3tMNxAFhjKESY6ZaOmQiNr">PolicyDecision</code></td><td data-page-node-id="pjjMkfnAM5S61gFa29peOr">—</td></tr>
+<tr data-page-node-id="phBiZZk1ZatsKuoGu2MOhA"><td data-page-node-id="TidLDH4vPbyfEwsRfWYn5x">19</td><td data-page-node-id="uK8ZdBtDV74wfeeEow7YpK"><span class="sig" data-page-node-id="N7P7lhVCOc30pRcTuGxCG4">decisionStore.save(decision, snapshot)</span><br data-page-node-id="ohzJdx83b1MuaW9cRFJuzF"><span class="anchor" data-page-node-id="OWhlfw8DTo2mLEFABoXJDL">:97</span></td><td data-page-node-id="IV3wGGLu6D1d0zPpm5NJ60">一条决策 + 一个快照</td><td data-page-node-id="yxTnx8apynJbZTUgNMo1A0">DB CHECK 违反 → 写入失败（fail-closed）</td></tr>
+<tr data-page-node-id="wQiUdn1M25xeCcUVmPhIHg"><td data-page-node-id="KQ2GNrYgIYoV2qUEXYb0GQ">20</td><td data-page-node-id="JKeTHNVxhDeXGB2NHXnrfZ"><span class="sig" data-page-node-id="eG2qUlsP9AzmeMcbZr4i2v">runService.executeQueuedRun(runId)</span><br data-page-node-id="E3JjEWU21FBpqMdqXJZawY"><span class="anchor" data-page-node-id="IrEwH66ntxAYAxfjUJRW3g">:379</span></td><td data-page-node-id="UjnJN8GnEVC8aTWFp2Yhdd">见 1.3</td><td data-page-node-id="SM2GYNdCeVXQ18sxvZgH94">见 §7 竞态</td></tr>
+<tr data-page-node-id="973syGaQA2TVOEA2EQEcsN"><td data-page-node-id="aPNupJYdAMVJztakavoWgC">21</td><td data-page-node-id="TcUbZ5L5bbiZlmilMOUmWT"><span class="sig" data-page-node-id="76UezeOgaDSwUzqNtqua9Z">scheduler.release(runId)</span>（<code data-page-node-id="WsGFKycsjAoHsAy9zZggXb">finally</code>）<br data-page-node-id="GoSoY6Ej29hdID5ZEeYuui"><span class="anchor" data-page-node-id="LBuDEQIvIyAVRw2riJ4zRz">:422</span></td><td data-page-node-id="ZYrhlGHOs0qubQHsLruYbx">释放 slot，下一轮可再次 claim</td><td data-page-node-id="veNPMbXys8BUAAsaDollqD">幂等，重复释放返回 <code data-page-node-id="iRwHTaUiJvZj7GozDcgEKn">false</code></td></tr>
+</table>
+
+<h3 data-page-node-id="CthdAPCDCuLGZfH6bDokMQ">1.3 受管执行（ManagedAgentRuntime.execute，12 步）</h3>
+<table data-page-node-id="AOybHARcD8Ej3lZEO8657s">
+<tr data-page-node-id="3BZYk6VKLu5uo0qVTqddSG"><th data-page-node-id="2OaQV8QyABgxRXpvbfxFlu">#</th><th data-page-node-id="Pa3z6ImmQ5jhRU9VnbFFOR">动作</th><th data-page-node-id="7N52vmhHH8qXgYiZEkNG1l">不变量 / 写入</th></tr>
+<tr data-page-node-id="riU7awyxFbRju8sJdDuiZl"><td data-page-node-id="du1xDJiBtEqbjbkPCZeZ6r">1</td><td data-page-node-id="ycHXnSsYhcp8nqOniktXNl"><code data-page-node-id="nm50BNl7uHYSEgBso9ux4Y">runs.get(runId)</code> 必须带 <code data-page-node-id="E4Ag6106U0RBcmZSwu46gV">templateVersionId</code> 与 <code data-page-node-id="YfoSOjGgMt0RSFUSX9qwpJ">harnessInstanceId</code></td><td data-page-node-id="hUCFa2sJslc5A5ckAr4jyS">否则抛「Run 缺少控制面绑定」</td></tr>
+<tr data-page-node-id="Eu9yuhW1zJWfONClUcYyzw"><td data-page-node-id="0qE043MMO7dDzbGuwX3RuB">2</td><td data-page-node-id="c65R1C5Jrg7UZyQmcGU8Zi">取 <code data-page-node-id="w74tOVvulJFXHVCoQo2DEH">template / instance / session</code>，四重归属断言</td><td data-page-node-id="aHdl0e8fSH3ALp2utJmo7A"><code data-page-node-id="LS9Z040iOta6yPsBeLwWRa">instance.tenantId===run.tenantId</code>、<code data-page-node-id="7a1FP7KLhm9vU3rNt2M29A">session.instanceId===instance.id</code> …</td></tr>
+<tr data-page-node-id="3xPABES4ChSivo2UU0Xae3"><td data-page-node-id="dGjIwO6m2x0vVsAlbNflVo">3</td><td data-page-node-id="RZPFhCmHJK6E2zOHA8Z8pr"><code data-page-node-id="NanG5QVkTPyKuZRSXzbZXA">capabilities.get(instance.capabilityProfileId)</code></td><td data-page-node-id="pHztXcmgKoik7xLjjYN3fI">找不到直接抛错</td></tr>
+<tr data-page-node-id="122Lhv5RHDpepB7ouxSOFN"><td data-page-node-id="lMvQRUJN9dfGCxZ0JmN9dj">4</td><td data-page-node-id="1A08MxF0gQ5IA5ncs5wK1F"><code data-page-node-id="AZXpLSGYAiFEWucDcdg9QM">computeEffectivePolicy({layers: policyLayers(...)})</code></td><td data-page-node-id="D393ST8OASb4BPwmfn91GI">五层交集，<strong data-page-node-id="mAvNhNiYniafSKaaDEsxva">单调收紧</strong></td></tr>
+<tr data-page-node-id="tBLx51pc7gCa7X7kpO5Ajv"><td data-page-node-id="r9oLnIGuE8WXpD5w8ZxWn7">5</td><td data-page-node-id="N77EWbgVT6besFYXp5vwhs"><code data-page-node-id="giLtTd1btvyigzBKQ8M35f">policies.saveSnapshot(snapshot)</code></td><td data-page-node-id="KHfOmrSpPIezxApiMWEkOB"><code data-page-node-id="tgh6DckVrCaFXTmhutLFGQ">effective_policy_snapshots</code>（含 <code data-page-node-id="WlBf95HJdBAa0J4bxB6vbr">layers_json</code> 原文）</td></tr>
+<tr data-page-node-id="ykdWm2afX2HCXfOYPb2uhI"><td data-page-node-id="81MP0C4DhDMOpWdc1zCeCY">6</td><td data-page-node-id="xbG6aVjerb0ssoeOj8eZiv"><code data-page-node-id="40dMr6ruUIAfQmBgDKMDBB">createRunAttempt({... policySnapshotId: snapshot.id})</code></td><td data-page-node-id="OZJX8plY9E1Nm3CKxNVG7o"><code data-page-node-id="SZp54niFqOfatDN8iZjYO7">run_attempts</code>；<strong data-page-node-id="GrDrlOE9jwkwab5ucaYTv3">创建即绑定策略</strong></td></tr>
+<tr data-page-node-id="TUVpkhL9ozmDx8Daw5HtXW"><td data-page-node-id="FUPpZkvvAgDtaR7Kacpd0l">7</td><td data-page-node-id="QeXm0fPsMEDRr907vA1i6i"><code data-page-node-id="sBS1iZ3EGlwfb9yCwBshX2">validateRuntimeCapabilities(profile, {required, optional})</code></td><td data-page-node-id="A4o150FK7G3N6NAgcSPtmb">缺 required → <code data-page-node-id="VXGdXn0oePa4s1bgyI8z5D">REJECTED</code> + Attempt 拒绝 + 抛错</td></tr>
+<tr data-page-node-id="lJUKs1zpEyWsluXdj9u6xx"><td data-page-node-id="K6qyekaIGYYwyIQc76CGf9">8</td><td data-page-node-id="mtMQhzC2N6zTGU5Y5l3YCM"><code data-page-node-id="U8Ke8gqBMlDz7Ms3YGTHCb">compilePiPolicy(template.spec, snapshot)</code></td><td data-page-node-id="ieyGdFN2Gbdb7vxTj4sSEA"><code data-page-node-id="DgHyRt1JQJwLwAW25yFREr">policy_compilations</code>：APPLIED / DEGRADED / REJECTED</td></tr>
+<tr data-page-node-id="XTDhpPiHSNjUCzS3j5FlaP"><td data-page-node-id="Ad5jDGAyxGFGvfB5WRvtIa">9</td><td data-page-node-id="rYWOFIptVnOfN0dvn32OEM"><code data-page-node-id="u3V2k2XpUGZA1bENJYH8vl">emit(control_prepared)</code></td><td data-page-node-id="nLNAcCilAvwLQuddyYaUMx">→ <code data-page-node-id="fL130DQEhBu8jVwMvW0PrS">CONTROL_PREPARED</code> 事件（带 dedupeKey）</td></tr>
+<tr data-page-node-id="J34Bac8FCDgLXAY3Ub2YhA"><td data-page-node-id="gzpJlydgQ7FvDtkGWukKMI">10</td><td data-page-node-id="gTsgAaHEA8R1mZHIiyqpfg"><code data-page-node-id="9fgjXnLDeLbyfCRFXV1ta4">sandbox.create({id,runId,instanceId,workspacePath,policy})</code></td><td data-page-node-id="nvDxwivo7fU3ECnLHNcb6n">失败 → Attempt <code data-page-node-id="nNEoMQXkEdC9lW7DPqPneZ">FAILED</code> 并抛错</td></tr>
+<tr data-page-node-id="P3diTmyY11FTv2WBBIlMPX"><td data-page-node-id="URnZv9WWF4az6IwrtTdigl">11</td><td data-page-node-id="ItEw1UXsaiku8jpwcnki73"><code data-page-node-id="GMC8AGGZEivPLBCThvFAJg">emit(sandbox_acquired)</code> + <code data-page-node-id="U6j2sFWcgxiZWdy5PWhxLs">startRunAttempt</code> + <code data-page-node-id="SGr1rwXf7KGdY49KZqE1JQ">instances.acquireRun</code></td><td data-page-node-id="Z85YdKSo18BXBw12Ex2F2W"><code data-page-node-id="PL0BQryOhBlLdPXX3EIIHC">active_run_count +1</code></td></tr>
+<tr data-page-node-id="65Hf7pKatGBIOZYBafKmVV"><td data-page-node-id="fFCAI5Y6vEkAShCLw1hc42">12</td><td data-page-node-id="UQfjexUJPDlY0kAczAUsD2"><code data-page-node-id="kfKAL4q13NPapEPhqJzkFB">invoke(managedRequest)</code> → <code data-page-node-id="pWxPoUqmCeQ5Q0c6iGUlHl">finally</code>: <code data-page-node-id="oemvHOWWmRaWqZzAx2kor4">sandbox.terminate()</code> + <code data-page-node-id="bWXnWEKBcyn8uANKa0Bb8C">instances.releaseRun()</code></td><td data-page-node-id="DFKQsVFPUdMHfyweXGkicL"><strong data-page-node-id="CM8UnYtNKh79vCtPOvgGyb">异常也在 finally 里回收</strong></td></tr>
+</table>
+
+<h2 data-page-node-id="fSfwDjZnEPTWflf4rdjmDm">§2 数据模型</h2>
+
+<h3 data-page-node-id="5SWyhEQUNaYLYiMKiXkCy9">2.1 27 张表按域分组</h3>
+<table data-page-node-id="4aarCMltYG0kqTBc4h0xAp">
+<tr data-page-node-id="FXxTkUNFkZcMKq4BXVkdUl"><th data-page-node-id="srP4zeHCC6PgGUV1VvrjZ7">域</th><th data-page-node-id="BctVu84faEnvfNmSEZQF9a">表</th></tr>
+<tr data-page-node-id="4qCh14M8ijmF6AbumY6OHl"><td data-page-node-id="jOO3AFT5iQ73KrT3Nq69uO">执行核心</td><td data-page-node-id="GlQwhUAgJ9YvCXBdzaPmRP"><code data-page-node-id="OVIFgOAexGQiyEcOTfDiLD">agent_runs</code> · <code data-page-node-id="ZOl5ng24h9E7OXNn4yVAQC">run_events</code> · <code data-page-node-id="7F5YdeVuclDqzsaOjKeLZM">run_output_chunks</code></td></tr>
+<tr data-page-node-id="4MAbPQYaNnIbdp6q7BVXmy"><td data-page-node-id="nwL9bVnzQJgU7UOWBLLoAe">工具与恢复</td><td data-page-node-id="7mKTo8xDO2kinnRQ6EiZq2"><code data-page-node-id="uViJOavOvFHNSInrZ0CpP4">tool_executions</code> · <code data-page-node-id="rvoxnAivFcUjDzl1fpGW6L">checkpoints</code></td></tr>
+<tr data-page-node-id="dJmElnck5uJXoDY2dEyDiA"><td data-page-node-id="nSizY2a0RZuXqYFMUCsEGT">资源与决策</td><td data-page-node-id="pP3TLFZYOWudFXaymHOjQa"><code data-page-node-id="ALi2k6UJJRYar2FHuEqd9K">resource_snapshots</code> · <code data-page-node-id="EAUNrVmv7u4CWFKS31cEYY">policy_decisions</code> · <code data-page-node-id="FDFOS0aZuoz7Kk3GlCxeQD">llm_cache_metrics</code></td></tr>
+<tr data-page-node-id="UTLQvGIqzOI8crGJ5vdeKs"><td data-page-node-id="ClrpheI9LgjGlF8RdQaQ5e">控制面对象</td><td data-page-node-id="EziNuh5aDLe7x2k2gTKMOR"><code data-page-node-id="7HcMIXhB5ZZHHCQPwtnPXz">harness_templates</code> · <code data-page-node-id="DKFjBb3rdGAzETIbncFd6t">harness_template_versions</code> · <code data-page-node-id="yn0MvOsY1CkbVw587M6UZm">harness_instances</code> · <code data-page-node-id="Sgfeb0jLUukMmufPv5bwuI">harness_sessions</code> · <code data-page-node-id="rKGekJ63dQjFWNg4BBckfX">run_attempts</code> · <code data-page-node-id="vUu37XgznpQzcCLu18MtMy">runtime_capability_profiles</code></td></tr>
+<tr data-page-node-id="9Raf3vsAB9mXincyvNxRcb"><td data-page-node-id="2MMXx6bWCKslH0gwCZpNKc">策略与隔离</td><td data-page-node-id="ExKl1vE6O2nGv4wS4te8GC"><code data-page-node-id="WCkaVBqjVhE5ZrV0r0pK2P">effective_policy_snapshots</code> · <code data-page-node-id="L0KJL5MqmFHQEJryNvXoDs">policy_compilations</code> · <code data-page-node-id="EQxLIpk6Hm26m5NQ9ZiAZ8">tool_policy_decisions</code> · <code data-page-node-id="HUuSfLF8NEedX8xWw6QE6i">sandboxes</code></td></tr>
+<tr data-page-node-id="Avm2oKr9xOFVNaIF6eTpTn"><td data-page-node-id="G9E2llqMgQ1FVf7z9AsGQr">身份与租户</td><td data-page-node-id="QbHCOYYC70P90AmME8AjgW"><code data-page-node-id="xdFubMvW8RjTp2cwp80q5c">api_credentials</code> · <code data-page-node-id="dkNpvfpKcYqgulTa8c5CMT">users</code> · <code data-page-node-id="aSmw3B8t9Fo2ODj0sr18Ll">user_sessions</code> · <code data-page-node-id="9VxFYekDYkBZz6pWfpLghX">access_audit_events</code></td></tr>
+<tr data-page-node-id="dtblY7jE4QwaxjbXxcw4Ns"><td data-page-node-id="EmHAiPcFeFEF9hU0A8hzg5">用户交付物</td><td data-page-node-id="iGPABeYQjiIqej7842rKMN"><code data-page-node-id="qJOLspYdMT2qydnAfRSH5C">workspaces</code> · <code data-page-node-id="zG3Ic40UrxrNhzhfnwtGiw">conversations</code> · <code data-page-node-id="IhqT5639OV7aoOu6H5bC4L">run_workspace_snapshots</code> · <code data-page-node-id="ZTxyc2hSSiffPLs7RslT7M">run_workspace_diffs</code> · <code data-page-node-id="bB4FkvE2W3E0BRnRC6Loed">run_artifacts</code></td></tr>
+</table>
+
+<h3 data-page-node-id="dDnwi8EqS4sW0nBnEYPJW8">2.2 核心表字段级定义（含约束原文）</h3>
+
+<div class="card" data-page-node-id="rKnPnW5apExgHBCtC0h8X6">
+<h3 style="margin-top:0" data-page-node-id="0MLoKD8CFX7HLtzIeZjTde"><code data-page-node-id="97pA6drExme2rzlKvieYUP">agent_runs</code>（16 列，Run 的权威当前快照）</h3>
+<table data-page-node-id="gA64vDOVCyMaEXIq5TGwUZ">
+<tr data-page-node-id="3oUPubizl3fFTfEBtNx7Uw"><th data-page-node-id="6ZjPVVHodNLC396tQOf7Zh">列</th><th data-page-node-id="d2y7DSzH0Au0CDAi1nP1UJ">类型 / 约束</th><th data-page-node-id="OXO1XEBPGuBrY0oUtYzDBg">说明</th></tr>
+<tr data-page-node-id="yZksIUwublZ74m7haRGIRS"><td class="mono" data-page-node-id="KL08pOLPOaPInXruUF256r">id</td><td data-page-node-id="jmXIFIkKTdGyvFUlaSubQn">TEXT PK</td><td data-page-node-id="6E7SgZ9dltXdAEBquP8X0a">Harness 生成，业务主键</td></tr>
+<tr data-page-node-id="s9D4ILblzGmnCeW7dveqC7"><td class="mono" data-page-node-id="PZow3d8dP1LAomA1Kh5Zaf">tenant_id</td><td data-page-node-id="BhwC5NDXq6n55oIHLpX5hF">TEXT NOT NULL</td><td data-page-node-id="FX8H4Rt5iT9nN0fbC4zTH9">数据/资源/审计归属边界</td></tr>
+<tr data-page-node-id="kDCcKLGtVABaN6nHUm3fbk"><td class="mono" data-page-node-id="XvvSWMVJiEFT7cwd6J4uix">harness_session_id</td><td data-page-node-id="Z9HTJkOL1nn66GknC9FUA7">TEXT NOT NULL</td><td data-page-node-id="i8BQqs3ZjyJF8S3TWS1oYr">一个 session 可含多个 run</td></tr>
+<tr data-page-node-id="byAw05MJOCN1O1OywwxSg5"><td class="mono" data-page-node-id="y2ivo2Bjy0NbZHPmJ7TyFh">status</td><td data-page-node-id="r6vhU9hTid60N3hVzKaxEG">TEXT NOT NULL CHECK IN (6 值)</td><td data-page-node-id="utrfqyywKa0dp9OjPoBRTq"><strong data-page-node-id="PHDmr4xRCq7DdCO8DjQr1O">数据库层第二道状态机</strong></td></tr>
+<tr data-page-node-id="FipRWOKjwy4xe5xG5okNIT"><td class="mono" data-page-node-id="ImfZinwgrjkI02ntrwZdgN">user_input</td><td data-page-node-id="5xv0L98m57vTbtqBWvMZW1">TEXT NOT NULL</td><td data-page-node-id="bhkd6rlTnj5ppwey4k7f8w">原始任务输入</td></tr>
+<tr data-page-node-id="aOo57AaKXA87WmEjsWrFcB"><td class="mono" data-page-node-id="q4parP0o1LFqXPo1z5IMQA">workspace_path</td><td data-page-node-id="zMGMrx8VBlAjzHm0sDFyxy">TEXT NOT NULL</td><td data-page-node-id="wocunKy94qSgBAchTN5DuV">服务端生成的宿主路径</td></tr>
+<tr data-page-node-id="GB6O16Pjh2pKpX1t02sow3"><td class="mono" data-page-node-id="pvhI2WuMvJPJwAhlSJD6or">created_at / updated_at</td><td data-page-node-id="XXh4GvEyZ6ZIoshTC7BAtB">TEXT NOT NULL</td><td data-page-node-id="lqX24PXVOD9Uai4c4GwtYx">ISO 字符串</td></tr>
+<tr data-page-node-id="eHAxYKtPaA8WEHXmV26WGX"><td class="mono" data-page-node-id="5wAZGCF0z0ZcDvWCS518Tq">started_at / finished_at</td><td data-page-node-id="aaClnoQN9xj0O6hozbzgQf">TEXT</td><td data-page-node-id="hmhFGX49v53x7VpFtWzCI0">进入生命周期后才有值</td></tr>
+<tr data-page-node-id="sCtELavECMIMxjdLPMp3TV"><td class="mono" data-page-node-id="m5kpFHGxEgMo6dFMtVTwhE">checkpoint_id</td><td data-page-node-id="foHfxyw23bULAyl8JxPzD0">TEXT</td><td data-page-node-id="xIvRTySy4JTF2LRHET0yFe">恢复连接点</td></tr>
+<tr data-page-node-id="AcrAn2M0XYuZbjkmlBknhv"><td class="mono" data-page-node-id="pS5ZYCkEoEmBD7zyHjesdF">failure_reason</td><td data-page-node-id="TwTFHOt3ONnmWN0lc2BVYD">TEXT</td><td data-page-node-id="hA39tLXjCuxcNHuLXajy6P">仅 FAILED / 部分 INTERRUPTED</td></tr>
+<tr data-page-node-id="wEp6QygzE7nXfFFD8niY4o"><td class="mono" data-page-node-id="xBzSZXLl6pWC5RE9dW8CNU">template_version_id</td><td data-page-node-id="dZbW5GBrI6i4gLzRCeAUhz">TEXT REFERENCES harness_template_versions</td><td data-page-node-id="mepuZh99sohkG4tyQlqIoW">migration v6 新增</td></tr>
+<tr data-page-node-id="k9MbgGiD160DGIf5h4T5ER"><td class="mono" data-page-node-id="HRVlJNkyGF4o4pJCshOao6">harness_instance_id</td><td data-page-node-id="yCGe9hZy1etz5xECnkY5Fe">TEXT REFERENCES harness_instances</td><td data-page-node-id="41WbjrFlZPKcBYo7eSUprH">migration v6 新增</td></tr>
+<tr data-page-node-id="98bdVGUml8YnqD0YDxbcFO"><td class="mono" data-page-node-id="uRVtuajxfPhUfMEB7erCwu">run_policy_json</td><td data-page-node-id="t6ZGITCmeHCcg9DpEFKXU3">TEXT CHECK json_valid</td><td data-page-node-id="Q18go9tCTDMOAo5jvqoEHQ">migration v7 新增</td></tr>
+<tr data-page-node-id="qaZ2Mw1vrP8YPsh1mbrEGv"><td class="mono" data-page-node-id="PwBbul61j3yAGVLSMtC4Pc">thinking_level</td><td data-page-node-id="5IdQplRrwJiagfTLkLiPQv">TEXT NOT NULL DEFAULT 'off' CHECK IN (5 值)</td><td data-page-node-id="O7FDGkx38FlWjRBTGit2I1">migration v19 新增</td></tr>
+</table>
+</div>
+
+<div class="card" data-page-node-id="gZFjvleMUg1ONAF0a66E3m">
+<h3 style="margin-top:0" data-page-node-id="X7McWHlTmdZOfb7Qf8WKCY"><code data-page-node-id="qFJvZYGCTqAjwvTXyod2Yf">run_events</code>（8 列，追加式历史事实）</h3>
+<pre data-page-node-id="5xc98cbrZc1xDDn2uLIo6c"><code data-page-node-id="qLNNuimpBrts9CJyg7oaH8"><span class="c" data-page-node-id="OkUjPyHiCWONBy3SGedc76">-- migration v1 + v2</span>
+CREATE TABLE run_events (
+    event_id        TEXT PRIMARY KEY,
+    run_id          TEXT NOT NULL,
+    sequence        INTEGER NOT NULL CHECK (sequence > 0),
+    type            TEXT NOT NULL,
+    timestamp       TEXT NOT NULL,
+    payload_version INTEGER NOT NULL CHECK (payload_version > 0),
+    payload_json    TEXT NOT NULL,
+    dedupe_key      TEXT,                        <span class="c" data-page-node-id="mka1iCrOxaQo4s6GqKA3lW">-- v2 新增</span>
+    FOREIGN KEY (run_id) REFERENCES agent_runs(id),
+    UNIQUE (run_id, sequence)                    <span class="c" data-page-node-id="vo3A8eYDmrSgEse4CG7xnO">-- 顺序无歧义</span>
+);
+
+<span class="c" data-page-node-id="3Cc8aiiYG5mXwrhhejf941">-- v2：只约束有 dedupe_key 的事件，实现 at-least-once 去重</span>
+CREATE UNIQUE INDEX idx_run_events_run_dedupe_key
+    ON run_events(run_id, dedupe_key)
+    WHERE dedupe_key IS NOT NULL;</code></pre>
+<div class="note" data-page-node-id="dUqEjSZgxdxcm7LCdgv6Mm">为什么 <code data-page-node-id="nZzfAdDIBmfC5625KPnnkN">timestamp</code> 不能当排序依据：多个事件可能落在同一毫秒。<code data-page-node-id="XM2Y5eBHrCzWzWGk1LqGaE">listEvents()</code> 明确按 <code data-page-node-id="WYBuDqXMUpVqpWmsX5aZtG">sequence</code> 排序，注释写了这一点。</div>
+</div>
+
+<div class="card" data-page-node-id="Nv0APC1wHcxyGumy5w1WLR">
+<h3 style="margin-top:0" data-page-node-id="B163ickStFXfFX9smXZB1Z"><code data-page-node-id="OqGXp9wtniPVIG8RBmjNmE">tool_executions</code>（11 列，控制重放与恢复）</h3>
+<pre data-page-node-id="fJp5R5rGuvoUwFb3XBUIs2"><code data-page-node-id="K7N8z4YzdJRybmOoPx7QNC">UNIQUE (run_id, tool_call_id)      <span class="c" data-page-node-id="U6SGkOQiQg5IYmOCuU18GV">-- ToolGateway 复用历史结果的稳定业务键</span>
+UNIQUE (id, run_id)                <span class="c" data-page-node-id="HkU3UMoVO2fxTp82dmir9P">-- 供 checkpoints 复合外键引用</span>
+
+CHECK (
+    (status='PREPARED'  AND result_json IS NULL     AND error_message IS NULL AND finished_at IS NULL)
+ OR (status='SUCCEEDED' AND result_json IS NOT NULL AND error_message IS NULL AND finished_at IS NOT NULL)
+ OR (status='FAILED'    AND error_message IS NOT NULL AND finished_at IS NOT NULL)
+);
+<span class="c" data-page-node-id="2qEMaUzNE9Xe3ApOA04qZH">-- effect: READ_ONLY | IDEMPOTENT_WRITE | UNKNOWN_EFFECT</span></code></pre>
+<div class="warn" data-page-node-id="PqXwkbWm5fdTMPEXHjewOQ">这条 CHECK 是「矛盾状态不可能入库」的强制手段：<strong data-page-node-id="wClcbnEBqMbx5JjB0KJN84">PREPARED 却带 result、SUCCEEDED 却没有 finished_at，在数据库层直接写入失败</strong>，不需要等恢复逻辑读到脏数据才发现。</div>
+</div>
+
+<div class="card" data-page-node-id="fx1TzNCLNnW6Mx0PzjGcM3">
+<h3 style="margin-top:0" data-page-node-id="tMV7LQ3cImwAWmR0XdL27r"><code data-page-node-id="sk5ylNtTbFF44eljLDhc7f">policy_decisions</code>（8 列）的双分支 CHECK</h3>
+<pre data-page-node-id="H09DGQQw7QcsTy5g61J2a8"><code data-page-node-id="xBvtDNkKV21VUVrSnTCEQs">CHECK (
+    (reason_code = 'RESOURCE_OBSERVATION_FAILED'
+        AND resource_snapshot_id IS NULL
+        AND pressure = 'UNKNOWN'
+        AND action = 'QUEUE'
+        AND observation_failure_reason IS NOT NULL)     <span class="c" data-page-node-id="YjDZnBp2rkkKu9N22K2qa7">-- 观测失败：必须 fail-closed</span>
+ OR (reason_code &lt;&gt; 'RESOURCE_OBSERVATION_FAILED'
+        AND resource_snapshot_id IS NOT NULL
+        AND observation_failure_reason IS NULL)         <span class="c" data-page-node-id="HocOjkVQLwzhPqtCvbyIwa">-- 成功决策：必须带快照证据</span>
+);</code></pre>
+<div class="note" data-page-node-id="HW9JTBzBuhom4wSNSWtpbv">这条约束把「<strong data-page-node-id="VnXSXCXBHd5KHjzSV5seMd">失败观测不得假设资源充足</strong>」从口头约定变成不可绕过的数据库规则：想写一条「观测失败但决定 START」，SQL 层直接拒绝。</div>
+</div>
+
+<h3 data-page-node-id="wPu71nGls9fLyCF3qinnHa">2.3 19 种 RunEventType：谁产生、去重键是什么、是否落库</h3>
+<table data-page-node-id="xe9N9kjEhPdkBhik4cA9di">
+<tr data-page-node-id="yZ6GII6I0hmwKRUaDK4IhG"><th data-page-node-id="zsRd4ztL9RlX0HBBEcHgEt">事件</th><th data-page-node-id="JhMsCvxCOB95xEqY6CYWo3">产生者</th><th data-page-node-id="JXFXCcpR2DjtwOCoyu1SFh">dedupeKey / 备注</th></tr>
+<tr data-page-node-id="qKeJlLqeUPiAk5FN4vJCbP"><td class="mono" data-page-node-id="K13FXefXpPIBVRbcEicXGa">RUN_CREATED</td><td data-page-node-id="RjN7Mt0EOdl3HPQQl30srD"><code data-page-node-id="HjD32DMBfUep1AUjR82EfO">RunService.createQueuedRun</code></td><td data-page-node-id="M7johlQEtmh76WLPbZFBQ0">无；sequence 恒为 1</td></tr>
+<tr data-page-node-id="Zf2lE4W0oA92kODkkVzRJ2"><td class="mono" data-page-node-id="oqkM3fo0uVZ7RmcPIesiew">RUN_QUEUED</td><td data-page-node-id="hkTU3TXPUeaAvEylqYWOaU"><code data-page-node-id="aIzK7zUNMbInY8gnWOvbtB">RunService.queueResume</code></td><td data-page-node-id="oNUVL938rqKFvUAWMvmIoq">无；payload 带 <code data-page-node-id="6dqvOA08cKJ0yUyYxfbc5z">checkpointId</code>、<code data-page-node-id="MzbNuyxlDOg6Tu3wkCwUeh">reason:"AUTO_RECOVERY"</code></td></tr>
+<tr data-page-node-id="sagEQjgHGsNRPzsrg510Al"><td class="mono" data-page-node-id="jnlh1oNqAjlLspRFzdkqvu">QUEUE_BLOCKED</td><td data-page-node-id="pQo7XA3tPJ3XXqG5gVWiPF"><code data-page-node-id="cdeUJRkImOgivPlAy6iC8h">RunQueueCoordinator.synchronizeQueueBlockers</code></td><td data-page-node-id="KDf1BF5oBMFqSojYa4s6UA">无；<strong data-page-node-id="A4vMGvwuTbpZgnxVSZ22En">不改变权威状态</strong>，只解释「为什么还不能跑」</td></tr>
+<tr data-page-node-id="H2HBCl7E7V15hUOtnMdXs3"><td class="mono" data-page-node-id="a2jZGGoM1siP2qSvuNmQcy">RUN_STARTED</td><td data-page-node-id="pllIitqQe3yPSBGYvtvUpc"><code data-page-node-id="Y96cEISpMdrGF9ilCdja1W">RunService.executeQueuedRun</code></td><td data-page-node-id="SrBt3Xw0lxgjjgDcjClY2k">无；与状态变更同事务</td></tr>
+<tr data-page-node-id="hPFMlyNwftxIhcFkPQ93mI"><td class="mono" data-page-node-id="Rwu67ndYQZo7fDT0hb1VfM">RUN_RESUMED</td><td data-page-node-id="f6DQ56Ow5CaVE4KV4tdGeN"><code data-page-node-id="jpaRtLkISn7QeCfhxD56Gt">RunService.executeQueuedResume</code></td><td data-page-node-id="5n6c8Cgj97pRLkdwQyQAAv">无；payload 带 <code data-page-node-id="cCeB8CJXi4dXm3FUtx31f4">checkpointId</code></td></tr>
+<tr data-page-node-id="FjoKKMsCUubztmecPVo3he"><td class="mono" data-page-node-id="Db2u0fHOmwoXpUe74AKSzz">RUN_INTERRUPTED</td><td data-page-node-id="tUd0KB5kgQTmIPsL7KCcqY"><code data-page-node-id="rLipEWQ5tGbRHU1BLhPZgM">RunService</code>（4 条路径）</td><td data-page-node-id="mzzaJ1qpRxMZ25q9i5nUWK">无；<code data-page-node-id="XpDeUoNVFGlR7R8LF7v5sP">reason</code> 可为 USER_REQUEST / RUNTIME_INTERRUPTED / START_FAILED / RESUME_FAILED / MANUAL_REVIEW_REQUIRED</td></tr>
+<tr data-page-node-id="vpRkuXu8ouKhQg29O68dgA"><td class="mono" data-page-node-id="jFZdae6bZopn5lTZgujhXQ">RUN_COMPLETED / RUN_FAILED</td><td data-page-node-id="3pcegCOW2CVyLoHuFvH9EA"><code data-page-node-id="QTLvTGkeDmkb2EtvCXo6Qv">RunService.subscribeToRuntime</code></td><td data-page-node-id="huJNvScSgUP5WzUND8UHbT">无；FAILED 的 message 经 <code data-page-node-id="QYf3NoaTAbpBDRPTd0qIJp">classifyModelFailure()</code> 归类</td></tr>
+<tr data-page-node-id="r8g4VOA8NDDrzOXVjKtDQy"><td class="mono" data-page-node-id="658mbRdhqaTOph0N8x5Qyo">MODEL_STARTED</td><td rowspan="3" data-page-node-id="8hhWO4TTkDEPN4b1nBGq1a"><code data-page-node-id="zHSDSPKALPpiHy77nwrTRx">RuntimeEventBridge</code></td><td data-page-node-id="lCzymDko0fiJjIpqeCBJAd"><code data-page-node-id="EOEnptGx1FxDfQD7hZtnjU">model:&lt;modelCallId&gt;:started</code></td></tr>
+<tr data-page-node-id="AYzm8Th9IIRABszEp4cauD"><td class="mono" data-page-node-id="meVkCXQ49l1LOp3XnjHh05">MODEL_FIRST_TOKEN</td><td data-page-node-id="lPAaOvNEFsDtQii6CIJpm8"><code data-page-node-id="KyibSquEAimuC2xGh4MDeb">model:&lt;modelCallId&gt;:first-token</code>（TTFT 观测）</td></tr>
+<tr data-page-node-id="lGkMP4tXFvU8C6xHp48Lyq"><td class="mono" data-page-node-id="YBGiMbC4LR7xE9xN0U7L03">MODEL_COMPLETED</td><td data-page-node-id="XzMN7mLbn0hsR4VZtb46pV"><code data-page-node-id="l4p68FyrBejCMX7yMS42MA">model:&lt;modelCallId&gt;:finished</code>（含 durationMs / stopReason / usage）</td></tr>
+<tr data-page-node-id="ZXuRo1HqVzP3RNJKnPSIW1"><td class="mono" data-page-node-id="Rh0G4WEnpAu55JaoeRiiqe">CONTROL_PREPARED</td><td data-page-node-id="DC1DiitNhGjXfZUm1vwAHa"><code data-page-node-id="oG0uCWSw5cVJuDB2q5LOka">ManagedAgentRuntime</code></td><td data-page-node-id="OAxkT8snBfwbH2wM8H5Mnv"><code data-page-node-id="PZb46RgyglxgjpQxxxeIRT">control:&lt;runId&gt;:prepared</code></td></tr>
+<tr data-page-node-id="rfgGsZtX4jxF41kWFCslgZ"><td class="mono" data-page-node-id="HWGBPbYQo1Boz95iBSJgEr">SANDBOX_ACQUIRED</td><td data-page-node-id="tqkDrNZVlZLzwxxy4JvnDh"><code data-page-node-id="HVESQGEuwTvoOAaI7c0HHd">ManagedAgentRuntime</code></td><td data-page-node-id="emFb7Li1QeDf3DF5or5JxM"><code data-page-node-id="gY9IoCsE7YyMoNDGGKBejb">sandbox:&lt;sandboxId&gt;:acquired</code></td></tr>
+<tr data-page-node-id="KlHfH3HEtA11eN474BoGal"><td class="mono" data-page-node-id="JGKhsALEdJB2hmIBag3ns8">SESSION_INITIALIZED</td><td data-page-node-id="xTcWVUER7EoW5sC5wJMHBi"><code data-page-node-id="L37QsY3p6RtdA4IgrKbIYy">RuntimeEventBridge</code></td><td data-page-node-id="oDT1aOdaQzEOZcZxoOFJTI"><code data-page-node-id="UCRtc8Rqi3XGCiDemkGqAg">session:&lt;runId&gt;:initialized</code></td></tr>
+<tr data-page-node-id="9oRa9EDtEre5y36qrMU7Au"><td class="mono" data-page-node-id="oMx2nsLEJTOu8GpQNlrgdF">TOOL_STARTED / TOOL_COMPLETED</td><td data-page-node-id="38LUi8Sz5EaE0ZfqyXtCXR"><code data-page-node-id="CXcgrJLH9F4JupW38KHPkL">RunService.markToolPhase</code></td><td data-page-node-id="qFQSOTeSOEFgtylVuyDY1T">无；驱动 <code data-page-node-id="rEEEjfbUZt7zBJ9PBiWkeV">RUNNING ⇄ WAITING_TOOL</code></td></tr>
+<tr data-page-node-id="M8Hbkd9wdUjVjA1UF9ZknX"><td class="mono" data-page-node-id="s7ZwN09uksFh973i5r8aP2">TOOL_REQUESTED / TOOL_FAILED / CHECKPOINT_SAVED</td><td data-page-node-id="GJjFrJgD599QEbTNyvfQWF">已定义</td><td data-page-node-id="uEWKHTWhsGxhVq6yfTYRGh">类型在 <code data-page-node-id="MkFaE9lrxlXRJzJTJJy09B">RunEventType</code> 中声明；当前主路径由 <code data-page-node-id="fMqELb9HzH0oaGXFUcTCuU">tool_executions</code> + <code data-page-node-id="HkupNGqpg8wYTFR9Jk5rqF">checkpoints</code> 承担对应事实</td></tr>
+<tr data-page-node-id="BppYuqg0E2nfyYfA1P0g5F"><td class="mono" colspan="3" data-page-node-id="2cCv1MTHsEnep2YYgD74aN"><strong data-page-node-id="E05vuoSLnYB7tOJ2HDEUo6">明确不落 run_events 的</strong>：<code data-page-node-id="ZKpl6dSZ1O5GMEbzqJBUtP">text_delta</code> / <code data-page-node-id="uh8hTUwzB0wKTiPxCx1pVZ">thinking_delta</code> → 走 <code data-page-node-id="GuCdyOBfORZWq4FT5yaAC0">run_output_chunks</code>（按 <code data-page-node-id="f4BkFqQEkg2rYpcm6D9TOI">sequence</code> + <code data-page-node-id="dAoa5AyzVEOYSP8AhaUcuL">channel</code> 分片），避免逐 token 写事件表</td></tr>
+</table>
+<div class="note" data-page-node-id="rViXAJA0c1HYw28NTMMTf6">Bridge 对五个生命周期事件（<code data-page-node-id="jRlybryu9O8uciADlzh7Cl">agent_started/completed/failed/interrupted/resumed</code>）<strong data-page-node-id="D9JJRWnKfWqinhtK84ssPo">返回 <code data-page-node-id="unF4FJ3cHWHeqEEuOdjHwM">null</code></strong>。注释写明理由：状态更新是 <code data-page-node-id="clbVLXCAbQgYfNmhLEx4Jo">RunService</code> 的职责，Bridge 再存一遍就是重复业务事件。</div>
+
+<h2 data-page-node-id="oEbOM4wgbz8YovTlImELgh">§3 六个算法的真实实现</h2>
+
+<h3 data-page-node-id="WB1uzCzpi1iZ02drQjnydm">3.1 <code data-page-node-id="4dFel3imKsNpJ4YlrBK3Ey">claimNext()</code>：轮转 + 原子占位</h3>
+<pre data-page-node-id="a8XGhCcbSTaBXVW9S6N6Kz"><code data-page-node-id="PHzC6IBZkbyAH7hTmg79k7"><span class="k" data-page-node-id="akCLrRXviC9Q54fY2y7yme">claimNext</span>(): QueuedRun | null {
+    <span class="c" data-page-node-id="19QRbd2iUy4OJE1ipVpH0F">// ① 全局 slot 已满，直接放弃</span>
+    if (this.activeTenantByRunId.size &gt;= this.config.maxActiveRuns) return null;
+
+    const tenantsToInspect = this.tenantOrder.length;
+    for (let i = 0; i &lt; tenantsToInspect; i++) {
+        const tenantId = this.tenantOrder.shift();          <span class="c" data-page-node-id="CIl2pdokmZsLyyH2LVmxjD">// ② 取轮转队首</span>
+        const q = this.queuesByTenant.get(tenantId);
+        if (!q || q.length === 0) { this.queuesByTenant.delete(tenantId); continue; }
+
+        <span class="c" data-page-node-id="yoIBhAarVd4Amioathh0rk">// ③ 该租户已达单租户上限 → 放回队尾，不阻塞别人</span>
+        if (this.getActiveTenantRunCount(tenantId) &gt;= this.config.maxActiveRunsPerTenant) {
+            this.tenantOrder.push(tenantId); continue;
+        }
+
+        const run = q.shift();
+        <span class="c" data-page-node-id="W1ROKIzoQn5FhMfWIJ3vhc">// ④ 会话串行：同一对话的前一个 Run 还活着 → 原样放回</span>
+        if (run.sessionId &amp;&amp; this.hasActiveSession(run.sessionId)) {
+            q.unshift(run); this.tenantOrder.push(tenantId); continue;
+        }
+
+        if (q.length &gt; 0) this.tenantOrder.push(tenantId); else this.queuesByTenant.delete(tenantId);
+
+        <span class="c" data-page-node-id="oGWxatpXJ4uzMQ9QnZwylG">// ⑤ 选择与占用 slot 必须在同一个同步动作里完成</span>
+        this.activeTenantByRunId.set(run.runId, run.tenantId);
+        if (run.sessionId) this.activeSessionByRunId.set(run.runId, run.sessionId);
+        return run;
+    }
+    return null;   <span class="c" data-page-node-id="fwmvm8dkh2WhKYKAfVHEuS">// 有等待任务，但所有租户都到自己上限</span>
+}</code></pre>
+<table data-page-node-id="xp6iKG2Zc5TLRHETxBdCTC">
+<tr data-page-node-id="j057hq0obJ62EMX9Z1RtS8"><th data-page-node-id="LwGQNArYGXZ1eRBi3bOj6p">为什么这么写</th><th data-page-node-id="BlY5420F9aaPllgK7fmLHQ">不这么写会发生什么</th></tr>
+<tr data-page-node-id="cS1CjrZSi0gW5zszN696TU"><td data-page-node-id="z8QXgtlQfSOcwVHuk4Y9Hm">② 轮转环而非全局 FIFO</td><td data-page-node-id="VYiomsQfRSpQDNx4iJZLC4">A 连续提交 A1..A100 时，B1 要等 100 个任务 → 永久饥饿</td></tr>
+<tr data-page-node-id="C9mseo1CTuAAvIIpTM3UMu"><td data-page-node-id="6JJG9UmbyagM1V2o8u5SwE">③ 达上限的租户放回队尾</td><td data-page-node-id="a8WFECNlIyE6EmpLQL2VLr">如果 <code data-page-node-id="gzHEzDH2paFPAFJ8VUo0oY">continue</code> 前不 push 回去，该租户会被错误地退出轮转</td></tr>
+<tr data-page-node-id="8N7AkGXWzbjDnlVgv1pYdi"><td data-page-node-id="o3xCQctbxwWbwAzlKdX4H1">⑤ 选 + 占同一动作</td><td data-page-node-id="6vwTfMYnDuY630cdDkbIDM">分离后多个调度尝试会同时看到空闲容量 → <strong data-page-node-id="GAHJloEkHhlXftA9RLG5hb">超额启动</strong></td></tr>
+</table>
+
+<h3 data-page-node-id="HSPcgVWpfAiJOExWyXztOT">3.2 <code data-page-node-id="WD2j1xDP8ieH4024vWuGM7">drain()</code>：单飞与重入</h3>
+<pre data-page-node-id="tLKf72jaRPN2hL5PvNiADm"><code data-page-node-id="2yEqgcifjSFVWljpJzv9io"><span class="k" data-page-node-id="ZI2h7sBvSvj2w2q38nViTH">drain</span>(): Promise&lt;CoordinatorResult[]&gt; {
+    this.drainRequested = <span class="k" data-page-node-id="aPGlG68Tpm9d0OHNYtn9Rm">true</span>;                    <span class="c" data-page-node-id="nDcUvDsC5zHAbgnh3IaqPE">// 每次都表示「状态可能变了」</span>
+    if (this.drainPromise !== null) return this.drainPromise;   <span class="c" data-page-node-id="ERYPHiBV1rLstqLcKAS3Nd">// 复用 in-flight</span>
+    this.drainPromise = this.runDrainLoop();
+    return this.drainPromise;
+}
+
+<span class="k" data-page-node-id="y1LYHaNu8hoq0EUQKD3ATi">runDrainLoop</span>() {
+    const results = [];
+    try {
+        while (this.drainRequested) {                 <span class="c" data-page-node-id="Yz7yM3MxyHF4h9SQmBuCju">// 执行期间被再次请求 → 多跑一轮</span>
+            this.drainRequested = false;
+            results.push(...await this.drainOnce());
+        }
+        return results;
+    } finally { this.drainPromise = null; }
+}</code></pre>
+<div class="warn" data-page-node-id="Mkn9oHrWfze0iRrHXPlXjX"><strong data-page-node-id="VlobKUDBQCCeE8jpBXUkPp">已知副作用</strong>：并发 tick 共享同一个会被 reject 的 promise，于是每个等待者各调一次 <code data-page-node-id="OCZDhu1dCoJcvPcGrs8vKM">onError</code> —— 实测同一次失败被上报 <strong data-page-node-id="KREm1xino9Sn0JGCP2R03A">9 次</strong>（去重后 1 条）。失效不致命，但计数语义不准。</div>
+
+<h3 data-page-node-id="eYVIAXYtkwxLBFYZE9Dl0m">3.3 <code data-page-node-id="F4wFLFU3HAyGsnLn4ZIl0c">reconcileQueuedRuns()</code>：TOCTOU 对账</h3>
+<pre data-page-node-id="ygk4Lv03ZvzCSPnuhXmdMj"><code data-page-node-id="LJxhOSqkkCvbfE4gvtHY1L"><span class="k" data-page-node-id="UQydS3jW1J4xtRQLbLNHV3">reconcileQueuedRuns</span>() {
+    for (const run of reader.listQueuedRuns()) {        <span class="c" data-page-node-id="OQvW8P4hvS3RNffy0hGxDN">// DB 里所有 QUEUED</span>
+        const waitedMs = nowMs - Date.parse(run.updatedAt);
+
+        <span class="c" data-page-node-id="MnmmdDpcD6wteFvbmHY6a5">// ① 超 TTL → 先落库 FAILED，再摘内存队列（顺序不可反）</span>
+        if (queueTtlMs !== undefined &amp;&amp; waitedMs &gt; queueTtlMs) {
+            try { this.runService.failQueuedRun(run.id, "QUEUE_TIMEOUT", …); }
+            catch (e) { console.error(…); continue; }   <span class="c" data-page-node-id="E9WOfP8FcYA8khirA2jUzS">// 落库失败 → 保留，下轮重试</span>
+            this.scheduler.removeQueued(run.id);
+            this.pendingResumeByRunId.delete(run.id);
+            timedOut.push(run.id); continue;
+        }
+
+        <span class="c" data-page-node-id="teR0sQOZlWuPac0kXn5dyJ">// ② DB 是 QUEUED 但不在内存队列 = 孤儿 → 重新入队</span>
+        if (queuedInMemory.has(run.id)) continue;
+        this.scheduler.enqueue({ …, enqueuedAt: run.updatedAt });   <span class="c" data-page-node-id="uIYt1bMJnfuuvYXBM2ptbZ">// TTL 时钟跨重启累计</span>
+        requeued.push(run.id);
+    }
+}</code></pre>
+<p data-page-node-id="kgRmFD55TXllicByXgBCBZ">孤儿窗口来自 <code data-page-node-id="ObHZbDkUGmuvi07QAT0hT6">claimNext()</code> 与 <code data-page-node-id="t4aZivtj6SMEhUKi6LVKc6">release + re-enqueue</code> 之间：此时 Run 已离开内存队列，但 DB 仍是 <code data-page-node-id="5WeIjjCJHODzWvWt3EyGFI">QUEUED</code>。若在这两步之间崩溃，只有对账能把它捞回来。</p>
+<p data-page-node-id="rfSCtM2lv7JuRFVoTTQ0cs"><strong data-page-node-id="RjF2Pjpwgws2FobjSUwSDL">顺序的关键</strong>：必须先 <code data-page-node-id="9tpMZDa066O8hvm0FmeMYI">failQueuedRun</code> 落库成功，再 <code data-page-node-id="hRk1p5UOYf36rTkhdOTgcJ">removeQueued</code> 摘内存。反过来一旦落库失败，这个 Run 既不在队列、也不是终态 —— 完全消失。</p>
+
+<h3 data-page-node-id="ZQhAAA7tiDRBDy795QQlDS">3.4 <code data-page-node-id="nH4CHUvk4xWdwF7dpVHega">classifyResource()</code>：四组信号 → 三档</h3>
+<pre data-page-node-id="zh8sYddRAPcgCdweg5LaBy"><code data-page-node-id="MkZvcUuY7Clf0gkuaFF2zh"><span class="c" data-page-node-id="ocZnGIjj6QG2jgpdGBEYlZ">// 信号源（任一可用即可分类；全部为 null 才是 UNKNOWN）</span>
+gpuMemoryUsagePercent  = used / total * 100        <span class="c" data-page-node-id="uFGcCOIzpmEGyMwaUl4oPK">// total ≤ 0 或任一为 null → null</span>
+kvCacheUsagePercent    <span class="c" data-page-node-id="0t8rnJh4kWP4i7o9QenhsH">// vLLM /metrics</span>
+runningRequests / waitingRequests
+
+<span class="c" data-page-node-id="AE8r8teCMSIqSvY1lAyKG1">// 判定优先级（收集全部 reason，再按最高档返回）</span>
+if reasons.some(r =&gt; r.endsWith("_CRITICAL")) return CRITICAL;   <span class="c" data-page-node-id="HsbCdWQjLK2GDAWuQwiluz">// 一票否决</span>
+if reasons.some(r =&gt; r.endsWith("_BUSY"))     return BUSY;
+return NORMAL;                                                    <span class="c" data-page-node-id="3TT1iOffpcuyEFhxqDsACv">// WITHIN_THRESHOLDS</span></code></pre>
+<table data-page-node-id="50elqxI6rzJKT0RW3sJBAH">
+<tr data-page-node-id="0jARffuH8h5Yly7X2jfY6A"><th data-page-node-id="a4QcPzJv5dMF9nKTOTXjEB">pressure</th><th data-page-node-id="YovCbwQrFWBZ7BzKpq5Thx">policy 动作</th><th data-page-node-id="j9x21k2Ts2EqR5VzgNfPle">reasonCode</th></tr>
+<tr data-page-node-id="iM2UaNZekTMl1J9G87igAL"><td data-page-node-id="ymYgTYFsADHiiG9T23yVji"><span class="pill p-red" data-page-node-id="CjnYUmNAfjkpw9es6VtYYF">CRITICAL</span></td><td data-page-node-id="EwLjz2jRPWzLF3EX3zG0wH">QUEUE</td><td data-page-node-id="bCVE7nRYrF09cJdo5bTVex"><code data-page-node-id="nhBSLPYeONIacKKsiOgky7">RESOURCE_CRITICAL</code></td></tr>
+<tr data-page-node-id="JKsKYL13oGcbydwHW9IMFu"><td data-page-node-id="yp4ekEO8UDg0EkTUsWivQE"><span class="pill p-gray" data-page-node-id="IypmxzKzIwutdIxxsEk8db">UNKNOWN</span></td><td data-page-node-id="xIl57LBS3DyBQOdF3KHlWx">QUEUE</td><td data-page-node-id="3v6mlFTOIqTNeHDQ2PNPoO"><code data-page-node-id="1X9HxMBYKTszoofOkodYwx">RESOURCE_UNKNOWN</code></td></tr>
+<tr data-page-node-id="bXwWtPMLGglYH6pYZn3wdO"><td data-page-node-id="nyr56CgtOiFv8yuhyVQpWN"><span class="pill p-amber" data-page-node-id="iGWzX791TXfXq7RfabGSqC">BUSY</span></td><td data-page-node-id="BIpqzGiJfGGEilsmTvAsOx">先查 <code data-page-node-id="qEPoPsK14OyWCFqUfsAncE">activeRunCount ≥ maxActiveRuns</code> → QUEUE <code data-page-node-id="zdFlA1sOyc2mF0qSFFlNcT">GLOBAL_CONCURRENCY_LIMIT</code>；再查 <code data-page-node-id="IQRHlGolcyJxpdR2KWllnC">activeTenantRunCount &gt; 0</code> → QUEUE <code data-page-node-id="m8Wb99rA3E8XYMKkIzS90k">RESOURCE_BUSY_TENANT_LIMIT</code>；否则 START</td><td data-page-node-id="FeYF1N3cRVcPgZ2JCeLJTU"><code data-page-node-id="irR9czxCHDDqUqj96Cq0Br">RESOURCE_BUSY_TENANT_AVAILABLE</code></td></tr>
+<tr data-page-node-id="ADfqWF26blFCnzcSBF54g2"><td data-page-node-id="CAhUnC9yde7H14fMAlwjqJ"><span class="pill p-green" data-page-node-id="Xw7HR7WJdjeE1NVu50p5m7">NORMAL</span></td><td data-page-node-id="sNktte9L97D6JPjzmLVxfM">查全局上限 → QUEUE；否则 START</td><td data-page-node-id="SCeUfsBffHppNC3VFHgO0Y"><code data-page-node-id="rxVUBvxteF2Su40EPmbDW7">RESOURCE_NORMAL</code></td></tr>
+</table>
+<div class="note" data-page-node-id="oWgUXt1YQg3AuLnxYEqTRb">BUSY 档的语义容易被忽略：<strong data-page-node-id="a2T2CJufKENJCrN6W4BmRL">它只允许同一租户同时跑一个</strong>（<code data-page-node-id="yrVEH9jAYYDYLm9Ep8Nn5j">activeTenantRunCount &gt; 0</code> 就排队）。这是"半压力下的租户间公平"，不是简单的并发限制。</div>
+
+<h3 data-page-node-id="x7QZR4Wxz0hxd9mlug0AR9">3.5 <code data-page-node-id="EcvFbKXWQ96mQk0LQOg3yO">canAutomaticallyReplay()</code>：故意保守</h3>
+<pre data-page-node-id="if3HVSE0MjUZ8sAPXzjbHA"><code data-page-node-id="t4QJ9lFFhtkrRSxQFryLq8"><span class="k" data-page-node-id="GICpmC0yJ1tVDLttnBrWut">canAutomaticallyReplay</span>(status, effect): boolean {
+    if (status !== "PREPARED") return false;     <span class="c" data-page-node-id="X0J7aorhywpzi0X1o81UnX">// 已有确定结果就不需要重放</span>
+    switch (effect) {
+        case "READ_ONLY":        return true;    <span class="c" data-page-node-id="c88p11Y0zzty9eYnQcpB7t">// 无副作用，重试安全</span>
+        case "IDEMPOTENT_WRITE": return false;   <span class="c" data-page-node-id="D6WadOOLUyOgJCYjiBlttq">// ← 见下方注释原文</span>
+        case "UNKNOWN_EFFECT":   return false;
+    }
+}</code></pre>
+<pre data-page-node-id="Fyrue5RVuaBwvBuGDGrdmg"><code data-page-node-id="2dBtMFvuv7ZXzi9uZO7cTH"><span class="c" data-page-node-id="wloelNMUcJMIa6P3FEVVak">// 源码注释原文：</span>
+<span class="s" data-page-node-id="keOQzd8Zh1UPHbzV7punGx">// “写入被声明为幂等”本身不足以证明外部系统会使用稳定幂等键。</span>
+<span class="s" data-page-node-id="ajmc8srK1qUciqBipAFDtw">// 在 ToolExecution 持久化并校验真实幂等证据前保持 fail closed。</span></code></pre>
+<p data-page-node-id="NEbxRApQSHyDfiqLSfM7wi">注意枚举里<strong data-page-node-id="YopAf2ppMQ5TY3yFEBnttb">没有</strong> <code data-page-node-id="JEWNoQS57wy2Ky8NSBhv0i">NON_IDEMPOTENT</code> —— 它被 <code data-page-node-id="U661pKNUElF4NEDMMDmmuG">UNKNOWN_EFFECT</code> 吸收了。系统关心的不是"这个工具是不是幂等的"，而是"<strong data-page-node-id="D0W5dE4JzZnQ3EXPTPtGXm">我当前能不能证明这次执行的副作用状态</strong>"。</p>
+
+<h3 data-page-node-id="m6ODmCTJ3u9O6ghEwsPgCG">3.6 <code data-page-node-id="RIWlPnLWBO8JVRRsUurnGn">ToolGateway</code> 两阶段</h3>
+<pre data-page-node-id="5Kkn5BgsJlqCDgPPyIzeyr"><code data-page-node-id="RVpyIPeWHuCgrCOJuIs5VN"><span class="k" data-page-node-id="y5pOlx0TrP2EsgwvhBvWo9">prepare</span>(input): ToolPrepareDecision {
+    this.policyGuard?.assertAllowed(input);                    <span class="c" data-page-node-id="M1MR3Z5m58K96N2eX55agN">// ① 策略否决先于一切</span>
+    const history = this.store.getByToolCall(input.runId, input.toolCallId);   <span class="c" data-page-node-id="a9E0NfgEi6PSRYi7ueYDxG">// ② 稳定业务键</span>
+    if (history === null) { this.store.prepare(PREPARED); return PREPARED; }
+    switch (history.status) {
+        case "SUCCEEDED": return { kind:"REUSE", result: history.result };      <span class="c" data-page-node-id="TTMhZieaSazyd1iZI84ztL">// 副作用已发生，直接复用</span>
+        case "FAILED":    return { kind:"DENIED", reason:`工具执行失败:…` };
+        case "PREPARED":  return canAutomaticallyReplay(history.status, history.effect)
+            ? { kind:"PREPARED", execution: history }   <span class="c" data-page-node-id="5hAQVDg5r3iJceX6s9VzI7">// ← 复用原记录，不能再 prepare（唯一约束）</span>
+            : { kind:"DENIED", reason:`不允许自动重放：${history.effect}` };
+    }
+}
+
+<span class="k" data-page-node-id="k8kwCgiy98j9HVdgnu68do">complete</span>(input, execution, outcome) {
+    if (!outcome.ok) { this.store.fail(FAILED + errorMessage); return; }
+    const checkpoint = { id, runId, toolExecutionId: execution.id,
+                         runtimeSessionRef, lastEventSequence, createdAt };
+    this.store.completeWithCheckpoint(SUCCEEDED, checkpoint);   <span class="c" data-page-node-id="TEePDfYPtgEk672NiLaPJv">// ③ 结果与 Checkpoint 原子提交</span>
+}</code></pre>
+<div class="note" data-page-node-id="5mnjAWRwgzVz3QYG31DQTT">Checkpoint 保存的是「下一次可以安全继续所需的持久信息」——<code data-page-node-id="wgoduPvF90XlCqfaDNQ3k8">runtimeSessionRef</code> + <code data-page-node-id="PltEd0xigJ9Cv6bU2GAoMD">lastEventSequence</code>，<strong data-page-node-id="Ddjw5lFoEUAIa7WpG52fBk">不是进程内存快照</strong>。恢复时从这个 sequence 继续追加事件，所以 Day7 的 sequence 能保持 1..8 连续。</div>
+
+<h2 data-page-node-id="WjhPfd3MEf4zOCymrwEw4d">§4 两处保留的结构图</h2>
+
+<h3 data-page-node-id="g8Wco1XZxZLDiEUPJHQqYq">4.1 运行时四层装饰器与进程边界</h3>
+<svg viewBox="0 0 1040 300" width="100%" role="img" xmlns="http://www.w3.org/2000/svg" data-page-node-id="Z9oUtgofbD4c9K7PXIaBq1">
+<title>运行时四层装饰器与进程边界</title>
+<desc data-page-node-id="S4GGv6Jto22jXEAIGq4LuE">从外到内四层 Runtime，以及 Master 与 Worker 子进程的边界划分</desc>
+<rect x="20" y="24" width="640" height="256" rx="20" fill="#FBFAF7" stroke="#CFCCC3" stroke-width="0.5" data-page-node-id="EhLCAGmRggWO6MGr2pL7zi"/>
+<text x="40" y="48" font-size="12" fill="#5F5E5A" dominant-baseline="central" data-page-node-id="5FUJUuLG17sBL7IA6NlmwD">Master 进程（拥有 SQLite）</text>
+
+<rect x="40" y="66" width="600" height="46" rx="10" fill="#F1EFE8" stroke="#B4B2A9" stroke-width="0.5" data-page-node-id="1WIASupdACMVD9krBMZzOa"/>
+<text x="60" y="89" font-size="13" font-weight="500" fill="#2C2C2A" dominant-baseline="central" data-page-node-id="Huws7S4FQVU7Y3c3QXmU5g">④ WorkerProcessAgentRuntime</text>
+<text x="330" y="89" font-size="11" fill="#5F5E5A" dominant-baseline="central" data-page-node-id="hzFiO5Ncz1UXnZlyz5Mrmw">spawn 子进程 · NDJSON IPC · 握手看门狗 15s · 崩溃翻译 WORKER_CRASHED · 孤儿沙箱回收</text>
+
+<rect x="40" y="124" width="600" height="46" rx="10" fill="#FAEEDA" stroke="#EF9F27" stroke-width="0.5" data-page-node-id="BhdjIGYnZqJtbs7dKH6ZWm"/>
+<text x="60" y="147" font-size="13" font-weight="500" fill="#633806" dominant-baseline="central" data-page-node-id="2xkBDoAnVzmBfWEOCkarps">③ SupervisedAgentRuntime</text>
+<text x="330" y="147" font-size="11" fill="#854F0B" dominant-baseline="central" data-page-node-id="umWEUw75pTu6nSRnSVCKFi">执行超时 30min · 优雅中断 → SIGTERM → SIGKILL 阶梯 · forceKill 物理强杀</text>
+
+<rect x="40" y="182" width="600" height="46" rx="10" fill="#E6F1FB" stroke="#85B7EB" stroke-width="0.5" data-page-node-id="nAXO1u6iKEo0NrGPRcXLMn"/>
+<text x="60" y="205" font-size="13" font-weight="500" fill="#0C447C" dominant-baseline="central" data-page-node-id="FMFlrELljg7VMstZfh9yj6">② ManagedAgentRuntime</text>
+<text x="330" y="205" font-size="11" fill="#185FA5" dominant-baseline="central" data-page-node-id="SMp3mKO75AWZpOjwVfDlwj">Instance/Attempt 绑定 · 五层策略交集 · Capability 门 · Sandbox 生命周期</text>
+
+<rect x="40" y="240" width="600" height="30" rx="8" fill="#EAF3DE" stroke="#97C459" stroke-width="0.5" data-page-node-id="l8hUu0FYjNeUZuqj8fADgq"/>
+<text x="60" y="255" font-size="12" fill="#27500A" dominant-baseline="central" data-page-node-id="i03kIYTY9001Xk0cvKKkL1">① PiAdapter（在 Worker 内装配，驱动 Pi Agent Runtime）</text>
+
+<rect x="700" y="66" width="320" height="204" rx="20" fill="#FBFAF7" stroke="#CFCCC3" stroke-width="0.5" data-page-node-id="LdY2c8Ctf1HkVRiq5LUTy9"/>
+<text x="720" y="90" font-size="12" fill="#5F5E5A" dominant-baseline="central" data-page-node-id="YcRWpAYS9MjhnanSVOrDeh">Worker 子进程（独立 PID）</text>
+
+<rect x="720" y="110" width="280" height="42" rx="8" fill="#E6F1FB" stroke="#85B7EB" stroke-width="0.5" data-page-node-id="jWA1jTvl30EwwPNecXhd9o"/>
+<text x="736" y="131" font-size="12" fill="#0C447C" dominant-baseline="central" data-page-node-id="HmlQ99GBr4dpTsnWSW2tKT">worker-main.ts（console 重定向到 stderr）</text>
+
+<rect x="720" y="162" width="280" height="42" rx="8" fill="#E6F1FB" stroke="#85B7EB" stroke-width="0.5" data-page-node-id="nAEu9SHTeVok8fBDk54Org"/>
+<text x="736" y="183" font-size="12" fill="#0C447C" dominant-baseline="central" data-page-node-id="I1BMElOgb6HBZElv8D8q33">PiAdapter + ModelRuntime</text>
+
+<rect x="720" y="214" width="280" height="42" rx="8" fill="#FAEEDA" stroke="#EF9F27" stroke-width="0.5" data-page-node-id="nWj64F5BG3cLBMrTcERebz"/>
+<text x="736" y="235" font-size="12" fill="#633806" dominant-baseline="central" data-page-node-id="8l8xAeS2yNnbApOCDdNPaC">WorkerToolGateway（无旁路放行路径）</text>
+
+<text x="660" y="150" font-size="11" fill="#A32D2D" text-anchor="middle" dominant-baseline="central" data-page-node-id="REELOystSsSvGOHuAxGhcJ">stdio</text>
+<text x="660" y="168" font-size="11" fill="#A32D2D" text-anchor="middle" dominant-baseline="central" data-page-node-id="x4DHxvmMneF8Bp2BCe4du9">NDJSON</text>
+<text x="660" y="186" font-size="11" fill="#A32D2D" text-anchor="middle" dominant-baseline="central" data-page-node-id="OMOeNW20zKFrT19KslSu7r">v2</text>
+</svg>
+
+<h3 data-page-node-id="VuM98UytMfAFfByUuSn6O1">4.2 工具治理：两个阶段跨越进程边界</h3>
+<svg viewBox="0 0 1040 268" width="100%" role="img" xmlns="http://www.w3.org/2000/svg" data-page-node-id="yv0FlD2oK47b1TpOFyGTC7">
+<title>工具治理跨进程两阶段</title>
+<desc data-page-node-id="2bkGy16rcx4JHFg0RExxJE">Worker 发起工具准备请求，Master 完成策略与幂等裁决并记账，Worker 只保留真实执行</desc>
+<defs data-page-node-id="rgazFkLGVoAKHosrdxCwzG">
+<marker id="ar2" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse" data-page-node-id="8WLriz03pvAwm8nGeGDDN4">
+<path d="M2 1L8 5L2 9" fill="none" stroke="context-stroke" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" data-page-node-id="WLKVKxXhxGyXD2WRviFLeC"/>
+</marker>
+</defs>
+<rect x="20" y="30" width="440" height="218" rx="20" fill="#FBFAF7" stroke="#CFCCC3" stroke-width="0.5" data-page-node-id="zz1uf6BBbgnzDspfnBAM6t"/>
+<text x="40" y="54" font-size="12" fill="#5F5E5A" dominant-baseline="central" data-page-node-id="zOW6sxyE8ECCoenEC9NM2h">Master：ToolGateway（治理与记账）</text>
+
+<rect x="40" y="72" width="400" height="38" rx="8" fill="#E6F1FB" stroke="#85B7EB" stroke-width="0.5" data-page-node-id="8CkMv7qD1iYOrpmL0eY6YC"/>
+<text x="56" y="91" font-size="12" fill="#0C447C" dominant-baseline="central" data-page-node-id="ifyBy7e4gMi0eyDKFWgyAU">① policyGuard.assertAllowed(input)</text>
+
+<rect x="40" y="118" width="400" height="38" rx="8" fill="#E6F1FB" stroke="#85B7EB" stroke-width="0.5" data-page-node-id="QOfw6f7s1STNmIVXxBl3gt"/>
+<text x="56" y="137" font-size="12" fill="#0C447C" dominant-baseline="central" data-page-node-id="dWPGin3K68RrW1ZpLQbJvb">② getByToolCall(runId, toolCallId) → 幂等历史判定</text>
+
+<rect x="40" y="164" width="400" height="38" rx="8" fill="#EAF3DE" stroke="#97C459" stroke-width="0.5" data-page-node-id="6JgMaJGDFewecnPjStavsW"/>
+<text x="56" y="183" font-size="12" fill="#27500A" dominant-baseline="central" data-page-node-id="hGdKlbDxcExbytPRcRGznK">③ 写 PREPARED（副作用发生之前）</text>
+
+<rect x="40" y="210" width="400" height="30" rx="8" fill="#F1EFE8" stroke="#B4B2A9" stroke-width="0.5" data-page-node-id="72eIBG1W4NEP7FlEmsIHWW"/>
+<text x="56" y="225" font-size="12" fill="#2C2C2A" dominant-baseline="central" data-page-node-id="kgvZDAwfRW0zEXEhfNFerd">④ complete → SUCCEEDED + Checkpoint（原子）</text>
+
+<rect x="580" y="30" width="440" height="218" rx="20" fill="#FBFAF7" stroke="#CFCCC3" stroke-width="0.5" data-page-node-id="UX2TadvIHPZYR3GXYY2Gb7"/>
+<text x="600" y="54" font-size="12" fill="#5F5E5A" dominant-baseline="central" data-page-node-id="SPxLfandNF9bscaXFu3U2T">Worker：只保留真实执行</text>
+
+<rect x="600" y="72" width="400" height="38" rx="8" fill="#E6F1FB" stroke="#85B7EB" stroke-width="0.5" data-page-node-id="NtSJQXzwzvOgLcJppZhFW7"/>
+<text x="616" y="91" font-size="12" fill="#0C447C" dominant-baseline="central" data-page-node-id="u2xgPP8MJFXqYEJ0grIJIf">PiAdapter 发起工具调用</text>
+
+<rect x="600" y="118" width="400" height="38" rx="8" fill="#FAEEDA" stroke="#EF9F27" stroke-width="0.5" data-page-node-id="nnuCzEoOxrDozGczbLAVTX"/>
+<text x="616" y="137" font-size="12" fill="#633806" dominant-baseline="central" data-page-node-id="JY7vIRHACLkGE4UTlHWBEK">等待裁决（ALLOWED / REUSE / DENIED）</text>
+
+<rect x="600" y="164" width="400" height="38" rx="8" fill="#EAF3DE" stroke="#97C459" stroke-width="0.5" data-page-node-id="CjxaZkiYmrW7Yg3FhRYuWN"/>
+<text x="616" y="183" font-size="12" fill="#27500A" dominant-baseline="central" data-page-node-id="8fmHNjVECzipEoajHAfwGX">仅当 ALLOWED 才执行真实沙箱工具</text>
+
+<rect x="600" y="210" width="400" height="30" rx="8" fill="#FCEBEB" stroke="#F09595" stroke-width="0.5" data-page-node-id="4r5b35FFCn0BYkwETu3ZXK"/>
+<text x="616" y="225" font-size="12" fill="#791F1F" dominant-baseline="central" data-page-node-id="EEkM78OCbodxtu1QiyrtLb">stdin end → failAllPending() 全部拒绝</text>
+
+<line x1="460" y1="91" x2="576" y2="91" stroke="#185FA5" stroke-width="1.5" marker-end="url(#ar2)" data-page-node-id="vzigfmCskvyXD7CilDuqlQ"/>
+<line x1="576" y1="137" x2="464" y2="137" stroke="#BA7517" stroke-width="1.5" marker-end="url(#ar2)" data-page-node-id="GubW4d4C1b0hm99ooqDJYO"/>
+</svg>
+<p data-page-node-id="G7FDcbH1addILwCS0fT16u"><code data-page-node-id="mDxp9clQr2DKJ6tQ55HuV5">TOOL_PREPARE_REQUEST</code>（Worker→Master）与 <code data-page-node-id="RB6L0C8tfVddmlHeKD1hB1">TOOL_PREPARE_RESPONSE</code>（Master→Worker）是这一对往返。<strong data-page-node-id="7XCHr1S9mHdoDGF1iCEaMK">Worker 进程内没有任何可以跳过裁决的工具执行路径</strong>；Master 断连时 <code data-page-node-id="XuHetT4RfDZg4COu25G2zf">failAllPending()</code> 让所有在途裁决失败，宁可任务失败也不放过未受治执行。</p>
+
+<h2 data-page-node-id="6kiiGdZ5hg7NUcjGdFqBBj">§5 参数全表</h2>
+<div class="h2note" data-page-node-id="4ZAmO5yA4ycZVj7tZYga7z">全部经 <code data-page-node-id="xCZWRx7eXfgvN1ZlAOVAOd">loadHarnessConfig(environment, cwd)</code> 读取；非法值在启动时 <code data-page-node-id="13gFXsw0cyqgoUvnHKnmV7">throw</code>（fail-fast），不会运行到一半才发现。</div>
+
+<table data-page-node-id="GU5knKAW6MLN9tH4IRAEpp">
+<tr data-page-node-id="EiFodNhorPt4wR35sWHymj"><th data-page-node-id="nhMbAJDJT7lVtNUHfMbef0">环境变量</th><th data-page-node-id="mgWt18hVxnaIDUQt7Je6GQ">默认</th><th data-page-node-id="xdWVdnN2tXf6koOKZeRDxs">生效点</th><th data-page-node-id="P9zHzS3IfiHL3jF9eZhCvi">非法/违反时</th></tr>
+<tr data-page-node-id="96Y87nOpbsigLZJXr4rbG4"><td class="mono" data-page-node-id="qDaMxC6X9BB0KwWVjU4VqP">VLLM_MODEL_ID</td><td data-page-node-id="IIU2SyMAaEx03PL770r0fo"><em data-page-node-id="GBgmFaOVELt6zrRRcV2paf">必填</em></td><td data-page-node-id="4BTPTcI0Hzzfw1Cig5EjQR">Pi 模型标识</td><td data-page-node-id="zvnibydyET6q3lWIzmuGrS">缺失 → 启动抛「必须设置环境变量」</td></tr>
+<tr data-page-node-id="fgzTTH9LkgtO0Od6AJREGX"><td class="mono" data-page-node-id="4UqzUZucBLyXWQWSTrwxYB">VLLM_BASE_URL</td><td data-page-node-id="EVulHEkO0Y8ObCwIHzv5SX"><code data-page-node-id="HWRGdO18wO4RjCQ8bFhIcA">http://127.0.0.1:8000/v1</code></td><td data-page-node-id="TXtp2JO2thxQKc5txxN1HL">网关后端</td><td data-page-node-id="WHJ6AHGlwCt7NsPJFGeU0V">—</td></tr>
+<tr data-page-node-id="mDADxCYMy0P9rQaBxPfVQz"><td class="mono" data-page-node-id="ES3ybH6004D8ByxAsYVsXI">HARNESS_DATABASE_PATH</td><td data-page-node-id="nCiPHh9BdcThWbn0JAHZJs"><code data-page-node-id="QfDqdfag4rR3eWOLDkA1OQ">&lt;cwd&gt;/data/harness.sqlite</code></td><td data-page-node-id="L9kcVpqxzpyVEF6M65R4EN">SQLite 打开</td><td data-page-node-id="lsmgGdZlIPG2nhthMxKB4k">父目录自动 <code data-page-node-id="LDhyLkqVk6eM4AN8WhZzgR">mkdirSync</code></td></tr>
+<tr data-page-node-id="eBV0KIv0C4lJKOu8277cRD"><td class="mono" data-page-node-id="JukHHfC9EkVSg3S3UEyBsX">HARNESS_PORT / HARNESS_HOST</td><td data-page-node-id="B5P3uHkWFWCvIOVGGt34tW"><code data-page-node-id="O33eVFH5AR40v4IujitUlY">3000</code> / <code data-page-node-id="F3ald5cKTzJ0Rkl8xU0gMM">127.0.0.1</code></td><td data-page-node-id="AFOqwTCswLc7RRskMuccy2">HTTP 监听</td><td data-page-node-id="OAGohc2eA4FdhVTuCAnuaD">&gt; 65535 → 抛错</td></tr>
+<tr data-page-node-id="dGljVDWvqmClm1B3C3KzuO"><td class="mono" data-page-node-id="tPc3HdSKgC2JOboRzMVSmT">HARNESS_WORKSPACE_ROOT</td><td data-page-node-id="zg41FMUovdgbkp5oO5AE72"><code data-page-node-id="Asy9vtOyyX1blcktVzZbaV">&lt;cwd&gt;/data/workspaces</code></td><td data-page-node-id="nbrGkVbvBh2fUuvHCFVGDn">Workspace 根</td><td data-page-node-id="1laa92XF7HFo436ZVXhWg0">生成路径越界 → 抛「非法 Workspace 根目录」</td></tr>
+<tr data-page-node-id="kMrcB84oT5cFmzJ2hqUQxx"><td class="mono" data-page-node-id="tX6NMFYSLn7HgcOSB027Lf">HARNESS_MAX_ACTIVE_RUNS</td><td data-page-node-id="6p0RPRD26RqprtGNe0tEd4"><code data-page-node-id="G345EFVDNpEA6ltT9wJDaL">30</code></td><td data-page-node-id="VQ40LnoZk9mqA44zYke9a5">全局 slot</td><td data-page-node-id="0dUoEkPagEQWMRxFvynwdv">非正整数 → 抛错</td></tr>
+<tr data-page-node-id="sCKxFmZiO28qEEczbxlGs1"><td class="mono" data-page-node-id="qF7bY6Kmwi4eIwMWsDSGKJ">HARNESS_MAX_ACTIVE_RUNS_PER_TENANT</td><td data-page-node-id="lfzEmLBarIsfWs6nj0C2Mv"><code data-page-node-id="YzHjzMvWfa8OkeCO1ghGOT">10</code></td><td data-page-node-id="BkfRncVdbwpbC9FMBHKLNI">单租户 slot</td><td data-page-node-id="KiXB8EbNXxHc7YTviIvGqs">&gt; 全局值 → 抛错</td></tr>
+<tr data-page-node-id="0JryJ3thHghermemr2sUsf"><td class="mono" data-page-node-id="fJOw6UWb5RLhtVI5zHLbL5">HARNESS_PUMP_INTERVAL_MS</td><td data-page-node-id="2JmLmzYNUNPH8NBShzXGCo"><code data-page-node-id="sd7DM5mLD3QAUzIxVqe9St">1000</code></td><td data-page-node-id="2Wyd0AeN4IyifZxADqviPE">drain 周期</td><td data-page-node-id="zsiALD4OzDTxELmYtpBM0m">非正整数 → 抛错</td></tr>
+<tr data-page-node-id="WYO7uCNHEV4084O7IEqmoH"><td class="mono" data-page-node-id="e7MFDU8aCIEZaA5i5CCC9S">HARNESS_QUEUE_TTL_MS</td><td data-page-node-id="JGXukjKQeJML7vG6laZN94"><code data-page-node-id="8RTjzRl62JRCHK1wH5bnAF">300000</code></td><td data-page-node-id="4CxNmRZHtWnbZ4Lya4KodZ">排队熔断门限</td><td data-page-node-id="e3ADKiG5EAREnPPta4EJuR">—</td></tr>
+<tr data-page-node-id="JbY6HJojUt1RuXxjZgLBH4"><td class="mono" data-page-node-id="abHMll2WM6P38JoOQIUyTC">HARNESS_EXECUTION_TIMEOUT_MS</td><td data-page-node-id="cUlyzTmxzYHhiYM3m8cURl"><code data-page-node-id="7jLsXThGmFk66Oab4qDrze">1800000</code>（30min）</td><td data-page-node-id="9e9K6FnuHyPaZH4wLKdrBK">Supervisor 超时</td><td data-page-node-id="QWfzYE0u2M3N0Ug9s9lFiS">—</td></tr>
+<tr data-page-node-id="iKDllouw6bhb8mxWreAri9"><td class="mono" data-page-node-id="kUnfzOq1lhIud0QmuyGgDs">HARNESS_INTERRUPT_GRACE_MS</td><td data-page-node-id="MiNq81wC6iVyGDDBV0JrWo"><code data-page-node-id="M0rSno6sgUKsFIBDjHMqi3">10000</code></td><td data-page-node-id="K6tD7aqi6fdwyslf9LP7cV">优雅中断宽限</td><td data-page-node-id="iaRiD1yTa2XWtZdBRvdaIP">—</td></tr>
+<tr data-page-node-id="wwjprgH7CFC4GhrWC2HDNr"><td class="mono" data-page-node-id="uFM867A8cwq2bEXR9DGVOC">HARNESS_WORKER_HANDSHAKE_TIMEOUT_MS</td><td data-page-node-id="zgDspCFIwVuchpA84TDJDe"><code data-page-node-id="ChxDNeIRSm8NCcrxDCzf7p">15000</code></td><td data-page-node-id="1kazaSzK26z9SB9D3rHOw7">WORKER_READY 看门狗</td><td data-page-node-id="ffsmsad6NR0FFhhHBQyxtw">超时 → SIGKILL + WORKER_CRASHED</td></tr>
+<tr data-page-node-id="MnGNa8vt1FX4JAlpwcjYgo"><td class="mono" data-page-node-id="kLGAgNrE1X37wtHuObjcmr">HARNESS_MAX_USER_INPUT_CHARS</td><td data-page-node-id="iOLySFpszmwVB117KxZibm"><code data-page-node-id="aEieAi8RNKvczCCtsgsAEu">100000</code></td><td data-page-node-id="CjJZ6ldmTBsRPhBzWF79pj">提交期输入上界</td><td data-page-node-id="vlUhBsTYjO11qpS4OfEqUT">超出 → 413</td></tr>
+<tr data-page-node-id="tLJFK1Hsf3NIG5E3T2Z8Qe"><td class="mono" data-page-node-id="uTuCtFREX9kwZZYyqUe7m1">HARNESS_RESOURCE_TIMEOUT_MS</td><td data-page-node-id="2cYsnyBKBeyfuP46cXVmCT"><code data-page-node-id="SERr4clHsMIzIfsB3G822j">3000</code></td><td data-page-node-id="gqEnjCVkzVOXHuAVRmXHzz">单次观测超时</td><td data-page-node-id="AWdIFFqJ4EpTgl7Nm0J82E">超时 → <code data-page-node-id="OayZjFxIaWMRXJP3uiTCLG">TIMEOUT</code> → fail-closed</td></tr>
+<tr data-page-node-id="Mc4FOFHZfuhCAl8CWrzHoF"><td class="mono" data-page-node-id="sugV2Oj0d91eU38ZJiF0m1">HARNESS_RESOURCE_METRICS_INTERVAL_MS</td><td data-page-node-id="jlitF4tEw6yZNFQgUANIZO"><code data-page-node-id="xgDeJfiDiOdlUNj6Ifxd5x">1000</code></td><td data-page-node-id="C9L0ZL1yeCeIyYmVPQvXN4">后台采样周期</td><td data-page-node-id="MO9xGqYXYbfWYCFc0hCoqx">—</td></tr>
+<tr data-page-node-id="Z0uav1xBDiVOaZRSUaEtGV"><td class="mono" data-page-node-id="cDDNgmVu9fEZJzZPXEDx9L">HARNESS_BUSY_GPU_MEMORY_PERCENT</td><td data-page-node-id="sJnMmSfHbUn6gX6RrDUVwZ"><code data-page-node-id="YFDnTEQpubBk68RHUbMBKm">70</code></td><td rowspan="8" data-page-node-id="A4zASauAKtF9ryO14xK6DB">阈值分类</td><td rowspan="8" data-page-node-id="uilpn60k2UEDff6ZmpFSBR">—</td></tr>
+<tr data-page-node-id="qSlx3b7tzhYzh8liaOnoJI"><td class="mono" data-page-node-id="ln9vormc8TUHgiS3xTi7y2">HARNESS_CRITICAL_GPU_MEMORY_PERCENT</td><td data-page-node-id="GBINB6OdccVS9VVXmUySEn"><code data-page-node-id="cDxU0jQFrAK8R2bYN3Jfft">90</code></td></tr>
+<tr data-page-node-id="eyxBeDQnETHh5ahEfcvqSQ"><td class="mono" data-page-node-id="SxH9BirE2royhmplCBfngX">HARNESS_BUSY_KV_CACHE_PERCENT</td><td data-page-node-id="6hqBZiInU7bNA3DwNISdc8"><code data-page-node-id="h0xrYm17vlYdvlJ9vylHqg">60</code></td></tr>
+<tr data-page-node-id="iGBZFnnrxlGMqHvEmHojbn"><td class="mono" data-page-node-id="YnAuvo44Q7C5yzs1wPWfTW">HARNESS_CRITICAL_KV_CACHE_PERCENT</td><td data-page-node-id="gajGRcS7unQZEDky5Xp7A7"><code data-page-node-id="0RXc6iyvL4TCx051obpuqo">85</code></td></tr>
+<tr data-page-node-id="xzCF6sE3sr1I7GZa8qPrbT"><td class="mono" data-page-node-id="OTDEER0LZgD4IelruJCDYB">HARNESS_BUSY_RUNNING_REQUESTS</td><td data-page-node-id="vNsFdh3uNkH0bYcsW5LuoJ"><code data-page-node-id="FDcDy0ta0YXE6sBlLQWl1W">4</code></td></tr>
+<tr data-page-node-id="SsPNSmOji2FPYQymWgL67I"><td class="mono" data-page-node-id="IC2FvgvTMZt1uX6D3N7yYv">HARNESS_CRITICAL_RUNNING_REQUESTS</td><td data-page-node-id="2CzzBujlhkuTTB25dgt6L4"><code data-page-node-id="sFBN3mTuUSHzzrGUjFOe01">8</code></td></tr>
+<tr data-page-node-id="QGC55CsGta42Ls0JLmR4FC"><td class="mono" data-page-node-id="ljK75J3bDZhx7rHqgGBAzQ">HARNESS_BUSY_WAITING_REQUESTS</td><td data-page-node-id="5Qbcipp2Qnsv1ZQh5FVkE6"><code data-page-node-id="8sMVAGLYedUZCZsMGd9wR3">1</code></td></tr>
+<tr data-page-node-id="sVvGFrdtKfZRTJt2Gnj3Wt"><td class="mono" data-page-node-id="CA8kxZvyEldukXgCFUQ7oi">HARNESS_CRITICAL_WAITING_REQUESTS</td><td data-page-node-id="Pz2lqvoQJ43J3rwmtijYoQ"><code data-page-node-id="fXEDIkFcpOuRA1zdQ32mIs">4</code></td></tr>
+<tr data-page-node-id="o2ry6BJPniUqG6Nn1NpMkI"><td class="mono" data-page-node-id="b7FGACGSBn4SM2C94ptX1X">HARNESS_SANDBOX_PROVIDER</td><td data-page-node-id="1mataOidPS7jxu1MxqYuMQ"><code data-page-node-id="0ux9tHTuBnENQerHSgi2aJ">managed-local</code></td><td data-page-node-id="MhLQz6mfoJENpXhQpGkYrb">Provider 选择</td><td data-page-node-id="KDa3mZIphuBUuaGFzLLc6K">非 container → 归为 managed-local</td></tr>
+<tr data-page-node-id="DH8CXWDmRxXBoGz1pmbIdD"><td class="mono" data-page-node-id="sWGKVnvjH5WITgkgDRYJr7">HARNESS_SANDBOX_PROFILE</td><td data-page-node-id="bBTUX429qqGnbkqPniwYTM">managed-local→<code data-page-node-id="Tgjb5RWPv9YJlfTllaLIx0">development</code>；container→<code data-page-node-id="tEmwDBNBSVmeXTG6BMGgWR">default</code></td><td data-page-node-id="oUhJFflPT0YAGQGDAwS9JL">隔离等级</td><td data-page-node-id="pPrfqHd3HTZXtsthdsvfOI">managed-local + 非 development → 抛错；container + development → 抛错</td></tr>
+<tr data-page-node-id="7zqi35x4jlzTiJdTK9CssE"><td class="mono" data-page-node-id="WPGZeFyjYKh4t8SlQ0ySYL">HARNESS_SANDBOX_RUNTIME</td><td data-page-node-id="rJRrNVnMFC5zONlMCuMzwE">container→<code data-page-node-id="Z32MQlTmnxkegkM1AB7sv3">runsc</code></td><td data-page-node-id="NC36ZffU0Sg6KFJn9SKtpX">OCI runtime</td><td data-page-node-id="Bc47coCAlbAc4PcpHIBVUF"><code data-page-node-id="0mFDZTQMT5CeaFE2BCNUxn">default</code>/<code data-page-node-id="sBoGCXaJZonDiLKp86hMG8">restricted-egress</code> + runc → 抛「禁止回退」</td></tr>
+<tr data-page-node-id="if0YmVu1jXzHx4wjs2BKVf"><td class="mono" data-page-node-id="UFs8jnBOEUYgoNGWfvgQWE">HARNESS_CONTAINER_IMAGE / _USER_ID</td><td data-page-node-id="FAGIUnEm0GiTDUP5VTbMqq"><code data-page-node-id="huKVqG0wtZsR5I6krrYikY">alpine:3.20</code> / <code data-page-node-id="QZR4VgM3xKYzE4w11Z5BFE">65532</code></td><td data-page-node-id="jrVlZsXZEtfnVCqth9IIqV">容器镜像与非 root UID</td><td data-page-node-id="IejPlR0zdK5hoUKEcngXa0">chown 失败 → 删除 Workspace 并抛错</td></tr>
+<tr data-page-node-id="dXGAVIJ5Fzef1KszBdgVQL"><td class="mono" data-page-node-id="WfQupCXHZdLHDmBCDUNktB">LLM_REQUEST_TIMEOUT_MS</td><td data-page-node-id="DO0m6xY9l3x4a9BTf2hm2V"><code data-page-node-id="EqpsK6jGMfAkQvmyGF7RUL">300000</code></td><td data-page-node-id="WVIss3qjiKibwNBga2Fr0J">单次模型请求（含流式）</td><td data-page-node-id="m86BEMOP9EPi500cbs7gwt">超时 → 流中断 → <code data-page-node-id="gtGchDiZeXEqL5p3sjLhBk">classifyModelFailure</code></td></tr>
+<tr data-page-node-id="qlw1kqTArDxq5IaejhDBBr"><td class="mono" data-page-node-id="EhtSDJXSejCmzI7Vs6b4nK">LLM_GATEWAY_STRATEGY</td><td data-page-node-id="GoK8EdANEhOkfgp51u1C0b"><code data-page-node-id="xhjN1afJZhxFzFvl1fuEKY">round-robin</code></td><td data-page-node-id="R5Nhj0HbycVtDTXsuCUNzQ">双卡负载均衡</td><td data-page-node-id="eypeS2SXUzhKVsmLiRTOIB">非三选一 → 抛错</td></tr>
+<tr data-page-node-id="kjn28nlpk0Ox3z34d17soy"><td class="mono" data-page-node-id="9K0NSh7kokNCPpYxR1SiBT">HARNESS_TENANT_BUDGETS</td><td data-page-node-id="TOc9L5QWYGWqTnEbRf6Ufh"><code data-page-node-id="MFeka5NDbFRc9Av0PpMdWr">{}</code>（不启用）</td><td data-page-node-id="rgUmS6CrLJoHuNpGpKLl6J">预算/fair-share 叠加</td><td data-page-node-id="FArE0vrMEvjFzxxDZIIt8r">JSON 非法或 weight/maxUnits ≤ 0 → 抛错</td></tr>
+<tr data-page-node-id="yQHdXk4KLLUjw02wF9qJe1"><td class="mono" data-page-node-id="4XtzbiItINt4pOlonIHpX4">HARNESS_WORKER_ISOLATION</td><td data-page-node-id="EMjHSlNIusBkQFnmyFSTqq"><code data-page-node-id="4k7hEezAg3JcwqJXTuMfws">process</code></td><td data-page-node-id="uOipuBX8aWH9rWRMT5JBNJ">子进程隔离</td><td data-page-node-id="UuHVolEGNwKaiSj1hPv3BW">非 in-process 一律按 process</td></tr>
+</table>
+
+<div class="note" data-page-node-id="qUi1UeuDFO1fTE6wdiJhDA"><strong data-page-node-id="5zgOWXUtUvNaWezytnhoRK">一处值得注意的历史修复</strong>：<code data-page-node-id="V4kDNAT4Y5zzFkPhL7q3LW">LLM_REQUEST_TIMEOUT_MS</code> 早期硬编码 60s 且不可配置。真机实测一个 50k 字符的任务连续 4 次在 ~60s 被掐断后 <code data-page-node-id="bmmeFkNTnNI1WHGCBHqifR">RUN_FAILED</code>，而当时无法调整——这就是默认值改到 300s 并暴露成配置项的原因。</div>
+
+<h2 data-page-node-id="ylYHZs0CzOd8ktJ0r4KKEF">§6 边界与异常矩阵（真实错误串）</h2>
+<table data-page-node-id="9hvNHiAOenjz4qMfBY8kv2">
+<tr data-page-node-id="I3sZmxwdSiMDFgsUtSBoT4"><th data-page-node-id="VTtbwxWIRFvn6n7589wtbl">场景</th><th data-page-node-id="jcJrvcL26nEEYrPukrxKM2">真实观测</th><th data-page-node-id="KIqunTC3JTPGmJIAPaNmj2">处置层</th></tr>
+<tr data-page-node-id="VMZrZEVYsjwcBzS5APM1YP"><td data-page-node-id="p1LQDCLm2cVzLheFtA1cby">Worker 崩溃</td><td class="mono" data-page-node-id="sZYOUhyWLgBBAykB9X2R8O">WORKER_CRASHED: exitCode=137, signal=SIGKILL</td><td data-page-node-id="FRUCNAqeAq76ZvUrdHJAPs"><code data-page-node-id="bzL5myq2rfcV2KFTk0r0bg">child.exited</code> 看门狗 → 合成 <code data-page-node-id="xRN6M3KvavTVWGRqvovemr">agent_failed</code> → RUN_FAILED</td></tr>
+<tr data-page-node-id="183EnCT11zOz6RfrTsfnvU"><td data-page-node-id="pBbCm2SRSt6d4f4SYZ4ZyP">Worker 主动报失败</td><td class="mono" data-page-node-id="s0Z90cQakSCJhGxMHIS1gO">终态 INTERRUPTED / failureReason=null</td><td data-page-node-id="D2sDvvSj8r0jIf9QataURS">⚠️ <code data-page-node-id="6QJk1NoAbwf1FYBWAtgPyX">markRuntimeInvocationFailureInterrupted</code>（与崩溃分支不一致）</td></tr>
+<tr data-page-node-id="KfKCFoG126WvFdMAkIWHXQ"><td data-page-node-id="JE5z8xDSyZppyODZg6yF4h">执行超时</td><td class="mono" data-page-node-id="tNkArdw4jK5Z4DZIFfSNKd">Agent Runtime 执行超时：&lt;runId&gt; (3000ms)</td><td data-page-node-id="TPlOMtFPHuyeUMM55NCfa8">Supervisor → 优雅中断 → SIGTERM → SIGKILL</td></tr>
+<tr data-page-node-id="xjyavkosJ7GaH3lNcom4AE"><td data-page-node-id="aOcLRjZzOsvGmrQa2WQcwG">握手失败</td><td class="mono" data-page-node-id="6XUFinIyguGCjzKDtT0YMu">Worker failed to become ready within &lt;N&gt;ms</td><td data-page-node-id="ghPTSyhA5ML1jIGP6bIoxi">看门狗 SIGKILL + 附 stderr tail</td></tr>
+<tr data-page-node-id="0CAp3JtFUpomPuezS4SDh4"><td data-page-node-id="D1bZwTcVPHNrQJb6SdAxgO">工具在副作用窗口崩溃</td><td data-page-node-id="yE5u4bWjP6jCM687Ky5KOh">DB 留下 <code data-page-node-id="YMtMyiwLgFjFvzO3dBqqVb">PREPARED</code> + <code data-page-node-id="NvEjz1Mg9JdXnAsi6wLuHw">UNKNOWN_EFFECT</code></td><td data-page-node-id="W2bMAZGKFG2oNZ9Rhb3kIr">重启后 <code data-page-node-id="HE8x8cz44PMdwmdjEUDw0N">canAutomaticallyReplay=false</code> → DENIED，需人工确认</td></tr>
+<tr data-page-node-id="nHpOjmydUr6YrfA1PNzeft"><td data-page-node-id="Vv5BAqfgjKQElr3SzG7sgP">观测失败</td><td class="mono" data-page-node-id="ilinqEMVREVIDzgf9eWGFD">RESOURCE_OBSERVATION_FAILED</td><td data-page-node-id="GQJO10AjBFho28O4mCcH1S">fail-closed；DB CHECK 强制「无快照 + UNKNOWN + QUEUE」</td></tr>
+<tr data-page-node-id="qBS3mKduR42EgVl1K43GiY"><td data-page-node-id="fiAJNiNADKx9J0x7ay4MXT">排队超时</td><td class="mono" data-page-node-id="3Kp6MfgUrHngDkInsTqGmS">QUEUE_TIMEOUT（含 waitedMs / queueTtlMs）</td><td data-page-node-id="Yrn7hXYtiSPTuGoVluyt6i">先落库再摘队列</td></tr>
+<tr data-page-node-id="rNGShdk9kdoelX6BnHNXmw"><td data-page-node-id="nrzxc3H3WzCOIQq29pcy7L">越权访问 Run</td><td class="mono" data-page-node-id="muokjUa89gMzWXXx829rI3">404 找不到 AgentRun</td><td data-page-node-id="JcXwaV2QGExDhYXDXekaHA">与「不存在」同码（反枚举），并写 DENY 审计</td></tr>
+<tr data-page-node-id="P9SMmqVARqbxpnBD4o4wZv"><td data-page-node-id="DrCdbDhwBLiyWCxaB6PZwP">会话抢注</td><td class="mono" data-page-node-id="nejcy19XVjUjLriKnuKakt">409 harnessSessionId 已被其他租户占用</td><td data-page-node-id="CBHaPAXHuFGkB0NTOCKAhZ">首次使用即认领，跨租户拒绝</td></tr>
+<tr data-page-node-id="ZnyYD6AJdBjcoeyhYHnX18"><td data-page-node-id="KZDPFNbt5ghUpfDPTEVbxC">非法状态转换</td><td class="mono" data-page-node-id="C8KNbsWzhfaYGIG6oGXeBf">非法的 AgentRun 状态转换：X -&gt; Y</td><td data-page-node-id="HG5zz4vt7PYjOHAVFdShPM"><code data-page-node-id="EXSheB51ip0WoXJD3A0bpQ">assertValidTransition</code> + SQL CHECK 双保险</td></tr>
+<tr data-page-node-id="38Lsjw8nhkXdcCNxTdU5Ty"><td data-page-node-id="b1rqXGyTplS0DA0x1GjjXk">重复事件投递</td><td data-page-node-id="9i8DXrCwgKuEeKH3LA6BEV">唯一索引冲突被吸收，返回 <code data-page-node-id="RWfB8L1ikCt2dNL17fOCqr">false</code></td><td data-page-node-id="fwpB6oqC0RrL1tTzw4BkCm"><code data-page-node-id="Jj3RWm5RRnUCCVKozFlVqq">appendEventIfNew</code> 先查同 dedupeKey 记录再决定是否重抛</td></tr>
+<tr data-page-node-id="zUulsGZBfcU6VIt6KzMkbH"><td data-page-node-id="DtuOffQBR0kgjtzKSd15b3">Master 断连</td><td data-page-node-id="kBMEhy8WyVqdtyJyB8HgYB"><code data-page-node-id="buAbDVkUsXoQEyCC8eTvmV">failAllPending("Master IPC 已关闭…")</code></td><td data-page-node-id="S75jYQX4rlpFMtNyAOBgG3">Worker 侧 fail-closed</td></tr>
+</table>
+
+<h2 data-page-node-id="FOcVYKztG7KWxYp4ncDgov">§7 不变量与竞态窗口</h2>
+
+<div class="grid2" data-page-node-id="ApxZLIgWjRdm5DBIbAS310">
+<div class="card" data-page-node-id="GSajVxxFLdOsLLZ7KJChHs">
+<h3 style="margin-top:0" data-page-node-id="NWlyfSeWmbWb419vLIqWHc">必须恒成立的不变量</h3>
+<ul data-page-node-id="kzrEhuJY3UV4BjOKjE03bq">
+<li data-page-node-id="PpaEXVWhF5wJwr5hMmZX3w">同一 Run 的 <code data-page-node-id="oxZXwuE269yRS0NkVm2RU1">sequence</code> 连续且唯一（<code data-page-node-id="aG1zEAmGSiQOqEpj12RNoK">UNIQUE(run_id, sequence)</code>）</li>
+<li data-page-node-id="YPLjWnG2Vnke754CLbeLr3"><code data-page-node-id="NrCPC9nXrJEd2PFei2PM6V">QUEUED</code> 的 Run 要么在内存队列，要么可由 <code data-page-node-id="6Upb5bcERCKnROjz6qCXfE">reconcileQueuedRuns</code> 补入</li>
+<li data-page-node-id="M9UuIpzKVrw1IV3WADwLE9">每个 <code data-page-node-id="Gp3aaylvwqDY6FIqI26xPr">RUN_STARTED</code> 之前必有一条 <code data-page-node-id="p4VGQQeILpKAGC66Gc1QDK">policy_decisions</code></li>
+<li data-page-node-id="sGm2JGJkB9lYPFg5Z6Z7Hn">每个 slot 的占用与释放成对；重复释放幂等</li>
+<li data-page-node-id="ZU0O2UXviC12ZjMkKBD0Ii">沙箱在 <code data-page-node-id="JB6UonIuwSesWjMXv9sX5g">finally</code> 中终止；异常路径不留 <code data-page-node-id="D91NZMCN81uXxdux2xLp9l">ACTIVE</code></li>
+<li data-page-node-id="UW0Pco65iGGh0n8W6Pn32h"><code data-page-node-id="9tKcf7gDBgkdnpSEvDN2gl">QUEUED</code> 的 Run 一旦转终态，必须同时离开内存队列</li>
+<li data-page-node-id="973yTtB4p2HmmBDFXw4k0w">Attempt 从创建起就绑定不可变 <code data-page-node-id="cwR1EAqHnAPaPuTgIckKRd">policySnapshotId</code></li>
+</ul>
+</div>
+<div class="card" data-page-node-id="bgDWkMVTAXAsCBpnZGBLHJ">
+<h3 style="margin-top:0" data-page-node-id="yBja85qme1MEqykVaihzmz">已知竞态窗口</h3>
+<ul data-page-node-id="Qr6kLC2TLMhBF0LC9DgNSU">
+<li data-page-node-id="CTmxslXclCoPoDFaD6b9mN"><strong data-page-node-id="RnrBV2dfgJr59SXlCGv16d">claimNext ↔ release/re-enqueue</strong>：中间崩溃 → 孤儿 QUEUED，靠对账补回</li>
+<li data-page-node-id="eXFHBau2nk7A1QQMUjGImC"><strong data-page-node-id="8gbj59TvAhHG9PXXG0AG9y">QUEUED→RUNNING 写入 ↔ 用户 interrupt</strong>：真机抓到 <code data-page-node-id="etw6C18wUqZqm5V2NvDgIj">INTERRUPTED → RUNNING</code> 非法转换毒丸（<code data-page-node-id="H7ydbjKFIJIjZakj8qmxQ9">docs/known-issues</code> A4）。现由 <code data-page-node-id="Hagh4uWtB81J0Mevsf1Wbb">executeQueuedRun</code> 的两处兜底安全放弃启动</li>
+<li data-page-node-id="HbpGlaMECPRgZ7K2CMqVr8"><strong data-page-node-id="NIjD1pAcXY02maeGL3tFfH">drain 单飞 ↔ 多 tick 等待</strong>：一次失败被 <code data-page-node-id="W9qsgv1qC6hes4nhONDqvB">onError</code> 记 N 次（实测 9）</li>
+<li data-page-node-id="7IhnpG0TlxhWCfABlgppK3"><strong data-page-node-id="ZkDj2ON8EHeCxpywVHosKh">会话串行</strong>：同 session 的 Run 不允许并发，但跨 session 无此约束</li>
+</ul>
+</div>
+</div>
+
+<div class="danger" data-page-node-id="jqn7Ih03uI4E7wCqBy5LtQ">
+<strong data-page-node-id="vD8o9YLsMyKyFiKBkouIip">必须诚实标注的三条边界</strong>
+<ul data-page-node-id="SVkqrbvoVi7Z9kB6zgGWTn">
+<li data-page-node-id="DSr5WhuKA9BzHOjtI6PWnV"><code data-page-node-id="vgme56pGf8W74cQYQqEWrG">development</code> profile 的 <code data-page-node-id="82HtMosz47ntfiKvkZZ2Lr">runtimeEvidence.verificationReason</code> 自带声明「仅开发/测试生命周期证据；<strong data-page-node-id="4c6QrmVvoNH054bXWUQ6go">不代表内核隔离</strong>」。</li>
+<li data-page-node-id="cuaUhVw3dtgP5LFdR1uxjC">本机无 Docker daemon / runsc，<code data-page-node-id="9gTFULM1OXgb1Yc8zywabi">smoke:container</code> 系列<strong data-page-node-id="w7p03QnycjBtSbNHgvLjGi">未执行</strong>；真实隔离证据必须在 Linux Docker + runsc 上产生。</li>
+<li data-page-node-id="dkfrj3Xngm0jis9RVKTyHI">A6000 真机对照实验未完成，<strong data-page-node-id="aSE3HSBa8fEZTGcZLh1jaA">所有性能结论不成立</strong>。本次证明的是控制面正确性。</li>
+</ul>
+</div>
+
+<h2 data-page-node-id="Piwah9coXJ74sx4W8h2CVD">§8 场景 ↔ 本文映射</h2>
+<table data-page-node-id="mVlXQviIxMbr85TueEUOlx">
+<tr data-page-node-id="1PDrVbLzy8rzQsD9jCAMdl"><th data-page-node-id="YWAJQRtGgzYFf2VJf5xNKW">场景</th><th data-page-node-id="woELog9kOnFZniFYPQFFQc">主要机制出处</th></tr>
+<tr data-page-node-id="85YOExO2RU7OlRHWEoCg1K"><td data-page-node-id="ebKL47zoVv8gdRLMt3h1ps">0 启动顺序</td><td data-page-node-id="jpp4VRVzK3I4gbEr10NqmJ"><code data-page-node-id="ofy7iZKQkLFxlW2yLnvUFa">HarnessApplication.startOnce()</code>（<code data-page-node-id="MizF3OVyKF6wMsq8WitxVJ">recover()</code> → <code data-page-node-id="kcCjgiJdvtuc4GmPhttwbW">queuePump.start()</code> → <code data-page-node-id="awDgNcek6eJuN7DATaFEtj">started=true</code>）；§1.1 步骤 7-8 的顺序</td></tr>
+<tr data-page-node-id="XxfYAbkDsYbrfAP4QNKyZC"><td data-page-node-id="la0HJh1M9zRj2dQFqHdtUY">1 边界归位</td><td data-page-node-id="9dBYotHxhPnkektWho4uep">§1.1 步骤 1-5；§6 前 5 行</td></tr>
+<tr data-page-node-id="X9S2NzgP3maKonSaqLjQtE"><td data-page-node-id="xtaiBPAamVR3cNyWYa8TCt">2 START</td><td data-page-node-id="SoIsKcndvFS93uzaPsrIwn">§3.4 决策表 NORMAL 行；§1.3 全 12 步</td></tr>
+<tr data-page-node-id="ufcoKktrD0BEoQiF4Qpmoy"><td data-page-node-id="aYuDTy9b2SOOg17H8MnAn3">3 QUEUE</td><td data-page-node-id="07Vk1CyjcWdqPF8ETshxSU">§3.4 CRITICAL 行；§1.2 步骤 19-20</td></tr>
+<tr data-page-node-id="JbHeupUuAzjKQFDBnsH4sh"><td data-page-node-id="GIPmL2QRK8pfiufOGPKCgB">4 自动续跑</td><td data-page-node-id="nvSIXfE8lcJB4OJolB6xhC">§3.2 单飞 drain；<code data-page-node-id="okPXnykkaLJPhuhvBweQzz">RunQueuePump.start()</code> 启动即 tick 一次</td></tr>
+<tr data-page-node-id="Lx1sg9Me7PAuYan5EUB76G"><td data-page-node-id="5MnR4w20WtVMIxYBDJdJBy">5 公平轮转</td><td data-page-node-id="a2kdoeJzgINeCjGGzt2di9">§3.1 轮转与原子占位</td></tr>
+<tr data-page-node-id="pqkEa6BpNhcX5jhWVs0QDc"><td data-page-node-id="T8QvBM6DGQZ03jBIjc4pwV">6 证据链</td><td data-page-node-id="t9ISeyHpIasxv6q8wKdCvT">§2.2 四张核心表；§1.3 步骤 4-11</td></tr>
+<tr data-page-node-id="gN7avYXOysnVyrrJeEHIu5"><td data-page-node-id="LxvrndFr6Kq7fTzuZ7ZedL">7 审计</td><td data-page-node-id="xmrzKoV2k1KuIBPy06V31L"><code data-page-node-id="8HD44bF9t946JRVfrc2xXh">access_audit_events</code>（v9 + v15 去 subject_id + v22 加 attempted_key_digest）</td></tr>
+<tr data-page-node-id="oHF3caVGEaGaaUKuRl5hIl"><td data-page-node-id="tIpPuYfVhPxvB2UBmFs4oK">8 关闭</td><td data-page-node-id="lA3eHHsSn8twYhg0VYafdk"><code data-page-node-id="NAItAcmaE4MrumtQY7a0DX">HarnessApplication.stop()</code>：停 Pump → <code data-page-node-id="7THzCzpCfah2plmUZFpvDE">listActiveRuns</code> → 全部 <code data-page-node-id="dy0IPrH7JOkxGIHqJRVV02">interrupt</code></td></tr>
+<tr data-page-node-id="Y7SLAHlQr9YygQ7aTmOOth"><td data-page-node-id="ouoU2ekEWCyD6tj3FVmy5x">F1/F2/F3</td><td data-page-node-id="MC0P79SdH8ldylTz6PaOL7">§4.1 第③④层；§6 前三行；§7 竞态第 2 条</td></tr>
+<tr data-page-node-id="4yc0TJZOwdKgg366pWyVqJ"><td data-page-node-id="zQRH2JZ2n0jhRkzMKrDGXw">D1 恢复</td><td data-page-node-id="raJwXZL187dbHp5WNlUEjA">§3.6 Checkpoint 语义；<code data-page-node-id="Y2JV9yjBDutHW7BOcbeXpX">queueResume</code> + <code data-page-node-id="bUMoCH1ahzED2ait4V1RUQ">executeQueuedResume</code>；恢复不绕过 §3.1</td></tr>
+</table>
+
+<div class="foot" data-page-node-id="eqn8JAvJBrF0ZvqLRkmnx8">
+  全部代码片段取自本仓库当前工作树，行号以本文撰写时的版本为准；全部实测数据来自 Bun 1.4.2 / macOS /
+  无 GPU / 无 Docker 环境下的真实执行。原始 stdout 留档于 <code data-page-node-id="n94k0QPuBHmAs5d6p51y1U">tmp/e2e-evidence/</code>。
+</div>
+
+</div>
+</body>
+</html>

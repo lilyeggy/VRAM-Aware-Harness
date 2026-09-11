@@ -1,0 +1,1232 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>场景机制逐图详解 · VRAM-Aware Harness</title>
+<style>
+  :root{
+    --bg:#FFFFFF; --bg2:#F7F6F1; --bg3:#F1EFE8;
+    --tx:#2C2C2A; --tx2:#5F5E5A; --tx3:#888780;
+    --bd:rgba(0,0,0,.12); --bd2:rgba(0,0,0,.22);
+    --mono:ui-monospace,SFMono-Regular,Menlo,monospace;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg3);color:var(--tx);
+    font:400 15px/1.75 -apple-system,BlinkMacSystemFont,"PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;}
+  .wrap{max-width:960px;margin:0 auto;padding:48px 28px 80px}
+  h1{font-size:26px;font-weight:500;margin:0 0 10px;letter-spacing:-.01em}
+  .lede{font-size:15px;color:var(--tx2);margin:0 0 28px}
+  h2{font-size:20px;font-weight:500;margin:56px 0 6px;padding-top:22px;border-top:1px solid var(--bd)}
+  h3{font-size:16px;font-weight:500;margin:34px 0 8px}
+  p{margin:12px 0}
+  code{font-family:var(--mono);font-size:12.5px;background:var(--bg3);border-radius:4px;padding:1px 5px;color:#3C3489}
+  pre{font-family:var(--mono);font-size:12px;line-height:1.6;background:#2C2C2A;color:#F1EFE8;
+    border-radius:10px;padding:16px 18px;overflow-x:auto;margin:14px 0}
+  pre .c{color:#B4B2A9}
+  table{width:100%;border-collapse:collapse;margin:16px 0;font-size:13.5px;table-layout:fixed}
+  th{text-align:left;font-weight:500;font-size:12px;color:var(--tx2);padding:8px 10px;
+    border-bottom:1px solid var(--bd2);background:var(--bg2)}
+  td{padding:9px 10px;border-bottom:1px solid var(--bd);vertical-align:top;word-break:break-word}
+  td.l{font-family:var(--mono);font-size:12px;color:var(--tx2)}
+  .card{background:var(--bg);border:1px solid var(--bd);border-radius:14px;padding:20px 22px;margin:18px 0}
+  .fig{background:var(--bg);border:1px solid var(--bd);border-radius:14px;padding:18px;margin:18px 0}
+  .note{border-left:3px solid #185FA5;background:#E6F1FB;border-radius:0 10px 10px 0;padding:12px 16px;margin:16px 0;font-size:13.5px}
+  .warn{border-left:3px solid #A32D2D;background:#FCEBEB;border-radius:0 10px 10px 0;padding:12px 16px;margin:16px 0;font-size:13.5px}
+  .ok{border-left:3px solid #3B6D11;background:#EAF3DE;border-radius:0 10px 10px 0;padding:12px 16px;margin:16px 0;font-size:13.5px}
+  .tag{display:inline-block;font-size:11px;padding:2px 8px;border-radius:20px;background:var(--bg3);
+    color:var(--tx2);font-family:var(--mono);margin-right:6px}
+  .chain{background:var(--bg);border:1px solid var(--bd);border-radius:14px;padding:18px 22px;margin:22px 0;font-size:13.5px}
+  .chain div{padding:3px 0;font-family:var(--mono);font-size:12px;color:var(--tx2)}
+  .chain b{font-family:inherit;font-size:13.5px;color:var(--tx);font-weight:500}
+  hr{border:0;border-top:1px solid var(--bd);margin:40px 0}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<h1>场景机制逐图详解</h1>
+<p class="lede">按场景逐个展开，每个场景配「架构 / 流程图 + 真实调用链 + 参数 + 边界」。本页先覆盖<b>场景 0</b> 与 <b>场景 1</b>，后续场景续写在同一份文档里。所有代码锚点均取自本仓库，所有实测值取自 <code>tmp/e2e-evidence/e2e-main.txt</code> 的原始 stdout。</p>
+
+<div class="chain">
+  <b>这套文档的分工</b>
+  <div>docs/scenario-atlas.zh-CN.html &nbsp;── 测了什么、结果如何（清单视角）</div>
+  <div>docs/scenario-mechanisms.zh-CN.html ── 本文：每个场景的图 + 机制（逐图视角）</div>
+  <div>docs/scenario-technical-anatomy.zh-CN.html ── 真实 SQL / 源码分支 / 参数全表</div>
+  <div>docs/test-evidence-map.zh-CN.html &nbsp;── 每条承诺由哪一行断言在守</div>
+  <div>docs/e2e-real-run-walkthrough.zh-CN.md ── 逐阶段走查原始记录</div>
+</div>
+
+<div class="card">
+  <b>覆盖进度</b>
+  <div style="margin-top:8px;font-size:13.5px">
+    <span class="tag">已完成</span>场景 0（启动顺序不变量）、场景 1（失败归位与租户隔离）、场景 2（GPU 空闲直启）、场景 3（资源压力排队与自动续跑）、场景 5（双租户公平轮转）、场景 6（五层证据链）、场景 8（关闭顺序与幂等）、场景 D1（恢复链路与 fail-closed 决策）、场景 F1–F3（三条故障分支）<br>
+    <span class="tag">待续写</span>场景 4（压力解除自动续跑 · 已并入场景 3 的第二次 drain）<br>
+    <span class="tag">未执行</span>需真实 vLLM / Docker + runsc 的 20 个入口（见《场景图谱》E1–E12）<br>
+    <span class="tag">新发现</span><a href="#finding-blocked-flood">QUEUE_BLOCKED 折叠在并发领取下失效</a> · F2 失败语义不一致 · <a href="#finding-interrupt-swallowed">F-4 中断失败被静默丢弃，关闭防线不可达</a> · F-5 关库竞态 · 读路径先查存在性后鉴权
+  </div>
+</div>
+
+<h2>场景 0 · 启动顺序不变量</h2>
+<p><b>测的不是"服务能起来"，而是一条不变量：在恢复扫描与队列 Pump 就绪之前，监听端口绝不能存在。</b>它看着像基础设施，实际上决定了后面所有场景的可解释性——如果端口早开，任何在此窗口内到达的请求都会走进一个必然报错的分支，而这种错误看起来像是"鉴权失败"或"参数错误"，会污染场景 1 的归位结论。</p>
+
+<div class="fig">
+<svg viewBox="0 0 680 624" width="100%" role="img" xmlns="http://www.w3.org/2000/svg">
+<title>场景 0 启动与关闭的顺序不变量</title>
+<desc>左侧为启动六步，前五步没有监听端口，第六步才开放；右侧为关闭六步，顺序与启动严格相反。</desc>
+<text x="40" y="26" font-size="14" font-weight="500" fill="#2C2C2A">场景 0 · 启动与关闭的顺序不变量</text>
+<text x="40" y="45" font-size="12" fill="#5F5E5A">端口 bind 之前，恢复必须已经跑完；关闭时严格相反</text>
+<rect x="40" y="58" width="10" height="10" rx="2" fill="#FAEEDA" stroke="#854F0B" stroke-width="0.5"/>
+<text x="56" y="63" font-size="11" fill="#5F5E5A" dominant-baseline="central">端口尚未开放</text>
+<rect x="154" y="58" width="10" height="10" rx="2" fill="#EAF3DE" stroke="#3B6D11" stroke-width="0.5"/>
+<text x="170" y="63" font-size="11" fill="#5F5E5A" dominant-baseline="central">已可接收请求</text>
+<rect x="268" y="58" width="10" height="10" rx="2" fill="#F1EFE8" stroke="#888780" stroke-width="0.5"/>
+<text x="284" y="63" font-size="11" fill="#5F5E5A" dominant-baseline="central">关闭顺序（逆序）</text>
+<text x="40" y="90" font-size="11.5" font-weight="500" fill="#444441">启动顺序 · 自上而下</text>
+<text x="370" y="90" font-size="11.5" font-weight="500" fill="#444441">关闭顺序 · 自上而下，与启动相反</text>
+<g>
+<rect x="40" y="100" width="270" height="56" rx="10" fill="#FAEEDA" stroke="#854F0B" stroke-width="0.5"/>
+<circle cx="64" cy="128" r="12" fill="#FFFFFF" stroke="#854F0B" stroke-width="0.5"/>
+<text x="64" y="128" font-size="11" font-weight="500" fill="#633806" text-anchor="middle" dominant-baseline="central">1</text>
+<text x="84" y="120" font-size="13" font-weight="500" fill="#633806" dominant-baseline="central">加载配置 + 打开 SQLite</text>
+<text x="84" y="137" font-size="11" fill="#854F0B" dominant-baseline="central">loadHarnessConfig() · 22 个 migration</text>
+<text x="84" y="151" font-size="11" fill="#854F0B" dominant-baseline="central">非法沙箱组合 → 启动即抛</text>
+</g>
+<g>
+<rect x="40" y="168" width="270" height="56" rx="10" fill="#FAEEDA" stroke="#854F0B" stroke-width="0.5"/>
+<circle cx="64" cy="196" r="12" fill="#FFFFFF" stroke="#854F0B" stroke-width="0.5"/>
+<text x="64" y="196" font-size="11" font-weight="500" fill="#633806" text-anchor="middle" dominant-baseline="central">2</text>
+<text x="84" y="188" font-size="13" font-weight="500" fill="#633806" dominant-baseline="central">装配组件图</text>
+<text x="84" y="205" font-size="11" fill="#854F0B" dominant-baseline="central">stores → scheduler → admission</text>
+<text x="84" y="219" font-size="11" fill="#854F0B" dominant-baseline="central">→ coordinator → queuePump</text>
+</g>
+<g>
+<rect x="40" y="236" width="270" height="56" rx="10" fill="#FAEEDA" stroke="#854F0B" stroke-width="0.5"/>
+<circle cx="64" cy="264" r="12" fill="#FFFFFF" stroke="#854F0B" stroke-width="0.5"/>
+<text x="64" y="264" font-size="11" font-weight="500" fill="#633806" text-anchor="middle" dominant-baseline="central">3</text>
+<text x="84" y="256" font-size="13" font-weight="500" fill="#633806" dominant-baseline="central">application.start() → recover()</text>
+<text x="84" y="273" font-size="11" fill="#854F0B" dominant-baseline="central">沙箱对账 → QUEUED 重入队</text>
+<text x="84" y="287" font-size="11" fill="#854F0B" dominant-baseline="central">→ 扫描中断 Run（只入队，不 drain）</text>
+</g>
+<g>
+<rect x="40" y="304" width="270" height="56" rx="10" fill="#FAEEDA" stroke="#854F0B" stroke-width="0.5"/>
+<circle cx="64" cy="332" r="12" fill="#FFFFFF" stroke="#854F0B" stroke-width="0.5"/>
+<text x="64" y="332" font-size="11" font-weight="500" fill="#633806" text-anchor="middle" dominant-baseline="central">4</text>
+<text x="84" y="324" font-size="13" font-weight="500" fill="#633806" dominant-baseline="central">queuePump.start() · started = true</text>
+<text x="84" y="341" font-size="11" fill="#854F0B" dominant-baseline="central">assertStarted() 从此放行</text>
+</g>
+<g>
+<rect x="40" y="372" width="270" height="56" rx="10" fill="#FAEEDA" stroke="#854F0B" stroke-width="0.5"/>
+<circle cx="64" cy="400" r="12" fill="#FFFFFF" stroke="#854F0B" stroke-width="0.5"/>
+<text x="64" y="400" font-size="11" font-weight="500" fill="#633806" text-anchor="middle" dominant-baseline="central">5</text>
+<text x="84" y="392" font-size="13" font-weight="500" fill="#633806" dominant-baseline="central">resourceMetrics.start()</text>
+<text x="84" y="409" font-size="11" fill="#854F0B" dominant-baseline="central">独立采样器，不抢准入探测</text>
+</g>
+<g>
+<rect x="40" y="440" width="270" height="56" rx="10" fill="#EAF3DE" stroke="#3B6D11" stroke-width="0.5"/>
+<circle cx="64" cy="468" r="12" fill="#FFFFFF" stroke="#3B6D11" stroke-width="0.5"/>
+<text x="64" y="468" font-size="11" font-weight="500" fill="#27500A" text-anchor="middle" dominant-baseline="central">6</text>
+<text x="84" y="460" font-size="13" font-weight="500" fill="#27500A" dominant-baseline="central">startHarnessHttpServer()</text>
+<text x="84" y="477" font-size="11" fill="#3B6D11" dominant-baseline="central">Bun.serve 绑定 127.0.0.1:port</text>
+<text x="84" y="491" font-size="11" fill="#3B6D11" dominant-baseline="central">← 端口此刻才存在</text>
+</g>
+<g>
+<rect x="370" y="100" width="270" height="56" rx="10" fill="#F1EFE8" stroke="#888780" stroke-width="0.5"/>
+<circle cx="394" cy="128" r="12" fill="#FFFFFF" stroke="#888780" stroke-width="0.5"/>
+<text x="394" y="128" font-size="11" font-weight="500" fill="#444441" text-anchor="middle" dominant-baseline="central">6</text>
+<text x="414" y="120" font-size="13" font-weight="500" fill="#444441" dominant-baseline="central">server.stop(true)</text>
+<text x="414" y="137" font-size="11" fill="#5F5E5A" dominant-baseline="central">先停止接收新请求</text>
+</g>
+<g>
+<rect x="370" y="168" width="270" height="56" rx="10" fill="#F1EFE8" stroke="#888780" stroke-width="0.5"/>
+<circle cx="394" cy="196" r="12" fill="#FFFFFF" stroke="#888780" stroke-width="0.5"/>
+<text x="394" y="196" font-size="11" font-weight="500" fill="#444441" text-anchor="middle" dominant-baseline="central">5</text>
+<text x="414" y="188" font-size="13" font-weight="500" fill="#444441" dominant-baseline="central">application.stop()</text>
+<text x="414" y="205" font-size="11" fill="#5F5E5A" dominant-baseline="central">pump.stop() → 中断全部 activeRun</text>
+</g>
+<g>
+<rect x="370" y="236" width="270" height="56" rx="10" fill="#F1EFE8" stroke="#888780" stroke-width="0.5"/>
+<circle cx="394" cy="264" r="12" fill="#FFFFFF" stroke="#888780" stroke-width="0.5"/>
+<text x="394" y="264" font-size="11" font-weight="500" fill="#444441" text-anchor="middle" dominant-baseline="central">4</text>
+<text x="414" y="264" font-size="13" font-weight="500" fill="#444441" dominant-baseline="central">llmHealthMonitor.stop()</text>
+</g>
+<g>
+<rect x="370" y="304" width="270" height="56" rx="10" fill="#F1EFE8" stroke="#888780" stroke-width="0.5"/>
+<circle cx="394" cy="332" r="12" fill="#FFFFFF" stroke="#888780" stroke-width="0.5"/>
+<text x="394" y="332" font-size="11" font-weight="500" fill="#444441" text-anchor="middle" dominant-baseline="central">3</text>
+<text x="414" y="332" font-size="13" font-weight="500" fill="#444441" dominant-baseline="central">resourceMetrics.stop()</text>
+</g>
+<g>
+<rect x="370" y="372" width="270" height="56" rx="10" fill="#F1EFE8" stroke="#888780" stroke-width="0.5"/>
+<circle cx="394" cy="400" r="12" fill="#FFFFFF" stroke="#888780" stroke-width="0.5"/>
+<text x="394" y="400" font-size="11" font-weight="500" fill="#444441" text-anchor="middle" dominant-baseline="central">2</text>
+<text x="414" y="400" font-size="13" font-weight="500" fill="#444441" dominant-baseline="central">sandboxProvider.close()</text>
+</g>
+<g>
+<rect x="370" y="440" width="270" height="56" rx="10" fill="#F1EFE8" stroke="#888780" stroke-width="0.5"/>
+<circle cx="394" cy="468" r="12" fill="#FFFFFF" stroke="#888780" stroke-width="0.5"/>
+<text x="394" y="468" font-size="11" font-weight="500" fill="#444441" text-anchor="middle" dominant-baseline="central">1</text>
+<text x="414" y="460" font-size="13" font-weight="500" fill="#444441" dominant-baseline="central">database.close()</text>
+<text x="414" y="477" font-size="11" fill="#5F5E5A" dominant-baseline="central">仅当本进程 ownsDatabase</text>
+</g>
+<line x1="312" y1="128" x2="368" y2="128" stroke="#B4B2A9" stroke-width="0.5" stroke-dasharray="3 3"/>
+<line x1="312" y1="196" x2="368" y2="196" stroke="#B4B2A9" stroke-width="0.5" stroke-dasharray="3 3"/>
+<line x1="312" y1="264" x2="368" y2="264" stroke="#B4B2A9" stroke-width="0.5" stroke-dasharray="3 3"/>
+<line x1="312" y1="332" x2="368" y2="332" stroke="#B4B2A9" stroke-width="0.5" stroke-dasharray="3 3"/>
+<line x1="312" y1="400" x2="368" y2="400" stroke="#B4B2A9" stroke-width="0.5" stroke-dasharray="3 3"/>
+<line x1="312" y1="468" x2="368" y2="468" stroke="#B4B2A9" stroke-width="0.5" stroke-dasharray="3 3"/>
+<rect x="40" y="520" width="600" height="84" rx="12" fill="#FCEBEB" stroke="#A32D2D" stroke-width="0.5"/>
+<text x="62" y="540" font-size="12.5" font-weight="500" fill="#501313" dominant-baseline="central">如果写反了：先 listen，后 recover</text>
+<text x="62" y="561" font-size="11" fill="#791F1F" dominant-baseline="central">POST /runs 会撞上 assertStarted() → 409（不是 400/401：它压根不是 HttpError）</text>
+<text x="62" y="577" font-size="11" fill="#791F1F" dominant-baseline="central">旧进程遗留的沙箱还没被回收 → 同一 workspace 可能被两个执行环境同时持有</text>
+<text x="62" y="593" font-size="11" fill="#791F1F" dominant-baseline="central">QUEUED Run 未重建到内存 Scheduler，/queue 的 position 会短暂失真</text>
+</svg>
+</div>
+
+<h3>启动各步的真实落点</h3>
+<table>
+<colgroup><col style="width:6%"><col style="width:30%"><col style="width:34%"><col style="width:30%"></colgroup>
+<thead><tr><th>#</th><th>真实调用</th><th>读 / 写什么</th><th>失败时</th></tr></thead>
+<tbody>
+<tr><td>1</td><td class="l">loadHarnessConfig(env, cwd)</td><td>纯计算，读环境变量。沙箱组合在此校验</td><td class="l">managed-local × 非 development → 抛；default/restricted-egress × runc → 抛「禁止回退」</td></tr>
+<tr><td>1</td><td class="l">openHarnessDatabase(path)</td><td>跑 22 个 migration，建 27 张表</td><td class="l">migration 冲突 → 抛，进程不启动</td></tr>
+<tr><td>2</td><td class="l">credentialStore.create(...)</td><td>写入 bootstrap 与 agent-runtime 两把凭证</td><td class="l">UNIQUE 冲突被吞掉 —— 重复启动不覆盖、不新建身份</td></tr>
+<tr><td>2</td><td class="l">new TenantRunScheduler / ResourceAdmissionService / RunQueueCoordinator</td><td>内存对象，无 IO</td><td class="l">—</td></tr>
+<tr><td>3</td><td class="l">application.start() → startOnce()</td><td>见下一张图</td><td class="l">抛错则整体启动失败，端口从未开放</td></tr>
+<tr><td>4</td><td class="l">queuePump.start()</td><td>启动定时器（实测 intervalMs = 1000）</td><td class="l">—</td></tr>
+<tr><td>5</td><td class="l">resourceMetrics.start()</td><td>独立采样器实例</td><td class="l">—</td></tr>
+<tr><td>6</td><td class="l">startHarnessHttpServer(api, {hostname, port})</td><td>Bun.serve 绑定端口</td><td class="l">端口占用 → 抛，且 catch 会调 composition.close() 回收已开资源</td></tr>
+</tbody>
+</table>
+<div class="ok"><b>可观测的证据</b>：<code>GET /health → 200 {"ok":true,"started":true}</code>。这里的 <code>started</code> 字段就是 <code>application.isStarted()</code> 的直读（<code>harness-http-api.ts:225</code>）——它能返回 200，本身就说明第 3、4 步已经完成。反过来说，只要这个端口有响应，这条不变量就已经被满足。</div>
+
+<div class="note"><b>为什么 <code>start()</code> 与 <code>stop()</code> 都要 single-flight。</b><code>startPromise</code> 与 <code>stopPromise</code> 两个字段让重复调用返回同一个 Promise（<code>harness-application.ts:86-126</code>）。更关键的是 <code>stop()</code> 开头会 <code>await this.startPromise</code>：如果启动途中被要求停止，它会等启动跑完再关闭，而不是留下一个 <code>started=true</code> 的孤儿应用。若没有这一句，"启动到一半 + 收到 SIGTERM" 就会产生一个既没恢复完、又认为自己活着、且已经开放端口的进程。</div>
+
+<div class="warn"><b>关闭失败不静默。</b><code>stop()</code> 用 <code>Promise.allSettled</code> 中断 <code>listActiveRuns()</code> 的全部活跃 Run，只要有任何一个 rejected 就抛 <code>安全关闭时有 N 个 Run 无法中断</code>。此时 <code>create-harness-application.close()</code> 的后续步骤（healthMonitor / metrics / sandboxProvider / database）都不会被执行，<code>closed</code> 保持 false —— <b>宁可留着资源并报错，也不假装关干净了</b>。</div>
+
+<h3>recover() 内部：唯一会"杀东西"的一步</h3>
+<div class="fig">
+<svg viewBox="0 0 680 536" width="100%" role="img" xmlns="http://www.w3.org/2000/svg">
+<title>recover 内部三步与 fail-closed 启动门</title>
+<desc>沙箱对账、QUEUED 重入队、扫描中断 Run 三步顺序执行，每步的真实查询与失败行为。</desc>
+<text x="40" y="26" font-size="14" font-weight="500" fill="#2C2C2A">场景 0 · recover() 内部三步与 fail-closed 启动门</text>
+<text x="40" y="45" font-size="12" fill="#5F5E5A">三步都只入队、不 drain —— 恢复任务不享受特权通道</text>
+<rect x="40" y="92" width="600" height="96" rx="10" fill="#F1EFE8" stroke="#B4B2A9" stroke-width="0.5"/>
+<circle cx="68" cy="120" r="13" fill="#E6F1FB" stroke="#185FA5" stroke-width="0.5"/>
+<text x="68" y="120" font-size="12" font-weight="500" fill="#0C447C" text-anchor="middle" dominant-baseline="central">1</text>
+<text x="92" y="118" font-size="13" font-weight="500" fill="#2C2C2A" dominant-baseline="central">回收上一个进程遗留的执行环境</text>
+<text x="92" y="142" font-size="11" fill="#5F5E5A" dominant-baseline="central">sandboxReconciler.reconcile() → sandboxes.listUnsettled()</text>
+<text x="92" y="162" font-size="11" fill="#5F5E5A" dominant-baseline="central">逐条 provider.cleanupStale(record)，随后 markLost("PROCESS_RESTART:…")</text>
+<rect x="516" y="114" width="104" height="52" rx="8" fill="#FCEBEB" stroke="#A32D2D" stroke-width="0.5" stroke-dasharray="3 3"/>
+<text x="568" y="132" font-size="11" font-weight="500" fill="#791F1F" text-anchor="middle" dominant-baseline="central">失败 →</text>
+<text x="568" y="150" font-size="11" font-weight="500" fill="#791F1F" text-anchor="middle" dominant-baseline="central">拒绝启动</text>
+<rect x="40" y="204" width="600" height="96" rx="10" fill="#F1EFE8" stroke="#B4B2A9" stroke-width="0.5"/>
+<circle cx="68" cy="232" r="13" fill="#E6F1FB" stroke="#185FA5" stroke-width="0.5"/>
+<text x="68" y="232" font-size="12" font-weight="500" fill="#0C447C" text-anchor="middle" dominant-baseline="central">2</text>
+<text x="92" y="230" font-size="13" font-weight="500" fill="#2C2C2A" dominant-baseline="central">把 QUEUED Run 重建回内存 Scheduler</text>
+<text x="92" y="254" font-size="11" fill="#5F5E5A" dominant-baseline="central">runStore.listQueuedRuns() → 末条 RUN_QUEUED 事件里的 checkpointId</text>
+<text x="92" y="274" font-size="11" fill="#5F5E5A" dominant-baseline="central">有 checkpoint → restoreQueuedResume()；无 → restoreQueuedRun()</text>
+<rect x="516" y="226" width="104" height="52" rx="8" fill="#FCEBEB" stroke="#A32D2D" stroke-width="0.5" stroke-dasharray="3 3"/>
+<text x="568" y="244" font-size="11" font-weight="500" fill="#791F1F" text-anchor="middle" dominant-baseline="central">缺 Checkpoint</text>
+<text x="568" y="262" font-size="11" font-weight="500" fill="#791F1F" text-anchor="middle" dominant-baseline="central">→ 抛错</text>
+<rect x="40" y="316" width="600" height="96" rx="10" fill="#F1EFE8" stroke="#B4B2A9" stroke-width="0.5"/>
+<circle cx="68" cy="344" r="13" fill="#E6F1FB" stroke="#185FA5" stroke-width="0.5"/>
+<text x="68" y="344" font-size="12" font-weight="500" fill="#0C447C" text-anchor="middle" dominant-baseline="central">3</text>
+<text x="92" y="342" font-size="13" font-weight="500" fill="#2C2C2A" dominant-baseline="central">扫描中断 Run，生成恢复计划</text>
+<text x="92" y="366" font-size="11" fill="#5F5E5A" dominant-baseline="central">listActiveRuns() → listPreparedForRun + getValidCheckpoint + decideRecovery()</text>
+<text x="92" y="386" font-size="11" fill="#5F5E5A" dominant-baseline="central">execute(plans) 只把恢复任务入队，不 drain</text>
+<rect x="516" y="338" width="104" height="52" rx="8" fill="#EAF3DE" stroke="#3B6D11" stroke-width="0.5" stroke-dasharray="3 3"/>
+<text x="568" y="356" font-size="11" font-weight="500" fill="#27500A" text-anchor="middle" dominant-baseline="central">只入队</text>
+<text x="568" y="374" font-size="11" font-weight="500" fill="#27500A" text-anchor="middle" dominant-baseline="central">不 drain</text>
+<rect x="40" y="440" width="600" height="76" rx="12" fill="#FCEBEB" stroke="#A32D2D" stroke-width="0.5"/>
+<text x="62" y="458" font-size="12" font-weight="500" fill="#501313" dominant-baseline="central">为什么必须先 reconcile 再 restore / scan</text>
+<text x="62" y="479" font-size="11" fill="#791F1F" dominant-baseline="central">顺序反了 → 旧沙箱尚未回收，扫描就会为同一个 workspace 再开一个，两个执行环境同写一份文件</text>
+<text x="62" y="497" font-size="11" fill="#791F1F" dominant-baseline="central">另外：recover() 抛错时端口从未开放过 —— 启动失败是「什么都没发生」，不是「半个进程在跑」</text>
+</svg>
+</div>
+
+<table>
+<colgroup><col style="width:5%"><col style="width:24%"><col style="width:37%"><col style="width:34%"></colgroup>
+<thead><tr><th>#</th><th>步骤</th><th>真实查询 / 写入</th><th>失败行为</th></tr></thead>
+<tbody>
+<tr><td>1</td><td class="l">sandboxReconciler.reconcile()</td><td class="l">sandboxStore.listUnsettled() → provider.cleanupStale(record) → markLost(id, "PROCESS_RESTART:遗留执行环境已回收")</td><td class="l">markCleanupFailure(id, "STARTUP_CLEANUP_FAILED:…") 后抛 <code>Sandbox 启动对账失败，拒绝启动：&lt;ids&gt;</code></td></tr>
+<tr><td>2</td><td class="l">queuedRunRestorer.restore()</td><td class="l">runStore.listQueuedRuns() → listEvents(run.id) 反向找末条 RUN_QUEUED → payload.checkpointId → checkpointStore.get(id)</td><td class="l">checkpoint 为 null 或 runId 不匹配 → 抛 <code>QUEUED 恢复任务缺少有效 Checkpoint：&lt;id&gt;</code></td></tr>
+<tr><td>3</td><td class="l">scanInterruptedRuns() → execute(plans)</td><td class="l">runStore.listActiveRuns() → 每个 Run 上做 listPreparedForRun + getValidCheckpoint + decideRecovery()</td><td class="l">不抛；只把恢复任务交回 Scheduler</td></tr>
+</tbody>
+</table>
+
+<div class="note"><b>三步的顺序是设计，不是巧合。</b><code>RecoveryStartupCoordinator.recover()</code> 注释写明：必须先停止旧进程可能遗留的执行环境，再允许恢复任务重新入队；先恢复旧的 QUEUED Run，随后扫描产生的新任务由 RecoveryExecutor 直接加入同一个 Scheduler，<b>不会重复恢复</b>。</div>
+
+<div class="note"><b>"不 drain" 是恢复不享有特权的实现方式。</b>类注释：这里不直接 drain，HarnessApplication 会在 recover 完成后启动 QueuePump，由 Pump 使用与普通提交<b>相同的资源准入和调度路径</b>推进恢复任务。所以场景 D1 看到的是 <code>RUN_INTERRUPTED → RUN_QUEUED → QUEUE_BLOCKED ×2 → RUN_RESUMED</code>，而不是直接 <code>RUN_STARTED</code>。恢复任务也要重新过准入、也要排队。</div>
+
+<div class="warn"><b>这条 fail-closed 取舍值得单独记住。</b>只要有一个遗留沙箱清理不掉，整个进程就拒绝启动。代价是"一次清理故障 = 服务不可用"，收益是"绝不会出现两个执行环境写同一份 workspace"。在一个把"沙箱隔离"当作核心卖点的系统里，这个方向的取舍是对的——但它意味着 <code>cleanupStale()</code> 的健壮性直接决定了可用性。</div>
+
+<h2>场景 1 · 失败归位与租户隔离</h2>
+<p><b>测的不是"能不能拒绝非法请求"，而是每一次拒绝是否由正确的那一层做出、返回正确的状态码、并留下可归因的审计。</b>这个区别很重要：如果 401 是被路由层顺手拦下的，那么"鉴权正常"这句话就永远无法被证伪。七个用例全部命中，且没有一个是"别的层顺手拦下的"。</p>
+
+<div class="fig">
+<svg viewBox="0 0 680 724" width="100%" role="img" xmlns="http://www.w3.org/2000/svg">
+<title>场景 1 请求路径与失败归位</title>
+<desc>POST /runs 自上而下穿过路由匹配、JSON 解析、凭证校验、作用域校验、workspace 归属解析、输入上界、Run 查询七个层次。</desc>
+<text x="40" y="26" font-size="14" font-weight="500" fill="#2C2C2A">场景 1 · 请求路径与失败归位</text>
+<text x="40" y="45" font-size="12" fill="#5F5E5A">自上而下即代码执行顺序；每一层只负责它能负责的错</text>
+<text x="40" y="82" font-size="11" font-weight="500" fill="#444441">调用层</text>
+<text x="208" y="82" font-size="11" font-weight="500" fill="#444441">触发条件</text>
+<text x="408" y="82" font-size="11" font-weight="500" fill="#444441">响应</text>
+<text x="508" y="82" font-size="11" font-weight="500" fill="#444441">审计写入</text>
+<rect x="40" y="92" width="600" height="48" rx="8" fill="#F7F6F1" stroke="#D3D1C7" stroke-width="0.5"/>
+<text x="56" y="116" font-size="12" fill="#2C2C2A" dominant-baseline="central">route() 路径匹配</text>
+<text x="208" y="116" font-size="11" fill="#5F5E5A" dominant-baseline="central">路径不在路由表里</text>
+<text x="450" y="116" font-size="14" font-weight="500" fill="#A32D2D" text-anchor="middle" dominant-baseline="central">404</text>
+<text x="516" y="116" font-size="11" fill="#888780" dominant-baseline="central">—</text>
+<rect x="40" y="148" width="600" height="48" rx="8" fill="#F7F6F1" stroke="#D3D1C7" stroke-width="0.5"/>
+<text x="56" y="172" font-size="12" fill="#2C2C2A" dominant-baseline="central">readJsonObject()</text>
+<text x="208" y="172" font-size="11" fill="#5F5E5A" dominant-baseline="central">body 为空或不是 JSON 对象</text>
+<text x="450" y="172" font-size="14" font-weight="500" fill="#A32D2D" text-anchor="middle" dominant-baseline="central">400</text>
+<text x="516" y="172" font-size="11" fill="#888780" dominant-baseline="central">—</text>
+<rect x="40" y="204" width="600" height="48" rx="8" fill="#F7F6F1" stroke="#D3D1C7" stroke-width="0.5"/>
+<text x="56" y="228" font-size="12" fill="#2C2C2A" dominant-baseline="central">requirePrincipal()</text>
+<text x="208" y="228" font-size="11" fill="#5F5E5A" dominant-baseline="central">没有 Authorization / x-api-key</text>
+<text x="450" y="228" font-size="14" font-weight="500" fill="#A32D2D" text-anchor="middle" dominant-baseline="central">401</text>
+<text x="516" y="216" font-size="11" fill="#5F5E5A" dominant-baseline="central">DENY · tenant = NULL</text>
+<text x="516" y="234" font-size="11" fill="#888780" dominant-baseline="central">missing_api_key</text>
+<rect x="40" y="260" width="600" height="48" rx="8" fill="#F7F6F1" stroke="#D3D1C7" stroke-width="0.5"/>
+<text x="56" y="284" font-size="12" fill="#2C2C2A" dominant-baseline="central">　↳ authenticate()</text>
+<text x="208" y="284" font-size="11" fill="#5F5E5A" dominant-baseline="central">返回 null（密钥错误或已撤销）</text>
+<text x="450" y="284" font-size="14" font-weight="500" fill="#A32D2D" text-anchor="middle" dominant-baseline="central">401</text>
+<text x="516" y="272" font-size="11" fill="#5F5E5A" dominant-baseline="central">DENY · tenant = NULL</text>
+<text x="516" y="290" font-size="11" fill="#888780" dominant-baseline="central">+ keyDigest（不存明文）</text>
+<rect x="40" y="316" width="600" height="48" rx="8" fill="#F7F6F1" stroke="#D3D1C7" stroke-width="0.5"/>
+<text x="56" y="340" font-size="12" fill="#2C2C2A" dominant-baseline="central">　↳ hasScope()</text>
+<text x="208" y="340" font-size="11" fill="#5F5E5A" dominant-baseline="central">作用域不含 tasks:write</text>
+<text x="450" y="340" font-size="14" font-weight="500" fill="#A32D2D" text-anchor="middle" dominant-baseline="central">403</text>
+<text x="516" y="328" font-size="11" fill="#5F5E5A" dominant-baseline="central">DENY · agent-runtime</text>
+<text x="516" y="346" font-size="11" fill="#888780" dominant-baseline="central">missing_scope</text>
+<rect x="40" y="372" width="600" height="48" rx="8" fill="#F7F6F1" stroke="#D3D1C7" stroke-width="0.5"/>
+<text x="56" y="396" font-size="12" fill="#2C2C2A" dominant-baseline="central">workspace 归属解析</text>
+<text x="208" y="396" font-size="11" fill="#5F5E5A" dominant-baseline="central">不存在，或不属于本租户</text>
+<text x="450" y="396" font-size="14" font-weight="500" fill="#A32D2D" text-anchor="middle" dominant-baseline="central">404</text>
+<text x="516" y="384" font-size="11" fill="#5F5E5A" dominant-baseline="central">—（刻意与「不存在」</text>
+<text x="516" y="402" font-size="11" fill="#888780" dominant-baseline="central">不可区分，防枚举）</text>
+<rect x="40" y="428" width="600" height="48" rx="8" fill="#F7F6F1" stroke="#D3D1C7" stroke-width="0.5"/>
+<text x="56" y="452" font-size="12" fill="#2C2C2A" dominant-baseline="central">requireUserInput()</text>
+<text x="208" y="452" font-size="11" fill="#5F5E5A" dominant-baseline="central">输入长度 &gt; 2000 字符</text>
+<text x="450" y="452" font-size="14" font-weight="500" fill="#A32D2D" text-anchor="middle" dominant-baseline="central">413</text>
+<text x="516" y="452" font-size="11" fill="#888780" dominant-baseline="central">—（Run 尚未创建）</text>
+<rect x="40" y="484" width="600" height="48" rx="8" fill="#F7F6F1" stroke="#D3D1C7" stroke-width="0.5"/>
+<text x="56" y="508" font-size="12" fill="#2C2C2A" dominant-baseline="central">getRequiredRun() 读路径</text>
+<text x="208" y="508" font-size="11" fill="#5F5E5A" dominant-baseline="central">Run 不存在，或 tenantId 不匹配</text>
+<text x="450" y="508" font-size="14" font-weight="500" fill="#A32D2D" text-anchor="middle" dominant-baseline="central">404</text>
+<text x="516" y="496" font-size="11" fill="#5F5E5A" dominant-baseline="central">DENY · run_not_owned</text>
+<text x="516" y="514" font-size="11" fill="#888780" dominant-baseline="central">（仅 interrupt 路径）</text>
+<rect x="40" y="540" width="600" height="48" rx="8" fill="#EAF3DE" stroke="#3B6D11" stroke-width="0.5"/>
+<text x="56" y="564" font-size="12" font-weight="500" fill="#27500A" dominant-baseline="central">全部通过</text>
+<text x="208" y="564" font-size="11" fill="#3B6D11" dominant-baseline="central">assertStarted() → coordinator.submit()</text>
+<text x="450" y="564" font-size="14" font-weight="500" fill="#27500A" text-anchor="middle" dominant-baseline="central">202</text>
+<text x="516" y="552" font-size="11" fill="#27500A" dominant-baseline="central">ALLOW · RUN_SUBMIT</text>
+<text x="516" y="570" font-size="11" fill="#3B6D11" dominant-baseline="central">tenant = bootstrap</text>
+<rect x="40" y="612" width="600" height="92" rx="12" fill="#FAEEDA" stroke="#854F0B" stroke-width="0.5"/>
+<text x="62" y="632" font-size="12" font-weight="500" fill="#633806" dominant-baseline="central">读路径的一个顺序细节</text>
+<text x="62" y="653" font-size="11" fill="#854F0B" dominant-baseline="central">getRequiredRun() 先查存在性、后校验凭证：无凭证访问存在的 Run → 401，不存在的 Run → 404</text>
+<text x="62" y="671" font-size="11" fill="#854F0B" dominant-baseline="central">未认证调用者因此能区分「id 存在」与「不存在」；id 是随机 UUID，实际不可枚举</text>
+<text x="62" y="689" font-size="11" fill="#854F0B" dominant-baseline="central">要收紧只需把 requirePrincipal() 提到 getRun() 之前（harness-http-api.ts:676-687）</text>
+</svg>
+</div>
+
+<h3>七个用例的实测归位</h3>
+<table>
+<colgroup><col style="width:23%"><col style="width:12%"><col style="width:38%"><col style="width:27%"></colgroup>
+<thead><tr><th>探针</th><th>实测</th><th>响应体</th><th>由哪一层做出</th></tr></thead>
+<tbody>
+<tr><td>空 body、无凭证</td><td class="l">400</td><td class="l">请求体必须是有效 JSON</td><td class="l">readJsonObject() —— 在鉴权之前</td></tr>
+<tr><td>合法 JSON、无凭证</td><td class="l">401</td><td class="l">缺少 API Key</td><td class="l">requirePrincipal() 头部解析</td></tr>
+<tr><td>错误密钥</td><td class="l">401</td><td class="l">API Key 无效或已撤销</td><td class="l">authenticate() 返回 null</td></tr>
+<tr><td>仅 models:generate 密钥</td><td class="l">403</td><td class="l">缺少权限：tasks:write</td><td class="l">hasScope() —— 身份已知，能力不足</td></tr>
+<tr><td>未知路由 POST /nope</td><td class="l">404</td><td class="l">找不到 HTTP 路由</td><td class="l">route() 末尾兜底</td></tr>
+<tr><td>查询不存在的 Run</td><td class="l">404</td><td class="l">找不到 AgentRun：does-not-exist</td><td class="l">getRequiredRun() 资源层</td></tr>
+<tr><td>超长输入 2001 字符</td><td class="l">413</td><td class="l">任务输入过长：2001 字符，超过上限 2000 字符</td><td class="l">requireUserInput() —— 在 workspace 解析之后</td></tr>
+</tbody>
+</table>
+
+<div class="note"><b>两处顺序事实（这才是"归位"的实质）</b><br>
+① <b>400 在 401 之前</b>：JSON 解析先于凭证校验。反过来的话，未认证调用者永远拿不到 400，客户端无法区分"请求体写坏了"和"密钥不对"。<br>
+② <b>413 在 workspace 解析之后</b>：脚本里有一条自注释——"输入上界在 workspace 解析之后检查，所以这里必须带一个真实存在的 workspaceId 才能命中 413"。副作用是：<b>一个 413 必然意味着调用者已通过鉴权、且在<b>自己租户内</b>指向了一个真实 workspace</b>，所以 413 不能被用来探测别的租户。</div>
+
+<div class="ok"><b>两个 404 是两个不同的层。</b><code>找不到 HTTP 路由</code> 由路由表抛出，<code>找不到 AgentRun</code> 由资源层抛出。同一个状态码、不同来源——这正是"失败归位"要证明的东西。而两处资源级 404 都是刻意的防枚举：workspace 跨租户与"根本不存在"返回完全相同的响应；Run 跨租户同理，区别只在 interrupt 路径会额外落一条 <code>run_not_owned</code> 的 DENY 审计。<b>响应上不可区分，追溯上留痕。</b></div>
+
+<h3>审计的租户隔离：63 = 50 + 10 + 3</h3>
+<div class="fig">
+<svg viewBox="0 0 680 444" width="100%" role="img" xmlns="http://www.w3.org/2000/svg">
+<title>审计事件的租户隔离</title>
+<desc>全库 63 条审计事件分为三个不可混同的归属集合：bootstrap 可见 50 条，租户 B 可见 10 条，另有 3 条刻意不可归属。</desc>
+<text x="40" y="26" font-size="14" font-weight="500" fill="#2C2C2A">场景 1 · 审计的租户隔离：63 = 50 + 10 + 3</text>
+<text x="40" y="45" font-size="12" fill="#5F5E5A">ALLOW 与 DENY 都落库，且 GET /audit 只返回 principal.tenantId 的记录</text>
+<rect x="40" y="76" width="600" height="232" rx="20" fill="#F1EFE8" stroke="#888780" stroke-width="0.5"/>
+<text x="62" y="102" font-size="13" font-weight="500" fill="#2C2C2A" dominant-baseline="central">access_audit_events · 全库 63 条</text>
+<text x="62" y="120" font-size="11" fill="#5F5E5A" dominant-baseline="central">索引 idx_access_audit_tenant_timestamp (tenant_id, timestamp) —— 按租户查询走索引</text>
+<rect x="64" y="134" width="176" height="156" rx="10" fill="#EAF3DE" stroke="#3B6D11" stroke-width="0.5"/>
+<text x="80" y="158" font-size="12" font-weight="500" fill="#27500A" dominant-baseline="central">bootstrap · 50 条</text>
+<text x="80" y="178" font-size="11" fill="#3B6D11" dominant-baseline="central">scopes = ["*"]</text>
+<text x="80" y="202" font-size="11" fill="#27500A" dominant-baseline="central">GET /audit → 50 条</text>
+<text x="80" y="222" font-size="11" fill="#27500A" dominant-baseline="central">含 6 条 RUN_SUBMIT</text>
+<text x="80" y="242" font-size="11" fill="#27500A" dominant-baseline="central">ALLOW 与 DENY 都在内</text>
+<text x="80" y="266" font-size="11" fill="#3B6D11" dominant-baseline="central">但不是「能看所有」</text>
+<rect x="252" y="134" width="176" height="156" rx="10" fill="#EAF3DE" stroke="#3B6D11" stroke-width="0.5"/>
+<text x="268" y="158" font-size="12" font-weight="500" fill="#27500A" dominant-baseline="central">租户 B · 10 条</text>
+<text x="268" y="178" font-size="11" fill="#3B6D11" dominant-baseline="central">tenant_id = 6043c869…</text>
+<text x="268" y="202" font-size="11" fill="#27500A" dominant-baseline="central">GET /audit → 10 条</text>
+<text x="268" y="222" font-size="11" fill="#27500A" dominant-baseline="central">工作区与 Run 各 5 条</text>
+<text x="268" y="242" font-size="11" fill="#27500A" dominant-baseline="central">独立的 workspace 与配额</text>
+<text x="268" y="266" font-size="11" fill="#3B6D11" dominant-baseline="central">与 bootstrap 零交集</text>
+<rect x="440" y="134" width="176" height="156" rx="10" fill="#FAEEDA" stroke="#854F0B" stroke-width="0.5"/>
+<text x="456" y="158" font-size="12" font-weight="500" fill="#633806" dominant-baseline="central">不可归属 · 3 条</text>
+<text x="456" y="178" font-size="11" fill="#854F0B" dominant-baseline="central">2 条 tenant_id = NULL</text>
+<text x="456" y="202" font-size="11" fill="#633806" dominant-baseline="central">未认证 → 无可归属租户</text>
+<text x="456" y="222" font-size="11" fill="#633806" dominant-baseline="central">1 条 tenant = agent-runtime</text>
+<text x="456" y="242" font-size="11" fill="#633806" dominant-baseline="central">scopes = [models:generate]</text>
+<text x="456" y="266" font-size="11" fill="#854F0B" dominant-baseline="central">两个视图都看不到</text>
+<rect x="40" y="332" width="600" height="92" rx="12" fill="#E6F1FB" stroke="#185FA5" stroke-width="0.5"/>
+<text x="62" y="352" font-size="12" font-weight="500" fill="#0C447C" dominant-baseline="central">这 3 条不是「丢了」，是刻意不可归属</text>
+<text x="62" y="373" font-size="11" fill="#185FA5" dominant-baseline="central">无凭证的 AUTHENTICATE 失败没有可归属租户 → 记 tenant_id = NULL，而不是甩给某个随机租户</text>
+<text x="62" y="391" font-size="11" fill="#185FA5" dominant-baseline="central">agent-runtime 是第三个身份（只授 models:generate），它的 403 只出现在自己的视图里</text>
+<text x="62" y="409" font-size="11" fill="#185FA5" dominant-baseline="central">bootstrap 的 "*" 不等于「能看所有」：/audit 仍按 principal.tenantId 过滤，只是它自己也属于一个租户</text>
+</svg>
+</div>
+
+<table>
+<colgroup><col style="width:26%"><col style="width:20%"><col style="width:54%"></colgroup>
+<thead><tr><th>集合</th><th>条数</th><th>为什么是这个数</th></tr></thead>
+<tbody>
+<tr><td>bootstrap 视角</td><td class="l">50</td><td class="l">GET /audit 用 principal.tenantId 过滤，bootstrap 只是"自己这个租户"的记录</td></tr>
+<tr><td>租户 B 视角</td><td class="l">10</td><td class="l">工作区与 Run 各 5 条；与 bootstrap 零交集</td></tr>
+<tr><td class="l">tenant_id = NULL</td><td class="l">2</td><td class="l">无凭证的 AUTHENTICATE 失败（missing_api_key）与密钥无效（invalid_or_revoked_api_key）。<b>没有可归属租户，就记 NULL</b>，不甩给随机租户、也不许出现在任何租户视图里。</td></tr>
+<tr><td class="l">tenant = agent-runtime</td><td class="l">1</td><td class="l">第三个身份的 403（missing_scope）。它是真实存在的租户，所以有归属，但只出现在自己的视图里。</td></tr>
+<tr><td><b>合计</b></td><td class="l"><b>63</b></td><td class="l">50 + 10 + 3</td></tr>
+</tbody>
+</table>
+
+<div class="note"><b>DENY 记录里存的是摘要，不是明文。</b><code>invalid_or_revoked_api_key</code> 那条带着 <code>attempted_key_digest=5e179de4…c98806</code>，而 <code>missing_api_key</code> 那条 digest 为 none。这让"谁在用错误密钥试探"可追溯，同时不把明文密钥写进数据库。表结构见 <code>migrations.ts</code> v9：<code>outcome CHECK IN ('ALLOW','DENY')</code>，外加 <code>(tenant_id, timestamp)</code> 索引。</div>
+
+<div class="warn"><b>一处诚实的缺口：<code>getRequiredRun()</code> 的检查顺序。</b>读路径是<b>先查存在性、后校验凭证</b>（<code>harness-http-api.ts:676-687</code>）。因此无凭证访问一个<b>存在</b>的 Run 得到 401，访问一个<b>不存在</b>的 Run 得到 404 —— 未认证调用者可以区分"这个 id 存在"与"不存在"。因为 id 是随机 UUID，实际不可枚举，风险很低；但这确实是一处与"防枚举"目标不完全一致的地方。要收紧只需把 <code>requirePrincipal()</code> 提到 <code>getRun()</code> 之前。</div>
+
+<hr>
+<h2>场景 2 + 3 · 共用的资源准入决策树</h2>
+<p>场景 2 和场景 3 跑的是<b>同一段代码</b>，只是输入不同。这个场景对存在的意义就是把这一点钉死：场景 2 证明「资源空闲时提交即可跑」，场景 3 证明「资源紧张时同一个提交会被挡下并给出可查的原因」。两者共享两段门：</p>
+
+<div class="fig">
+<svg viewBox="0 0 680 720" width="100%" role="img" xmlns="http://www.w3.org/2000/svg">
+<title>资源准入决策树</title>
+<desc>第一段把四路资源信号合并为压力等级，第二段由确定性策略把压力等级与并发计数映射为 START 或 QUEUE 及具体原因码。</desc>
+<text x="40" y="26" font-size="14" font-weight="500" fill="#2C2C2A">场景 2 + 3 共用 · 资源准入决策树（两段门）</text>
+<text x="40" y="45" font-size="12" fill="#5F5E5A">第一段只说压力多大，第二段才做判决 —— 所以同一个压力可以对应三种结果</text>
+<rect x="40" y="68" width="600" height="176" rx="14" fill="#F7F6F1" stroke="#D3D1C7" stroke-width="0.5"/>
+<text x="62" y="92" font-size="12.5" font-weight="500" fill="#2C2C2A" dominant-baseline="central">① 观测 → ② 分类：四路信号，任一 _CRITICAL 即 CRITICAL</text>
+<text x="62" y="116" font-size="11" font-weight="500" fill="#5F5E5A" dominant-baseline="central">四路信号 · busy / critical 默认阈值</text>
+<text x="62" y="136" font-size="11" fill="#5F5E5A" dominant-baseline="central">GPU 显存 used/total×100 → 70 / 90</text>
+<text x="62" y="154" font-size="11" fill="#5F5E5A" dominant-baseline="central">KV cache 占用 → 60 / 85</text>
+<text x="62" y="172" font-size="11" fill="#5F5E5A" dominant-baseline="central">runningRequests 并发数 → 4 / 8</text>
+<text x="62" y="190" font-size="11" fill="#5F5E5A" dominant-baseline="central">waitingRequests 排队数 → 1 / 4</text>
+<line x1="340" y1="106" x2="340" y2="200" stroke="#D3D1C7" stroke-width="0.5"/>
+<text x="356" y="116" font-size="11" font-weight="500" fill="#5F5E5A" dominant-baseline="central">合并规则 · classifyResource()</text>
+<text x="356" y="136" font-size="11" fill="#A32D2D" dominant-baseline="central">任一 _CRITICAL → CRITICAL</text>
+<text x="356" y="154" font-size="11" fill="#185FA5" dominant-baseline="central">否则任一 _BUSY → BUSY</text>
+<text x="356" y="172" font-size="11" fill="#3B6D11" dominant-baseline="central">否则 → NORMAL</text>
+<text x="356" y="190" font-size="11" fill="#854F0B" dominant-baseline="central">四路全为空 → UNKNOWN</text>
+<text x="62" y="222" font-size="11" fill="#A32D2D" dominant-baseline="central">observation.ok = false 时不走这里：直接 QUEUE / RESOURCE_OBSERVATION_FAILED（snapshotId = null）</text>
+<text x="40" y="266" font-size="12" font-weight="500" fill="#2C2C2A" dominant-baseline="central">③ 策略分派 · DeterministicExecutionPolicy.decide()</text>
+<text x="628" y="266" font-size="11" fill="#888780" text-anchor="end" dominant-baseline="central">自上而下命中即返回</text>
+<rect x="40" y="280" width="600" height="44" rx="8" fill="#FCEBEB" stroke="#D3D1C7" stroke-width="0.5"/>
+<text x="56" y="302" font-size="11.5" font-weight="500" fill="#A32D2D" dominant-baseline="central">CRITICAL</text>
+<text x="140" y="302" font-size="11.5" fill="#5F5E5A" dominant-baseline="central">（无条件）</text>
+<text x="420" y="302" font-size="11" font-weight="500" fill="#A32D2D" dominant-baseline="central">QUEUE · RESOURCE_CRITICAL</text>
+<rect x="40" y="330" width="600" height="44" rx="8" fill="#FAEEDA" stroke="#D3D1C7" stroke-width="0.5"/>
+<text x="56" y="352" font-size="11.5" font-weight="500" fill="#854F0B" dominant-baseline="central">UNKNOWN</text>
+<text x="140" y="352" font-size="11.5" fill="#5F5E5A" dominant-baseline="central">（无条件）</text>
+<text x="420" y="352" font-size="11" font-weight="500" fill="#854F0B" dominant-baseline="central">QUEUE · RESOURCE_UNKNOWN</text>
+<rect x="40" y="380" width="600" height="44" rx="8" fill="#F7F6F1" stroke="#D3D1C7" stroke-width="0.5"/>
+<text x="56" y="402" font-size="11.5" font-weight="500" fill="#185FA5" dominant-baseline="central">BUSY</text>
+<text x="140" y="402" font-size="11.5" fill="#5F5E5A" dominant-baseline="central">activeRunCount ≥ maxActiveRuns（30）</text>
+<text x="420" y="402" font-size="11" font-weight="500" fill="#A32D2D" dominant-baseline="central">QUEUE · GLOBAL_CONCURRENCY_LIMIT</text>
+<rect x="40" y="430" width="600" height="44" rx="8" fill="#F7F6F1" stroke="#D3D1C7" stroke-width="0.5"/>
+<text x="56" y="452" font-size="11.5" font-weight="500" fill="#185FA5" dominant-baseline="central">BUSY</text>
+<text x="140" y="452" font-size="11.5" fill="#5F5E5A" dominant-baseline="central">activeTenantRunCount &gt; 0</text>
+<text x="420" y="452" font-size="11" font-weight="500" fill="#A32D2D" dominant-baseline="central">QUEUE · RESOURCE_BUSY_TENANT_LIMIT</text>
+<rect x="40" y="480" width="600" height="44" rx="8" fill="#EAF3DE" stroke="#3B6D11" stroke-width="0.5"/>
+<text x="56" y="502" font-size="11.5" font-weight="500" fill="#185FA5" dominant-baseline="central">BUSY</text>
+<text x="140" y="502" font-size="11.5" fill="#5F5E5A" dominant-baseline="central">否则</text>
+<text x="420" y="502" font-size="11" font-weight="500" fill="#27500A" dominant-baseline="central">START · RESOURCE_BUSY_TENANT_AVAILABLE</text>
+<rect x="40" y="530" width="600" height="44" rx="8" fill="#F7F6F1" stroke="#D3D1C7" stroke-width="0.5"/>
+<text x="56" y="552" font-size="11.5" font-weight="500" fill="#3B6D11" dominant-baseline="central">NORMAL</text>
+<text x="140" y="552" font-size="11.5" fill="#5F5E5A" dominant-baseline="central">activeRunCount ≥ maxActiveRuns（30）</text>
+<text x="420" y="552" font-size="11" font-weight="500" fill="#A32D2D" dominant-baseline="central">QUEUE · GLOBAL_CONCURRENCY_LIMIT</text>
+<rect x="40" y="580" width="600" height="44" rx="8" fill="#EAF3DE" stroke="#3B6D11" stroke-width="0.5"/>
+<text x="56" y="602" font-size="11.5" font-weight="500" fill="#3B6D11" dominant-baseline="central">NORMAL</text>
+<text x="140" y="602" font-size="11.5" fill="#5F5E5A" dominant-baseline="central">否则</text>
+<text x="420" y="602" font-size="11" font-weight="500" fill="#27500A" dominant-baseline="central">START · RESOURCE_NORMAL</text>
+<rect x="40" y="648" width="600" height="64" rx="12" fill="#E6F1FB" stroke="#185FA5" stroke-width="0.5"/>
+<text x="62" y="668" font-size="12" font-weight="500" fill="#0C447C" dominant-baseline="central">BUSY 档的语义容易被读错</text>
+<text x="62" y="690" font-size="11" fill="#185FA5" dominant-baseline="central">activeTenantRunCount &gt; 0 就排队 —— 压力半满时每个租户只允许一个 Run。这是租户间公平，不是简单的并发限制。</text>
+<text x="62" y="706" font-size="11" fill="#185FA5" dominant-baseline="central">（调用方传 capacity.activeTenantRunCount - 1：claimNext 已把本 Run 计入 active，减 1 是回避自己）</text>
+</svg>
+</div>
+
+<div class="note"><b>四路信号是「或」关系，不是加权。</b>任一 <code>_CRITICAL</code> 直接判 CRITICAL —— 所以 <code>runningRequests ≥ 8</code> 单独一项就能把判决拉到 CRITICAL，哪怕 GPU 显存还很空。这是保守取向：任一维度饱和即视为整体饱和。反过来，只要还能拿到一路有效信号，就不会退化成 UNKNOWN。</div>
+
+<div class="note"><b>UNKNOWN 有两条来源，而且可区分。</b>分类器四路全空 → <code>RESOURCE_UNKNOWN</code> + <code>INSUFFICIENT_DATA</code>；观测本身失败 → <code>RESOURCE_OBSERVATION_FAILED</code>，且 <b><code>resourceSnapshotId = null</code></b>。两条都判 QUEUE，但原因码与证据完全不同。后者是全系统唯一允许 snapshotId 为 null 的决策，<code>PolicyDecisionStore.assertEvidenceMatchesDecision()</code> 会在运行时拦住任何「观测失败却带快照」或「观测成功却没有快照」的组合，数据库层还有一条等价的 <code>CHECK</code> 约束做第二道防线。</div>
+
+<h3>决策链的四个组件与职责边界</h3>
+<table>
+<colgroup><col style="width:26%"><col style="width:26%"><col style="width:48%"></colgroup>
+<thead><tr><th>组件</th><th>输入 → 输出</th><th>职责边界（它不做什么）</th></tr></thead>
+<tbody>
+<tr><td class="l">ResourceObserver<br>（VllmResourceObserver）</td><td class="l">vLLM /metrics → ResourceObservation{ok, snapshot?, reason?}</td><td>只负责取一次事实。超时由 <code>HARNESS_RESOURCE_TIMEOUT_MS</code>（默认 3000ms）约束，失败时给 reason，不改任何状态。</td></tr>
+<tr><td class="l">classifyResource()</td><td class="l">snapshot + thresholds → {pressure, reasons[], gpuMemoryUsagePercent}</td><td>纯函数，无 IO、无状态。它<b>不做 START/QUEUE 判断</b>，只回答「压力多大、因为哪几路信号」。</td></tr>
+<tr><td class="l">DeterministicExecutionPolicy</td><td class="l">pressure + 两个并发计数 → PolicyDecision</td><td>不观测、不落库。同样的输入必得同样的输出（除了 decisionId 与 decidedAt）。</td></tr>
+<tr><td class="l">ResourceAdmissionService</td><td class="l">request → {observation, classification, decision}</td><td>唯一的整合点：串起观测→分类→判决，并负责把决策与快照一起落库。它自己不产生判断。</td></tr>
+</tbody>
+</table>
+
+<h2>场景 2 · GPU 空闲（NORMAL）→ 提交即启动</h2>
+<p>这是整条链路最短的一次，但能证明一件具体的事：<b>「提交即可跑」不靠等待，靠一次主动推进</b>。</p>
+
+<div class="fig">
+<svg viewBox="0 0 680 684" width="100%" role="img" xmlns="http://www.w3.org/2000/svg">
+<title>场景 2 GPU 空闲时提交即启动的时序</title>
+<desc>从 POST /runs 到 RUN_COMPLETED 的八个步骤与真实时间戳，队列等待 6 毫秒、端到端 417 毫秒，全程没有 QUEUE_BLOCKED 事件。</desc>
+<text x="40" y="26" font-size="14" font-weight="500" fill="#2C2C2A">场景 2 · GPU 空闲（NORMAL）→ 提交即启动</text>
+<text x="40" y="45" font-size="12" fill="#5F5E5A">队列等待 6ms、端到端 417ms；关键在最后一步之外的那次「主动 tick」</text>
+<rect x="40" y="76" width="600" height="52" rx="8" fill="#F7F6F1" stroke="#D3D1C7" stroke-width="0.5"/>
+<circle cx="64" cy="102" r="12" fill="#FFFFFF" stroke="#888780" stroke-width="0.5"/>
+<text x="64" y="102" font-size="11" font-weight="500" fill="#444441" text-anchor="middle" dominant-baseline="central">1</text>
+<text x="86" y="96" font-size="12" fill="#2C2C2A" dominant-baseline="central">HTTP 入口：POST /runs → 202 Accepted</text>
+<text x="86" y="114" font-size="11" fill="#5F5E5A" dominant-baseline="central">响应里的 status=QUEUED 是落库快照，不是最终态</text>
+<text x="628" y="102" font-size="11" fill="#888780" text-anchor="end" dominant-baseline="central">202</text>
+<rect x="40" y="134" width="600" height="52" rx="8" fill="#F7F6F1" stroke="#D3D1C7" stroke-width="0.5"/>
+<circle cx="64" cy="160" r="12" fill="#FFFFFF" stroke="#888780" stroke-width="0.5"/>
+<text x="64" y="160" font-size="11" font-weight="500" fill="#444441" text-anchor="middle" dominant-baseline="central">2</text>
+<text x="86" y="154" font-size="12" fill="#2C2C2A" dominant-baseline="central">createQueuedRun(input)</text>
+<text x="86" y="172" font-size="11" fill="#5F5E5A" dominant-baseline="central">一个事务：INSERT agent_runs ＋ INSERT run_events(seq=1, RUN_CREATED)</text>
+<text x="628" y="160" font-size="11" fill="#888780" text-anchor="end" dominant-baseline="central">.937</text>
+<rect x="40" y="192" width="600" height="52" rx="8" fill="#F7F6F1" stroke="#D3D1C7" stroke-width="0.5"/>
+<circle cx="64" cy="218" r="12" fill="#FFFFFF" stroke="#888780" stroke-width="0.5"/>
+<text x="64" y="218" font-size="11" font-weight="500" fill="#444441" text-anchor="middle" dominant-baseline="central">3</text>
+<text x="86" y="212" font-size="12" fill="#2C2C2A" dominant-baseline="central">scheduler.enqueue ＋ synchronizeQueueBlockers()</text>
+<text x="86" y="230" font-size="11" fill="#5F5E5A" dominant-baseline="central">AWAITING_SCHEDULING 被跳过 —— 此处刻意不写事件</text>
+<text x="628" y="218" font-size="11" fill="#888780" text-anchor="end" dominant-baseline="central">—</text>
+<rect x="40" y="250" width="600" height="52" rx="8" fill="#E6F1FB" stroke="#185FA5" stroke-width="0.5"/>
+<circle cx="64" cy="276" r="12" fill="#FFFFFF" stroke="#185FA5" stroke-width="0.5"/>
+<text x="64" y="276" font-size="11" font-weight="500" fill="#0C447C" text-anchor="middle" dominant-baseline="central">4</text>
+<text x="86" y="270" font-size="12" font-weight="500" fill="#0C447C" dominant-baseline="central">void queuePump.tick()</text>
+<text x="86" y="288" font-size="11" fill="#185FA5" dominant-baseline="central">提交后立即推进，不等下一个 1000ms 轮询周期</text>
+<text x="628" y="276" font-size="11" fill="#185FA5" text-anchor="end" dominant-baseline="central">+0ms</text>
+<rect x="40" y="308" width="600" height="52" rx="8" fill="#F7F6F1" stroke="#D3D1C7" stroke-width="0.5"/>
+<circle cx="64" cy="334" r="12" fill="#FFFFFF" stroke="#888780" stroke-width="0.5"/>
+<text x="64" y="334" font-size="11" font-weight="500" fill="#444441" text-anchor="middle" dominant-baseline="central">5</text>
+<text x="86" y="328" font-size="12" fill="#2C2C2A" dominant-baseline="central">drain()：enforceQueueTtl → reconcileQueuedRuns → attemptNext</text>
+<text x="86" y="346" font-size="11" fill="#5F5E5A" dominant-baseline="central">队列此刻只有这一个 Run，TTL 与 DB 对账都是空操作</text>
+<text x="628" y="334" font-size="11" fill="#888780" text-anchor="end" dominant-baseline="central">—</text>
+<rect x="40" y="366" width="600" height="52" rx="8" fill="#F7F6F1" stroke="#D3D1C7" stroke-width="0.5"/>
+<circle cx="64" cy="392" r="12" fill="#FFFFFF" stroke="#888780" stroke-width="0.5"/>
+<text x="64" y="392" font-size="11" font-weight="500" fill="#444441" text-anchor="middle" dominant-baseline="central">6</text>
+<text x="86" y="386" font-size="12" fill="#2C2C2A" dominant-baseline="central">claimNext() 占住 slot</text>
+<text x="86" y="404" font-size="11" fill="#5F5E5A" dominant-baseline="central">getCapacity 后减 1：claimNext 已把本 Run 计入 active，减 1 是回避自己</text>
+<text x="628" y="392" font-size="11" fill="#888780" text-anchor="end" dominant-baseline="central">—</text>
+<rect x="40" y="424" width="600" height="52" rx="8" fill="#F7F6F1" stroke="#D3D1C7" stroke-width="0.5"/>
+<circle cx="64" cy="450" r="12" fill="#FFFFFF" stroke="#888780" stroke-width="0.5"/>
+<text x="64" y="450" font-size="11" font-weight="500" fill="#444441" text-anchor="middle" dominant-baseline="central">7</text>
+<text x="86" y="444" font-size="12" fill="#2C2C2A" dominant-baseline="central">admission.evaluate()：observe → classify → decide</text>
+<text x="86" y="462" font-size="11" fill="#5F5E5A" dominant-baseline="central">snap-normal-1（GPU 20%）→ pressure=NORMAL → START / RESOURCE_NORMAL</text>
+<text x="628" y="450" font-size="11" fill="#27500A" text-anchor="end" dominant-baseline="central">.943</text>
+<rect x="40" y="482" width="600" height="52" rx="8" fill="#EAF3DE" stroke="#3B6D11" stroke-width="0.5"/>
+<circle cx="64" cy="508" r="12" fill="#FFFFFF" stroke="#3B6D11" stroke-width="0.5"/>
+<text x="64" y="508" font-size="11" font-weight="500" fill="#27500A" text-anchor="middle" dominant-baseline="central">8</text>
+<text x="86" y="502" font-size="12" font-weight="500" fill="#27500A" dominant-baseline="central">executeQueuedRun()，finally release() 归还 slot</text>
+<text x="86" y="520" font-size="11" fill="#3B6D11" dominant-baseline="central">RUN_STARTED → CONTROL_PREPARED → SANDBOX_ACQUIRED → RUN_COMPLETED</text>
+<text x="628" y="508" font-size="11" fill="#27500A" text-anchor="end" dominant-baseline="central">+417ms</text>
+<rect x="40" y="556" width="600" height="108" rx="12" fill="#F1EFE8" stroke="#B4B2A9" stroke-width="0.5"/>
+<text x="62" y="576" font-size="12" font-weight="500" fill="#2C2C2A" dominant-baseline="central">事件时间线（GET /runs/:id/events）—— 全程没有 QUEUE_BLOCKED</text>
+<text x="62" y="598" font-size="11" fill="#5F5E5A" dominant-baseline="central">0001 16:14:46.937 RUN_CREATED</text>
+<text x="62" y="616" font-size="11" fill="#27500A" dominant-baseline="central">0002 16:14:46.943 RUN_STARTED　　距 0001 仅 6ms —— 这正是 queue_wait_ms</text>
+<text x="62" y="634" font-size="11" fill="#5F5E5A" dominant-baseline="central">0003 .948 CONTROL_PREPARED（dedupe=control:&lt;runId&gt;:prepared）　0004 .949 SANDBOX_ACQUIRED</text>
+<text x="62" y="652" font-size="11" fill="#5F5E5A" dominant-baseline="central">0005 16:14:47.354 RUN_COMPLETED　　端到端 e2e_ms = 417</text>
+</svg>
+</div>
+
+<table>
+<colgroup><col style="width:34%"><col style="width:38%"><col style="width:28%"></colgroup>
+<thead><tr><th>真实调用</th><th>落库 / 事件</th><th>实测</th></tr></thead>
+<tbody>
+<tr><td class="l">coordinator.submit()<br>→ runService.createQueuedRun()</td><td class="l">一个事务内 INSERT agent_runs ＋ INSERT run_events(seq=1, RUN_CREATED)。事务回滚则不留孤立事件。</td><td class="l">0001 RUN_CREATED .937</td></tr>
+<tr><td class="l">scheduler.enqueue()<br>→ synchronizeQueueBlockers()</td><td class="l">不写事件。<code>AWAITING_SCHEDULING</code> 被显式跳过（<code>run-queue-coordinator.ts:168</code>）。</td><td class="l">无 QUEUE_BLOCKED</td></tr>
+<tr><td class="l">HarnessApplication.submitRun()<br>→ void queuePump.tick()</td><td class="l">不等待、不阻塞响应。异步触发一次 drain。</td><td class="l">+0ms</td></tr>
+<tr><td class="l">drain() → enforceQueueTtl()<br>→ reconcileQueuedRuns()</td><td class="l">队列只有 1 个 Run 且未超 TTL，两者皆为空操作。注意这两个扫描<b>每次 drain 都跑</b>，不是独立定时任务。</td><td class="l">—</td></tr>
+<tr><td class="l">claimNext()</td><td class="l">从 tenantOrder 取租户 → 取该租户队首 Run → 写入 <code>activeTenantByRunId</code> 占住 slot。选 Run 与占 slot 是<b>同一个同步动作</b>。</td><td class="l">—</td></tr>
+<tr><td class="l">admission.evaluate()</td><td class="l">save(decision, snapshot)：先写不可变 snapshot，再写 decision（同一事务）。</td><td class="l">decision = START / RESOURCE_NORMAL / NORMAL / snap-normal-1</td></tr>
+<tr><td class="l">executeQueuedRun()<br>finally scheduler.release()</td><td class="l">0003 CONTROL_PREPARED（dedupe=control:&lt;runId&gt;:prepared）→ 0004 SANDBOX_ACQUIRED（dedupe=sandbox:&lt;id&gt;:acquired）→ 0005 RUN_COMPLETED</td><td class="l">0002 RUN_STARTED .943<br>0005 RUN_COMPLETED 47.354</td></tr>
+</tbody>
+</table>
+
+<div class="note"><b>queue_wait_ms 的定义就是可见的。</b>实测 <code>RUN_CREATED(.937) → RUN_STARTED(.943)</code> = 6ms，与 <code>/observability</code> 报的 <code>queue_wait_ms = 6</code> 完全一致。所以这个指标不是估算，是事件时间线上两点之差——可以被外部独立复算。</div>
+
+<div class="ok"><b>为什么场景 2 里没有 QUEUE_BLOCKED 事件，是个有价值的「没有」。</b><code>synchronizeQueueBlockers()</code> 的代码注释写得很明确：正常排队的事实已经由 <code>RUN_CREATED</code> / <code>RUN_QUEUED</code> 表达了，只持久化那个解释「此刻为什么还不能跑」的<b>具体阻断原因</b>。所以<code>AWAITING_SCHEDULING</code> 不写事件。这也解释了场景 3 为什么恰好只有一条 <code>QUEUE_BLOCKED</code>：因为那里确实存在一个具体阻断原因。</div>
+
+<h2>场景 3 · GPU 打满（CRITICAL）→ QUEUE → 自动续跑</h2>
+<p>同一个 Run，两次独立决策。多出来的不是日志行数，而是<b>两个不可变快照</b>和<b>一个被刻意保留的 TTL 时钟</b>。</p>
+
+<div class="fig">
+<svg viewBox="0 0 680 696" width="100%" role="img" xmlns="http://www.w3.org/2000/svg">
+<title>场景 3 资源打满时排队与自动续跑</title>
+<desc>同一个 Run 上先后发生两次准入决策，第一次因 CRITICAL 被拒并保留排队时间，第二次在 pump 的下一个周期放行。</desc>
+<text x="40" y="26" font-size="14" font-weight="500" fill="#2C2C2A">场景 3 · GPU 打满（CRITICAL）→ QUEUE，回落后自动续跑</text>
+<text x="40" y="45" font-size="12" fill="#5F5E5A">同一个 Run 上累积两条 decision；续跑由 pump 的固定周期驱动，无人工干预</text>
+<rect x="40" y="72" width="600" height="44" rx="8" fill="#F7F6F1" stroke="#D3D1C7" stroke-width="0.5"/>
+<text x="62" y="94" font-size="12" fill="#2C2C2A" dominant-baseline="central">POST /runs → 202 Accepted，响应 status=QUEUED</text>
+<text x="628" y="94" font-size="11" fill="#185FA5" text-anchor="end" dominant-baseline="central">提交后立即 tick</text>
+<rect x="40" y="128" width="600" height="128" rx="10" fill="#FCEBEB" stroke="#A32D2D" stroke-width="0.5"/>
+<text x="62" y="148" font-size="12" font-weight="500" fill="#791F1F" dominant-baseline="central">第 1 次 drain · attemptNext 被拒</text>
+<text x="62" y="172" font-size="11" fill="#791F1F" dominant-baseline="central">observe → snap-critical-1（GPU 96% ≥ 90 → GPU_MEMORY_CRITICAL）</text>
+<text x="62" y="192" font-size="11" fill="#791F1F" dominant-baseline="central">classify → pressure = CRITICAL　｜　decide → QUEUE / RESOURCE_CRITICAL</text>
+<text x="62" y="212" font-size="11" fill="#791F1F" dominant-baseline="central">save(decision, snapshot) —— 决策与快照一起落库，不是先决策后补证据</text>
+<text x="62" y="232" font-size="11" fill="#791F1F" dominant-baseline="central">副作用：release() → enqueue(reasonCode=RESOURCE_CRITICAL, enqueuedAt 保留) → QUEUE_BLOCKED(seq=2)</text>
+<rect x="40" y="268" width="600" height="56" rx="10" fill="#FAEEDA" stroke="#854F0B" stroke-width="0.5"/>
+<text x="62" y="288" font-size="11.5" font-weight="500" fill="#633806" dominant-baseline="central">等待窗口：Run 保持 QUEUED，GET /queue 里 position=1 / tenantPosition=1</text>
+<text x="62" y="308" font-size="11" fill="#854F0B" dominant-baseline="central">没有任何人工操作介入 —— 续跑由 pump 的固定周期驱动，最坏延迟 = 1 个 pump 周期</text>
+<rect x="40" y="336" width="600" height="128" rx="10" fill="#EAF3DE" stroke="#3B6D11" stroke-width="0.5"/>
+<text x="62" y="356" font-size="12" font-weight="500" fill="#27500A" dominant-baseline="central">第 2 次 drain · 同一个 Run 被放行</text>
+<text x="62" y="380" font-size="11" fill="#3B6D11" dominant-baseline="central">pump 的下一个周期到（实测 555ms 后，intervalMs = 1000）</text>
+<text x="62" y="400" font-size="11" fill="#3B6D11" dominant-baseline="central">observe → snap-normal-2（GPU 20% → WITHIN_THRESHOLDS）</text>
+<text x="62" y="420" font-size="11" fill="#3B6D11" dominant-baseline="central">classify → pressure = NORMAL　｜　decide → START / RESOURCE_NORMAL</text>
+<text x="62" y="440" font-size="11" fill="#3B6D11" dominant-baseline="central">attemptNext → executeQueuedRun，finally release() 归还 slot</text>
+<rect x="40" y="484" width="600" height="104" rx="12" fill="#F1EFE8" stroke="#B4B2A9" stroke-width="0.5"/>
+<text x="62" y="504" font-size="12" font-weight="500" fill="#2C2C2A" dominant-baseline="central">同一个 Run 上累积两条 decision，各自引用不同的不可变 snapshot</text>
+<text x="62" y="526" font-size="11" fill="#A32D2D" dominant-baseline="central">① action=QUEUE　reasonCode=RESOURCE_CRITICAL　pressure=CRITICAL　snapshot=snap-critical-1</text>
+<text x="62" y="544" font-size="11" fill="#27500A" dominant-baseline="central">② action=START　reasonCode=RESOURCE_NORMAL　pressure=NORMAL　snapshot=snap-normal-2</text>
+<text x="62" y="566" font-size="11" fill="#5F5E5A" dominant-baseline="central">事件 0001→0002 QUEUE_BLOCKED(47.376) →0003 RUN_STARTED(47.931) →0006 COMPLETED(48.301)</text>
+<rect x="40" y="600" width="600" height="76" rx="12" fill="#E6F1FB" stroke="#185FA5" stroke-width="0.5"/>
+<text x="62" y="620" font-size="12" font-weight="500" fill="#0C447C" dominant-baseline="central">两个容易忽略的实现点</text>
+<text x="62" y="642" font-size="11" fill="#185FA5" dominant-baseline="central">release 必须早于 enqueue：enqueue() 见到 runId 仍在 active 集合里会抛「Run 正在执行中」</text>
+<text x="62" y="660" font-size="11" fill="#185FA5" dominant-baseline="central">enqueuedAt 被显式保留：否则每次准入重排都刷新 TTL 时钟，反复被排队的 Run 永远等不到 QUEUE_TIMEOUT 熔断</text>
+</svg>
+</div>
+
+<h3>同一个 Run 的两个时点</h3>
+<table>
+<colgroup><col style="width:16%"><col style="width:20%"><col style="width:14%"><col style="width:14%"><col style="width:36%"></colgroup>
+<thead><tr><th>时点</th><th>观测快照</th><th>压力</th><th>判决</th><th>触发它的原因</th></tr></thead>
+<tbody>
+<tr><td class="l">第 1 次 drain<br>47.375</td><td class="l">snap-critical-1<br>GPU 96%</td><td class="l">CRITICAL</td><td class="l">QUEUE</td><td class="l">提交后的主动 tick。GPU 96% ≥ 90 → <code>GPU_MEMORY_CRITICAL</code> → 任一 CRITICAL 即 CRITICAL</td></tr>
+<tr><td class="l">第 2 次 drain<br>47.931</td><td class="l">snap-normal-2<br>GPU 20%</td><td class="l">NORMAL</td><td class="l">START</td><td class="l">pump 的固定 1000ms 周期命中，落在切换观测器后 555ms</td></tr>
+</tbody>
+</table>
+
+<div class="note"><b>两次决策都留在库里，而且各自引用不同的快照。</b><code>GET /runs/:id/decisions</code> 返回的是<b>两条</b>记录而不是最后一条覆盖——它们回答的是两个不同的问题：「当时为什么不让它跑」和「后来为什么让它跑了」。如果只有最终状态，这个 Run 的排队原因就永远无法被独立复核。</div>
+
+<div class="warn"><b>关于「自动续跑」的精度，我要更正自己上次的说法。</b>上次我说「观测器切回 20% 后 550ms 内自动 START」，这句话给了错误的印象，好像系统在响应资源变化。实际不是：<code>RunQueuePump.start()</code> 只做两件事——立刻 tick 一次，然后每 <code>intervalMs</code> 设一个定时器；它<b>不订阅任何资源事件</b>。观测器被切换后，系统是在下一个固定周期才发现资源已经回落。所以正确的表述是：<b>无需任何人工干预，然后延迟上界 = 1 个 pump 周期（1000ms），本次实测落在 555ms</b>。这是一个轮询系统，不是事件驱动系统——把它说成"响应式"是拔高了。</div>
+
+<div class="warn"><b>enqueuedAt 的保留是防饥饿的关键，不是细节。</b>被拒后重新入队时写的是 <code>enqueuedAt: queuedRun.enqueuedAt</code>（<code>run-queue-coordinator.ts:361</code>），而不是当前时间。如果每次准入重排都刷新这个时间戳，那么一个反复被排队、反复被拒的 Run 的等待时长会被无限重置，<code>enforceQueueTtl()</code> 永远等不到它超过 <code>queueTtlMs</code>（默认 300000ms），它就<b>永久饥饿</b>。重启恢复路径同理：<code>restoreQueuedRun()</code> 取的是 DB 的 <code>run.updatedAt</code>，注释写明「排队时间取 DB updatedAt，重启不重置 TTL 时钟，等待时间跨重启累计」。</div>
+
+<div class="note"><b>release 与 enqueue 的顺序是被代码强制约束的。</b><code>attemptNext()</code> 里注释原文：「顺序一定要是先release再 run，否则enqueue会认为 run 仍在执行并拒绝入队」。原因是 <code>TenantRunScheduler.enqueue()</code> 第一件事就是检查 <code>this.activeTenantByRunId.has(input.runId)</code>，命中即抛「Run 正在执行中」。这是把「不变量」写成运行时会抛错的断言，而不是靠调用方自觉。</div>
+
+<h3>队列被拒时对外能查到什么</h3>
+<table>
+<colgroup><col style="width:26%"><col style="width:74%"></colgroup>
+<thead><tr><th>观测点</th><th>实测内容</th></tr></thead>
+<tbody>
+<tr><td class="l">GET /queue</td><td class="l">{ runId, tenantId: "bootstrap", reasonCode: "RESOURCE_CRITICAL", enqueuedAt, <b>position: 1, tenantPosition: 1</b> }</td></tr>
+<tr><td class="l">GET /runs/:id/decisions<br>（排队中）</td><td class="l">[{ action: "QUEUE", reasonCode: "RESOURCE_CRITICAL", pressure: "CRITICAL" }]</td></tr>
+<tr><td class="l">GET /runs/:id/events</td><td class="l">0001 RUN_CREATED → <b>0002 QUEUE_BLOCKED</b> → 0003 RUN_STARTED → 0004 CONTROL_PREPARED → 0005 SANDBOX_ACQUIRED → 0006 RUN_COMPLETED</td></tr>
+<tr><td class="l">终态 decisions</td><td class="l">两条：QUEUE/RESOURCE_CRITICAL/snap-critical-1 ＋ START/RESOURCE_NORMAL/snap-normal-2</td></tr>
+<tr><td class="l">终态 status</td><td class="l">COMPLETED</td></tr>
+</tbody>
+</table>
+
+<div class="note"><b>QUEUE_BLOCKED 的两条折叠规则</b>（<code>synchronizeQueueBlockers()</code>）：<br>
+① <b>跳过 <code>AWAITING_SCHEDULING</code></b> —— 「在队列里」这个事实已经由 RUN_CREATED/RUN_QUEUED 表达，只有具体阻断原因才值得单独成事件；<br>
+② <b>相同连续原因折叠</b> —— pump 会反复 drain，如果每次都写，「原因没变」也会产生海量重复事件；但<b>原因一旦变化就写新事件</b>，因为那是新的因果事实（这正是场景 3 与 D1 里能看到原因演变的原因）。<br>
+另外 <code>listQueueBlockers()</code> 会让<b>调度器容量原因覆盖已存的资源原因</b>：<code>GLOBAL_CONCURRENCY_LIMIT</code> &gt; <code>TENANT_CONCURRENCY_LIMIT</code> &gt; <code>SESSION_SERIALIZATION</code> 优先，代码注释的理由是「容量才是此刻不能领取该 Run 的直接原因」。</div>
+
+<h3>相关参数与默认值</h3>
+<table>
+<colgroup><col style="width:38%"><col style="width:14%"><col style="width:48%"></colgroup>
+<thead><tr><th>环境变量</th><th>默认值</th><th>生效点 / 违反时行为</th></tr></thead>
+<tbody>
+<tr><td class="l">HARNESS_BUSY_GPU_MEMORY_PERCENT</td><td class="l">70</td><td class="l">classifyResource → GPU_MEMORY_BUSY</td></tr>
+<tr><td class="l">HARNESS_CRITICAL_GPU_MEMORY_PERCENT</td><td class="l">90</td><td class="l">→ GPU_MEMORY_CRITICAL（任一即 CRITICAL）</td></tr>
+<tr><td class="l">HARNESS_BUSY_KV_CACHE_PERCENT</td><td class="l">60</td><td class="l">→ KV_CACHE_BUSY</td></tr>
+<tr><td class="l">HARNESS_CRITICAL_KV_CACHE_PERCENT</td><td class="l">85</td><td class="l">→ KV_CACHE_CRITICAL</td></tr>
+<tr><td class="l">HARNESS_BUSY_RUNNING_REQUESTS</td><td class="l">4</td><td class="l">→ RUNNING_REQUESTS_BUSY</td></tr>
+<tr><td class="l">HARNESS_CRITICAL_RUNNING_REQUESTS</td><td class="l">8</td><td class="l">→ RUNNING_REQUESTS_CRITICAL</td></tr>
+<tr><td class="l">HARNESS_BUSY_WAITING_REQUESTS</td><td class="l">1</td><td class="l">→ WAITING_REQUESTS_BUSY（默认值 1 意味着「有人在等」就算忙）</td></tr>
+<tr><td class="l">HARNESS_CRITICAL_WAITING_REQUESTS</td><td class="l">4</td><td class="l">→ WAITING_REQUESTS_CRITICAL</td></tr>
+<tr><td class="l">HARNESS_MAX_ACTIVE_RUNS</td><td class="l">30</td><td class="l">全局 slot 上限。必须为正整数，否则策略构造时抛错。</td></tr>
+<tr><td class="l">HARNESS_MAX_ACTIVE_RUNS_PER_TENANT</td><td class="l">10</td><td class="l">单租户上限。<b>大于全局上限时启动即抛</b>（配置加载期校验）。</td></tr>
+<tr><td class="l">HARNESS_PUMP_INTERVAL_MS</td><td class="l">1000</td><td class="l">决定自动续跑的延迟上界。必须为正整数。</td></tr>
+<tr><td class="l">HARNESS_QUEUE_TTL_MS</td><td class="l">300000</td><td class="l">超过则 FAILED(QUEUE_TIMEOUT)。时钟起点是 enqueuedAt，不是重排时刻。</td></tr>
+<tr><td class="l">HARNESS_RESOURCE_TIMEOUT_MS</td><td class="l">3000</td><td class="l">单次观测超时 → 走 RESOURCE_OBSERVATION_FAILED 分支</td></tr>
+</tbody>
+</table>
+
+<div class="warn"><b>边界与已知取舍 —— 三处要如实说的</b><br>
+① <b>本机没有真实 GPU。</b>这两次决策里的观测源是注入的假观测器（<code>snap-normal-1</code> / <code>snap-critical-1</code> / <code>snap-normal-2</code> 都由它产生），唯一的真实替换点就是「GPU 多忙」这一个数字。所以这两个场景证明的是<b>决策链在给定观测下的正确性</b>，不是 classifyResource 面对真实 vLLM <code>/metrics</code> 的准确性。要覆盖后者只能跑 <code>e2e-gpu-pressure</code>（需真实 vLLM）。<br>
+② <b>轮询而非事件驱动</b>，延迟上界是一个 pump 周期。资源回落与续跑之间必然存在 0–1000ms 的空窗，这段时间 GPU 是空闲的。<br>
+③ <b>CRITICAL 是硬拦</b>：GPU ≥ 90% 时连一个 Run 都不放行，没有「降级小任务」这类中间档。这是明确的保守选择，代价是利用率，收益是避免把已经打满的卡再压上去。</div>
+
+<h2>场景 5 · 双租户公平轮转</h2>
+<p>场景 3 证明了「排队」，场景 5 证明「排队时不会有人被饿死」。两者用的是同一个调度器，但关注点完全不同：场景 3 看的是<b>一个</b> Run 的命运，场景 5 看的是<b>多个</b> Run 之间的相对顺序。</p>
+
+<div class="fig">
+<svg viewBox="0 0 680 596" width="100%" role="img" xmlns="http://www.w3.org/2000/svg">
+<title>场景 5 双租户公平轮转的状态推演</title>
+<desc>四个 Run 两个租户，tenantOrder 与各租户队列在连续四次 claimNext 中的真实取值，以及 listQueue 的全局投影。</desc>
+<text x="40" y="26" font-size="14" font-weight="500" fill="#2C2C2A">场景 5 · 双租户公平轮转：claimNext() 的真实状态推演</text>
+<text x="40" y="45" font-size="12" fill="#5F5E5A">四个 Run、两个租户，全局并发上限内 —— 实测全局投影 A1 → B1 → A2 → B2</text>
+<text x="56" y="76" font-size="11" font-weight="500" fill="#444441" dominant-baseline="central">动作</text>
+<text x="150" y="76" font-size="11" font-weight="500" fill="#444441" dominant-baseline="central">tenantOrder（轮转队列）</text>
+<text x="300" y="76" font-size="11" font-weight="500" fill="#444441" dominant-baseline="central">各租户队列</text>
+<text x="490" y="76" font-size="11" font-weight="500" fill="#444441" dominant-baseline="central">claimNext() 返回</text>
+<rect x="40" y="92" width="600" height="50" rx="8" fill="#F7F6F1" stroke="#D3D1C7" stroke-width="0.5"/>
+<text x="56" y="110" font-size="11.5" fill="#2C2C2A" dominant-baseline="central">初始状态</text>
+<text x="150" y="110" font-size="11" fill="#5F5E5A" dominant-baseline="central">[A, B]</text>
+<text x="300" y="110" font-size="11" fill="#5F5E5A" dominant-baseline="central">A:[a1, a2]　B:[b1, b2]</text>
+<text x="490" y="110" font-size="12" fill="#888780" dominant-baseline="central">—</text>
+<rect x="40" y="150" width="600" height="50" rx="8" fill="#F7F6F1" stroke="#D3D1C7" stroke-width="0.5"/>
+<text x="56" y="168" font-size="11.5" fill="#2C2C2A" dominant-baseline="central">① 取队首租户 A</text>
+<text x="150" y="168" font-size="11" font-weight="500" fill="#185FA5" dominant-baseline="central">[B, A]</text>
+<text x="300" y="168" font-size="11" fill="#5F5E5A" dominant-baseline="central">A:[a2]　B:[b1, b2]</text>
+<text x="490" y="168" font-size="12" font-weight="500" fill="#27500A" dominant-baseline="central">a1</text>
+<text x="300" y="186" font-size="11" fill="#185FA5" dominant-baseline="central">A 仍有 a2 → 把 A push 回队尾</text>
+<rect x="40" y="208" width="600" height="50" rx="8" fill="#F7F6F1" stroke="#D3D1C7" stroke-width="0.5"/>
+<text x="56" y="226" font-size="11.5" fill="#2C2C2A" dominant-baseline="central">② 取队首租户 B</text>
+<text x="150" y="226" font-size="11" font-weight="500" fill="#185FA5" dominant-baseline="central">[A, B]</text>
+<text x="300" y="226" font-size="11" fill="#5F5E5A" dominant-baseline="central">A:[a2]　B:[b2]</text>
+<text x="490" y="226" font-size="12" font-weight="500" fill="#27500A" dominant-baseline="central">b1</text>
+<text x="300" y="244" font-size="11" fill="#185FA5" dominant-baseline="central">B 仍有 b2 → 把 B push 回队尾</text>
+<rect x="40" y="266" width="600" height="50" rx="8" fill="#F7F6F1" stroke="#D3D1C7" stroke-width="0.5"/>
+<text x="56" y="284" font-size="11.5" fill="#2C2C2A" dominant-baseline="central">③ 取队首租户 A</text>
+<text x="150" y="284" font-size="11" font-weight="500" fill="#185FA5" dominant-baseline="central">[B]</text>
+<text x="300" y="284" font-size="11" fill="#5F5E5A" dominant-baseline="central">B:[b2]　（A 已删除）</text>
+<text x="490" y="284" font-size="12" font-weight="500" fill="#27500A" dominant-baseline="central">a2</text>
+<text x="300" y="302" font-size="11" fill="#185FA5" dominant-baseline="central">A 队列已空 → 从 map 与 tenantOrder 中删除</text>
+<rect x="40" y="324" width="600" height="50" rx="8" fill="#F7F6F1" stroke="#D3D1C7" stroke-width="0.5"/>
+<text x="56" y="342" font-size="11.5" fill="#2C2C2A" dominant-baseline="central">④ 取队首租户 B</text>
+<text x="150" y="342" font-size="11" font-weight="500" fill="#185FA5" dominant-baseline="central">[]</text>
+<text x="300" y="342" font-size="11" fill="#5F5E5A" dominant-baseline="central">（空）</text>
+<text x="490" y="342" font-size="12" font-weight="500" fill="#27500A" dominant-baseline="central">b2</text>
+<text x="300" y="360" font-size="11" fill="#185FA5" dominant-baseline="central">B 队列已空 → 全部清空，claimNext 返回 null</text>
+<rect x="40" y="394" width="600" height="76" rx="12" fill="#F1EFE8" stroke="#B4B2A9" stroke-width="0.5"/>
+<text x="62" y="414" font-size="12" font-weight="500" fill="#2C2C2A" dominant-baseline="central">listQueue() 的投影 —— 同一份队列，另一段代码算出</text>
+<text x="62" y="436" font-size="11" fill="#5F5E5A" dominant-baseline="central">position 1＝a1（tenantPosition 1）　2＝b1（1）　3＝a2（2）　4＝b2（2）</text>
+<text x="62" y="456" font-size="11" fill="#27500A" dominant-baseline="central">实测 GET /queue 的全局投影正是 A1, B1, A2, B2 —— 与上面的真实 claim 顺序一致</text>
+<rect x="40" y="490" width="600" height="86" rx="12" fill="#E6F1FB" stroke="#185FA5" stroke-width="0.5"/>
+<text x="62" y="508" font-size="12" font-weight="500" fill="#0C447C" dominant-baseline="central">公平性其实只来自一行代码</text>
+<text x="62" y="530" font-size="11" fill="#185FA5" dominant-baseline="central">取走一个 Run 之后：该租户队列仍非空 → 把租户 push 回 tenantOrder 队尾；已空 → 删除该租户。</text>
+<text x="62" y="548" font-size="11" fill="#185FA5" dominant-baseline="central">所以「一个租户不能靠堆积任务独占并发窗口」不是靠限流实现的，是靠这个轮转指针实现的。</text>
+<text x="62" y="566" font-size="11" fill="#185FA5" dominant-baseline="central">注意 position 与 tenantPosition 是 listQueue() 独立算出的诊断投影；权威顺序只由 claimNext() 决定。</text>
+</svg>
+</div>
+
+<div class="note"><b>公平性不是靠限流，是靠一个轮转指针。</b><code>claimNext()</code> 里没有任何按租户加权的公平调度——它只有一句：取走一个 Run 之后，如果该租户队列还非空，就把这个租户 <code>push</code> 回 <code>tenantOrder</code> 队尾；空了就从 <code>queuesByTenant</code> 与 <code>tenantOrder</code> 中删除。所以一个租户即使排 100 个任务，每轮也只能拿到一个名额。</div>
+
+<div class="note"><b><code>position</code> 是投影，不是权威顺序。</b><code>position</code> / <code>tenantPosition</code> 由 <code>listQueue()</code> 在队列副本上跑另一遍同样的轮转规则算出；<code>claimNext()</code> 则在真实结构上跑，并且额外应用单租户上限与会话串行。<b>两者可以分歧</b>——被租户上限挡下的 Run 仍留在队列里占着 <code>position</code>，而 <code>claimNext()</code> 会跳到下一个租户。所以 <code>QueueBlocker</code> 的注释说它是 <i>"diagnostic evidence, not a new scheduler decision"</i>。</div>
+
+<h3>调度侧的三道门与 /queue 的租户切片</h3>
+<div class="fig">
+<svg viewBox="0 0 680 568" width="100%" role="img" xmlns="http://www.w3.org/2000/svg">
+<title>调度侧三道门与 queue 的租户切片</title>
+<desc>调度器在资源准入之外还有三道隔离门：全局 slot、单租户 slot、会话串行；queue 接口按租户过滤但位置号是全局的。</desc>
+<text x="40" y="26" font-size="14" font-weight="500" fill="#2C2C2A">场景 5 · 调度侧的三道门与 /queue 的租户切片</text>
+<text x="40" y="45" font-size="12" fill="#5F5E5A">资源准入之外，调度器自己还有三道会拒绝入场的门</text>
+<text x="40" y="80" font-size="11.5" font-weight="500" fill="#444441" dominant-baseline="central">调度器的三道门（按顺序判定，命中即覆盖更早的原因码）</text>
+<rect x="40" y="92" width="600" height="52" rx="8" fill="#F7F6F1" stroke="#D3D1C7" stroke-width="0.5"/>
+<text x="56" y="112" font-size="11.5" font-weight="500" fill="#2C2C2A" dominant-baseline="central">① 全局 slot</text>
+<text x="160" y="112" font-size="11" fill="#5F5E5A" dominant-baseline="central">activeTenantByRunId.size ≥ maxActiveRuns（30）</text>
+<text x="500" y="112" font-size="11" font-weight="500" fill="#A32D2D" dominant-baseline="central">GLOBAL_CONCURRENCY_LIMIT</text>
+<text x="160" y="132" font-size="11" fill="#888780" dominant-baseline="central">claimNext() 第一件事就是查这个，超限直接返回 null</text>
+<rect x="40" y="152" width="600" height="52" rx="8" fill="#F7F6F1" stroke="#D3D1C7" stroke-width="0.5"/>
+<text x="56" y="172" font-size="11.5" font-weight="500" fill="#2C2C2A" dominant-baseline="central">② 单租户 slot</text>
+<text x="160" y="172" font-size="11" fill="#5F5E5A" dominant-baseline="central">getActiveTenantRunCount(t) ≥ maxActiveRunsPerTenant（10）</text>
+<text x="500" y="172" font-size="11" font-weight="500" fill="#A32D2D" dominant-baseline="central">TENANT_CONCURRENCY_LIMIT</text>
+<text x="160" y="192" font-size="11" fill="#888780" dominant-baseline="central">命中后把该租户 push 回队尾、跳到下一个租户，不阻塞别人</text>
+<rect x="40" y="212" width="600" height="52" rx="8" fill="#F7F6F1" stroke="#D3D1C7" stroke-width="0.5"/>
+<text x="56" y="232" font-size="11.5" font-weight="500" fill="#2C2C2A" dominant-baseline="central">③ 会话串行</text>
+<text x="160" y="232" font-size="11" fill="#5F5E5A" dominant-baseline="central">run.sessionId 有同会话的 Run 正在跑</text>
+<text x="500" y="232" font-size="11" font-weight="500" fill="#A32D2D" dominant-baseline="central">SESSION_SERIALIZATION</text>
+<text x="160" y="252" font-size="11" fill="#888780" dominant-baseline="central">unshift 放回队首：对话是有序消息流，不能让同一会话并发</text>
+<text x="40" y="294" font-size="11.5" font-weight="500" fill="#444441" dominant-baseline="central">/queue 的投影与租户切片（场景 5 实测）</text>
+<rect x="40" y="306" width="600" height="44" rx="8" fill="#E6F1FB" stroke="#185FA5" stroke-width="0.5"/>
+<text x="56" y="328" font-size="11.5" font-weight="500" fill="#0C447C" dominant-baseline="central">全局投影 listQueue()</text>
+<text x="200" y="328" font-size="11" fill="#185FA5" dominant-baseline="central">1＝A1（tenantPosition 1）　2＝B1（1）　3＝A2（2）　4＝B2（2）</text>
+<rect x="40" y="360" width="292" height="56" rx="8" fill="#F7F6F1" stroke="#D3D1C7" stroke-width="0.5"/>
+<text x="56" y="380" font-size="11.5" font-weight="500" fill="#2C2C2A" dominant-baseline="central">租户 A 的 GET /queue → 2 条</text>
+<text x="56" y="400" font-size="11" fill="#5F5E5A" dominant-baseline="central">返回 position=1 与 position=3</text>
+<rect x="348" y="360" width="292" height="56" rx="8" fill="#F7F6F1" stroke="#D3D1C7" stroke-width="0.5"/>
+<text x="364" y="380" font-size="11.5" font-weight="500" fill="#2C2C2A" dominant-baseline="central">租户 B 的 GET /queue → 2 条</text>
+<text x="364" y="400" font-size="11" fill="#5F5E5A" dominant-baseline="central">返回 position=2 与 position=4</text>
+<rect x="40" y="432" width="600" height="76" rx="12" fill="#FAEEDA" stroke="#854F0B" stroke-width="0.5"/>
+<text x="62" y="452" font-size="12" font-weight="500" fill="#633806" dominant-baseline="central">隔离实现与它的一点代价</text>
+<text x="62" y="474" font-size="11" fill="#854F0B" dominant-baseline="central">隔离：getQueue() 里 filter(entry.tenantId === principal.tenantId) —— 每个租户只拿到自己那一份切片</text>
+<text x="62" y="492" font-size="11" fill="#854F0B" dominant-baseline="central">代价：position 是全局序号，租户能从自己的编号跳号（1、3）推断出全局队列深度 —— 轻微跨租户信息暴露</text>
+</svg>
+</div>
+
+<table>
+<colgroup><col style="width:22%"><col style="width:40%"><col style="width:38%"></colgroup>
+<thead><tr><th>机制</th><th>它解决什么</th><th>实现位置</th></tr></thead>
+<tbody>
+<tr><td>轮转指针</td><td><b>不被饿死</b>：任何租户都不能靠堆积任务连续占用窗口</td><td class="l">claimNext() 里「取走后若队列非空则 push 回队尾」</td></tr>
+<tr><td>单租户上限<br>（默认 10 / 全局 30）</td><td><b>不被独占</b>：一个租户最多占 30 个全局 slot 中的 10 个</td><td class="l">claimNext() 的 getActiveTenantRunCount 检查</td></tr>
+<tr><td>会话串行</td><td><b>对话不并发</b>：同一 conversation 的 Run 不能同时活跃</td><td class="l">claimNext() 的 hasActiveSession → <code>unshift</code> 放回队首</td></tr>
+<tr><td>容量原因优先</td><td>让阻断原因反映「此刻不能领取的直接原因」，而不是上一次的资源原因</td><td class="l">listQueueBlockers()：GLOBAL &gt; TENANT &gt; SESSION 覆盖已存 reason</td></tr>
+<tr><td>租户切片</td><td>队列视图不跨租户可见</td><td class="l">getQueue() 的 tenantId filter（但 position 仍是全局序号）</td></tr>
+</tbody>
+</table>
+
+<div class="warn"><b>一点跨租户信息暴露，如实记下。</b><code>position</code> 是全局轮转序号，而 <code>/queue</code> 只按租户过滤条目。所以租户 A 看到自己的两条是 <code>position=1</code> 与 <code>position=3</code>，从中可以推断「全局队列里至少还有一条别人的任务」。泄露量很小（全局队列深度），但它确实是一个跨租户侧信道。要消除的话，可以把 <code>position</code> 也改成租户内序号，另给一个不带序号的总量字段。</div>
+
+<h2>场景 D1 · 恢复链路与 fail-closed 恢复决策</h2>
+<p>场景 3 留下了一个悬而未决的问题：那个被保留的 <code>enqueuedAt</code>、那条带 <code>checkpointId</code> 的 <code>RUN_QUEUED</code> 事件，到底是给谁用的？D1 就是答案——它的消费者是<b>下一次进程启动时的恢复扫描</b>。</p>
+
+<div class="fig">
+<svg viewBox="0 0 680 648" width="100%" role="img" xmlns="http://www.w3.org/2000/svg">
+<title>场景 D1 恢复链路与事件闭环</title>
+<desc>阶段一由脚本手工构造数据库遗留状态，阶段二用新的应用实例打开同一数据库跑真实的 recover 链路，最终两个 Run 收敛。</desc>
+<text x="40" y="26" font-size="14" font-weight="500" fill="#2C2C2A">场景 D1 · 恢复链路与事件闭环</text>
+<text x="40" y="45" font-size="12" fill="#5F5E5A">证据源 src/demo/day7-fake-demo.ts —— 阶段 1 是手工构造，阶段 2 的 recover() 链路是真实的</text>
+<text x="40" y="72" font-size="11.5" font-weight="500" fill="#633806" dominant-baseline="central">阶段 1 · 「上一个进程」留下的 DB 状态 —— 由脚本手工写入，不是真实崩溃</text>
+<rect x="40" y="84" width="600" height="112" rx="10" fill="#FAEEDA" stroke="#854F0B" stroke-width="0.5"/>
+<text x="62" y="106" font-size="11" fill="#854F0B" dominant-baseline="central">createQueuedRun(tenant-a) → QUEUED</text>
+<text x="62" y="124" font-size="11" fill="#854F0B" dominant-baseline="central">runStore.update(...) → RUNNING ＋ 事件 RUN_STARTED(sequence=2)</text>
+<text x="62" y="142" font-size="11" fill="#854F0B" dominant-baseline="central">toolStore.prepare(read, effect=READ_ONLY, status=PREPARED)</text>
+<text x="62" y="160" font-size="11" fill="#854F0B" dominant-baseline="central">completeWithCheckpoint(...) → 同时写下 agent_runs.checkpoint_id = demo-checkpoint</text>
+<text x="62" y="178" font-size="11" fill="#854F0B" dominant-baseline="central">createQueuedRun(tenant-b) → QUEUED（从未启动）　然后 database.close()</text>
+<text x="40" y="220" font-size="11.5" font-weight="500" fill="#27500A" dominant-baseline="central">阶段 2 · 新的 createHarnessApplication 打开同一个 DB 文件，跑真实的 start()</text>
+<rect x="40" y="232" width="600" height="150" rx="10" fill="#F7F6F1" stroke="#3B6D11" stroke-width="0.5"/>
+<text x="62" y="254" font-size="11" fill="#5F5E5A" dominant-baseline="central">recover() ① sandboxReconciler.reconcile() —— 无遗留沙箱，空操作</text>
+<text x="62" y="272" font-size="11" fill="#5F5E5A" dominant-baseline="central">recover() ② queuedRunRestorer.restore() → tenant-b 回到内存队列（enqueuedAt 取 DB updatedAt）</text>
+<text x="62" y="290" font-size="11" fill="#5F5E5A" dominant-baseline="central">recover() ③ scanInterruptedRuns() → 写 RUN_INTERRUPTED{reason:PROCESS_RESTART, AUTO_RESUME}</text>
+<text x="62" y="308" font-size="11" fill="#5F5E5A" dominant-baseline="central">　　　　RecoveryExecutor.execute() → submitResume → queueResume 写 RUN_QUEUED{checkpointId}</text>
+<text x="62" y="326" font-size="11" fill="#5F5E5A" dominant-baseline="central">pump.start() 立即 tick → 观测 CRITICAL → 两个 Run 都 DEFERRED（各写 QUEUE_BLOCKED）</text>
+<text x="62" y="344" font-size="11" fill="#5F5E5A" dominant-baseline="central">观测切 NORMAL → 下一个 tick → tenant-b 走 runtime.start、tenant-a 走 runtime.resume</text>
+<text x="62" y="362" font-size="11" fill="#27500A" dominant-baseline="central">两个 Run 均 COMPLETED；GET /queue 清空</text>
+<rect x="40" y="400" width="600" height="132" rx="12" fill="#F1EFE8" stroke="#B4B2A9" stroke-width="0.5"/>
+<text x="62" y="420" font-size="12" font-weight="500" fill="#2C2C2A" dominant-baseline="central">两条真实事件时间线（实测）</text>
+<text x="62" y="444" font-size="11" fill="#5F5E5A" dominant-baseline="central">A（恢复 Run）0001 RUN_CREATED　0002 RUN_STARTED　0003 RUN_INTERRUPTED　0004 RUN_QUEUED</text>
+<text x="62" y="462" font-size="11" fill="#5F5E5A" dominant-baseline="central">　　　　　　0005 QUEUE_BLOCKED　0006 QUEUE_BLOCKED　0007 RUN_RESUMED　0008 RUN_COMPLETED</text>
+<text x="62" y="480" font-size="11" fill="#5F5E5A" dominant-baseline="central">B（重入队 Run）0001 RUN_CREATED　0002 QUEUE_BLOCKED　0003 RUN_STARTED　0004 RUN_COMPLETED</text>
+<text x="62" y="502" font-size="11" fill="#A32D2D" dominant-baseline="central">A decisions：QUEUE RESOURCE_CRITICAL → QUEUE RESOURCE_CRITICAL → START RESOURCE_NORMAL</text>
+<text x="62" y="520" font-size="11" fill="#A32D2D" dominant-baseline="central">注意 A 有两条 QUEUE_BLOCKED，而 B 只有一条 —— 见文末的发现，这不是设计意图</text>
+<rect x="40" y="552" width="600" height="76" rx="12" fill="#E6F1FB" stroke="#185FA5" stroke-width="0.5"/>
+<text x="62" y="570" font-size="12" font-weight="500" fill="#0C447C" dominant-baseline="central">RUN_QUEUED 里的 checkpointId 是这条链路的闭环</text>
+<text x="62" y="592" font-size="11" fill="#185FA5" dominant-baseline="central">queueResume 写入的 payload = { checkpointId, reason: "AUTO_RECOVERY" }</text>
+<text x="62" y="610" font-size="11" fill="#185FA5" dominant-baseline="central">→ 下一次重启时 QueuedRunRecoveryService 正是读这个字段重建 ResumeRunInput，而不是把它当成新 Run</text>
+</svg>
+</div>
+
+<h3>这份证据里，什么是真的，什么是构造的</h3>
+<table>
+<colgroup><col style="width:10%"><col style="width:45%"><col style="width:45%"></colgroup>
+<thead><tr><th></th><th>项目</th><th>说明</th></tr></thead>
+<tbody>
+<tr><td><b>真</b></td><td>持久化边界</td><td>阶段 1 用 <code>openHarnessDatabase(path)</code> 写完就 <code>close()</code>；阶段 2 是另一个 <code>createHarnessApplication</code> 打开同一文件。阶段 2 的正规启动路径从未见过阶段 1 的内存状态 —— 这是「重启」在持久层上的真实等价物。</td></tr>
+<tr><td><b>真</b></td><td><code>recover()</code> 全链路</td><td>真的调了 <code>listActiveRuns()</code> → <code>buildPlan()</code>（写 RUN_INTERRUPTED）→ <code>decideRecovery()</code> → <code>RecoveryExecutor.execute()</code> → <code>submitResume()</code> → <code>queueResume()</code>（写 RUN_QUEUED）→ <code>scheduler.enqueue()</code>。无一步被替换。</td></tr>
+<tr><td><b>真</b></td><td>步骤顺序的指纹</td><td><code>restore()</code> 先于 <code>scan()</code>，表现为 <code>[CRITICAL] queue snapshot</code> 里 tenant-b 排在 tenant-a <b>前面</b>：重入队的旧任务比重扫出的恢复任务更靠前。</td></tr>
+<tr><td><b>假</b></td><td>没有进程重启</td><td>同一个进程内先后建了两个 composition。准确说法是<b>跨连接／跨应用实例的持久化恢复</b>，不是跨进程恢复。</td></tr>
+<tr><td><b>假</b></td><td>没有真实执行</td><td><code>DemoAgentRuntime</code> 替换 runtime；观测器返回 <code>sources:["FAKE"]</code>；没有 Worker、没有模型。</td></tr>
+<tr><td><b>假</b></td><td>「中断在工具执行中」是手工写的</td><td>阶段 1 用 <code>runStore.update</code> 直接写 RUNNING，用 <code>toolStore.prepare</code> ＋ <code>completeWithCheckpoint</code> 手工造出 <code>PREPARED → SUCCEEDED + checkpoint</code>。它验证的是<b>恢复逻辑对「库里出现这种状态」的处理</b>，<b>不是</b>「真实崩溃会留下什么状态」。</td></tr>
+<tr><td><b>假</b></td><td>pump 周期未被覆盖</td><td><code>HARNESS_PUMP_INTERVAL_MS = "60000"</code>，每次推进都是显式 <code>await tick()</code>。时间线因此确定，但周期行为没被测到。</td></tr>
+</tbody>
+</table>
+
+<div class="ok"><b>权威证据在测试里，不在这个脚本里。</b><code>tests/integration/day7-recovery-resource.e2e.test.ts:250-261</code> 断言了与上图完全一致的事件序列（含两条 QUEUE_BLOCKED），而它在 <code>bun run test</code> 的 403 项里。引用这条链路时应当引测试文件，`day7-fake-demo.ts` 只作为可手工复跑的演示。</div>
+
+<h3>恢复决策：fail closed 的两道把关</h3>
+<div class="fig">
+<svg viewBox="0 0 680 588" width="100%" role="img" xmlns="http://www.w3.org/2000/svg">
+<title>恢复决策与 fail closed 重校验</title>
+<desc>恢复决策分三支：无检查点或存在不可自动重放的工具执行则转人工，否则自动恢复；执行前还会按当前工具历史重算一次决策。</desc>
+<text x="40" y="26" font-size="14" font-weight="500" fill="#2C2C2A">场景 D1 · 恢复决策：什么能自动恢复，什么必须转人工</text>
+<text x="40" y="45" font-size="12" fill="#5F5E5A">fail closed：只有「仍处 PREPARED 且 READ_ONLY」的工具才允许自动重放</text>
+<rect x="40" y="76" width="600" height="52" rx="8" fill="#FCEBEB" stroke="#A32D2D" stroke-width="0.5"/>
+<text x="56" y="94" font-size="11.5" font-weight="500" fill="#791F1F" dominant-baseline="central">checkpointId === null</text>
+<text x="300" y="94" font-size="11" fill="#791F1F" dominant-baseline="central">→ MANUAL_REVIEW · NO_CHECKPOINT</text>
+<text x="56" y="114" font-size="11" fill="#A32D2D" dominant-baseline="central">没有恢复点就没有可续的位置，不猜</text>
+<rect x="40" y="136" width="600" height="52" rx="8" fill="#FCEBEB" stroke="#A32D2D" stroke-width="0.5"/>
+<text x="56" y="154" font-size="11.5" font-weight="500" fill="#791F1F" dominant-baseline="central">存在 prepared 执行且 !canAutomaticallyReplay(status, effect)</text>
+<text x="430" y="154" font-size="11" fill="#791F1F" dominant-baseline="central">→ MANUAL_REVIEW · UNSAFE_TOOL_EFFECT</text>
+<text x="56" y="174" font-size="11" fill="#A32D2D" dominant-baseline="central">同时带上 blockingToolExecutionId，指明是哪个工具执行阻断了恢复</text>
+<rect x="40" y="196" width="600" height="52" rx="8" fill="#EAF3DE" stroke="#3B6D11" stroke-width="0.5"/>
+<text x="56" y="214" font-size="11.5" font-weight="500" fill="#27500A" dominant-baseline="central">否则</text>
+<text x="300" y="214" font-size="11" fill="#27500A" dominant-baseline="central">→ AUTO_RESUME · SAFE_CHECKPOINT</text>
+<text x="56" y="234" font-size="11" fill="#3B6D11" dominant-baseline="central">唯一允许自动推进的一支</text>
+<rect x="40" y="268" width="600" height="88" rx="12" fill="#F7F6F1" stroke="#D3D1C7" stroke-width="0.5"/>
+<text x="62" y="288" font-size="12" font-weight="500" fill="#2C2C2A" dominant-baseline="central">canAutomaticallyReplay(status, effect) 的真实判定</text>
+<text x="62" y="310" font-size="11" fill="#5F5E5A" dominant-baseline="central">status ≠ PREPARED → false（已完成/已失败的执行不再重放）</text>
+<text x="62" y="328" font-size="11" fill="#27500A" dominant-baseline="central">READ_ONLY → true</text>
+<text x="62" y="346" font-size="11" fill="#791F1F" dominant-baseline="central">IDEMPOTENT_WRITE → false　｜　UNKNOWN_EFFECT → false　（注释：仅「被声明为幂等」不足以证明外部系统会用稳定幂等键）</text>
+<rect x="40" y="376" width="600" height="96" rx="12" fill="#E6F1FB" stroke="#185FA5" stroke-width="0.5"/>
+<text x="62" y="396" font-size="12" font-weight="500" fill="#0C447C" dominant-baseline="central">execute() 里的第二次决策 —— 这才是 fail closed 的关键</text>
+<text x="62" y="418" font-size="11" fill="#185FA5" dominant-baseline="central">若 plan.decision.action === "AUTO_RESUME"，就按【当前】preparedExecutions 重算 decideRecovery(...)</text>
+<text x="62" y="436" font-size="11" fill="#185FA5" dominant-baseline="central">重算结果若是 MANUAL_REVIEW → 坚决拒绝自动重放。注释理由：计划可能来自旧扫描快照或被上层改写。</text>
+<text x="62" y="454" font-size="11" fill="#185FA5" dominant-baseline="central">即 plan 自称可以自动恢复不算数，要按现在的工具副作用历史重新证明一遍。</text>
+<rect x="40" y="492" width="600" height="76" rx="12" fill="#FAEEDA" stroke="#854F0B" stroke-width="0.5"/>
+<text x="62" y="512" font-size="12" font-weight="500" fill="#633806" dominant-baseline="central">MANUAL_REVIEW 不是静默跳过</text>
+<text x="62" y="534" font-size="11" fill="#854F0B" dominant-baseline="central">Run 保持 INTERRUPTED，不自动推进；写 RUN_INTERRUPTED{reason:MANUAL_REVIEW_REQUIRED, blockingToolExecutionId}</text>
+<text x="62" y="552" font-size="11" fill="#854F0B" dominant-baseline="central">运维据此确认后走既有 resume API 继续推进 —— 人工路径与新任务共用同一条准入/调度链路</text>
+</svg>
+</div>
+
+<div class="note"><b>「计划说自己能自动恢复」不算数。</b><code>RecoveryExecutor.execute()</code> 在真正推进之前，会按<b>当前</b>的 <code>preparedExecutions</code> 重算一次 <code>decideRecovery()</code>。如果重算结果是 MANUAL_REVIEW，即便 <code>plan.decision</code> 声称 AUTO_RESUME 也坚决拒绝。代码注释给了理由：计划可能来自旧的扫描快照，或被上层改写。这是把「信任边界」放在了执行点上而不是计划生成点上。</div>
+
+<div class="note"><b>为什么 <code>IDEMPOTENT_WRITE</code> 也被拒绝。</b><code>tool-execution.ts:47-50</code> 注释原文：<i>「写入被声明为幂等」本身不足以证明外部系统会使用稳定幂等键。在 ToolExecution 持久化并校验真实幂等证据前保持 fail closed。</i> 也就是说，「工具自己说自己幂等」不被采信——需要外部系统侧的真实幂等证据。这是一个刻意偏保守、且把缺口写进注释而不是藏起来的决定。</div>
+
+<hr>
+<h2 id="finding-blocked-flood">本轮新发现 · QUEUE_BLOCKED 折叠规则在并发领取下失效</h2>
+<p>这个发现来自对 D1 事件线的一个疑问：为什么 tenant A 有<b>两条</b>完全相同的 <code>QUEUE_BLOCKED</code>，而 tenant B 只有一条？我把 D1 的种子与两阶段启动复现出来并打了插桩（<code>tmp/day7-inspect.ts</code>），拿到完整 payload。</p>
+
+<pre>bun run tmp/day7-inspect.ts
+
+=== CRITICAL 下连续 5 次 tick，观察 QUEUE_BLOCKED 计数 ===
+  起点：A=2 B=1
+  tick #1：A=3 B=1
+  tick #2：A=4 B=1
+  tick #3：A=5 B=1
+  tick #4：A=6 B=1
+  tick #5：A=7 B=1</pre>
+
+<div class="warn"><b>结论：这不是竞态，是确定性行为 —— A 每 tick 稳定 +1，B 恒为 1。两次独立运行结果完全一致。</b></div>
+
+<h3>两条事件的内容</h3>
+<pre>0005 QUEUE_BLOCKED {"reasonCode":"RESOURCE_CRITICAL","position":2,"tenantPosition":1,
+                    "activeRunCount":0,"activeTenantRunCount":0}
+0006 QUEUE_BLOCKED {"reasonCode":"RESOURCE_CRITICAL","position":2,"tenantPosition":1,
+                    "activeRunCount":0,"activeTenantRunCount":0}    ← 与上一条逐字节相同</pre>
+<p>payload <b>完全相同</b>：没有新的原因码、没有变化的计数、没有新信息。所以它不是「一条新的因果事实」，而是同一句话重复写。</p>
+
+<h3>机制</h3>
+<p><code>synchronizeQueueBlockers()</code> 用一张内存表 <code>lastQueueBlockerByRunId</code> 做折叠，规则是「与上次相同的原因码就跳过」。但它还有一段<b>删除</b>逻辑：</p>
+<pre>for (const runId of this.lastQueueBlockerByRunId.keys()) {
+    if (!queuedRunIds.has(runId)) {
+        this.lastQueueBlockerByRunId.delete(runId);   // 「不在当前队列里」= 「不再排队」
+    }
+}
+</pre>
+<p>问题在于：<b><code>claimNext()</code> 会把 Run 从队列里摘走，直到 <code>release()</code> + <code>enqueue()</code> 才放回去。</b>在这段窗口里，该 Run 的「不在队列里」并不代表它不再排队——它只是正在被评估。<code>drainOnce()</code> 又会用 <code>Promise.allSettled</code> <b>并发</b>发起 N 个 <code>attemptNext()</code>，所以 A 的 <code>synchronize</code> 调用完全可能落在 B 被摘走的窗口里，反之亦然。被误删的一方，下一轮就会把同一条原因重新写一遍。</p>
+<p>本次实测里受害的是 A，因为 A 在队列中是 position 2，被 <code>claimNext()</code> 取得更晚、<code>admission.evaluate()</code> 也返回更晚，于是它的表项总是先被 B 的那次 <code>synchronize</code> 删掉。这解释了为什么它是确定性的。</p>
+
+<h3>为什么现有测试没拦住</h3>
+<table>
+<colgroup><col style="width:46%"><col style="width:54%"></colgroup>
+<thead><tr><th>测试</th><th>它覆盖了什么 / 漏了什么</th></tr></thead>
+<tbody>
+<tr><td class="l">tests/scheduling/run-queue-coordinator.test.ts:1421-1426</td><td>明确断言折叠：<i>「A subsequent Pump tick sees the same blocker but must not flood the immutable event log with an identical explanation.」</i> 但它调用的是<b>串行</b> <code>attemptNext()</code>，且前一步已返回 <code>EMPTY</code> —— 被阻断的 Run 从未被 <code>claimNext()</code> 摘走，表项因而从未被误删。<b>这条路径恰好绕过了缺陷。</b></td></tr>
+<tr><td class="l">tests/integration/day7-recovery-resource.e2e.test.ts:250-261</td><td>断言了含<b>两条</b> <code>QUEUE_BLOCKED</code> 的完整事件序列 —— 也就是把当前（有缺陷的）行为固定了下来。它证明行为稳定，但不证明行为符合设计意图。</td></tr>
+</tbody>
+</table>
+
+<div class="warn"><b>影响面，按实测数据推算。</b>生产默认 <code>pumpIntervalMs = 1000</code>，所以每个「被反复拒绝且需要重新入队」的 Run 会以 <b>1 条/秒</b>的速率写 <code>QUEUE_BLOCKED</code>。缓解因素是 <code>queueTtlMs</code> 默认 300000ms：Run 最多在队列里待 5 分钟就被 <code>FAILED(QUEUE_TIMEOUT)</code> 熔断，所以单个 Run 的上界约 300 条。但如果把 <code>queueTtlMs</code> 调大、或设为 <code>undefined</code> 关闭 TTL（<code>enforceQueueTtl()</code> 会直接 return），而队列因资源长期 CRITICAL 而无法推进，<b>事件写入就是无界的</b>。<code>run_events</code> 是不可变事件日志，只会增长。</div>
+
+<div class="note"><b>建议的修法（我没有改代码，先报给你判断）。</b>把「不在队列里」与「已不再排队」区分开：删除判据不应只看当前队列快照，而应显式检查调度器是否仍持有该 Run——例如提供 <code>isTracked(runId)</code>（队列中 <b>或</b> 已领取活跃），仅当它既不在队列也不是活跃时才删除表项。或者更简单：把折叠从「比较上一次原因」改成「比较上一次写入到事件日志的原因」，并让删除逻辑只在 Run 真正进入终态或离开调度器时才触发。</div>
+
+<h2>场景 F1–F3 · 三条故障分支</h2>
+<p>前面所有场景都在验证「正常路径走对了」。F1–F3 换一个角度：<b>同一套生产入口，只换 Worker 的注入模式</b>，看失败是否被正确归因、Run 是否收敛、执行环境是否被回收。</p>
+
+<div class="ok"><b>这次是真的端到端，不是手工构造。</b>注入模块只在 <code>HARNESS_WORKER_SIMULATE</code> 显式设置时由 <code>worker-main.ts</code> <b>动态 import</b>——默认生产路径不含任何注入逻辑。所以故障是在真实的 Worker 子进程里、经真实 IPC 触发的。三个用例还都用了 <code>HARNESS_PUMP_INTERVAL_MS = 500</code>（默认是 1000），这一点在后面算 onError 次数时要用到。</div>
+
+<div class="warn"><b>更正：我把终态分流的落点画错了。</b>下面这张图初版把「按有没有 <code>agent_failed</code> 分流终态」归给了 <code>ManagedAgentRuntime</code>。重读源码后确认实际落点有两处，都在 <code>RunService</code>：<b>①</b> <code>subscribeToRuntime(runId)</code>（<code>run-service.ts:532</code>）把 runtime 事件经 <code>eventBridge.map()</code> 落库，<code>agent_failed</code> → <code>RUN_FAILED</code> 是在这里写下去的；<b>②</b> <code>executeQueuedRun</code> 的 <code>catch</code>（<code>:288-294</code>）调 <code>markRuntimeInvocationFailureInterrupted(runId, error, "START_FAILED")</code>，那里有一条我原先没注意到的<b>优先级规则</b>。已按下图更正。</div>
+
+<div class="fig">
+<svg viewBox="0 0 680 596" width="100%" role="img" xmlns="http://www.w3.org/2000/svg">
+<title>失败归因的四层与故障注入点</title>
+<desc>Worker 子进程中的故障注入经过四层装饰器；进程级失败由第一层翻译原因，超时由第二层决定时机，Run 终态由 RunService 落库并带优先级规则。</desc>
+<text x="40" y="26" font-size="14" font-weight="500" fill="#2C2C2A">场景 F1–F3 · 失败归因的四层与故障注入点</text>
+<text x="40" y="45" font-size="12" fill="#5F5E5A">同一套生产入口，只换 Worker 的注入模式；各层职责不重叠，终态落点在 RunService</text>
+<rect x="40" y="68" width="600" height="56" rx="10" fill="#FAEEDA" stroke="#854F0B" stroke-width="0.5"/>
+<text x="62" y="88" font-size="12" font-weight="500" fill="#633806" dominant-baseline="central">Worker 子进程（独立进程）—— Bun.spawn(worker-main.ts)</text>
+<text x="62" y="108" font-size="11" fill="#854F0B" dominant-baseline="central">注入模块仅在 HARNESS_WORKER_SIMULATE 显式设置时动态 import；默认生产路径不含任何注入逻辑</text>
+<rect x="40" y="140" width="600" height="90" rx="10" fill="#F7F6F1" stroke="#888780" stroke-width="0.5"/>
+<text x="62" y="160" font-size="12" font-weight="500" fill="#2C2C2A" dominant-baseline="central">第 1 层 · WorkerProcessAgentRuntime —— 翻译「进程级」失败</text>
+<text x="62" y="180" font-size="11" fill="#5F5E5A" dominant-baseline="central">handshake watchdog：15s 未收到 ready → SIGKILL ＋ 合成 agent_failed ＋ reject</text>
+<text x="62" y="198" font-size="11" fill="#5F5E5A" dominant-baseline="central">exited watchdog：!completedNormally → triggerSandboxCleanup() ＋ 合成 agent_failed{WORKER_CRASHED}</text>
+<text x="62" y="216" font-size="11" fill="#5F5E5A" dominant-baseline="central">interrupt()：优雅中断 → 宽限 graceMs → SIGTERM → 再等 2s → SIGKILL</text>
+<rect x="40" y="236" width="600" height="66" rx="10" fill="#F7F6F1" stroke="#888780" stroke-width="0.5"/>
+<text x="62" y="256" font-size="12" font-weight="500" fill="#2C2C2A" dominant-baseline="central">第 2 层 · SupervisedAgentRuntime —— 只决定「什么时候该中断」</text>
+<text x="62" y="276" font-size="11" fill="#5F5E5A" dominant-baseline="central">executionTimeoutMs 到点（默认 30min；本走查 3000ms）→ 调用下层 interrupt()</text>
+<text x="62" y="294" font-size="11" fill="#5F5E5A" dominant-baseline="central">interruptGraceMs（默认 10s；本走查 1000ms）作为宽限传给第 1 层</text>
+<rect x="40" y="308" width="600" height="108" rx="10" fill="#F7F6F1" stroke="#A32D2D" stroke-width="0.5"/>
+<text x="62" y="328" font-size="12" font-weight="500" fill="#2C2C2A" dominant-baseline="central">终态落点 · RunService（不是 ManagedAgentRuntime）</text>
+<text x="62" y="348" font-size="11" fill="#5F5E5A" dominant-baseline="central">① subscribeToRuntime()：runtime 事件经 eventBridge.map() 落库，agent_failed → RUN_FAILED</text>
+<text x="62" y="366" font-size="11" fill="#5F5E5A" dominant-baseline="central">② executeQueuedRun 的 catch → markRuntimeInvocationFailureInterrupted(runId, error, "START_FAILED")</text>
+<text x="62" y="384" font-size="11" fill="#27500A" dominant-baseline="central">　　优先级规则：若已持久化终态（status 不再是 RUNNING / WAITING_TOOL）则 return，以已落库的终态为准</text>
+<text x="62" y="402" font-size="11" fill="#A32D2D" dominant-baseline="central">　　否则写 RUN_INTERRUPTED{message, reason} —— 该路径从不写 agent_runs.failure_reason</text>
+<rect x="40" y="422" width="600" height="58" rx="10" fill="#F7F6F1" stroke="#D3D1C7" stroke-width="0.5"/>
+<text x="62" y="442" font-size="12" font-weight="500" fill="#2C2C2A" dominant-baseline="central">第 4 层 · PiAdapter —— 真实的 model / tool 执行</text>
+<text x="62" y="462" font-size="11" fill="#5F5E5A" dominant-baseline="central">本走查里被故障注入取代；正常路径由 mock_stream 或 Pi 提供 token</text>
+<rect x="40" y="500" width="600" height="76" rx="12" fill="#E6F1FB" stroke="#185FA5" stroke-width="0.5"/>
+<text x="62" y="518" font-size="12" font-weight="500" fill="#0C447C" dominant-baseline="central">F1 与 F2 的差别，全部落在那条优先级规则上</text>
+<text x="62" y="540" font-size="11" fill="#185FA5" dominant-baseline="central">F1：合成 agent_failed 已把 RUN_FAILED 落库 → 规则命中「已持久化终态」→ 早退 → FAILED 保留。</text>
+<text x="62" y="558" font-size="11" fill="#185FA5" dominant-baseline="central">F2：无人发 agent_failed → 状态仍是 RUNNING → 规则不命中 → 被改写成 INTERRUPTED 且 failureReason = null。</text>
+</svg>
+</div>
+
+<h3>三条分支的实测对照</h3>
+<div class="fig">
+<svg viewBox="0 0 680 700" width="100%" role="img" xmlns="http://www.w3.org/2000/svg">
+<title>三条故障分支的实测对照</title>
+<desc>Worker 崩溃、主动回报失败、卡死超时三条分支的注入方式、终态、失败原因、事件类型与沙箱回收情况对照。</desc>
+<text x="40" y="26" font-size="14" font-weight="500" fill="#2C2C2A">场景 F1–F3 · 三条故障分支实测对照</text>
+<text x="40" y="45" font-size="12" fill="#5F5E5A">同一套生产入口，三次注入；差异全部集中在一处：第 1 层有没有发 agent_failed</text>
+<rect x="40" y="66" width="600" height="152" rx="10" fill="#EAF3DE" stroke="#3B6D11" stroke-width="0.5"/>
+<text x="62" y="86" font-size="12" font-weight="500" fill="#27500A" dominant-baseline="central">F1 · crash_sigkill —— Worker 启动 Run 时对自己发 SIGKILL</text>
+<text x="62" y="108" font-size="11" fill="#3B6D11" dominant-baseline="central">终态 FAILED　｜　RUN_FAILED 事件（0005）　｜　attempt#1 = FAILED</text>
+<text x="62" y="126" font-size="11" fill="#27500A" dominant-baseline="central">failureReason = "WORKER_CRASHED: exitCode=137, signal=SIGKILL ＋ Stderr 尾"</text>
+<text x="62" y="144" font-size="11" fill="#3B6D11" dominant-baseline="central">sandbox status = TERMINATED　failureReason = none　←　孤儿执行环境被回收</text>
+<text x="62" y="162" font-size="11" fill="#3B6D11" dominant-baseline="central">onError 1 次（去重后 1）</text>
+<text x="62" y="186" font-size="11" fill="#27500A" dominant-baseline="central">机制：completedNormally=false → exited 看门狗合成 agent_failed → 状态机转 RUN_FAILED</text>
+<text x="62" y="206" font-size="11" fill="#3B6D11" dominant-baseline="central">注意：signal 优先取 child.signalCode，缺失时用 exitCode===137 反推 SIGKILL</text>
+<rect x="40" y="230" width="600" height="152" rx="10" fill="#FCEBEB" stroke="#A32D2D" stroke-width="0.5"/>
+<text x="62" y="250" font-size="12" font-weight="500" fill="#791F1F" dominant-baseline="central">F2 · fail_run —— Worker 经 IPC 主动回报 RUN_FAILED</text>
+<text x="62" y="272" font-size="11" fill="#A32D2D" dominant-baseline="central">终态 INTERRUPTED　｜　RUN_INTERRUPTED 事件（0005，不是 RUN_FAILED）　｜　attempt#1 = FAILED</text>
+<text x="62" y="290" font-size="11" fill="#791F1F" dominant-baseline="central">failureReason = null　←　与 F1 不一致：同一件事，两个不同的 Run 级终态</text>
+<text x="62" y="308" font-size="11" fill="#A32D2D" dominant-baseline="central">attempt#1.failureReason = "Simulated worker execution failure"（原因只活在这里）</text>
+<text x="62" y="326" font-size="11" fill="#A32D2D" dominant-baseline="central">sandbox status = TERMINATED　｜　onError 1 次（去重后 1）</text>
+<text x="62" y="350" font-size="11" fill="#791F1F" dominant-baseline="central">根因：case "RUN_FAILED" 只做 completedNormally=true ＋ rejectPromise，不发 agent_failed</text>
+<text x="62" y="368" font-size="11" fill="#791F1F" dominant-baseline="central">且 completedNormally=true 让 exited 看门狗的整段补救逻辑被跳过 —— 合成 agent_failed 也补不上</text>
+<rect x="40" y="394" width="600" height="152" rx="10" fill="#FAEEDA" stroke="#854F0B" stroke-width="0.5"/>
+<text x="62" y="414" font-size="12" font-weight="500" fill="#633806" dominant-baseline="central">F3 · hang_stubborn —— 不回应 START_RUN，且不理会优雅中断</text>
+<text x="62" y="436" font-size="11" fill="#854F0B" dominant-baseline="central">终态 INTERRUPTED　｜　RUN_INTERRUPTED 事件（0005，距 0004 约 4.0s）　｜　attempt#1 = FAILED</text>
+<text x="62" y="454" font-size="11" fill="#633806" dominant-baseline="central">attempt#1.failureReason = "Agent Runtime 执行超时：&lt;runId&gt; (3000ms)"　｜　failureReason = null</text>
+<text x="62" y="472" font-size="11" fill="#854F0B" dominant-baseline="central">sandbox status = TERMINATED</text>
+<text x="62" y="490" font-size="11" fill="#A32D2D" dominant-baseline="central">onError 9 次（去重后 1）　←　同一次 drain 失败被重复上报，见下一张图</text>
+<text x="62" y="514" font-size="11" fill="#633806" dominant-baseline="central">机制：第 2 层 3s 超时 → 优雅中断 → 宽限 1s 未退出 → 升级 SIGTERM（实测到此收敛）</text>
+<text x="62" y="532" font-size="11" fill="#854F0B" dominant-baseline="central">注意：SIGTERM 之后代码里还有 2s 等待与 SIGKILL 一档，但本次运行没有走到那一档</text>
+<rect x="40" y="568" width="600" height="112" rx="12" fill="#E6F1FB" stroke="#185FA5" stroke-width="0.5"/>
+<text x="62" y="588" font-size="12" font-weight="500" fill="#0C447C" dominant-baseline="central">三条分支共同成立的一件事：异常路径也不泄漏执行环境</text>
+<text x="62" y="610" font-size="11" fill="#185FA5" dominant-baseline="central">三个用例的 sandbox 全部收敛为 TERMINATED —— 崩溃、主动失败、超时强杀都没有留下孤儿沙箱。</text>
+<text x="62" y="628" font-size="11" fill="#185FA5" dominant-baseline="central">这也是场景 0 的启动对账能安全 fail-closed 的前提：正常路径已经把该清的清干净了。</text>
+<text x="62" y="650" font-size="11" fill="#A32D2D" dominant-baseline="central">不一致的只有终态语义：F1 是 FAILED，F2 与 F3 是 INTERRUPTED，而 F2 的失败原因在 Run 级不可见。</text>
+<text x="62" y="668" font-size="11" fill="#185FA5" dominant-baseline="central">脚本自己把 F2 的这个差异打成 [WARN] 输出，并在注释里写明「此差异无测试覆盖」。</text>
+</svg>
+</div>
+
+<div class="warn"><b>F2 的根因就是一行代码，而且它比「没测试」更具体。</b>对照两处：崩溃路径靠的是 <code>child.exited</code> 看门狗里 <code>if (!completedNormally)</code> 这一支，它会 <code>triggerSandboxCleanup()</code> 并<b>合成</b>一个 <code>agent_failed{WORKER_CRASHED}</code>。而 <code>case "RUN_FAILED"</code> 分支做的是 <code>completedNormally = true; rejectPromise(new Error(msg.error))</code>——<b>只 reject，不发 <code>agent_failed</code></b>；而且因为把 <code>completedNormally</code> 置为 true，看门狗那段补救逻辑整体被跳过，连合成的 <code>agent_failed</code> 也补不上。<br>
+于是 <code>RunService</code> 里那条优先级规则（<code>:662-668</code>）<b>不命中</b>——「已持久化终态」不存在，状态仍是 RUNNING——于是 <code>markRuntimeInvocationFailureInterrupted</code> 把状态改写成 <code>INTERRUPTED</code>，而这条路径<b>从不写 <code>agent_runs.failure_reason</code></b>，所以 Run 级 <code>failureReason = null</code>。注入意图完全相同，Run 级终态却不同，且失败原因在 Run 级不可见（只留在 <code>RUN_INTERRUPTED</code> 的 <code>payload.message</code> 与 <code>attempt.failureReason</code>）。</div>
+
+<div class="note"><b>反过来说，F1 之所以能保住 FAILED，靠的正是那条优先级规则。</b><code>markRuntimeInvocationFailureInterrupted</code> 开头有一段守卫：<code>if (currentRun.status !== "RUNNING" &amp;&amp; currentRun.status !== "WAITING_TOOL") return;</code>，代码注释写着「Runtime 已经发出终态事件时，以已持久化的终态为准」。F1 里合成的 <code>agent_failed</code> 已经把 <code>RUN_FAILED</code> 落库，所以这次调用直接早退，不会被改写成 INTERRUPTED。换句话说：<b>这条规则本身是对的，F2 的问题是它的前置条件从未被满足</b>——那条路径根本没落任何终态。</div>
+
+<h3>中断升级阶梯与 onError 的 9 次重复上报</h3>
+<div class="fig">
+<svg viewBox="0 0 680 584" width="100%" role="img" xmlns="http://www.w3.org/2000/svg">
+<title>中断升级阶梯与 onError 重复上报的算术</title>
+<desc>优雅中断、宽限、SIGTERM、SIGKILL 四档阶梯及各自实测结果；同一 drain 失败被 9 个等待者各上报一次的推算过程。</desc>
+<text x="40" y="26" font-size="14" font-weight="500" fill="#2C2C2A">场景 F3 · 中断升级阶梯与 onError 的 9 次重复上报</text>
+<text x="40" y="45" font-size="12" fill="#5F5E5A">阶梯有四档，本次运行只走到第三档；9 次上报可以精确算出来，不是估计</text>
+<text x="40" y="68" font-size="11.5" font-weight="500" fill="#444441" dominant-baseline="central">中断升级阶梯 —— WorkerProcessRuntime.interrupt(runId)</text>
+<rect x="40" y="80" width="600" height="60" rx="8" fill="#F7F6F1" stroke="#D3D1C7" stroke-width="0.5"/>
+<text x="62" y="100" font-size="11.5" font-weight="500" fill="#2C2C2A" dominant-baseline="central">① 优雅中断 —— active.send(INTERRUPT_RUN) 经 child stdin 发 IPC 消息</text>
+<text x="62" y="120" font-size="11" fill="#5F5E5A" dominant-baseline="central">实测：已执行。hang_stubborn 不回应任何消息，所以必然走到下一档</text>
+<rect x="40" y="148" width="600" height="60" rx="8" fill="#FAEEDA" stroke="#854F0B" stroke-width="0.5"/>
+<text x="62" y="168" font-size="11.5" font-weight="500" fill="#633806" dominant-baseline="central">② 宽限 graceMs = 1000ms —— settlesWithin(completionPromise, 1000)</text>
+<text x="62" y="188" font-size="11" fill="#854F0B" dominant-baseline="central">实测：未在宽限内退出，打印 "timed out in grace. Escalating to SIGTERM."</text>
+<rect x="40" y="216" width="600" height="60" rx="8" fill="#FAEEDA" stroke="#854F0B" stroke-width="0.5"/>
+<text x="62" y="236" font-size="11.5" font-weight="500" fill="#633806" dominant-baseline="central">③ SIGTERM —— child.kill("SIGTERM") 后再等 2000ms</text>
+<text x="62" y="256" font-size="11" fill="#854F0B" dominant-baseline="central">实测：Worker 约 11ms 内即退出，未再升级 —— 所以下一档的日志没有出现</text>
+<rect x="40" y="284" width="600" height="60" rx="8" fill="#F7F6F1" stroke="#888780" stroke-width="0.5"/>
+<text x="62" y="304" font-size="11.5" font-weight="500" fill="#444441" dominant-baseline="central">④ SIGKILL —— child.kill("SIGKILL")；另有 forceKill() 跳过整条阶梯直接强杀</text>
+<text x="62" y="324" font-size="11" fill="#888780" dominant-baseline="central">实测：本档「未被触达」—— 代码里有这一档，但本次运行没走到</text>
+<rect x="40" y="364" width="600" height="112" rx="12" fill="#FCEBEB" stroke="#A32D2D" stroke-width="0.5"/>
+<text x="62" y="384" font-size="12" font-weight="500" fill="#791F1F" dominant-baseline="central">为什么 onError 被调用 9 次 —— 一步一步算</text>
+<text x="62" y="406" font-size="11" fill="#791F1F" dominant-baseline="central">本走查的 HARNESS_PUMP_INTERVAL_MS = 500（默认是 1000）</text>
+<text x="62" y="424" font-size="11" fill="#791F1F" dominant-baseline="central">在飞行的 drain 持续 4011ms（0004 → 0005 ＝ 3000ms 执行超时 ＋ 1000ms 宽限 ＋ 约 11ms 收尾）</text>
+<text x="62" y="442" font-size="11" fill="#791F1F" dominant-baseline="central">4011 / 500 ≈ 8 个周期 tick ＋ 提交时的主动 tick ＝ 9 个等待者</text>
+<text x="62" y="462" font-size="11" fill="#791F1F" dominant-baseline="central">drain() 把同一个 in-flight promise 返回给每个等待者；它 reject 时每个等待者各自 catch 一次</text>
+<rect x="40" y="488" width="600" height="76" rx="12" fill="#E6F1FB" stroke="#185FA5" stroke-width="0.5"/>
+<text x="62" y="508" font-size="12" font-weight="500" fill="#0C447C" dominant-baseline="central">这 9 次是日志放大，不是状态错误</text>
+<text x="62" y="530" font-size="11" fill="#185FA5" dominant-baseline="central">Run 的收敛结果是正确的（INTERRUPTED，attempt 与 sandbox 都对）—— 所以脚本把它标成 [WARN] 而非失败。</text>
+<text x="62" y="548" font-size="11" fill="#185FA5" dominant-baseline="central">但若 onError 接了告警或重试计数，9 倍放大就会误导运维。修法：按 drain 轮次只计一次。</text>
+</svg>
+</div>
+
+<div class="note"><b>9 这个数字是算出来的，不是看到的。</b><code>queuePump.drain()</code> 在飞行中会把<b>同一个</b> <code>drainPromise</code> 返回给每个调用者（<code>drainRequested = true</code> 但不新建循环）。当它最终 reject，每个等待者的 <code>tick()</code> 都会在 catch 里调一次 <code>onError</code>。本次窗口里正好有 9 个等待者：<code>4011 ÷ 500 ≈ 8</code> 个周期 tick，加上 <code>submitRun()</code> 末尾那次主动 tick。所以「9 次」是可复算的，而非随机值——这也解释了为什么 F1/F2 只有 1 次：它们的失败几乎是瞬时的，只有一个 tick 在等。</div>
+
+<div class="warn"><b>一处我没在本次运行中验证的代码路径。</b>阶梯的第 ④ 档（SIGKILL）在代码里存在，但这次 <code>hang_stubborn</code> 的 Worker 在收到 SIGTERM 后约 11ms 就退出了——<b>它挂起但不忽略 SIGTERM</b>。所以用例名里的「忽略中断」只对优雅中断成立，对 SIGTERM 不成立。要真正覆盖第 ④ 档，注入模式需要显式 <code>process.on("SIGTERM", () => {})</code> 把信号也吞掉。<b>我不为第 ④ 档背书。</b></div>
+
+<h2>场景 6 · 五层证据链</h2>
+<p>前面每个场景都在说「跑通了」。场景 6 回答的是另一个问题：<b>凭什么相信它真的跑过？</b>答案是每一层都有可读的持久化记录，且层层可 join。</p>
+
+<div class="fig">
+<svg viewBox="0 0 680 598" width="100%" role="img" xmlns="http://www.w3.org/2000/svg">
+<title>场景 6 五层证据追溯链</title>
+<desc>从 Attempt 经 Sandbox、PolicySnapshot、Output 到 Instance 的五层追溯链，每层给出读取 API 与实测字段。</desc>
+<text x="40" y="26" font-size="14" font-weight="500" fill="#2C2C2A">场景 6 · 一次「跑过」能逐层追到不可变记录</text>
+<text x="40" y="45" font-size="12" fill="#5F5E5A">五层，每层一个读取 API；下面每一行都是实测字段，不是结构示意</text>
+<rect x="40" y="76" width="600" height="58" rx="10" fill="#F7F6F1" stroke="#D3D1C7" stroke-width="0.5"/>
+<text x="62" y="96" font-size="12" font-weight="500" fill="#2C2C2A" dominant-baseline="central">① Attempt —— attemptStore.listForRun(runId)</text>
+<text x="62" y="116" font-size="11" fill="#5F5E5A" dominant-baseline="central">attempt#1 kind=START status=SUCCEEDED sandboxId=d7848878-be8f-4529-84b5-52e93a52e5b5 reason=none</text>
+<rect x="40" y="142" width="600" height="100" rx="10" fill="#F7F6F1" stroke="#D3D1C7" stroke-width="0.5"/>
+<text x="62" y="162" font-size="12" font-weight="500" fill="#2C2C2A" dominant-baseline="central">② Sandbox —— sandboxStore.get(attempt.sandboxId)</text>
+<text x="62" y="182" font-size="11" fill="#5F5E5A" dominant-baseline="central">provider=MANAGED_LOCAL · status=TERMINATED · runtime=managed-local · failureReason=none</text>
+<text x="62" y="200" font-size="11" fill="#5F5E5A" dominant-baseline="central">spec：profile=development · networkMode=bridge · readOnlyRootfs=false · pidLimit=null</text>
+<text x="62" y="218" font-size="11" fill="#5F5E5A" dominant-baseline="central">　　　droppedCapabilities=NONE · noNewPrivileges=false</text>
+<text x="62" y="236" font-size="11" fill="#A32D2D" dominant-baseline="central">runtimeEvidence：verified=true · verificationReason=「仅开发/测试生命周期证据；不代表内核隔离」</text>
+<rect x="40" y="250" width="600" height="100" rx="10" fill="#F7F6F1" stroke="#D3D1C7" stroke-width="0.5"/>
+<text x="62" y="270" font-size="12" font-weight="500" fill="#2C2C2A" dominant-baseline="central">③ PolicySnapshot —— effectivePolicyStore.listSnapshotsForRun(runId)</text>
+<text x="62" y="290" font-size="11" fill="#5F5E5A" dominant-baseline="central">id=21f97b25-2406-4b7b-989d-bbc1afcfafbf · profile=development · allowNetwork=true</text>
+<text x="62" y="308" font-size="11" fill="#5F5E5A" dominant-baseline="central">allowedTools=[read, bash, edit, write, grep, find, ls]</text>
+<text x="62" y="326" font-size="11" fill="#5F5E5A" dominant-baseline="central">workspaceRoots=[…/workspaces/bootstrap/4636697c-…]　←　每租户独立路径</text>
+<text x="62" y="344" font-size="11" fill="#5F5E5A" dominant-baseline="central">listCompilations(snap.id) → status=APPLIED · reasons=[]　｜　listToolDecisions(runId) → []</text>
+<rect x="40" y="358" width="600" height="58" rx="10" fill="#F7F6F1" stroke="#D3D1C7" stroke-width="0.5"/>
+<text x="62" y="378" font-size="12" font-weight="500" fill="#2C2C2A" dominant-baseline="central">④ Output —— runOutputStore.list(runId) / .finalText(runId)</text>
+<text x="62" y="398" font-size="11" fill="#5F5E5A" dominant-baseline="central">outputChunks = 1 条　finalText = "Hello from isolated worker subprocess!"</text>
+<rect x="40" y="424" width="600" height="58" rx="10" fill="#F7F6F1" stroke="#D3D1C7" stroke-width="0.5"/>
+<text x="62" y="444" font-size="12" font-weight="500" fill="#2C2C2A" dominant-baseline="central">⑤ Instance —— instanceStore.listForTenant(tenantId)</text>
+<text x="62" y="464" font-size="11" fill="#5F5E5A" dominant-baseline="central">default-pi-instance:bootstrap · actual=READY · activeRunCount=0 · capability=worker-process:local-vllm/Qwen3-8B-demo</text>
+<rect x="40" y="502" width="600" height="76" rx="12" fill="#FCEBEB" stroke="#A32D2D" stroke-width="0.5"/>
+<text x="62" y="522" font-size="12" font-weight="500" fill="#791F1F" dominant-baseline="central">最容易被误读的一个字段：verified = true</text>
+<text x="62" y="544" font-size="11" fill="#A32D2D" dominant-baseline="central">它只表示「请求的 runtime 与实际观测到的 runtime 一致」，即 requestedRuntime === observedRuntime === managed-local，</text>
+<text x="62" y="562" font-size="11" fill="#A32D2D" dominant-baseline="central">不表示内核隔离已被验证 —— verificationReason 自己就写着「不代表内核隔离」。这是代码里的显式字段，不是文档免责。</text>
+</svg>
+</div>
+
+<table>
+<colgroup><col style="width:16%"><col style="width:40%"><col style="width:44%"></colgroup>
+<thead><tr><th>层</th><th>读取方式</th><th>它回答什么问题</th></tr></thead>
+<tbody>
+<tr><td>Attempt</td><td class="l">attemptStore.listForRun(runId)</td><td>这次执行是谁发起的（kind=START / RESUME）、成功还是失败、用的哪个沙箱</td></tr>
+<tr><td>Sandbox</td><td class="l">sandboxStore.get(attempt.sandboxId)</td><td>实际拿到的隔离配置是什么（<code>spec</code>）、以及<b>请求的 runtime 是否等于观测到的 runtime</b>（<code>runtimeEvidence</code>）</td></tr>
+<tr><td>PolicySnapshot</td><td class="l">effectivePolicyStore.listSnapshotsForRun(runId)<br>+ listCompilations(snap.id)<br>+ listToolDecisions(runId)</td><td>这次执行受哪份策略约束：允许的网络、工具白名单、<b>允许写入的工作区根路径</b>、策略编译是否成功（<code>status=APPLIED</code>、<code>reasons=[]</code>）</td></tr>
+<tr><td>Output</td><td class="l">runOutputStore.list(runId) / .finalText(runId)</td><td>它到底产出了什么（按 channel 分 answer / thinking）</td></tr>
+<tr><td>Instance</td><td class="l">instanceStore.listForTenant(tenantId)</td><td>承载它的实例当前什么状态、还能不能接新任务</td></tr>
+</tbody>
+</table>
+
+<div class="note"><b>两个 Run 拿到的是两份不同的 policySnapshot</b>（<code>21f97b25…</code> 与 <code>8ae217e9…</code>）——说明策略快照是<b>按 Run</b> 落库的，不是全局共享一份。这也解释了为什么 <code>workspaceRoots</code> 能精确到那一次运行自己的 workspace 目录（<code>…/workspaces/bootstrap/4636697c-…</code>）：因为「这次运行能写哪些文件」本身是这次运行才确定的事实，必须随它一起冻结。</div>
+
+<div class="note"><b><code>toolDecisions = []</code> 与场景 1 的 <code>limitations = []</code> 是同一件事。</b>这次运行没有工具被策略拒绝，所以受限账本是空的。反过来说，如果某个 Run 被拒绝了工具调用，这里会列出明细，而 <code>/runs/:id</code> 的 <code>limitations</code> 就是它的聚合视图（<code>summarizeToolDenials</code>）。</div>
+
+<h2>场景 8 · 关闭顺序与幂等</h2>
+<p>走查脚本在这一步只打了一行 <code>console.log</code>，<b>没有任何断言</b>。所以这一节我另写了探针来补：<code>tmp/close-probe.ts</code>。</p>
+
+<div class="fig">
+<svg viewBox="0 0 680 654" width="100%" role="img" xmlns="http://www.w3.org/2000/svg">
+<title>场景 8 关闭顺序与幂等的实测断言</title>
+<desc>关闭顺序与启动严格相反，附七项补做的断言结果、端口探测方法陷阱与幂等来源。</desc>
+<text x="40" y="26" font-size="14" font-weight="500" fill="#2C2C2A">场景 8 · 关闭顺序与幂等：走查脚本没断言的部分</text>
+<text x="40" y="45" font-size="12" fill="#5F5E5A">走查里只有一行 console.log；下面七项断言是本轮补做的实测</text>
+<rect x="40" y="76" width="600" height="150" rx="10" fill="#F7F6F1" stroke="#D3D1C7" stroke-width="0.5"/>
+<text x="62" y="96" font-size="12" font-weight="500" fill="#2C2C2A" dominant-baseline="central">关闭顺序 —— 与启动严格相反</text>
+<text x="62" y="118" font-size="11" fill="#5F5E5A" dominant-baseline="central">server.stop(true) —— 先停止接收新请求</text>
+<text x="62" y="136" font-size="11" fill="#5F5E5A" dominant-baseline="central">composition.close() → application.stop()</text>
+<text x="62" y="154" font-size="11" fill="#5F5E5A" dominant-baseline="central">　　queuePump.stop() → 中断全部活跃 Run（Promise.allSettled；有失败则抛「安全关闭时有 N 个 Run 无法中断」）</text>
+<text x="62" y="172" font-size="11" fill="#5F5E5A" dominant-baseline="central">→ llmHealthMonitor.stop() → resourceMetrics.stop()</text>
+<text x="62" y="190" font-size="11" fill="#5F5E5A" dominant-baseline="central">→ sandboxProvider.close() → database.close()（仅当本进程 ownsDatabase）</text>
+<text x="62" y="210" font-size="11" fill="#A32D2D" dominant-baseline="central">任何一步抛错都会中断后续步骤，且 closed 标志保持 false —— 不假装关干净了</text>
+<rect x="40" y="242" width="600" height="160" rx="12" fill="#EAF3DE" stroke="#3B6D11" stroke-width="0.5"/>
+<text x="62" y="262" font-size="12" font-weight="500" fill="#27500A" dominant-baseline="central">本轮补做的断言（tmp/close-probe.ts，RESULT: PASS 7/7）</text>
+<text x="62" y="284" font-size="11" fill="#27500A" dominant-baseline="central">PASS　关闭前 GET /health → 200，application.isStarted() = true</text>
+<text x="62" y="302" font-size="11" fill="#27500A" dominant-baseline="central">PASS　close() 后 application.isStarted() = false</text>
+<text x="62" y="320" font-size="11" fill="#27500A" dominant-baseline="central">PASS　close() 后裸 TCP 连接失败 —— 端口真的不再有监听者</text>
+<text x="62" y="338" font-size="11" fill="#27500A" dominant-baseline="central">PASS　第 2 次 close() 不抛错（幂等）</text>
+<text x="62" y="356" font-size="11" fill="#27500A" dominant-baseline="central">PASS　第 3 次 close() 不抛错（幂等）</text>
+<text x="62" y="374" font-size="11" fill="#27500A" dominant-baseline="central">PASS　并发 3 次 close() 全部 fulfilled，0 rejected（模拟 SIGINT 与 SIGTERM 同时到达）</text>
+<text x="62" y="392" font-size="11" fill="#27500A" dominant-baseline="central">PASS　关闭前活跃 Run 计数 = 1，关闭后被正确中断</text>
+<rect x="40" y="422" width="600" height="96" rx="12" fill="#FAEEDA" stroke="#854F0B" stroke-width="0.5"/>
+<text x="62" y="442" font-size="12" font-weight="500" fill="#633806" dominant-baseline="central">方法陷阱：判断「端口是否真的关闭」不能只看 fetch 抛不抛</text>
+<text x="62" y="464" font-size="11" fill="#854F0B" dominant-baseline="central">第一版探针里 fetch 没有抛错，我一度以为端口还在监听 —— 其实拿到的是 502，</text>
+<text x="62" y="482" font-size="11" fill="#854F0B" dominant-baseline="central">body 写着 upstream connect failed: Connection refused (os error 61)：中间的代理把 ECONNREFUSED 翻译成了 HTTP 响应。</text>
+<text x="62" y="500" font-size="11" fill="#854F0B" dominant-baseline="central">改用裸 TCP 连接（Bun.connect）直接探测，才得到可信结论：连接失败 → 监听确实已撤除。</text>
+<rect x="40" y="538" width="600" height="96" rx="12" fill="#E6F1FB" stroke="#185FA5" stroke-width="0.5"/>
+<text x="62" y="558" font-size="12" font-weight="500" fill="#0C447C" dominant-baseline="central">幂等由三处守卫保证，且组件级有测试</text>
+<text x="62" y="580" font-size="11" fill="#185FA5" dominant-baseline="central">RunningHarnessProcess.close() 用 closePromise 缓存；createHarnessApplication.close() 用 closed 标志；</text>
+<text x="62" y="598" font-size="11" fill="#185FA5" dominant-baseline="central">application.stop() 另有 stopPromise。重复与并发调用都返回同一个 Promise。</text>
+<text x="62" y="616" font-size="11" fill="#185FA5" dominant-baseline="central">测试：harness-application.test.ts:278（stop 两次、isStarted()=false、可重启、recoverCallCount=2）、run-queue-pump.test.ts:182。</text>
+</svg>
+</div>
+
+<div class="note"><b>关于「幂等」这个词的边界，要说清。</b>组件级测试覆盖的是 <code>HarnessApplication.start/stop</code> 与 <code>RunQueuePump.start/stop</code>；而<b>整条 <code>startHarnessProcess().close()</code> 的重复调用与并发调用，测试套件里没有</b>——这是我用探针补的。两者结论一致，但严格来说后者目前只有探针级别的证据，不在 <code>bun run test</code> 里。</div>
+
+<hr>
+<h2 id="finding-interrupt-swallowed">本轮新发现 · F-4 中断失败被静默丢弃，关闭防线因此不可达</h2>
+<p>这一条的过程值得完整记下来，因为<b>我的第一次推断是错的，是实验把它推翻的</b>。</p>
+
+<div class="warn"><b>我原本的推断（错的那一版）</b>：读 <code>HarnessApplication.stop()</code> 时我注意到一个可能的语义问题——如果「中断活跃 Run」失败，<code>stop()</code> 会抛错，<code>composition.close()</code> 因此不置 <code>closed=true</code> 且后续清理全部跳过；调用方再调一次 <code>close()</code> 时，第二次 <code>application.stop()</code> 会因为 <code>started</code> 已被置为 <code>false</code> 而<b>直接 early return</b>，跳过中断步骤——于是第二次 <code>close()</code> 报告成功，而那个 Run 从未被中断。<br>
+我写了 <code>tmp/close-failure-probe.ts</code> 去验证：注入一个 <code>start()</code> 永不返回、<code>interrupt()</code> 必抛的运行时装作真实运行时。<b>结果是第 1 次 <code>close()</code> 就正常返回、没有抛错</b>——我的推断不成立。</div>
+
+<h3>实测到的真实行为</h3>
+<table>
+<colgroup><col style="width:44%"><col style="width:56%"></colgroup>
+<thead><tr><th>观察项</th><th>实测值</th></tr></thead>
+<tbody>
+<tr><td class="l">第 1 次 close()</td><td>正常返回（不抛错）</td></tr>
+<tr><td class="l">runtime.interrupt 调用次数</td><td>1 次，且内部抛了错</td></tr>
+<tr><td class="l">runtime.start 调用次数</td><td>1 次，且仍处于挂起（执行载体没有退出）</td></tr>
+<tr><td class="l">最终 Run 状态</td><td><b>INTERRUPTED</b></td></tr>
+<tr><td class="l">原推断的两条断言</td><td>均 FAIL —— 推断被证伪</td></tr>
+</tbody>
+</table>
+
+<div class="fig">
+<svg viewBox="0 0 680 606" width="100%" role="img" xmlns="http://www.w3.org/2000/svg">
+<title>中断失败被静默丢弃的路径与后果</title>
+<desc>中断异常在 interruptWithinGrace 因 settlesWithin 把失败也判为 true 而被静默丢弃，导致关闭防线不可达且 Run 状态与事实不一致。</desc>
+<text x="40" y="26" font-size="14" font-weight="500" fill="#2C2C2A">发现 F-4 · 中断失败被静默丢弃，关闭防线因此不可达</text>
+<text x="40" y="45" font-size="12" fill="#5F5E5A">我的原推断被实验证伪了，而实际行为比原推断更值得说</text>
+<rect x="40" y="76" width="600" height="166" rx="10" fill="#FCEBEB" stroke="#A32D2D" stroke-width="0.5"/>
+<text x="62" y="96" font-size="12" font-weight="500" fill="#791F1F" dominant-baseline="central">异常在哪一层消失 —— 逐行读出根因</text>
+<text x="62" y="116" font-size="11" fill="#A32D2D" dominant-baseline="central">RunService.interrupt → runtime.interrupt（ManagedAgentRuntime → SupervisedAgentRuntime）</text>
+<text x="62" y="134" font-size="11" fill="#A32D2D" dominant-baseline="central">SupervisedAgentRuntime.interrupt（:58）→ await this.interruptWithinGrace(runId)</text>
+<text x="62" y="152" font-size="11" fill="#A32D2D" dominant-baseline="central">interruptWithinGrace（:102-105）：const interrupt = this.inner.interrupt(runId);</text>
+<text x="62" y="170" font-size="11" fill="#791F1F" dominant-baseline="central">　　if (!(await settlesWithin(interrupt, graceMs))) void interrupt.catch(() =&gt; undefined);</text>
+<text x="62" y="188" font-size="11" fill="#791F1F" dominant-baseline="central">settlesWithin（:129-137）：Promise.race([ promise.then(() =&gt; true, () =&gt; true), timeout.then(() =&gt; false) ])</text>
+<text x="62" y="206" font-size="11" fill="#791F1F" dominant-baseline="central">→ 成功与失败都映射成 true ⇒ !(true) 为假 ⇒ catch 分支不执行，rejection 被静默丢弃</text>
+<text x="62" y="224" font-size="11" fill="#791F1F" dominant-baseline="central">→ interruptWithinGrace 正常返回，interrupt 的调用者无从知道它失败了</text>
+<rect x="40" y="258" width="600" height="104" rx="12" fill="#F1EFE8" stroke="#B4B2A9" stroke-width="0.5"/>
+<text x="62" y="278" font-size="12" font-weight="500" fill="#2C2C2A" dominant-baseline="central">实测（tmp/close-failure-probe.ts，注入 HangingRuntime：start 永不返回 + interrupt 必抛）</text>
+<text x="62" y="300" font-size="11" fill="#5F5E5A" dominant-baseline="central">close() 报告成功 · runtime.interrupt 被调用 1 次且抛错 · runtime.start 被调用 1 次且仍挂起</text>
+<text x="62" y="318" font-size="11" fill="#5F5E5A" dominant-baseline="central">最终 Run 状态 = INTERRUPTED</text>
+<text x="62" y="336" font-size="11" fill="#791F1F" dominant-baseline="central">→ Run 级状态说「已中断」，而底层执行载体从未确认被中断</text>
+<rect x="40" y="378" width="600" height="96" rx="12" fill="#FAEEDA" stroke="#854F0B" stroke-width="0.5"/>
+<text x="62" y="398" font-size="12" font-weight="500" fill="#633806" dominant-baseline="central">两个后果</text>
+<text x="62" y="420" font-size="11" fill="#854F0B" dominant-baseline="central">① HarnessApplication.stop() 统计的 failures.length 对该场景恒为 0 ——</text>
+<text x="62" y="438" font-size="11" fill="#854F0B" dominant-baseline="central">　「安全关闭时有 N 个 Run 无法中断」这道防线对「中断真的失败」不可达，只在终态竞态下才会触发。</text>
+<text x="62" y="456" font-size="11" fill="#854F0B" dominant-baseline="central">② 关机时的状态与事实不一致：库里是 INTERRUPTED，进程侧的执行载体可能仍在跑。</text>
+<rect x="40" y="490" width="600" height="96" rx="12" fill="#E6F1FB" stroke="#185FA5" stroke-width="0.5"/>
+<text x="62" y="510" font-size="12" font-weight="500" fill="#0C447C" dominant-baseline="central">同一次实验还暴露了一个时序问题（F-5）</text>
+<text x="62" y="532" font-size="11" fill="#185FA5" dominant-baseline="central">stop() 不回等 in-flight attempt 结束（pump.stop() 明确「不强制中断已开始的 drain」）——</text>
+<text x="62" y="550" font-size="11" fill="#185FA5" dominant-baseline="central">所以 database.close() 可能落在仍在执行的 attempt 之前，它随后写工作区快照时撞上：</text>
+<text x="62" y="568" font-size="11" fill="#185FA5" dominant-baseline="central">RangeError: Cannot use a closed database（栈：captureAfter → executeQueuedRun → attemptNext → drainOnce）</text>
+</svg>
+</div>
+
+<h3>逐行根因</h3>
+<pre>// src/runtime/supervised-agent-runtime.ts:102-105
+private async interruptWithinGrace(runId: string): Promise&lt;void&gt; {
+    const interrupt = this.inner.interrupt(runId);
+    if (!(await settlesWithin(interrupt, this.config.interruptGraceMs)))
+        void interrupt.catch(() =&gt; undefined);
+}
+
+// src/runtime/supervised-agent-runtime.ts:129-137
+async function settlesWithin(promise: Promise&lt;unknown&gt;, ms: number): Promise&lt;boolean&gt; {
+    const timeout = deferredTimeout(ms);
+    try {
+        return await Promise.race([
+            promise.then(() =&gt; true, () =&gt; true),   // ← 成功与失败都返回 true
+            timeout.promise.then(() =&gt; false),
+        ]);
+    } finally { timeout.cancel(); }
+}</pre>
+
+<p><code>settlesWithin</code> 回答的是「<b>有没有结束</b>」，而不是「<b>有没有成功</b>」——两个 handler 都返回 <code>true</code>。调用方却把它当成了后者：注释的意图应是「若宽限内没结束，至少挂一个 catch 避免 unhandled rejection」，但因为 rejection 也算 settled，<code>!(true)</code> 为假，那条 <code>catch</code> 永远不会被执行。</p>
+
+<div class="warn"><b>建议的修法（我没改代码）。</b>让 <code>settlesWithin</code> 区分 fulfilled 与 rejected——例如返回 <code>"fulfilled" | "rejected" | "timeout"</code> 三态，或者新增一个 <code>interruptAndReport(runId): Promise&lt;unknown&gt;</code> 把结果交回调用方。最小改动是让 <code>interruptWithinGrace</code> 无条件挂 catch 并把失败<b>记入一个可被 <code>stop()</code> 读取的失败集合</b>，否则 <code>stop()</code> 里那条 <code>安全关闭时有 N 个 Run 无法中断</code> 的检查就永远等不到它要等的东西。</div>
+
+<div class="note"><b>F-5 的说明与边界。</b>上面那个 <code>Cannot use a closed database</code> 出现在<b>我的探针</b>里（因为我注入了数据库句柄、由我自己在最后关闭它）。但它在生产形态下同样成立：<code>ownsDatabase=true</code> 时 <code>close()</code> 会关掉 SQLite，而 <code>stop()</code> 并不等待 in-flight 的 <code>attemptNext()</code> 结束（<code>RunQueuePump.stop()</code> 的注释明确写着「不会强制中断当前已经开始的 drain」）。所以只要有一个 attempt 在 <code>close()</code> 之后才走到写库那一步，它就会撞上关闭的数据库。<b>它至少不是静默的</b>——这条错误会被 pump 的 <code>onError</code> 报出来（实测输出里就有 <code>RunQueuePump 推进失败</code> 这一行）。</div>
+
+<div class="note"><b>一条贯穿性的观察。</b>把这一轮的发现和前面的放在一起看，会发现一个共同的形状：<b>系统里存在若干「名字听起来在防守、但在它所指的那种情况下恰好失效」的代码</b>——<code>settlesWithin</code>（把失败当成功）、<code>synchronizeQueueBlockers</code> 的删除判据（把"被摘走"当"不再排队"）、<code>RUN_FAILED</code> 分支（把"已收尾"当"已发终态"）。三者都是同一类问题：<b>用一个更弱的条件近似了一个更强的条件，而近似恰好在关键路径上不成立。</b>这类问题不会让测试变红，因为测试覆盖的是近似成立的那条路径。</div>
+
+<hr>
+<p style="font-size:13.5px;color:var(--tx2)">本文已覆盖场景 0、1、2、3、5、6、8、D1、F1–F3 与三项新发现。剩余：场景 4（已并入场景 3 的第二次 drain）。每个场景沿用同一结构：<b>一张图 + 真实调用链 + 参数 + 边界 + 隔离机制</b>。</p>
+
+</div>
+</body>
+</html>

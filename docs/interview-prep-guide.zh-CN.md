@@ -92,7 +92,7 @@
   1. 一句话定位（多租户 Agent 任务控制面）
   2. 解决什么问题（四个系统难题）
   3. 技术栈（Bun + TypeScript + SQLite + runsc/gVisor + vLLM）
-  4. 量化结果（254 tests、真机验证）
+  4. 量化结果（385 tests，2026-09-09 快照，随开发增长；真机验证）
   5. 差异化（A/B/C 三个方向）
 
 ### 问题 2："为什么用 runsc/gVisor，而不是自己写沙箱？"
@@ -126,7 +126,7 @@
 - **引用**：`docs/course/modules/07-beyond-basics.html`
 - **回答要点**：
   - A：执行质量评测闭环（行业标配 + 护城河指标）。
-  - B：观测驾驶舱（图表化、多租户）。
+  - B：观测（GET /eval 数据端点 + 运行级观测抽屉；原独立 /observe 页已移除）。
   - C：LLM 网关（主备回退 + 熔断 + 决策记录）。
 
 ### 问题 7："做到什么程度了？生产能用吗？"
@@ -141,14 +141,14 @@
 ## 四、面试话术模板
 
 ### Elevator Pitch（30 秒）
-> 我做了一个多租户 Agent 任务控制面。Agent 负责"动脑"，我的系统负责"安排与安保"：多租户身份、GPU 资源准入与背压、runsc 沙箱隔离、工具副作用记账与崩溃恢复，以及最近的执行评测、观测驾驶舱和 LLM 路由网关。254 个测试全绿，并在 T4 GPU 上做了 120 并发的真机验证。
+> 我做了一个多租户 Agent 任务控制面。Agent 负责"动脑"，我的系统负责"安排与安保"：多租户身份、GPU 资源准入与背压、runsc 沙箱隔离、工具副作用记账与崩溃恢复，以及最近的执行评测、观测和 LLM 路由网关（Pi 主流量已接入）。385 个测试全绿（2026-09-09 快照），并在 T4 GPU 上做了 120 并发的真机验证。
 
 ### 3 分钟项目介绍
 > 这个项目起源于一个观察：让 AI 跑真实任务时，不能只靠 Agent 自己，需要一层控制面来保证"谁能在什么资源下、安全地做什么、失败后怎么办"。我把它拆成四个问题：副作用可靠执行、资源准入背压、工具治理、可解释决策。
 >
 > 技术上用 Bun + TypeScript + SQLite 做控制面，用 Pi 做 Agent Runtime，用 runsc/gVisor 做沙箱，用 vLLM 做模型服务。关键设计是 fail-closed：资源看不清就排队，工具副作用不确定就人工确认，checkpoint 是稳定引用不是内存 dump。
 >
-> 最近三个方向是在为 agent infra 岗位加深度：A 做执行质量评测，B 做观测驾驶舱，C 做 LLM 网关主备回退与熔断。这些都是只读/代理/配置接入，没有动核心控制面。
+> 最近三个方向是在为 agent infra 岗位加深度：A 做执行质量评测，B 做观测（eval 聚合 + 运行级观测抽屉），C 做 LLM 网关主备回退、熔断与流式 usage 采集。这些都是只读/代理/配置接入，没有动核心控制面。
 
 ### 10 分钟深挖（选一个点）
 > 面试官如果说"展开讲讲恢复"，你就从 `ToolEffect` 三分类开始，讲到 `canAutomaticallyReplay`，再讲到 `RecoveryService.scanInterruptedRuns` 建计划，`RecoveryExecutor.submitResume` 执行。最后落到`docs/course/module-6.html` 或源码。
@@ -171,7 +171,7 @@
 
 | 数字 | 来源文档 | 用法 |
 |---|---|---|
-| 254 tests pass / 0 fail | `bun test` 输出 | 证明基础功能稳定 |
+| 385 tests pass / 0 fail | `bun run test` 输出（2026-09-09 快照，随开发增长） | 证明基础功能稳定 |
 | 9 项攻击冒烟 PASS | `docs/archive/sandbox-runtime-benchmark-runbook.zh-CN.md` | 证明沙箱隔离有效 |
 | 120 并发 → CRITICAL → QUEUE | `docs/archive/gpu-completion-runbook.zh-CN.md` | 证明资源背压真实有效 |
 | runsc 1.22x 开销 | `docs/archive/sandbox-runtime-benchmark-runbook.zh-CN.md` | 证明隔离开销可接受 |
