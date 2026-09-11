@@ -215,17 +215,31 @@ export class LlmGateway {
         };
 
         if (candidates.length === 0) {
+            // N26：把"为什么没有可用后端"说清楚，别让用户自己猜。
+            // 两种原因完全不同：① 该逻辑模型根本没配后端；② 配了但全部在熔断
+            // 冷却中。真机上"流式断流 + 重试耗尽"正是第 ② 种，原先被笼统写成
+            // "未配置或全部熔断"，用户会误以为根本没配后端。
+            const described = this.router.describeModelBackends(logicalModel);
+            const reason = described.length === 0
+                ? `逻辑模型 ${logicalModel || "(空)"} 没有配置任何后端`
+                : `逻辑模型 ${logicalModel || "(空)"} 的 ${described.length} 个后端全部不可用：`
+                    + described.map((backend) =>
+                        `${backend.id}`
+                        + `(熔断${backend.circuitOpen ? "中" : "否"}`
+                        + `，冷却剩余 ${backend.cooldownRemainingMs}ms`
+                        + `，连续失败 ${backend.consecutiveFailures} 次)`,
+                    ).join("；");
             this.router.recordDecision({
                 ...base,
                 chosenBackendId: null,
                 status: "FAILED",
                 httpStatus: null,
                 latencyMs: this.now() - startedAt,
-                error: `逻辑模型 ${logicalModel || "(空)"} 无可用后端（未配置或全部熔断）`,
+                error: reason,
             });
             return json(503, {
                 error: {
-                    message: `模型 ${logicalModel || "(空)"} 暂无可用后端`,
+                    message: `模型 ${logicalModel || "(空)"} 暂无可用后端。${reason}`,
                     type: "no_available_backend",
                 },
             });

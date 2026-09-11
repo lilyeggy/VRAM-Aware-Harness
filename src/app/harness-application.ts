@@ -107,7 +107,10 @@ export class HarnessApplication {
         }
 
         this.started = false;
-        this.queuePump.stop();
+        // N20：必须"停表 + 等在飞 drain 落地"再往下走。原先只调
+        // queuePump.stop()（不等在飞 tick），于是一次在飞的 drain 会越过
+        // database.close() 继续写工作区快照 → closed-database 报错 20 次。
+        await this.queuePump.stopAndDrain();
         this.stopPromise = (async () => {
             const activeRuns = this.runStore.listActiveRuns();
             const results = await Promise.allSettled(

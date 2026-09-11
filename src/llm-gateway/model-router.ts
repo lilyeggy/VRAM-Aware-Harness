@@ -123,6 +123,40 @@ export class ModelRouter {
     }
 
     /**
+     * N26：诊断用——某逻辑模型的**全部**后端及其当前状态，不受熔断过滤影响。
+     *
+     * 起因：`candidatesFor()` 返回空时有两种完全不同的原因（该模型没配后端 /
+     * 全部后端都在熔断冷却中），而原先对外只给一句"暂无可用后端（未配置或全部
+     * 熔断）"，用户与运维都无从判断。真机实测里"断流 + 重试耗尽 → 熔断"这种情况
+     * 因此被误读成"根本没有配置后端"。
+     */
+    describeModelBackends(
+        logicalModel: string,
+    ): Array<{
+        id: string;
+        circuitOpen: boolean;
+        cooldownRemainingMs: number;
+        consecutiveFailures: number;
+        healthy: boolean;
+    }> {
+        const now = this.now();
+        const list = this.backendsByModel.get(logicalModel) ?? [];
+        return list.map((backend) => {
+            const state = this.states.get(backend.id);
+            const openUntil = state?.circuitOpenUntil ?? 0;
+            return {
+                id: backend.id,
+                circuitOpen: openUntil !== 0 && now < openUntil,
+                cooldownRemainingMs: openUntil === 0
+                    ? 0
+                    : Math.max(0, openUntil - now),
+                consecutiveFailures: state?.consecutiveFailures ?? 0,
+                healthy: state?.healthy ?? false,
+            };
+        });
+    }
+
+    /**
      * 返回某逻辑模型当前可用的后端（剔除熔断打开中与健康探测失败的），
      * 并按负载均衡策略排序。
      * 熔断在冷却期结束后自动半开（允许再次尝试）。

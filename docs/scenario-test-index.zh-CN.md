@@ -13,7 +13,7 @@
 | --- | --- | --- |
 | 一共要求多少场景？ | **86**（U12 + C12 + Q12 + R12 + S14 + G12 = 74 基础，+ X01–X12 = 12 复合） | [指南](full-scenario-test-guide.zh-CN.md) §1、§7、§8 |
 | 实际跑了多少？ | **84 执行 / 2 未跑**（R07、S12）。执行里：67 完整通过、8 部分、8 FAIL（含 2 个当场已修、1 个是模型能力问题）、1 INCONCLUSIVE | [合并账](scenario-coverage-consolidated.zh-CN.md) §1、§2 |
-| 系统侧还剩几个没修？ | **0 个**。原先 5 条（N22、N25、N23、N18、N19）已于 2026-09-11 全部修复并经真机复验；剩下的是 1 条**上游依赖**（N27）与若干非阻断体验项（如 N24） | [缺陷台账 §23](known-issues.zh-CN.md)、[缺陷登记](defect-register.zh-CN.md) |
+| 还剩几个没修？ | **本项目代码范围内 0 个**。2026-09-11 修掉 9 条：N22/N25/N23/N18/N19（高危，含真机复验）+ N20/N21/N24/N26（中等）。剩余仅：**上游依赖 N27**、部署校准项 N5、明确非目标 N15/N16、记录性观察 N9/N10/N14 | [缺陷台账 §23–§24](known-issues.zh-CN.md)、[缺陷登记](defect-register.zh-CN.md) |
 | 容量和长稳呢？ | λ\* = 1.146 任务/s；8h 长稳 3505 次沙箱 0 残留 | [合并账](scenario-coverage-consolidated.zh-CN.md) §9；证据见下方「跑道 A / D」 |
 | 有没有假装通过？ | 没有。8 个 FAIL、3 个 INCONCLUSIVE/BLOCKED、2 个未跑都逐条登记并给了理由；其中 5 条已修并复验，未修的也写清了根因 | 本文 §5、[合并账](scenario-coverage-consolidated.zh-CN.md) §0.5 |
 

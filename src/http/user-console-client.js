@@ -50,12 +50,24 @@ function markdown(v){
   return out.join('');
 }
 function inlineMd(s){
-  return s.replace(/`([^`]+)`/g,'<code>$1</code>')
+  // N21：先把行内代码摘出来占位，**只对非代码段**套用强调/链接规则。
+  // 原先把反引号内容包成 <code> 之后，后续强调替换仍在同一整串上继续跑，
+  // 于是钻进 <code> 内部：`new_python_script.py` 被渲染成
+  // <code>new<em>python</em>script.py</code>，显示与复制都丢掉下划线。
+  // 文件名/路径/标识符（如 harness_instances）普遍受影响。
+  var codes = [];
+  var masked = s.replace(/`([^`]+)`/g, function(_, code){
+    // 入参已由调用方 esc() 转义，这里存原样，避免二次转义。
+    codes.push(code);
+    return '\u0000' + (codes.length - 1) + '\u0000';
+  });
+  var out = masked
     .replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g,'<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>')
     .replace(/\*\*([^*]+)\*\*/g,'<strong>$1</strong>')
     .replace(/__([^_]+)__/g,'<strong>$1</strong>')
     .replace(/(^|[^*])\*([^*]+)\*(?!\*)/g,'$1<em>$2</em>')
     .replace(/(^|[^_])_([^_]+)_(?!_)/g,'$1<em>$2</em>');
+  return out.replace(/\u0000(\d+)\u0000/g, function(_, i){ return '<code>' + codes[Number(i)] + '</code>'; });
 }
 function toast(msg, bad){
   var t = $('toast'); t.textContent = msg; t.className = 'toast on' + (bad ? ' bad' : '');
@@ -444,6 +456,15 @@ function renderConversations(){
       + '<b>' + esc(c.title) + '</b><span>' + esc(shortAge(c.updatedAt) || fmtTime(c.createdAt)) + '</span></button>';
   }).join('');
 }
+/* N24：`added` / `deleted` 条目有顶层 `path`，而 `modified` 是
+   `{ before: { path }, after: { path } }`。原先三个桶统一按 `f.path` 取值，
+   modified 于是渲染成 `[object Object]`，路径完全不可读。
+   （这与测试驱动的 T1 缺陷是同一个数据形态踩点：驱动侧 `pathOf()` 同样只取 `x.path`。） */
+function diffPath(f){
+  if(f == null) return '';
+  if(typeof f === 'string') return f;
+  return f.path || (f.after && f.after.path) || (f.before && f.before.path) || '';
+}
 function runFactsHtml(run){
   var diff = S.diffs[run.id], arts = S.artifacts[run.id] || [];
   if(!diff && !arts.length) return '';
@@ -457,9 +478,9 @@ function runFactsHtml(run){
       + '</div>';
     if(open){
       var lines = []
-        .concat((diff.added || []).map(function(f){ return '<div class="diffline"><span class="tag add">新增</span><span class="path">' + esc(f.path || f) + '</span></div>'; }))
-        .concat((diff.modified || []).map(function(f){ return '<div class="diffline"><span class="tag mod">修改</span><span class="path">' + esc(f.path || f) + '</span></div>'; }))
-        .concat((diff.deleted || []).map(function(f){ return '<div class="diffline"><span class="tag del">删除</span><span class="path">' + esc(f.path || f) + '</span></div>'; }));
+        .concat((diff.added || []).map(function(f){ return '<div class="diffline"><span class="tag add">新增</span><span class="path">' + esc(diffPath(f)) + '</span></div>'; }))
+        .concat((diff.modified || []).map(function(f){ return '<div class="diffline"><span class="tag mod">修改</span><span class="path">' + esc(diffPath(f)) + '</span></div>'; }))
+        .concat((diff.deleted || []).map(function(f){ return '<div class="diffline"><span class="tag del">删除</span><span class="path">' + esc(diffPath(f)) + '</span></div>'; }));
       html += '<div class="diffbox"><div class="boxhead">WORKSPACE DIFF · 只包含路径、哈希与大小</div>'
         + (lines.length ? lines.join('') : '<div class="diffline"><span>没有文件改动</span></div>') + '</div>';
     }

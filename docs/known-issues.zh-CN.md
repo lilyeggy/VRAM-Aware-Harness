@@ -819,3 +819,88 @@ RESUME_FAILED 次数: 0
 - 其中 `tests/resources/resource-budget-ledger.test.ts` 是**已入库**文件，因 N23 的契约变更
   （用量改由准入事实驱动）同步改写了 3 条用例。**未入库**，因此新克隆里这 3 条会按旧契约失败。
   这是"测试不入库"约定的已知后果，已在 `docs/scenario-test-index.zh-CN.md` §6 边界里披露。
+
+## §24 第十一轮：清掉剩余 4 条本项目代码缺陷（2026-09-11）
+
+> §23 之后系统侧高危清零，剩下 4 条**本项目代码**的中等缺陷。本轮一并修掉，
+> 使"未修"清单里只剩**上游依赖**与**产品范围外**项。
+> 回归：`bun test ./tests` → **439 pass / 0 fail**；`bun run typecheck` → 已入库源码 0 错误。
+
+| # | 缺陷 | 级别 | 修法 | 验证 |
+| --- | --- | --- | --- | --- |
+| N20 | SIGTERM 关闭途中 pump 仍写已关闭 DB | 中 | `stopAndDrain()`：停表后**等**在飞 drain 落地 | 新增 3 条用例（含等价复现"关库后仍被触达"） |
+| N21 | 行内代码里的下划线被 Markdown 强调吃掉 | 中 | `inlineMd` 先摘出代码段占位，只对非代码段套强调 | 新增行为级用例（取出函数源码后直接断言输出） |
+| N24 | 「文件变更」把 `modified` 渲染成 `[object Object]` | 中 | 新增 `diffPath()` 兼容 `{before,after}` 形态 | 新增行为级用例 + 断言渲染处不再用 `f.path \|\| f` |
+| N26 | 无可用后端的 503 说不清原因 | 观察 | 新增 `describeModelBackends()`，消息点明熔断/冷却/失败次数 | 新增 3 条用例（熔断 vs 未配置两种原因可区分） |
+
+### N20（中）：关闭途中 queue pump 仍推进 Run，写库落在已关闭 DB
+
+**根因**：`RunQueuePump.stop()` 只清定时器——原注释自己就写着"不会强制中断当前已经开始的
+drain"。而关闭顺序是 `application.stop()` → `llmHealthMonitor.stop()` → `resourceMetrics.stop()`
+→ `database.close()`，其中**没有任何一步等待在飞的 drain**。于是一次在飞 tick 会继续推进 Run、
+走到工作区快照写库，而此刻 SQLite 已关闭 → `RangeError: Cannot use a closed database`
+（真机同实例日志 20 次）。
+
+**修法**：`RunQueuePump` 记录当前在飞的 tick，新增 `async stopAndDrain()`：先停表，再**循环等待**
+在飞 tick 归零（循环是为了覆盖"等待期间又有一拍被触发"）。`HarnessApplication.stop()` 改用它，
+于是"停表 + 等在飞落地"发生在中断活跃 Run 与关库之前。
+
+**测试**（`tests/scheduling/run-queue-pump-shutdown.test.ts`，3 条）：
+① drain 期间若资源已被标记关闭就抛错 → 用 `stopAndDrain` 后必须已 `drained`；
+② `stopAndDrain` 之后定时器不再触发新 drain；③ 无在飞 tick 时立即返回且幂等。
+
+### N21（中）：行内代码里的下划线被强调规则吃掉
+
+**根因**：`inlineMd()` 第 1 步先把反引号内容包成 `<code>x</code>`，而后续的强调替换
+（`**`、`__`、`_…_`）**仍在同一整串上继续跑**，于是钻进 `<code>` 内部。
+`` `new_python_script.py` `` 被渲染成 `<code>new<em>python</em>script.py</code>`，
+显示与复制都得到 `newpythonscript.py`。文件名/路径/标识符（如 `harness_instances`）普遍受影响。
+
+**修法**：先把行内代码摘成占位符（`\u0000N\u0000`，输入已由调用方 `esc()` 转义，
+不会与该字符冲突），只对**非代码段**套用链接/强调规则，最后再把占位符还原成 `<code>`。
+代码段之外的强调（`_斜体_`）仍然生效。
+
+### N24（中）：`modified` 条目渲染成 `[object Object]`
+
+**根因**：diff 的三个桶形态不同——`added` / `deleted` 有顶层 `path`，
+而 `modified` 是 `{ before: { path }, after: { path } }`。前端三个桶统一按 `f.path` 取值，
+`modified` 因此落到 `esc(f)`，渲染出 `[object Object]`，路径完全不可读。
+
+**修法**：新增 `diffPath(f)`：字符串直接用；否则取 `f.path || f.after.path || f.before.path`，
+形状不认识时返回空串（**不再退化成对象字符串**）。三个桶统一改用它。
+
+> **注意这与测试驱动的 T1 是同一个数据形态踩点**：驱动侧 `pathOf()` 同样只取 `x.path`，
+> 导致 `diff_*` 类检查恒真。一个错在前端渲染、一个错在测试驱动，值得单独记一笔。
+
+### N26（观察）：无可用后端的 503 说不清原因
+
+**根因**：`candidatesFor()` 返回空有两种完全不同的原因——① 该逻辑模型没配后端；
+② 配了但全部后端处于熔断冷却中。而对外只有一句"暂无可用后端（未配置或全部熔断）"。
+真机上"流式断流 + 重试耗尽 → 熔断"正是第 ② 种（N17 之后断流会正确打开熔断），
+用户与运维却会误读成"根本没有配置后端"。
+
+**修法**：`ModelRouter` 新增 `describeModelBackends(logicalModel)`，返回该模型**全部**后端
+及其 `circuitOpen` / `cooldownRemainingMs` / `consecutiveFailures` / `healthy`
+（不受熔断过滤影响）。网关在无候选分支据此生成消息：未配置时明说"没有配置任何后端"；
+全部熔断时逐个列出"熔断中、冷却剩余 Xms、连续失败 N 次"。`RouteDecision.error` 同源。
+
+**测试**（`tests/llm-gateway/load-balancing.test.ts` 新增 3 条）：全部熔断时消息含
+熔断/冷却剩余/连续失败与各后端 id，且**不再**出现"未配置或全部熔断"；未配置时含
+"没有配置任何后端"且不含"冷却剩余"；`describeModelBackends` 的字段与熔断状态正确。
+
+---
+
+### §24 之后的未修清单（全部非本项目代码缺陷或明确非目标）
+
+| 项 | 级别 | 性质 | 为什么不修 |
+| --- | --- | --- | --- |
+| **N27** | 高 | **上游依赖** | vLLM 流式工具调用参数丢末字符（26%），绕过 Harness 直连 18000 即复现。不是本项目代码 |
+| N5 | 中 | 部署校准 | 资源准入按显存**已用**比例判定，而 vLLM 预占约 90% → 默认阈值下长期判 CRITICAL。**刻意不改默认值**（会影响其他部署），按部署校准（真机用 93/98），并要求文档写明校准要求 |
+| N15 | 中 | 产品范围外 | 没有配置租户资源限额/Secret 的产品入口。单机学习项目的管理面，明确非目标 |
+| N16 | 中 | 产品设计选择 | `UNKNOWN_EFFECT` 无人工消解出口。补它需要新 API + UI，属功能扩展而非收尾 |
+| N9 / N10 / N14 | 记录 | 非缺陷 | 未知模型 503、洪泛尾延迟 215s（无永久饥饿）、gVisor 下 PID 耗尽会终结整个沙箱——都是"记录下来供文档写明"的环境语义/真实现象 |
+
+**结论**：本项目代码范围内的缺陷已全部修复；未修项要么是上游、要么是明确非目标、
+要么是记录性观察。测试驱动的 T1–T5（测量有效性）仍只登记未修，见
+[`scenario-coverage-consolidated.zh-CN.md`](scenario-coverage-consolidated.zh-CN.md) §3 与
+缺陷登记表 §2。
