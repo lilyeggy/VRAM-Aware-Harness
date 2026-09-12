@@ -1,80 +1,67 @@
 # VRAM-Aware Harness
 
-> 单机单卡上的多租户 Agent 任务服务——给 agent 工作负载写的一个小型「AI OS」。
-> One machine, one GPU, many tenants: scheduling, isolation, quota, recovery, and an LLM gateway for agent workloads.
+一个支持团队共享本地大模型的**多租户 Agent 任务服务**。成员在同一台 GPU 服务器上提交 Agent 任务，系统为每个任务分配受策略约束的隔离环境执行，按 GPU 与推理服务状态公平调度，并保证任务可中断、可恢复，执行过程与结果可审计。
 
-在一台只有一张 GPU 的服务器上，让多个租户各自提交长时运行的 agent 任务（带 bash / 文件工具、多轮对话、单个任务可达数十分钟），并且**互相隔离、互不饿死、崩溃可恢复**——这是本项目回答的全部问题。
+技术栈：Bun + TypeScript + SQLite；隔离执行使用 Docker + gVisor(runsc)；推理后端为自托管 vLLM（OpenAI 兼容接口）。
 
-OS 管理 CPU 给进程用；这里管理 GPU 给 agent 用。调度、配额、系统调用网关、隔离沙箱、审计——内核职能一件不缺（[与操作系统/数据库的逐层对照](docs/isolation-deep-dive.zh-CN.html)）。
+## 功能
 
-**从这里开始：**[技术主文档](docs/project-handbook.zh-CN.md) · [多租户隔离深潜](docs/isolation-deep-dive.zh-CN.html) · [86 场景测试总索引](docs/scenario-test-index.zh-CN.md) · [缺陷台账（28 条全收口）](docs/known-issues.zh-CN.md)
+**面向用户**
 
-## 架构总览
+- 邮箱密码注册登录，或使用租户签发的 API Key 接入；数据与工作区按租户隔离
+- 按项目创建 Workspace 并组织对话，提交任务后实时查看排队位置与执行输出
+- 任务完成后查看最终回答、文件改动（Diff）并下载 Artifact
+- 任务可随时中断；崩溃或中断的任务从 Checkpoint 恢复，不确定的工具副作用转人工确认
+- 提供 Web 用户工作台（`/app`）与任务控制台
+
+**面向系统**
+
+- **公平调度**：租户内 FIFO、租户间轮转，叠加全局与单租户并发上限；基于 vLLM 显存与队列状态的准入背压，资源恢复后自动继续执行队列中的任务
+- **隔离执行**：每个任务一个独立容器——只读根文件系统、丢弃全部 capabilities、默认无网络、限制 CPU / 内存 / 进程数、非 root 运行
+- **工具治理**：工具白名单与工作区路径围栏；工具副作用在执行前记账、执行后确认，状态不明时禁止自动重放
+- **可靠恢复**：状态与事件先落库，进程重启后重建队列并恢复未完成任务
+- **LLM 网关**：OpenAI 兼容代理，多后端路由与熔断、上下文预算裁剪、流式 usage 采集
+- **审计**：认证成败、工具裁决、资源准入决策全程落库，按租户可查询
+
+## 工作原理
 
 ```mermaid
 flowchart TB
-    U["租户 A / B / C"] -->|"HTTP + API key"| API["Harness HTTP API<br/>认证 · 会话归属 · 审计"]
-    API --> SCH["租户轮转调度器<br/>压力准入 · 预算闸 · 队列 TTL"]
-    SCH -->|"每 Run 一个"| W["Worker 子进程<br/>NDJSON IPC"]
-    W --> SB["容器沙箱<br/>runsc · cap-drop ALL<br/>network none · pids/cpu/mem 限额"]
-    W -->|"工具调用"| TG["ToolGateway<br/>两阶段裁决 · 路径围栏"]
-    W -->|"模型调用"| GW["LLM 网关<br/>scope 门 · 上下文预算<br/>多后端路由 + 熔断"]
+    U["租户 A / B / C"] -->|"HTTP + API key"| API["HTTP API<br/>认证 · 会话归属 · 审计"]
+    API --> SCH["调度器<br/>租户轮转 · 准入 · 预算"]
+    SCH -->|"每任务一个"| W["Worker 子进程<br/>IPC"]
+    W --> SB["容器沙箱<br/>runsc · 只读 · 无网络 · 资源限额"]
+    W -->|"工具调用"| TG["ToolGateway<br/>两阶段裁决"]
+    W -->|"模型调用"| GW["LLM 网关<br/>多后端路由 + 熔断"]
     GW --> VLLM["vLLM · GPU"]
-    API --- DB[("SQLite · 全表 tenant_id")]
+    API --- DB[("SQLite · 按租户隔离")]
     SCH --- DB
     TG --- DB
 ```
 
-对象模型：`Tenant → Workspace → Session → Run → Attempt`，外加围绕租户的策略、配额与审计——多租户是数据、策略、资源与审计归属的一等边界，不是后加的字段。
-
-## 六层隔离
-
-| 层 | 回答的问题 | 核心机制 | 核心实现 |
-| --- | --- | --- | --- |
-| **L0 身份** | 你是谁 | tenantId 只能从凭证派生（SHA-256 + 恒时比较）；会话抢注 409；越权 404 与「不存在」不可区分 | `src/auth/api-credential-store.ts` |
-| **L1 调度** | 能跑多少 | 每租户 FIFO + 轮转 + aging 防饿死；GPU 压力分级准入（只看推理基线之上的增量）；预算账本 commit/settle | `src/scheduling/tenant-run-scheduler.ts` |
-| **L2 沙箱** | 在哪跑 | 每 Run 一个 gVisor(runsc) 容器：read-only / cap-drop ALL / no-new-privileges / network none / pids·cpu·mem 限额；创建后用 `docker inspect` 验证运行时证据，不符即销毁 | `src/sandbox/container-sandbox-provider.ts` |
-| **L3 工具** | 能做什么 | 五层策略取交集（最小权限）；工具两阶段裁决（副作用前先落 PREPARED，崩溃窗口禁自动重放）；bash 需策略+三种隔离证明同时成立 | `src/tools/tool-gateway.ts` |
-| **L4 数据** | 能看什么 | 单库全表 `tenant_id` + 访问层 SQL 强制 WHERE（应用层 RLS）；工作区按租户物理分目录 | `src/runs/runstore.ts` |
-| **L5 网关** | 花多少 token | `models:generate` 分权凭证；上下文预算按轮次边界裁剪；多后端路由 + 熔断 | `src/llm-gateway/` |
-
-贯穿两条横切线：**fail-closed**（观测不到就拒绝、证据不符就销毁、无法证明隔离就禁 bash）与**审计**（ALLOW/DENY、策略裁决、工具副作用、路由决策全部落库）。
-
-深度解析（机制 × 核心源码 × 场景实证 × OS/数据库对照）：**[docs/isolation-deep-dive.zh-CN.html](docs/isolation-deep-dive.zh-CN.html)**
-
-## 真机验证（A6000 48GB · Qwen2.5-7B-Instruct · vLLM 0.7.3）
-
-| 指标 | 数值 |
-| --- | --- |
-| 稳定吞吐 λ\*（闭环 C=4） | **1.146 task/s**（1806s，2069 完成 / 0 失败，正确率 96.8%） |
-| 并发阶梯 C=1 / 2 / 4 | 0.293 / 0.580 / **1.153** task/s |
-| 过载拐点 | 1.2×–2.0×λ\*（2.0× 时队列 max 48、E2E p95 97.4s，行为有界） |
-| 8 小时长稳 | 3505 次沙箱创建/回收 **0 残留**；RSS/FD/线程无泄漏 |
-| 场景覆盖 | 86 个场景：84 执行、67 完整通过（[合并账](docs/scenario-coverage-consolidated.zh-CN.md)） |
-| 隔离实测 | 跨租户读/写/凭证 **15/15 拒绝**；网关错误矩阵 **14/14**；fork 炸弹在 `--pids-limit` 下 ~40 进程处拦停 |
-| 测试 | `bun test` **476 pass / 0 fail**（98 个文件）+ `tsc --noEmit` 全绿 |
+核心概念自上而下：`Tenant（租户）→ Workspace（项目工作区）→ Session（对话）→ Run（一次任务）→ Attempt（一次实际执行）`，策略、配额与审计都以租户为一等归属边界。
 
 ## 快速开始
 
-依赖：[Bun](https://bun.sh)。容器隔离档（E2）另需 Linux + Docker + runsc(gVisor)；macOS / 无 Docker 环境可跑 managed-local 档的全部测试与 demo。
+依赖 [Bun](https://bun.sh)。容器隔离档需要 Linux + Docker + runsc(gVisor)；macOS / 无 Docker 环境可运行全部测试与演示。
 
 ```bash
 bun install
 
-# ① 无 GPU 本地体验：全量测试 + 类型检查 + 假推理端到端 demo
+# 全量测试 + 类型检查 + 无 GPU 端到端 demo
 bun run verify:stage0
 ```
 
 三个不需要真实模型的演示：
 
 ```bash
-bun run demo:day7        # 资源压力→排队→恢复自动续跑 + Checkpoint 恢复闭环（出现 RESULT: PASS）
-bun run demo:console     # 同源任务控制台：API Key、Workspace、任务历史与结果 API
-bun run scripts/user-console-demo-server.ts   # 用户工作台 /app（http://127.0.0.1:3977/app，
-                                              # 演示账号 demo@team.local / demo-password-123）
+bun run demo:day7        # 资源压力→排队→恢复后自动续跑 + Checkpoint 恢复闭环
+bun run demo:console     # 任务控制台：API Key、Workspace、任务历史与结果 API
+bun run scripts/user-console-demo-server.ts
+# 用户工作台：http://127.0.0.1:3977/app（演示账号 demo@team.local / demo-password-123）
 ```
 
-起一个真服务（需要可用的 vLLM 端点）：
+连接真实 vLLM 启动服务：
 
 ```bash
 HARNESS_PORT=13000 \
@@ -86,45 +73,47 @@ bun run src/main.ts
 curl -sS http://127.0.0.1:13000/health && bun run smoke:http
 ```
 
-单机 GPU 真机部署：完整参数模板见 [deploy/a6000-harness.env](deploy/a6000-harness.env)，步骤见 [docs/a6000-deployment-report.zh-CN.md](docs/a6000-deployment-report.zh-CN.md)。容器攻击面冒烟（需 Linux + runsc）：`bun run smoke:container:attacks`。
+在单卡 GPU 服务器（如 A6000 + vLLM）上的完整部署参数见 [deploy/a6000-harness.env](deploy/a6000-harness.env) 与 [部署报告](docs/a6000-deployment-report.zh-CN.md)；容器隔离冒烟：`bun run smoke:container:attacks`（需 Linux + runsc）。
 
-## 仓库结构
+## 配置
 
-| 目录 | 职责 |
-| --- | --- |
-| `src/auth` `src/http` | API key / 会话凭证、恒时比较、HTTP API 与用户工作台 |
-| `src/scheduling` `src/resources` | 租户轮转调度、队列协调、GPU 压力分类、预算账本与准入策略 |
-| `src/sandbox` `src/runtime` `src/worker` | 容器沙箱（OCI spec / runsc / warm pool）、Worker 子进程运行时与中断阶梯 |
-| `src/tools` `src/policies` | 工具两阶段裁决网关、五层策略交集与路径围栏 |
-| `src/llm-gateway` | 多后端路由、熔断、上下文预算、prefix cache、流式 usage 采集 |
-| `src/runs` `src/checkpoints` `src/sessions` `src/instances` `src/templates` | Run 生命周期、Checkpoint 恢复、会话 / 实例 / 模板版本化 |
-| `src/storage` `src/audit` `src/workspaces` `src/eval` | SQLite 迁移与访问、审计事件、租户工作区与 Diff/Artifact、评测聚合 |
-| `tests/` | 与 `src/` 镜像的测试树（98 文件 / 476 项） |
-| `scripts/` | 发压器（`campaign/load-driver`）、真机供给（`provision-instance.sh`）、E2 故障注入与冒烟脚本 |
-| `docs/` | 技术主文档、场景覆盖账本、缺陷台账、深潜材料（见下） |
+常用环境变量（完整清单见 [.env.example](.env.example) 与部署模板）：
 
-## 文档地图
+| 变量 | 说明 | 默认 |
+| --- | --- | --- |
+| `HARNESS_PORT` | HTTP 服务端口 | 3000 |
+| `HARNESS_DATABASE_PATH` | SQLite 数据库路径 | `./data/harness.sqlite` |
+| `HARNESS_WORKSPACE_ROOT` | 租户工作区根目录 | `./data/workspaces` |
+| `VLLM_BASE_URL` / `VLLM_MODEL_ID` | 推理后端地址与模型 | — |
+| `HARNESS_SANDBOX_PROVIDER` / `_RUNTIME` | 沙箱档：`managed-local` 或 `container`；容器 runtime（`runsc`） | `managed-local` |
+| `HARNESS_MAX_ACTIVE_RUNS` / `HARNESS_MAX_ACTIVE_RUNS_PER_TENANT` | 全局 / 单租户并发上限 | 30 / 10 |
+| `HARNESS_QUEUE_TTL_MS` / `HARNESS_SCHEDULER_AGING_MS` | 排队超时 / 老化插队阈值 | 300000 / 60000 |
+| `HARNESS_GPU_MEMORY_BASELINE_PERCENT` | 同机推理服务显存基线（准入只看其上增量） | 90 |
+| `LLM_GATEWAY_STRATEGY` / `VLLM_BASE_URLS` | 网关路由策略与多后端列表 | round-robin |
 
-| 文档 | 内容 |
-| --- | --- |
-| [docs/project-handbook.zh-CN.md](docs/project-handbook.zh-CN.md) | 技术主文档（先读这份建立整体认知） |
-| [docs/isolation-deep-dive.zh-CN.html](docs/isolation-deep-dive.zh-CN.html) | 多租户隔离深潜：机制 × 核心代码 × 场景实证 × OS/数据库对照 |
-| [docs/scenario-test-index.zh-CN.md](docs/scenario-test-index.zh-CN.md) | 86 个测试场景的总索引（哪份文档、哪台主机、哪个证据） |
-| [docs/scenario-coverage-consolidated.zh-CN.md](docs/scenario-coverage-consolidated.zh-CN.md) | 全场景覆盖合并账（查任何场景状态的第一入口） |
-| [docs/known-issues.zh-CN.md](docs/known-issues.zh-CN.md) | 缺陷台账：28 条缺陷全部定位根因并收口（§1–§25） |
-| [docs/e2e-real-run-walkthrough.zh-CN.md](docs/e2e-real-run-walkthrough.zh-CN.md) | 一个任务从输入到输出的真实闭环走查（未改写的实测 stdout） |
-| [docs/a6000-deployment-report.zh-CN.md](docs/a6000-deployment-report.zh-CN.md) | A6000 真机部署报告 |
-| [docs/archive/adr/](docs/archive/adr/) | 架构决策记录（ADR 0001–0009：Pi Runtime 选型、MVP 收敛、多租户一等边界等） |
+## 目录结构
 
-## 范围与边界
+```text
+src/
+├── auth/ http/        # 凭证与认证、HTTP API 与用户工作台
+├── scheduling/        # 租户轮转调度、队列协调
+├── resources/         # GPU 观测、压力分类、准入策略与预算账本
+├── sandbox/           # 沙箱 Provider（container/runsc、managed-local）
+├── runtime/ worker/   # Worker 子进程运行时、中断与恢复执行
+├── tools/ policies/   # 工具两阶段裁决、五层策略与路径围栏
+├── llm-gateway/       # 多后端路由、熔断、上下文预算、流式采集
+├── runs/ checkpoints/ # Run 状态机与安全恢复
+├── storage/ audit/    # SQLite 迁移、访问审计
+└── workspaces/ eval/  # 工作区 Diff/Artifact、评测聚合
+tests/                 # 与 src/ 镜像的测试树（98 文件 / 476 项）
+scripts/               # 负载发生器、真机供给与端到端脚本
+docs/                  # 技术主文档与测试账本
+```
 
-- **单机单进程**——定位是单机多租户平台，明确不做 HA / 多机；关键状态先落 SQLite，进程重启可恢复。
-- **GPU 是时间维度的软隔离**——A6000 不支持 MIG，所有租户共享同一 vLLM 实例；租户隔离 = 并发 slot + 预算 + 排队，硬限制在容器 cgroup 层（CPU / 内存 / PID）。
-- **两档沙箱**——managed-local 仅限开发（无法证明隔离，bash 被 fail-closed 禁止）；真实含 bash 的负载跑容器档（runsc）。
-- **租户配额在调度层**——并发与预算由调度 / 准入强制；网关层 token 级限流未做，prefix cache 有意跨租户共享以换命中率。
+## 文档
 
-更完整的记录见 [docs/defect-register.zh-CN.md](docs/defect-register.zh-CN.md)。
-
-## 状态
-
-2026-09：86 场景覆盖收口、28 条缺陷全部定位根因并修复（含真机复验）、容量与 8 小时长稳实测完成、476 项测试全绿。
+- [技术主文档](docs/project-handbook.zh-CN.md) —— 系统设计全景
+- [多租户隔离深度解析](docs/isolation-deep-dive.zh-CN.html) —— 六层隔离机制、核心代码与场景实证
+- [全场景测试总索引](docs/scenario-test-index.zh-CN.md) / [覆盖合并账](docs/scenario-coverage-consolidated.zh-CN.md) —— 86 个场景的测试与结果对账
+- [已知问题台账](docs/known-issues.zh-CN.md) —— 每条缺陷的根因、修复与复验记录
+- [A6000 部署报告](docs/a6000-deployment-report.zh-CN.md) —— 单机真机环境基线
