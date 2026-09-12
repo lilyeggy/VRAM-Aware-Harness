@@ -48,8 +48,10 @@ export async function startHarnessProcess(
         options.compositionDependencies,
     );
     let server:HarnessServer;
-
-    try {
+    /* 
+    我们能够看到，顺序上来看，启动顺序就是 先启动应用，再启动资源监测，然后开启 HTTP 服务
+    */
+    try {   
         await composition.application.start();
         composition.resourceMetrics.start();
         server = startHarnessHttpServer(composition.httpApi, {
@@ -77,6 +79,10 @@ export async function startHarnessProcess(
                 process.off(signal, handler);
             }
             signalHandlers.clear();
+
+            /* 
+            一定要注意，关闭顺序是相反的，是先关闭http服务，因为我们关闭是要首先停止接收新请求
+            */
 
             await server.stop(true);
             await composition.close();
