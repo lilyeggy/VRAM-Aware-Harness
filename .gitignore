@@ -62,3 +62,7 @@ tmp/
 .workbuddy-ai/
 *.bak
 *.bak2
+
+# 讲解/展示类 HTML 文档只在本地保留，不提交
+docs/isolation-deep-dive.zh-CN.html
+docs/scenario-compliance-report.zh-CN.html

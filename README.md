@@ -113,7 +113,6 @@ docs/                  # 技术主文档与测试账本
 ## 文档
 
 - [技术主文档](docs/project-handbook.zh-CN.md) —— 系统设计全景
-- [多租户隔离深度解析](docs/isolation-deep-dive.zh-CN.html) —— 六层隔离机制、核心代码与场景实证
 - [全场景测试总索引](docs/scenario-test-index.zh-CN.md) / [覆盖合并账](docs/scenario-coverage-consolidated.zh-CN.md) —— 86 个场景的测试与结果对账
 - [已知问题台账](docs/known-issues.zh-CN.md) —— 每条缺陷的根因、修复与复验记录
 - [A6000 部署报告](docs/a6000-deployment-report.zh-CN.md) —— 单机真机环境基线
