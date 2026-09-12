@@ -13,9 +13,11 @@ class MemorySandboxStore {
 
 class FakeDocker {
     readonly calls: string[][] = [];
+    readonly environments: (Readonly<Record<string, string>> | undefined)[] = [];
     nextExecResult: { exitCode: number; stdout: string; stderr: string } | null = null;
-    async run(args: readonly string[]) {
+    async run(args: readonly string[], environment?: Readonly<Record<string, string>>) {
         this.calls.push([...args]);
+        this.environments.push(environment);
         if (args[1] === "inspect") return { exitCode: 0, stdout: "runsc\n", stderr: "" };
         if (args[1] === "exec" && this.nextExecResult !== null) return this.nextExecResult;
         return { exitCode: 0, stdout: "container-id", stderr: "" };
@@ -59,9 +61,17 @@ test("容器 Sandbox 将隔离策略编译为可审计 Docker 参数，并仅持
     expect(create).toContain("1.5");
     expect(create).toContain("--memory");
     expect(create).toContain("512m");
+    // N12 回归：runsc 同样必须下发 PID 上限，否则沙箱内进程数完全不设限
+    // （实测不传时 900/900 个子进程均可创建成功）。
+    expect(create).toContain("--pids-limit");
+    expect(create).toContain("128");
     expect(create).toContain("type=bind,src=/srv/workspaces/tenant/workspace,dst=/workspace");
     expect(create.some((argument) => argument.includes(",rw"))).toBe(false);
-    expect(create).toContain("TOKEN=secret-value");
+    // N13 回归：Secret 明文不得出现在任何创建参数里（历史实现会在这里放明文，
+    // 结果 docker inspect 可读出、argv 也可见）。
+    expect(create).not.toContain("TOKEN=secret-value");
+    expect(JSON.stringify(create)).not.toContain("secret-value");
+    expect(JSON.stringify(create)).not.toContain("__HARNESS_SECRET_");
     expect(JSON.stringify(store.get(handle.id))).not.toContain("secret-value");
     expect(store.get(handle.id)?.secretNames).toEqual(["TOKEN"]);
     expect(store.get(handle.id)?.profile).toBe("default");
@@ -80,13 +90,17 @@ test("容器 Sandbox 将隔离策略编译为可审计 Docker 参数，并仅持
         cpuLimitEnforced: true,
         memoryLimitEnforced: true,
         diskLimitEnforced: false,
-        pidLimitEnforced: false,
+        pidLimitEnforced: true,
     });
 
     await provider.execute(handle.id, ["sh", "-lc", "id"]);
+    // N13：exec 只带 Secret 名字，明文经子进程环境传入（不进 argv）。
     expect(docker.calls[2]).toEqual([
-        "docker", "exec", "--workdir", "/workspace", "agent-harness-sandbox-1", "sh", "-lc", "id",
+        "docker", "exec", "--workdir", "/workspace", "--env", "TOKEN",
+        "agent-harness-sandbox-1", "sh", "-lc", "id",
     ]);
+    expect(docker.environments[2]).toEqual({ TOKEN: "secret-value" });
+    expect(JSON.stringify(docker.calls[2])).not.toContain("secret-value");
     await provider.terminate(handle.id);
     expect(store.get(handle.id)?.status).toBe("TERMINATED");
 });

@@ -25,7 +25,7 @@ function makeInput(overrides: Partial<ExecutionPolicyInput> = {}): ExecutionPoli
     return {
         runId: "run",
         tenantId: "tenant-a",
-        classification: { pressure: "NORMAL", snapshotId: "snap", reasons: [], gpuMemoryUsagePercent: null },
+        classification: { pressure: "NORMAL", snapshotId: "snap", reasons: [], gpuMemoryUsagePercent: null, gpuMemoryPressurePercent: null },
         activeRunCount: 0,
         activeTenantRunCount: 0,
         ...overrides,
@@ -99,8 +99,11 @@ test("BudgetAwareExecutionPolicy：预算未超时保持基础 START", () => {
         new DeterministicExecutionPolicy({ maxActiveRuns: 5 }),
         usage,
     );
-    ledger.commit({ runId: "r1", tenantId: "tenant-a", units: 4 }); // used 4, avail 2
-    const decision = policy.decide(makeInput());
+    // N23 后契约：准入用量只来自准入事实（activeTenantRunCount），预算层不再
+    // 回读账本/调度器。ceiling=6、已用 4 → 仍有 2 个额度。
+    const decision = policy.decide(
+        makeInput({ activeRunCount: 4, activeTenantRunCount: 4 }),
+    );
     expect(decision.action).toBe("START");
     expect(decision.reasonCode).toBe("RESOURCE_NORMAL");
 });
@@ -109,11 +112,13 @@ test("BudgetAwareExecutionPolicy：预算耗尽时 START 降级为 QUEUE", () =>
     const ledger = new MemoryResourceLedger();
     const usage = new LedgerBudgetUsage(ledger, budgets, CAPACITY, weights);
     const policy = new BudgetAwareExecutionPolicy(
-        new DeterministicExecutionPolicy({ maxActiveRuns: 5 }),
+        new DeterministicExecutionPolicy({ maxActiveRuns: 10 }),
         usage,
     );
-    ledger.commit({ runId: "r1", tenantId: "tenant-a", units: 6 }); // used 6 == ceiling 6
-    const decision = policy.decide(makeInput());
+    // ceiling=6、已用 6 → 触顶。
+    const decision = policy.decide(
+        makeInput({ activeRunCount: 6, activeTenantRunCount: 6 }),
+    );
     expect(decision.action).toBe("QUEUE");
     expect(decision.reasonCode).toBe("TENANT_BUDGET_EXCEEDED");
 });
@@ -126,7 +131,7 @@ test("BudgetAwareExecutionPolicy：基础策略本就 QUEUE 时保持 QUEUE（�
         usage,
     );
     const decision = policy.decide(makeInput({
-        classification: { pressure: "CRITICAL", snapshotId: "snap", reasons: [], gpuMemoryUsagePercent: null },
+        classification: { pressure: "CRITICAL", snapshotId: "snap", reasons: [], gpuMemoryUsagePercent: null, gpuMemoryPressurePercent: null },
     }));
     expect(decision.action).toBe("QUEUE");
     expect(decision.reasonCode).toBe("RESOURCE_CRITICAL");
@@ -136,12 +141,17 @@ test("结算后预算释放：租户又能启动", () => {
     const ledger = new MemoryResourceLedger();
     const usage = new LedgerBudgetUsage(ledger, budgets, CAPACITY, weights);
     const policy = new BudgetAwareExecutionPolicy(
-        new DeterministicExecutionPolicy({ maxActiveRuns: 5 }),
+        new DeterministicExecutionPolicy({ maxActiveRuns: 10 }),
         usage,
     );
-    ledger.commit({ runId: "r1", tenantId: "tenant-a", units: 6 });
-    expect(policy.decide(makeInput()).action).toBe("QUEUE");
+    // 占用触顶 → 排队；该 Run 结算后占用归零 → 又能启动。
+    // 占用事实由准入输入表达（见上面的 N23 契约说明）。
+    expect(
+        policy.decide(makeInput({ activeRunCount: 6, activeTenantRunCount: 6 })).action,
+    ).toBe("QUEUE");
 
     ledger.settle({ runId: "r1", reason: "COMPLETED" });
-    expect(policy.decide(makeInput()).action).toBe("START");
+    expect(
+        policy.decide(makeInput({ activeRunCount: 0, activeTenantRunCount: 0 })).action,
+    ).toBe("START");
 });

@@ -48,7 +48,7 @@ test("所有可用指标都低于 busy 阈值时分类为 NORMAL", () => {
         snapshotId: "snapshot-1",
         pressure: "NORMAL",
         reasons: ["WITHIN_THRESHOLDS"],
-        gpuMemoryUsagePercent: 20,
+        gpuMemoryUsagePercent: 20, gpuMemoryPressurePercent: 20,
     });
 });
 
@@ -150,4 +150,49 @@ test("总显存为零时忽略显存信号并继续使用其他指标", () => {
     expect(result.gpuMemoryUsagePercent).toBeNull();
     expect(result.pressure).toBe("BUSY");
     expect(result.reasons).toEqual(["KV_CACHE_BUSY"]);
+});
+
+// ---------------------------------------------------------------------------
+// N5：同机推理服务稳态基线。真机上 vLLM 默认预占 90% 显存，若直接拿
+// 「已用比例」做准入，平台只看自己的模型服务就长期判 CRITICAL，把任务
+// 无差别排队到 TTL 熔断（13 字符的小任务也被排掉）。
+// ---------------------------------------------------------------------------
+
+const baselineThresholds: ResourceThresholds = {
+    ...thresholds,
+    gpuMemoryBaselinePercent: 90,
+};
+
+test("N5：基线之内的显存占用不再算压力（vLLM 预占 90% 是预期稳态）", () => {
+    const result = classifyResource(
+        createSnapshot({ gpuUsedMemoryMiB: 93, gpuFreeMemoryMiB: 7 }),
+        baselineThresholds,
+    );
+
+    // 观测事实保留原始已用比例，压力按基线之上的增量度量。
+    expect(result.gpuMemoryUsagePercent).toBe(93);
+    expect(result.gpuMemoryPressurePercent).toBe(30);
+    expect(result.pressure).toBe("NORMAL");
+});
+
+test("N5：把基线之上的余量吃干净才判 CRITICAL", () => {
+    const result = classifyResource(
+        createSnapshot({ gpuUsedMemoryMiB: 99, gpuFreeMemoryMiB: 1 }),
+        baselineThresholds,
+    );
+
+    expect(result.gpuMemoryUsagePercent).toBe(99);
+    expect(result.gpuMemoryPressurePercent).toBe(90);
+    expect(result.pressure).toBe("CRITICAL");
+    expect(result.reasons).toContain("GPU_MEMORY_CRITICAL");
+});
+
+test("N5：未配置基线时退化为按原始比例判定（旧行为，无同机推理服务的部署）", () => {
+    const result = classifyResource(
+        createSnapshot({ gpuUsedMemoryMiB: 93, gpuFreeMemoryMiB: 7 }),
+        thresholds,
+    );
+
+    expect(result.gpuMemoryPressurePercent).toBe(93);
+    expect(result.pressure).toBe("CRITICAL");
 });

@@ -11,8 +11,9 @@ import type {
     RunRecoveryPlan,
 } from "../../src/checkpoints/recovery-service.ts";
 import type { AgentRun } from "../../src/runs/agent-run.ts";
-import type {
-    ResumeRunInput,
+import {
+    buildRecoveryContinuationInput,
+    type ResumeRunInput,
 } from "../../src/runs/run-service.ts";
 
 function createInterruptedRun(
@@ -89,7 +90,11 @@ test("AUTO_RESUME 计划会提交到恢复队列", async () => {
         {
             runId: plan.run.id,
             checkpoint: plan.checkpoint!,
-            continuationInput: "请从恢复点继续完成任务",
+            // B3：续跑输入必须携带原始任务语境，而不是一句空泛的指令。
+            continuationInput: buildRecoveryContinuationInput(
+                plan.run.userInput,
+                plan.checkpoint!.id,
+            ),
         },
     ]);
     expect(results).toEqual([
@@ -178,7 +183,7 @@ test("一个 Run 提交恢复失败不会阻止后续 Run", async () => {
     expect(results[1]?.run).toEqual(queuedRun);
 });
 
-test("AUTO_RESUME 缺少 Checkpoint 时记录失败", async () => {
+test("AUTO_RESUME 缺少 Checkpoint 时 fail closed 转人工审核", async () => {
     const run = createInterruptedRun("run-no-checkpoint", null);
     const plan: RunRecoveryPlan = {
         run,
@@ -200,14 +205,15 @@ test("AUTO_RESUME 缺少 Checkpoint 时记录失败", async () => {
 
     const results = await executor.execute([plan]);
 
+    // 支柱 3：计划声称 AUTO_RESUME 但重校验发现无恢复点 →
+    // 确定性落 MANUAL_REVIEW（Run 保持 INTERRUPTED），绝不自动推进。
     expect(resumeCallCount).toBe(0);
     expect(results).toEqual([
         {
             runId: run.id,
-            status: "FAILED",
-            run: null,
-            errorMessage:
-                "AUTO_RESUME 恢复计划缺少 Checkpoint",
+            status: "MANUAL_REVIEW",
+            run,
+            errorMessage: null,
         },
     ]);
 });

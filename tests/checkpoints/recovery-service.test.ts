@@ -216,3 +216,125 @@ test("危险 PREPARED 工具会阻止自动恢复", () => {
         db.close();
     }
 });
+
+/**
+ * N18 回归：Checkpoint 引用的运行时会话打不开时，恢复必须转人工而不是静默降级。
+ *
+ * 修复前：恢复只校验 Checkpoint 归属，不校验 `runtime_session_ref` 是否可达。
+ * Pi 的 `loadEntriesFromFile` 对不存在的文件返回空数组，`SessionManager.open`
+ * 于是给出一个"没有历史的会话" —— Run 照常 COMPLETED、日志零告警，用户以为
+ * 续上了上下文，其实模型对之前做过什么一无所知（真机 R10 实证）。
+ */
+test("N18：会话引用不可达时拒绝自动恢复，转 MANUAL_REVIEW", () => {
+    const db = openHarnessDatabase(":memory:");
+    try {
+        const run = seedRunningRun(db);
+        const runStore = new RunStore(db);
+        const executionStore = new ToolExecutionStore(db);
+        const checkpointStore = new CheckpointStore(db);
+        seedCheckpoint(executionStore, run.id);
+
+        const [plan] = new RecoveryService(
+            runStore,
+            executionStore,
+            checkpointStore,
+            () => false, // 引用不可达
+        ).scanInterruptedRuns();
+
+        expect(plan?.decision).toEqual({
+            action: "MANUAL_REVIEW",
+            reason: "SESSION_REF_UNREACHABLE",
+            blockingToolExecutionId: null,
+        });
+        expect(runStore.get(run.id)?.status).toBe("INTERRUPTED");
+        expect(runStore.listActiveRuns()).toEqual([]);
+
+        const lastEvent = runStore.listEvents(run.id).at(-1);
+        expect(lastEvent?.payload).toMatchObject({
+            recoveryAction: "MANUAL_REVIEW",
+            recoveryReason: "SESSION_REF_UNREACHABLE",
+        });
+    } finally {
+        db.close();
+    }
+});
+
+test("N18：未知副作用优先于不可达引用（安全信号不被盖过）", () => {
+    const db = openHarnessDatabase(":memory:");
+    try {
+        const run = seedRunningRun(db);
+        const runStore = new RunStore(db);
+        const executionStore = new ToolExecutionStore(db);
+        const checkpointStore = new CheckpointStore(db);
+        seedCheckpoint(executionStore, run.id);
+        const pendingBash = createPreparedExecution(
+            run.id,
+            "pending-bash-n18",
+            "pending-bash-call-n18",
+            "UNKNOWN_EFFECT",
+        );
+        executionStore.prepare(pendingBash);
+
+        const [plan] = new RecoveryService(
+            runStore,
+            executionStore,
+            checkpointStore,
+            () => false,
+        ).scanInterruptedRuns();
+
+        // 两者都指向 MANUAL_REVIEW，但理由必须是更强的安全信号，
+        // 否则运维会把"存在未知副作用"误读成"只是恢复点损坏"。
+        expect(plan?.decision.reason).toBe("UNSAFE_TOOL_EFFECT");
+        expect(plan?.decision.blockingToolExecutionId).toBe(pendingBash.id);
+    } finally {
+        db.close();
+    }
+});
+
+test("N18：未注入校验器时行为不变（保护 demo/测试的合成引用）", () => {
+    const db = openHarnessDatabase(":memory:");
+    try {
+        const run = seedRunningRun(db);
+        const runStore = new RunStore(db);
+        const executionStore = new ToolExecutionStore(db);
+        const checkpointStore = new CheckpointStore(db);
+        seedCheckpoint(executionStore, run.id);
+
+        const [plan] = new RecoveryService(
+            runStore,
+            executionStore,
+            checkpointStore,
+        ).scanInterruptedRuns();
+
+        expect(plan?.decision.action).toBe("AUTO_RESUME");
+        expect(plan?.decision.reason).toBe("SAFE_CHECKPOINT");
+    } finally {
+        db.close();
+    }
+});
+
+test("N18：真实文件校验器——文件在则恢复，被删则拒绝", async () => {
+    const { mkdtempSync, writeFileSync, rmSync } = await import("node:fs");
+    const { tmpdir } = await import("node:os");
+    const { join } = await import("node:path");
+    const { createFileSessionRefReachability } = await import(
+        "../../src/runtime/session-ref-reachability.ts"
+    );
+
+    const dir = mkdtempSync(join(tmpdir(), "n18-"));
+    const sessionFile = join(dir, "session.jsonl");
+    writeFileSync(sessionFile, '{"type":"session"}\n');
+    const isReachable = createFileSessionRefReachability();
+
+    expect(isReachable(sessionFile)).toBe(true);
+    // 空文件同样判为不可达：它等价于"没有历史"。
+    const emptyFile = join(dir, "empty.jsonl");
+    writeFileSync(emptyFile, "");
+    expect(isReachable(emptyFile)).toBe(false);
+    // 目录、缺失路径都不算可达会话。
+    expect(isReachable(dir)).toBe(false);
+    expect(isReachable(join(dir, "missing.jsonl"))).toBe(false);
+
+    rmSync(sessionFile);
+    expect(isReachable(sessionFile)).toBe(false);
+});

@@ -301,7 +301,7 @@ describe("WorkerProcessAgentRuntime Unit & Integration Tests", () => {
             // Rejection is fine (since setupRuntime might fail if model isn't running),
             // but Master MUST NOT crash with unhandled JSON SyntaxError!
         }
-    });
+    }, 15_000); // 真子进程冷启动在负载波动下 3-5s，5s 默认预算会偶发误报（2026-09-10 实测 5.00s 超时/3.21s 通过）
 
     test("Handshake Watchdog: Handshake timeout kills hung worker and cleans up orphan sandbox", async () => {
         let cleanerCalled = false;

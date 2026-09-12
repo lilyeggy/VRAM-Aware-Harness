@@ -92,6 +92,33 @@ test("Sandbox execution context 缺少命令执行器时 fail closed", () => {
     )).toThrow("拒绝回退宿主机");
 });
 
+test("HOST 边界下 sandboxId 仅为归属标识，无执行器时走宿主机受管目录", () => {
+    // A6000 真机发现：managed-local + process worker 组合下，
+    // Master 分配 sandbox 上下文（含 sandboxId），Worker 侧无容器执行器。
+    // HOST 边界的工具本就在宿主机受管目录执行，不应 fail-closed。
+    const hostEnforcement = Object.freeze({
+        ...sandboxEnforcement,
+        toolExecutionBoundary: "HOST" as const,
+    });
+    let invoked = false;
+    const tools = createGatewayPiTools(
+        ["read"],
+        "/srv/workspace",
+        { async execute(_input, invokeTool) { invoked = true; return invokeTool(); } },
+        {
+            runId: "run-host",
+            workspacePath: "/srv/workspace",
+            getSandboxId: () => "sandbox-1",
+            getSandboxEnforcement: () => hostEnforcement,
+            getRuntimeSessionRef: () => "session",
+            getLastEventSequence: () => 1,
+        },
+    );
+
+    expect(tools).toHaveLength(1);
+    expect(tools[0]!.name).toBe("read");
+});
+
 test("Pi ToolDefinition 的真实 execute 会经过 Gateway", async () => {
     let originalInvokeCount = 0;
     let capturedInput: ExecuteToolInput | null = null;

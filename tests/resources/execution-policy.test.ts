@@ -23,7 +23,7 @@ function createInput(
             reasons: pressure === "NORMAL"
                 ? ["WITHIN_THRESHOLDS"]
                 : ["INSUFFICIENT_DATA"],
-            gpuMemoryUsagePercent: null,
+            gpuMemoryUsagePercent: null, gpuMemoryPressurePercent: null,
         },
         activeRunCount: 0,
         activeTenantRunCount: 0,

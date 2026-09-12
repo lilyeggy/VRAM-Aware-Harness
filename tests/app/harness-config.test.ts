@@ -18,8 +18,11 @@ test("loadHarnessConfig 提供本地安全默认值并派生 metrics URL", () =>
         piModelsPath:"/tmp/harness-project/.pi/spike/models.json",
         vllmMetricsUrl:"http://127.0.0.1:8000/metrics",
         gpuIds:["0"],
-        maxActiveRuns:2,
-        maxActiveRunsPerTenant:1,
+        maxActiveRuns:30,
+        maxActiveRunsPerTenant:10,
+        llmGatewayStrategy:"round-robin",
+        llmHealthProbeIntervalMs:10_000,
+        llmPrefixCacheEnabled:true,
         pumpIntervalMs:1_000,
         containerUserId:65532,
     });
@@ -96,4 +99,103 @@ test("loadHarnessConfig 拒绝缺失模型和非法并发配置", () => {
         VLLM_MODEL_ID:"model",
         HARNESS_CONTAINER_USER_ID:"0",
     })).toThrow("HARNESS_CONTAINER_USER_ID 必须是正整数");
+    expect(() => loadHarnessConfig({
+        VLLM_MODEL_ID:"model",
+        LLM_GATEWAY_STRATEGY:"random",
+    })).toThrow("LLM_GATEWAY_STRATEGY 只支持");
+});
+
+test("支柱 2：VLLM_BASE_URLS 展开为双卡后端，LLM_BACKENDS 显式配置优先", () => {
+    const dualCard = loadHarnessConfig({
+        VLLM_MODEL_ID:"qwen3.5-4b",
+        VLLM_BASE_URLS:"http://127.0.0.1:8000/v1, http://127.0.0.1:8001/v1",
+    }, "/tmp/harness-project");
+
+    expect(dualCard.llmBackends).toEqual([
+        {
+            id:"vllm-gpu0",
+            baseUrl:"http://127.0.0.1:8000/v1",
+            model:"qwen3.5-4b",
+            logicalModel:"qwen3.5-4b",
+        },
+        {
+            id:"vllm-gpu1",
+            baseUrl:"http://127.0.0.1:8001/v1",
+            model:"qwen3.5-4b",
+            logicalModel:"qwen3.5-4b",
+        },
+    ]);
+
+    const explicit = loadHarnessConfig({
+        VLLM_MODEL_ID:"qwen3.5-4b",
+        VLLM_BASE_URLS:"http://127.0.0.1:8000/v1",
+        LLM_BACKENDS:JSON.stringify([{
+            id:"cloud",
+            baseUrl:"http://cloud/v1",
+            model:"m",
+            logicalModel:"qwen3.5-4b",
+        }]),
+    }, "/tmp/harness-project");
+    expect(explicit.llmBackends).toHaveLength(1);
+    expect(explicit.llmBackends[0]!.id).toBe("cloud");
+
+    const disabled = loadHarnessConfig(
+        { VLLM_MODEL_ID:"qwen3.5-4b" },
+        "/tmp/harness-project",
+    );
+    expect(disabled.llmBackends).toEqual([]);
+});
+
+test("N28：Pi 压缩参数默认值按 32768 窗口标定，且可被环境变量覆盖", () => {
+    const defaults = loadHarnessConfig({
+        VLLM_MODEL_ID:"qwen3.5-4b",
+    }, "/tmp/harness-project");
+
+    // 触发点 = 模型窗口 - reserveTokens，必须 > keepRecentTokens，
+    // 否则切点退到会话开头、compress 退化成空操作（真机 142 连败的根因）。
+    expect(defaults.piCompactionEnabled).toBe(true);
+    expect(defaults.piCompactionReserveTokens).toBe(12_288);
+    expect(defaults.piCompactionKeepRecentTokens).toBe(8_192);
+    expect(defaults.piCompactionReserveTokens)
+        .toBeGreaterThan(defaults.piCompactionKeepRecentTokens);
+
+    const explicit = loadHarnessConfig({
+        VLLM_MODEL_ID:"qwen3.5-4b",
+        PI_COMPACTION_RESERVE_TOKENS:"6000",
+        PI_COMPACTION_KEEP_RECENT_TOKENS:"3000",
+    }, "/tmp/harness-project");
+    expect(explicit.piCompactionReserveTokens).toBe(6_000);
+    expect(explicit.piCompactionKeepRecentTokens).toBe(3_000);
+
+    for (const off of ["false", "0"]) {
+        const disabled = loadHarnessConfig({
+            VLLM_MODEL_ID:"qwen3.5-4b",
+            PI_COMPACTION_ENABLED:off,
+        }, "/tmp/harness-project");
+        expect(disabled.piCompactionEnabled).toBe(false);
+    }
+});
+
+test("loadHarnessConfig 为 N5/N10/N14 注入适配本项目的默认值", () => {
+    const config = loadHarnessConfig({ VLLM_MODEL_ID: "qwen" }, "/tmp/harness-project");
+
+    // N5：同机 vLLM 默认预占 90% 显存，准入按基线之上的增量判定。
+    expect(config.resourceThresholds.gpuMemoryBaselinePercent).toBe(90);
+    // N10：排队超过 60s 的 Run 插队优先调度。
+    expect(config.schedulerAgingMs).toBe(60_000);
+    // N14：容器 PID 上限（可下调到 gVisor 内部上限之下）。
+    expect(config.containerPidsLimit).toBe(128);
+});
+
+test("loadHarnessConfig 允许覆盖 N5/N10/N14 三个新开关", () => {
+    const config = loadHarnessConfig({
+        VLLM_MODEL_ID: "qwen",
+        HARNESS_GPU_MEMORY_BASELINE_PERCENT: "0",
+        HARNESS_SCHEDULER_AGING_MS: "0",
+        HARNESS_CONTAINER_PIDS_LIMIT: "64",
+    }, "/tmp/harness-project");
+
+    expect(config.resourceThresholds.gpuMemoryBaselinePercent).toBe(0);
+    expect(config.schedulerAgingMs).toBe(0);
+    expect(config.containerPidsLimit).toBe(64);
 });

@@ -6,7 +6,15 @@ import type {
 import {
     HarnessHttpApi,
     type HarnessHttpApplication,
+    type HttpAccessControl,
 } from "../../src/http/harness-http-api.ts";
+import type {
+    PolicyConstraints,
+    PolicyLayer,
+} from "../../src/policies/effective-policy.ts";
+import type {
+    ToolExecution,
+} from "../../src/tools/tool-execution.ts";
 import type {
     PolicyDecision,
 } from "../../src/resources/execution-policy.ts";
@@ -41,10 +49,28 @@ function createRun(
     };
 }
 
-function createApi() {
+function createApi(
+    limits?: { maxUserInputChars: number },
+    accessControl?: HttpAccessControl,
+) {
     let currentRun = createRun();
     let submittedInput:StartRunInput | null = null;
     let resumeInput:ResumeRunInput | null = null;
+    // N15/N16：策略管理面与人工消解的观测点。
+    const unrestricted: PolicyConstraints = {
+        allowedTools: null,
+        allowedSkills: null,
+        allowedModels: null,
+        workspaceRoots: null,
+        allowNetwork: true,
+        allowProcess: true,
+        allowedSecrets: null,
+        resourceLimits: { cpuCores: null, memoryMiB: null, diskMiB: null },
+    };
+    let platformPolicy: PolicyLayer = { ...unrestricted, id: "platform:default", kind: "PLATFORM" };
+    let tenantPolicy: PolicyLayer = { ...unrestricted, id: "tenant:tenant-http:default", kind: "TENANT" };
+    let preparedExecutions: ToolExecution[] = [];
+    let resolveInput: { runId: string; resolution: string; note?: string; actor: string | null } | null = null;
     const event:RunEvent = {
         eventId:"event-http",
         runId:currentRun.id,
@@ -112,6 +138,11 @@ function createApi() {
         getRunDecisions(runId) {
             return runId === currentRun.id ? [decision] : [];
         },
+        getRunLimitations(runId) {
+            return runId === currentRun.id
+                ? [{ toolName: "bash", reason: "执行环境无法隔离 Workspace，拒绝 bash", count: 3, lastDecidedAt: timestamp }]
+                : [];
+        },
         getQueue() {
             return [{
                 runId:currentRun.id,
@@ -150,6 +181,35 @@ function createApi() {
             };
             return currentRun;
         },
+        getPlatformPolicy() {
+            return platformPolicy;
+        },
+        getTenantPolicy(tenantId) {
+            return tenantId === currentRun.tenantId ? tenantPolicy : tenantPolicy;
+        },
+        setPlatformPolicy(id, policy) {
+            platformPolicy = { ...policy, id, kind: "PLATFORM" };
+            return true;
+        },
+        setTenantPolicy(_tenantId, id, policy) {
+            tenantPolicy = { ...policy, id, kind: "TENANT" };
+            return true;
+        },
+        getRunUnknownEffects(runId) {
+            return runId === currentRun.id ? preparedExecutions : [];
+        },
+        resolveUnknownEffect(runId, input) {
+            resolveInput = {
+                runId,
+                resolution: input.resolution,
+                ...(input.note === undefined ? {} : { note: input.note }),
+                actor: input.actor,
+            };
+            return {
+                run: currentRun,
+                resolvedExecutionIds: preparedExecutions.map((execution) => execution.id),
+            };
+        },
     };
 
     return {
@@ -159,9 +219,13 @@ function createApi() {
                     ? checkpoint
                     : null;
             },
-        }),
+        }, accessControl, undefined, undefined, undefined, limits),
         getResumeInput:() => resumeInput,
         getSubmittedInput:() => submittedInput,
+        getResolveInput:() => resolveInput,
+        setPreparedExecutions:(executions: ToolExecution[]) => { preparedExecutions = executions; },
+        getPlatformPolicy:() => platformPolicy,
+        getTenantPolicy:() => tenantPolicy,
     };
 }
 
@@ -230,9 +294,11 @@ test("最小 HTTP API 覆盖提交、查询、中断、恢复、队列、资源�
     expect(await jsonBody<{
         run:AgentRun;
         decisions:PolicyDecision[];
+        limitations:unknown[];
     }>(runResponse)).toMatchObject({
         run:{ id:"run-http" },
         decisions:[{ decisionId:"decision-http" }],
+        limitations:[{ toolName: "bash", reason: "执行环境无法隔离 Workspace，拒绝 bash", count: 3, lastDecidedAt: timestamp }],
     });
 
     const eventsResponse = await api.fetch(new Request(
@@ -335,6 +401,14 @@ test("LLM 网关入口走统一身份主干：无 key 401、作用域不足 403�
             return new Response(JSON.stringify({ choices: [] }), { status: 200 });
         },
         router: fakeRouter,
+        // 支柱 2：stats 端点会一并读取缓存命中指标。
+        cacheMetrics: () => ({
+            totalRequests: 0,
+            promptTokensTotal: 0,
+            cachedTokensTotal: 0,
+            cacheHitRate: null,
+            recentSamples: [],
+        }),
     };
 
     const build = (scopes: string[], keyOk: boolean) => new HarnessHttpApi(
@@ -419,4 +493,255 @@ test("HTTP API 为无效输入和不存在的资源返回稳定错误", async ()
         "http://harness.local/unknown",
     ));
     expect(missingRouteResponse.status).toBe(404);
+});
+
+// N8 回归：2026-09-10 真机发现 78 万字符输入被 202 接受后才在模型侧 400 失败，
+// 且提交响应把全量输入原样回显。这里断言提交期上界与回显收敛。
+test("N8：超过提交期上界的输入必须 413 且不创建 Run", async () => {
+    const { api, getSubmittedInput } = createApi({ maxUserInputChars: 50 });
+    const response = await api.fetch(new Request(
+        "http://harness.local/runs",
+        {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({
+                tenantId: "tenant-api",
+                sessionId: "session-api",
+                userInput: "x".repeat(51),
+                workspacePath: "/tmp/api-workspace",
+            }),
+        },
+    ));
+    expect(response.status).toBe(413);
+    const body = await jsonBody<{ error: string }>(response);
+    expect(body.error).toContain("任务输入过长");
+    expect(body.error).toContain("51");
+    // 校验发生在创建之前：不能留下 Run。
+    expect(getSubmittedInput()).toBeNull();
+});
+
+test("N8：边界内输入按 202 接受，且提交响应不回显全量输入", async () => {
+    // 上界 1000 字符，但回显只保留 200 字符摘要。
+    const { api, getSubmittedInput } = createApi({ maxUserInputChars: 1000 });
+    const long = "y".repeat(600);
+    const response = await api.fetch(new Request(
+        "http://harness.local/runs",
+        {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({
+                tenantId: "tenant-api",
+                sessionId: "session-api",
+                userInput: long,
+                workspacePath: "/tmp/api-workspace",
+            }),
+        },
+    ));
+    expect(response.status).toBe(202);
+    const body = await jsonBody<{ run: { userInput: string; userInputTruncated?: boolean; userInputLength?: number } }>(response);
+    expect(body.run.userInput.length).toBe(200);
+    expect(body.run.userInputTruncated).toBe(true);
+    expect(body.run.userInputLength).toBe(600);
+    // 后端仍然拿到完整输入。
+    expect(getSubmittedInput()?.userInput).toBe(long);
+});
+
+// ---------------------------------------------------------------------------
+// N15：策略管理面——租户资源限额 / 授权 Secret 的产品入口。
+// 修复前 PolicyRegistry.setTenantPolicy 只被测试调用，HTTP 没有任何路由，
+// 每次运行都落在 unrestrictedPolicy（CPU/内存无限额、无 Secret）。
+// ---------------------------------------------------------------------------
+
+function createToolExecution(overrides: Partial<ToolExecution> = {}): ToolExecution {
+    return {
+        id: "tool-exec-1",
+        runId: "run-http",
+        toolCallId: "call-1",
+        toolName: "bash",
+        arguments: { command: "rm -rf /tmp/scratch" },
+        effect: "UNKNOWN_EFFECT",
+        status: "PREPARED",
+        result: null,
+        errorMessage: null,
+        createdAt: timestamp,
+        finishedAt: null,
+        ...overrides,
+    };
+}
+
+test("N15：PUT /admin/policies/tenants/:id 落地租户资源限额与授权 Secret", async () => {
+    const { api, getTenantPolicy } = createApi();
+
+    const response = await api.fetch(new Request(
+        "http://harness.local/admin/policies/tenants/tenant-http",
+        {
+            method: "PUT",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({
+                policy: {
+                    allowedTools: ["read", "bash"],
+                    allowedSecrets: ["GITHUB_TOKEN"],
+                    allowNetwork: false,
+                    resourceLimits: { cpuCores: 1.5, memoryMiB: 1024 },
+                },
+            }),
+        },
+    ));
+
+    expect(response.status).toBe(200);
+    const body = await jsonBody<{ tenant: PolicyLayer }>(response);
+    expect(body.tenant.allowedTools).toEqual(["read", "bash"]);
+    expect(body.tenant.allowedSecrets).toEqual(["GITHUB_TOKEN"]);
+    expect(body.tenant.allowNetwork).toBe(false);
+    expect(body.tenant.resourceLimits).toEqual({ cpuCores: 1.5, memoryMiB: 1024, diskMiB: null });
+    expect(getTenantPolicy().resourceLimits.memoryMiB).toBe(1024);
+});
+
+test("N15：GET /admin/policies 返回平台层与租户层", async () => {
+    const { api } = createApi();
+
+    const response = await api.fetch(new Request("http://harness.local/admin/policies"));
+    expect(response.status).toBe(200);
+    const body = await jsonBody<{ platform: PolicyLayer; tenant: PolicyLayer }>(response);
+    expect(body.platform.kind).toBe("PLATFORM");
+    expect(body.tenant.kind).toBe("TENANT");
+});
+
+test("N15：策略字段类型错误 → 400，不静默降级成无限额", async () => {
+    const { api } = createApi();
+
+    const response = await api.fetch(new Request(
+        "http://harness.local/admin/policies/tenants/tenant-http",
+        {
+            method: "PUT",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ policy: { resourceLimits: { memoryMiB: "1024" } } }),
+        },
+    ));
+
+    expect(response.status).toBe(400);
+});
+
+test("N15：POST /runs 的 runPolicy 透传到 StartRunInput（此前无产品调用方）", async () => {
+    const { api, getSubmittedInput } = createApi();
+
+    const response = await api.fetch(new Request("http://harness.local/runs", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+            tenantId: "tenant-http",
+            workspacePath: "/tmp/http-workspace",
+            userInput: "受限运行",
+            runPolicy: { allowedTools: ["read"], resourceLimits: { cpuCores: 2 } },
+        }),
+    }));
+
+    expect(response.status).toBe(202);
+    const submitted = getSubmittedInput();
+    expect(submitted?.runPolicy?.allowedTools).toEqual(["read"]);
+    expect(submitted?.runPolicy?.resourceLimits.cpuCores).toBe(2);
+});
+
+test("N15：非通配 scope 不能改别的租户（404）；缺写权限 → 403", async () => {
+    const scoped = createApi(undefined, {
+        authenticate(rawKey: string) {
+            if (rawKey === "other-tenant-key") {
+                return { tenantId: "tenant-other", scopes: ["policies:read", "policies:write"] };
+            }
+            if (rawKey === "readonly-key") {
+                return { tenantId: "tenant-http", scopes: ["policies:read"] };
+            }
+            return null;
+        },
+    } as unknown as HttpAccessControl);
+
+    const denied = await scoped.api.fetch(new Request(
+        "http://harness.local/admin/policies/tenants/tenant-http",
+        {
+            method: "PUT",
+            headers: { "content-type": "application/json", authorization: "Bearer other-tenant-key" },
+            body: JSON.stringify({ policy: { allowNetwork: false } }),
+        },
+    ));
+    expect(denied.status).toBe(404);
+
+    const forbidden = await scoped.api.fetch(new Request(
+        "http://harness.local/admin/policies/tenants/tenant-http",
+        {
+            method: "PUT",
+            headers: { "content-type": "application/json", authorization: "Bearer readonly-key" },
+            body: JSON.stringify({ policy: { allowNetwork: false } }),
+        },
+    ));
+    expect(forbidden.status).toBe(403);
+});
+
+// ---------------------------------------------------------------------------
+// N16：UNKNOWN_EFFECT 的人工消解出口
+// ---------------------------------------------------------------------------
+
+test("N16：GET /runs/:id 暴露待核对的不确定副作用", async () => {
+    const { api, setPreparedExecutions } = createApi();
+    setPreparedExecutions([createToolExecution()]);
+
+    const response = await api.fetch(new Request("http://harness.local/runs/run-http"));
+    expect(response.status).toBe(200);
+    const body = await jsonBody<{
+        unknownEffects: Array<{
+            executionId: string;
+            toolCallId: string;
+            toolName: string;
+            effect: string;
+            createdAt: string;
+        }>;
+    }>(response);
+
+    expect(body.unknownEffects).toEqual([
+        {
+            executionId: "tool-exec-1",
+            toolCallId: "call-1",
+            toolName: "bash",
+            effect: "UNKNOWN_EFFECT",
+            createdAt: timestamp,
+        },
+    ]);
+});
+
+test("N16：POST /runs/:id/resolve-unknown-effect 记录人工核对结论", async () => {
+    const { api, getResolveInput, setPreparedExecutions } = createApi();
+    setPreparedExecutions([createToolExecution()]);
+
+    const response = await api.fetch(new Request(
+        "http://harness.local/runs/run-http/resolve-unknown-effect",
+        {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ resolution: "EFFECT_OCCURRED", note: "日志显示命令已执行" }),
+        },
+    ));
+
+    expect(response.status).toBe(200);
+    const body = await jsonBody<{ resolvedExecutionIds: string[] }>(response);
+    expect(body.resolvedExecutionIds).toEqual(["tool-exec-1"]);
+    expect(getResolveInput()).toEqual({
+        runId: "run-http",
+        resolution: "EFFECT_OCCURRED",
+        note: "日志显示命令已执行",
+        actor: "legacy",
+    });
+});
+
+test("N16：非法 resolution → 400", async () => {
+    const { api } = createApi();
+
+    const response = await api.fetch(new Request(
+        "http://harness.local/runs/run-http/resolve-unknown-effect",
+        {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ resolution: "MAYBE" }),
+        },
+    ));
+
+    expect(response.status).toBe(400);
 });

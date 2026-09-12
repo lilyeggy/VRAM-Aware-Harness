@@ -147,10 +147,12 @@ describe("LlmGateway 路由与回退", () => {
         expect(router.recentDecisions(1)[0]!.attemptedBackendIds).toEqual(["opencode-cloud"]);
     });
 
-    it("未知逻辑模型 → 503 无可用后端", async () => {
+    it("未知逻辑模型 → 404 模型不存在（不再伪装成服务不可用）", async () => {
         const { gateway } = makeGateway(async () => okResponse("x"));
         const res = await gateway.handleChatCompletions(chatRequest("nonexistent"));
-        expect(res.status).toBe(503);
+        expect(res.status).toBe(404);
+        const body = await res.json() as { error: { type: string } };
+        expect(body.error.type).toBe("model_not_found");
     });
 
     it("stats 聚合成功率与回退率", async () => {

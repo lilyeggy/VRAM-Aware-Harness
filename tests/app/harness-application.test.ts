@@ -167,6 +167,8 @@ function createAdmission(
                             : ["GPU_MEMORY_CRITICAL"],
                     gpuMemoryUsagePercent:
                         action === "START" ? 16.67 : 95,
+                    gpuMemoryPressurePercent:
+                        action === "START" ? 16.67 : 95,
                 },
                 decision,
             };
