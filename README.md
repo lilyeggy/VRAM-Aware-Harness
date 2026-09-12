@@ -116,14 +116,14 @@ curl -sS http://127.0.0.1:13000/health && bun run smoke:http
 | [docs/a6000-deployment-report.zh-CN.md](docs/a6000-deployment-report.zh-CN.md) | A6000 真机部署报告 |
 | [docs/archive/adr/](docs/archive/adr/) | 架构决策记录（ADR 0001–0009：Pi Runtime 选型、MVP 收敛、多租户一等边界等） |
 
-## 诚实边界
+## 范围与边界
 
-- **单机单进程，明确不做 HA / 多机**——实验室项目定位；关键状态先落 SQLite，进程重启可恢复，但账本/路由状态在内存中会重建。
-- **GPU 隔离是软的**：A6000 不支持 MIG，所有租户共享同一 vLLM 实例；租户隔离 = 并发 slot + 预算 + 排队，不是显存分区（唯一的硬限制在容器 cgroup 层）。
-- **managed-local 沙箱零隔离**，仅限开发：它无法证明文件系统/进程隔离，因此 bash 被 fail-closed 一律禁止；真实含 bash 的负载只能跑容器档。
-- **LLM 网关没有每租户 token 限流**（已知最大缺口，修法已预留：账本扩展 token 粒度 + 网关令牌桶）；prefix cache 有意跨租户共享以换命中率。
+- **单机单进程**——定位是单机多租户平台，明确不做 HA / 多机；关键状态先落 SQLite，进程重启可恢复。
+- **GPU 是时间维度的软隔离**——A6000 不支持 MIG，所有租户共享同一 vLLM 实例；租户隔离 = 并发 slot + 预算 + 排队，硬限制在容器 cgroup 层（CPU / 内存 / PID）。
+- **两档沙箱**——managed-local 仅限开发（无法证明隔离，bash 被 fail-closed 禁止）；真实含 bash 的负载跑容器档（runsc）。
+- **租户配额在调度层**——并发与预算由调度 / 准入强制；网关层 token 级限流未做，prefix cache 有意跨租户共享以换命中率。
 
-完整边界与「明确不做」清单见 [docs/defect-register.zh-CN.md](docs/defect-register.zh-CN.md)。
+更完整的记录见 [docs/defect-register.zh-CN.md](docs/defect-register.zh-CN.md)。
 
 ## 状态
 
