@@ -46,7 +46,7 @@
 <div class="wrap">
 
 <h1>场景机制逐图详解</h1>
-<p class="lede">按场景逐个展开，每个场景配「架构 / 流程图 + 真实调用链 + 参数 + 边界」。本页先覆盖<b>场景 0</b> 与 <b>场景 1</b>，后续场景续写在同一份文档里。所有代码锚点均取自本仓库，所有实测值取自 <code>tmp/e2e-evidence/e2e-main.txt</code> 的原始 stdout。</p>
+<p class="lede">按场景逐个展开，每个场景配「架构 / 流程图 + 真实调用链 + 参数 + 边界」。所有代码锚点均取自本仓库，所有实测值取自 <code>tmp/e2e-evidence/e2e-main.txt</code> 的原始 stdout。没有工程经验的读者请先读 <a href="#how-to-read">〇 · 怎么读这份文档</a>。</p>
 
 <div class="chain">
   <b>这套文档的分工</b>
@@ -63,8 +63,95 @@
     <span class="tag">已完成</span>场景 0（启动顺序不变量）、场景 1（失败归位与租户隔离）、场景 2（GPU 空闲直启）、场景 3（资源压力排队与自动续跑）、场景 5（双租户公平轮转）、场景 6（五层证据链）、场景 8（关闭顺序与幂等）、场景 D1（恢复链路与 fail-closed 决策）、场景 F1–F3（三条故障分支）<br>
     <span class="tag">待续写</span>场景 4（压力解除自动续跑 · 已并入场景 3 的第二次 drain）<br>
     <span class="tag">未执行</span>需真实 vLLM / Docker + runsc 的 20 个入口（见《场景图谱》E1–E12）<br>
-    <span class="tag">新发现</span><a href="#finding-blocked-flood">QUEUE_BLOCKED 折叠在并发领取下失效</a> · F2 失败语义不一致 · <a href="#finding-interrupt-swallowed">F-4 中断失败被静默丢弃，关闭防线不可达</a> · F-5 关库竞态 · 读路径先查存在性后鉴权
+    <span class="tag">新发现</span><a href="#finding-blocked-flood">QUEUE_BLOCKED 折叠在并发领取下失效</a> · F2 失败语义不一致 · <a href="#finding-interrupt-swallowed">F-4 中断失败被静默丢弃，关闭防线不可达</a> · F-5 关库竞态 · 读路径先查存在性后鉴权<br>
+    <span class="tag">口径更正</span>「20 个具名入口未跑」的说法<b>已作废</b>——A6000 上实跑过 12 个 <code>campaign-*</code>，但用的是每场景手搓的探针（<code>fairshare_probe.ts</code> 等），<b>不是</b> <code>scripts/</code> 里那 20 个具名入口，两者不可互证。详见 <code>docs/defect-register.zh-CN.md</code> §5。
   </div>
+</div>
+
+<h2 id="how-to-read">〇 · 怎么读这份文档（写给没有工程经验的读者）</h2>
+<p>后面 11 节默认你了解一些工程常识。如果你没有，先花十五分钟读完这一节——它讲清楚三件事：<b>这个系统跑起来时物理上是什么</b>、<b>按什么顺序读</b>、<b>每个反复出现的词到底是什么意思</b>。</p>
+
+<h3>1 · 先建立物理图景：执行之后，电脑里多了什么</h3>
+<p>读源码最大的障碍不是代码，而是不知道"那些名字"对应现实里的什么东西。执行 <code>bun run src/main.ts</code> 之后，这台电脑上真实存在的是：</p>
+
+<table>
+<tr><th style="width:16%">东西</th><th style="width:34%">物理形态</th><th style="width:16%">数量</th><th style="width:34%">生命周期</th></tr>
+<tr><td><b>harness 主进程</b></td><td>操作系统里的一个进程（Bun 运行时）</td><td>1 个</td><td>从启动到关闭，一直是"总调度"</td></tr>
+<tr><td><b>Worker 子进程</b></td><td>主进程 <code>spawn</code> 出来的<b>另一个</b>进程</td><td>每个在跑的任务 1 个</td><td>任务开始时创建，结束或崩溃时消失</td></tr>
+<tr><td><b>SQLite 数据库</b></td><td>磁盘上的<b>一个文件</b>（<code>harness.sqlite</code>）</td><td>1 个</td><td>永久——唯一"记住一切"的东西</td></tr>
+<tr><td><b>vLLM 推理服务</b></td><td>又一个独立进程，占着 GPU 显存</td><td>1 个</td><td>独立于 harness 生死（本机走查时是假观测器）</td></tr>
+<tr><td><b>HTTP 端口</b></td><td>主进程监听的一个"门牌号"</td><td>1 个</td><td>启动完成之后才有——见场景 0</td></tr>
+</table>
+
+<div class="note">
+<b>为什么这个区分是一切的地基：</b>"进程"是操作系统的隔离单位——一个进程崩了，别的进程还活着；两个进程互相看不见对方的内存，只能靠"写信"（管道、HTTP 请求）交流。所以本文说"跨进程"，意思就是"两边只能按约定好的消息来往，谁也不能直接翻对方的口袋"。这就是为什么 Worker 崩溃不会带崩主进程（场景 F1），也是为什么工具副作用治理必须拆成 prepare / complete 两步跨着进程边界走（技术剖面 §3）。<br><br>
+而"SQLite 是一个文件"意味着：<b>写进文件的东西，进程死了、断电了，它还在；只存在内存里的东西，进程一死就没了。</b>本文反复出现的"落库 / 落盘 / 持久化"，说的都是同一件事——把它写进那个文件。整个 D1（跨进程恢复）之所以成立，就是因为中断前的状态已经落库了。
+</div>
+
+<h3>2 · 阅读路线：按依赖关系，不按章节顺序</h3>
+<p>11 节不是平的，它们有依赖。下面这条顺序保证你读到每一节时，它要用的概念你都已经见过：</p>
+
+<table>
+<tr><th style="width:6%">序</th><th style="width:22%">读哪节</th><th style="width:14%">前置</th><th>读完你能回答的问题</th></tr>
+<tr><td>1</td><td><b>场景 0</b> 启动顺序</td><td>—</td><td>为什么端口必须最后才开？关闭为什么是启动的镜像？</td></tr>
+<tr><td>2</td><td><b>场景 1</b> 失败归位</td><td>场景 0</td><td>一个错误请求由哪一层、按什么状态码、留不留痕迹地拒绝？</td></tr>
+<tr><td>3</td><td><b>决策树</b>（2+3 开头）</td><td>场景 0</td><td>"GPU 有多忙"这个数字，怎么变成 START / QUEUE 这个决定？</td></tr>
+<tr><td>4</td><td><b>场景 2</b> 空闲直启</td><td>决策树</td><td>提交到启动只花 6ms，这 6ms 里发生了什么？</td></tr>
+<tr><td>5</td><td><b>场景 3</b> 压力排队</td><td>场景 2</td><td>排队的依据怎么落库？压力解除后<b>谁</b>去推进它？</td></tr>
+<tr><td>6</td><td><b>场景 5</b> 双租户轮转</td><td>决策树</td><td>两个租户怎么做到不互相饿死？公平到底几行代码？</td></tr>
+<tr><td>7</td><td><b>D1</b> 跨进程恢复</td><td>场景 3</td><td>重启后怎么恢复？为什么"恢复"不是特权通道？</td></tr>
+<tr><td>8</td><td><b>F1–F3</b> 故障分支</td><td>场景 0</td><td>三种死法分别死在哪一层、谁来收尸？</td></tr>
+<tr><td>9</td><td><b>场景 6</b> 证据链</td><td>场景 1</td><td>凭什么相信"这个任务真的跑过、真的在隔离里跑的"？</td></tr>
+<tr><td>10</td><td><b>场景 8</b> 关闭幂等</td><td>场景 0</td><td>为什么 close 一次和 close 三次效果一样？</td></tr>
+<tr><td>11</td><td><b>两个 finding</b></td><td>F1–F3、8</td><td>带着前面所有概念，自己能不能挖到同样深？</td></tr>
+</table>
+
+<div class="note"><b>时间紧的话</b>：只读 1→3→7→8 四站。它们分别覆盖"顺序、决策、恢复、故障"，是面试被追问概率最高的四块。每一站都能独立成篇，读完任何一站停下都不亏。<br><b>正文里标着「为什么这么设计」的六张深色卡片</b>（场景 0、1、2+3、5、D1、F1–F3 各一张）是设计论证：每张都按「为什么 → 如果反过来会怎样 → 代价是什么」三段走。被追问"为什么这么设计"时直接引用它们；<b>「代价」那句尤其值得记</b>——能说出代价的设计才叫决策，说不出代价的叫口号。</div>
+
+<h3>3 · 十五个词的地基</h3>
+<p>后面所有章节会反复用这十五个词。每个词给三样东西：<b>是什么</b>（一句）、<b>这个项目为什么在乎它</b>、<b>在哪一节见到它</b>。</p>
+
+<table>
+<tr><th style="width:14%">词</th><th style="width:30%">是什么</th><th style="width:38%">这个项目为什么在乎</th><th>首次出现</th></tr>
+
+<tr><td><b>进程 / 子进程</b></td><td>操作系统的隔离单位；子进程是父进程"生"出来的另一个进程</td><td>任务跑在 Worker 子进程里，所以一个任务崩溃不会带崩调度器（F1）</td><td>〇§1</td></tr>
+
+<tr><td><b>IPC</b></td><td>进程间通信——两个进程靠管道/消息传数据，不能读对方内存</td><td>主进程与 Worker 的一切来往（含工具调用）都走它；消息丢了就是状态丢了</td><td>F1–F3</td></tr>
+
+<tr><td><b>端口 / 监听</b></td><td>进程在某个端口号上"开门收信"；没监听 = 外界联系不上它</td><td>启动顺序不变量的核心：端口开早了，就会收到不该收的请求</td><td>场景 0</td></tr>
+
+<tr><td><b>事务</b></td><td>一组数据库写操作"要么全成、要么全没发生"的保证</td><td>Run 状态和事件必须同事务落库，否则会出现"状态变了但没有历史"</td><td>技术剖面 §2</td></tr>
+
+<tr><td><b>状态机</b></td><td>一个东西只能处在有限几个状态之一，且只能在指定状态间转移</td><td>Run 的 QUEUED→RUNNING→…→终态；非法转移会被拒绝（毒丸防护）</td><td>图谱总览</td></tr>
+
+<tr><td><b>轮询 vs 事件驱动</b></td><td>轮询=每秒主动问一次"好了吗"；事件驱动=好了叫我</td><td>Pump 是<b>轮询</b>（1s 一次），所以资源回落后最多等 1s 才续跑——这是设计选择，不是缺陷</td><td>场景 3</td></tr>
+
+<tr><td><b>fail-closed</b></td><td>拿不准时宁可拒绝服务，也不要猜一个继续跑</td><td>沙箱对账失败→拒绝启动；恢复点不确定→转人工；这是全项目最一致的取向</td><td>D1、场景 0</td></tr>
+
+<tr><td><b>幂等</b></td><td>同一件事做一次和做一百次，结果一样</td><td>崩溃恢复后要不要重放工具调用？只有能<b>证明</b>幂等（READ_ONLY）才敢自动重放</td><td>D1</td></tr>
+
+<tr><td><b>TTL</b></td><td>Time-To-Live：排队超过这个时长就判超时出局</td><td>防止一个永远轮不上的任务无限占着队列（永久饥饿）；时钟跨重启累计</td><td>场景 3、5</td></tr>
+
+<tr><td><b>沙箱 / runsc</b></td><td>把任务关在一个受限环境里跑；runsc(gVisor) 是内核级隔离的实现</td><td>任务的文件读写被限制在自己的 workspace；<code>verified=true</code> 只说明 runtime 一致，<b>不代表内核隔离</b></td><td>场景 6、D1</td></tr>
+
+<tr><td><b>审计（append-only）</b></td><td>只追加、不修改、不删除的记录本</td><td>ALLOW 和 DENY 都留痕；按租户过滤视图；这是"事后还能说清楚"的根基</td><td>场景 1</td></tr>
+
+<tr><td><b>不可变快照</b></td><td>某个时刻的完整切面，落库后不许改</td><td>每次准入决策都引用一份资源快照——"当时为什么拒"永远可以独立复核</td><td>场景 3、6</td></tr>
+
+<tr><td><b>装饰器分层</b></td><td>像洋葱一样一层包一层的运行时结构，每层只管一件事</td><td>进程翻译、超时时机、终态裁决分属三层——谁先看到错误是设计好的，不是巧合</td><td>F1–F3</td></tr>
+
+<tr><td><b>并发 / 竞态</b></td><td>多件事同时进行；竞态=结果取决于谁先谁后的窗口</td><td>F-1 的折叠失效就是竞态：一个并发窗口里"被摘走"被当成了"不再排队"</td><td>finding 两节</td></tr>
+
+<tr><td><b>防枚举 / UUID</b></td><td>让外人无法靠"试编号"猜出资源是否存在</td><td>跨租户访问和不存在的 Run 返回同样的 404，响应上不可区分、追溯上留痕</td><td>场景 1</td></tr>
+</table>
+
+<h3>4 · 怎么核对我说的——不信结论，信锚点</h3>
+<div class="ok">
+这份文档的每张图、每条"实测"，都附带可以独立核验的凭据。三种验证方式，成本从低到高：<br><br>
+<b>① 查锚点（秒级）</b>：文中所有 <code>文件名:行号</code>（如 <code>harness-application.ts:139</code>）都可以直接打开源码对照。拿任意一个去查，和我说的一致，这一页就可信；不一致，<b>以代码为准</b>，并告诉我。<br>
+<b>② 复跑走查（约 12 秒）</b>：<code>bun run scripts/e2e-walkthrough.ts</code> 重跑主链路，对照 <code>tmp/e2e-evidence/e2e-main.txt</code>；带 <code>failure</code> 参数跑 F1–F3。<br>
+<b>③ 复现发现（各约 10 秒）</b>：<code>bun run tmp/day7-inspect.ts</code> 复现 F-1（阻断事件每 tick +1）；<code>bun run tmp/close-failure-probe.ts</code> 复现 F-4（中断失败被吞）。这两个脚本只读不写仓库源码。<br><br>
+判断这份材料可信度的标准只有一条：<b>它的每个论断是否都留了"你可以自己去查"的入口。</b>留了的，即使错了也能被你发现；没留的，无论多流畅都不要信。
 </div>
 
 <h2>场景 0 · 启动顺序不变量</h2>
@@ -261,6 +348,43 @@
 
 <div class="warn"><b>这条 fail-closed 取舍值得单独记住。</b>只要有一个遗留沙箱清理不掉，整个进程就拒绝启动。代价是"一次清理故障 = 服务不可用"，收益是"绝不会出现两个执行环境写同一份 workspace"。在一个把"沙箱隔离"当作核心卖点的系统里，这个方向的取舍是对的——但它意味着 <code>cleanupStale()</code> 的健壮性直接决定了可用性。</div>
 
+<div class="card">
+  <b>为什么这么设计 · 启动顺序与关闭镜像</b>
+  <p><b>为什么端口必须最后开。</b>启动的前五步（开库、迁移、恢复扫描、重入队、Pump）都是在「清点现场」——此时系统对世界的认识不完整。端口一开请求就进来了，而 <code>submitRun()</code> 的前提还没满足：<code>harness-application.ts:139</code> 的 <code>assertStarted()</code> 抛的是普通 <code>Error</code> 而非 <code>HttpError</code>，会走 HTTP 层的兜底分支，客户端拿到一个<b>无法归因</b>的失败，运维在日志里也无法把它和「真的鉴权失败」区分开。所以顺序错的代价不是「启动慢一点」，而是<b>产生一批永远说不清原因的错误记录</b>——它们会污染场景 1 那种「每个码都有明确含义」的结论。<br>
+  <b>如果反过来（先开端口再恢复）。</b>恢复扫描要杀遗留沙箱、重入队 QUEUED Run，这些动作会和「接收新请求」并发。一个正在被恢复的 Run 和一个新提交的 Run 可能撞在同一个 workspace、同一把会话串行锁上，而你没有任何机制保证恢复先完成——「启动」就从确定性阶段变成了竞态窗口。<br>
+  <b>为什么关闭是严格镜像。</b>关闭顺序由依赖关系决定：HTTP 依赖 Pump（Pump 在推进请求触发的 tick），Pump 依赖 DB。必须先让使用方停、再让被依赖方停——先 <code>server.stop(true)</code>（不收新请求），再停 Pump（不再推进），最后关 DB（没人再写）。顺序反了就是「DB 已关而 Pump 还想写」——这正是 <a href="#finding-interrupt-swallowed">F-5 关库竞态</a>的形状，它不是假设，是真实发生过的。<br>
+  <b>为什么 start/stop 要 single-flight。</b>两者都可能被并发调用（信号处理器、健康检查、测试）。没有 <code>startPromise</code>/<code>stopPromise</code> 这两个「进行中」句柄的话，两次并发 start 会各跑一遍 <code>startOnce()</code>——两个 Pump、两根监听端口。实现只有几行（<code>:88-96</code> 返回同一个 promise；<code>:102-104</code> 先 <code>await startPromise</code>），它把「重复调用」从未定义行为变成幂等。</p>
+</div>
+
+<div class="card">
+  <b>对应到真实代码 · single-flight 一共只有 10 行</b>
+<pre>// src/app/harness-application.ts:86-105（逐字摘录；:106 起进入具体停止步骤，此处省略）
+start():Promise&lt;void&gt; {
+    if (this.started) {
+        return Promise.resolve();
+    }
+
+    if (this.startPromise !== null) {
+        return this.startPromise;
+    }
+
+    this.startPromise = this.startOnce();
+    return this.startPromise;
+}
+
+async stop() : Promise&lt;void&gt; {
+    if (this.stopPromise !== null) return this.stopPromise;
+    if (this.startPromise !== null){
+        await this.startPromise;
+    }
+
+    if (!this.started) {
+        return;
+    }
+    …</pre>
+  <p><b>怎么读：</b>整个「重复调用安全」不靠任何锁，只靠两个存进行对象的字段——<code>startPromise</code> 与 <code>stopPromise</code>。第二次 <code>start()</code> 拿到的是<b>同一个</b> Promise 对象，所以两个调用者等的是同一次启动，天然不会出现两个 Pump。第 102 行的 <code>await this.startPromise</code> 是「启动到一半收到停止」不产生孤儿应用的原因：先让启动落完，再走停止。</p>
+</div>
+
 <h2>场景 1 · 失败归位与租户隔离</h2>
 <p><b>测的不是"能不能拒绝非法请求"，而是每一次拒绝是否由正确的那一层做出、返回正确的状态码、并留下可归因的审计。</b>这个区别很重要：如果 401 是被路由层顺手拦下的，那么"鉴权正常"这句话就永远无法被证伪。七个用例全部命中，且没有一个是"别的层顺手拦下的"。</p>
 
@@ -409,6 +533,38 @@
 
 <div class="warn"><b>一处诚实的缺口：<code>getRequiredRun()</code> 的检查顺序。</b>读路径是<b>先查存在性、后校验凭证</b>（<code>harness-http-api.ts:676-687</code>）。因此无凭证访问一个<b>存在</b>的 Run 得到 401，访问一个<b>不存在</b>的 Run 得到 404 —— 未认证调用者可以区分"这个 id 存在"与"不存在"。因为 id 是随机 UUID，实际不可枚举，风险很低；但这确实是一处与"防枚举"目标不完全一致的地方。要收紧只需把 <code>requirePrincipal()</code> 提到 <code>getRun()</code> 之前。</div>
 
+<div class="card">
+  <b>为什么这么设计 · 拒绝的顺序与防枚举</b>
+  <p><b>为什么 400 必须先于 401。</b>这两个码回答的是不同的问题——400 是「你的请求本身写错了」，401 是「你没资格说话」。把 JSON 解析放在凭证校验之前，意味着一个坏 body 的未认证请求会得到 400；反过来做，它永远只能得到 401，客户端就失去了区分「我写错了」和「我的密钥不对」的能力。这是可诊断性决定：<b>错误的可区分性直接决定排障速度</b>。七个用例里那个「空 body、无凭证 → 400」就是在钉这个顺序。<br>
+  <b>为什么 413 必须晚于 workspace 解析。</b>上界检查（100,000 字符）排在 workspace 归属解析之后，副作用是：<b>一个 413 必然意味着调用者已通过鉴权、且指向自己租户内的一个真实 workspace</b>。于是 413 无法被当成探测工具——你不能用超长输入去问「别的租户有没有这个 workspace」。顺带，这个上界本身是补出来的：配置项上方的注释原文写着「旧实现不校验，78 万字符会被 202 接受，直到模型侧返回 400 才失败，且提交响应回显全量输入」——<b>一条注释就是一次事故复盘</b>。<br>
+  <b>为什么防枚举选「同响应、不同审计」。</b>跨租户访问一个存在的 Run，和访问一个不存在的 Run，响应必须一模一样（都是 404）——否则响应差异本身就是信息通道，外人可以靠试编号摸出哪些 id 存在。但「一模一样」不等于「什么都没发生」：interrupt 路径会额外落一条 <code>run_not_owned</code> 的 DENY 审计。<b>响应层不可区分、审计层可追溯</b>——安全性由响应保证，追责由审计保证，互不牺牲。这是能同时满足两个目标的最小实现。</p>
+</div>
+
+<div class="card">
+  <b>对应到真实代码 · 防枚举的 19 行</b>
+<pre>// src/http/harness-http-api.ts:672-690（逐字摘录）
+private getRequiredRun(
+    runId:string,
+    request?:Request,
+    scope = "tasks:read",
+):AgentRun {
+    const run = this.application.getRun(runId);
+
+    if (run === null) {
+        throw new HttpError(404, `找不到 AgentRun：${runId}`);
+    }
+    if (request !== undefined &amp;&amp; this.accessControl !== undefined) {
+        const principal = this.requirePrincipal(request, scope);
+        if (run.tenantId !== principal.tenantId) {
+            throw new HttpError(404, `找不到 AgentRun：${runId}`);
+        }
+    }
+
+    return run;
+}</pre>
+  <p><b>怎么读：</b>注意两处 404 抛的是<b>字面相同</b>的错误（第 680 行与第 685 行）——「不存在」和「存在但不是你的」在响应上不可区分，这就是防枚举。也注意读路径的顺序：<b>第 677 行先查库、第 683 行后才校验凭证</b>，所以未认证调用者能靠 401/404 的差别判断某个 id 是否存在（F-2，登记未修）。跨租户时 interrupt 路径会额外落一条 <code>run_not_owned</code> 审计——响应一样，账本不一样。</p>
+</div>
+
 <hr>
 <h2>场景 2 + 3 · 共用的资源准入决策树</h2>
 <p>场景 2 和场景 3 跑的是<b>同一段代码</b>，只是输入不同。这个场景对存在的意义就是把这一点钉死：场景 2 证明「资源空闲时提交即可跑」，场景 3 证明「资源紧张时同一个提交会被挡下并给出可查的原因」。两者共享两段门：</p>
@@ -485,6 +641,79 @@
 <tr><td class="l">ResourceAdmissionService</td><td class="l">request → {observation, classification, decision}</td><td>唯一的整合点：串起观测→分类→判决，并负责把决策与快照一起落库。它自己不产生判断。</td></tr>
 </tbody>
 </table>
+
+<div class="card">
+  <b>为什么这么设计 · 两段门与「或」语义</b>
+  <p><b>为什么拆成两段而不是一段。</b>如果一段完成「读资源 → 判决」，你就无法回答「同样 BUSY，为什么这个 START 那个 QUEUE」。两段之后，<code>classifyResource()</code> 只回答「世界有多忙」，<code>decide()</code> 回答「这么忙的时刻，<b>这个</b>请求能不能跑」——后者还能拿到资源之外的输入（本租户活跃数、全局 slot）。测试也因此可以分开写：分类器只测「四路信号 → 三档」的映射，策略只测「三档 + 计数 → 判决」的映射，<b>谁错了一目了然</b>。<br>
+  <b>为什么四路信号是「或」不是加权。</b>加权意味着「显存 60% + 队列 3 个」可以折中成「还能跑」。但 GPU 服务的退化不是线性的——KV cache 满了不是「慢一点」，是新请求被 vLLM 直接拒绝。「或」的语义是：任一维度饱和即视为整体饱和。默认阈值 GPU 70/90、KV 60/85、running 4/8、waiting 1/4（<code>harness-config.ts:285-323</code>，逐条核对过）。<b>代价是保守</b>：显存 89% 但请求 0 个也会 QUEUE。这是拿利用率换「绝不把已经打满的卡再压上去」——对共享 GPU 的编排器，这个方向几乎总是对的。<br>
+  <b>为什么 BUSY 档 <code>activeTenantRunCount &gt; 0</code> 就排队。</b>半满的容量是留给「别的租户」的，不是留给「同一个租户多开」的。如果 BUSY 档允许同租户继续开，一个大任务的租户会在资源半满时吃满自己的配额；等资源进入 CRITICAL，别的租户连入场券都没拿过。这个条件让「半满」成为租户间的缓冲带——它不是并发限制（上限在 10/30，<code>:144-149</code> 还有「perTenant 不得超过全局」的启动校验），是<b>公平的先手</b>。<br>
+  <b>为什么 UNKNOWN 拆成两个原因码。</b><code>RESOURCE_UNKNOWN</code>（四路全空）和 <code>RESOURCE_OBSERVATION_FAILED</code>（观测调用本身失败）都判 QUEUE，但证据不同——后者 <code>resourceSnapshotId = null</code>，是全系统唯一允许该组合的决策，运行时守卫和 DB <code>CHECK</code> 双重拦截「观测失败却带快照」的矛盾组合。拆开的意义：前者说「这次没观测到，常规排队」，后者说「<b>监控本身坏了</b>」——两者的运维应对完全不同。</p>
+</div>
+
+<div class="card">
+  <b>对应到真实代码 · 「或」语义与 BUSY 三岔，各只有十来行</b>
+<pre>// src/resources/resource-classifier.ts:147-179（逐字摘录）——「或」的语义就是这两个 some()
+const hasCriticalReason = reasons.some((reason) =&gt;
+    reason.endsWith("_CRITICAL")
+);
+
+if (hasCriticalReason) {
+    return {
+        snapshotId:snapshot.snapshotId,
+        pressure:"CRITICAL",
+        reasons,
+        gpuMemoryUsagePercent,
+    }
+}
+
+const hasBusyReason = reasons.some((reason) =&gt;
+    reason.endsWith("_BUSY")
+);
+
+if (hasBusyReason){
+    return {
+        snapshotId:snapshot.snapshotId,
+        pressure:"BUSY",
+        reasons,
+        gpuMemoryUsagePercent,
+    }
+}
+
+
+return {
+    snapshotId:snapshot.snapshotId,
+    pressure:"NORMAL",
+    reasons:["WITHIN_THRESHOLDS"],
+    gpuMemoryUsagePercent,
+};</pre>
+<pre>// src/resources/execution-policy.ts:90-114（逐字摘录）——同一个 BUSY 的三种去向
+case "BUSY":
+    if (
+        input.activeRunCount &gt;=
+        this.config.maxActiveRuns
+    ) {
+        return this.createDecision(
+            input,
+            "QUEUE",
+            "GLOBAL_CONCURRENCY_LIMIT",
+        );
+    }
+
+    if (input.activeTenantRunCount &gt; 0) {
+        return this.createDecision(
+            input,
+            "QUEUE",
+            "RESOURCE_BUSY_TENANT_LIMIT",
+        );
+    }
+
+    return this.createDecision(
+        input,
+        "START",
+        "RESOURCE_BUSY_TENANT_AVAILABLE",
+    );</pre>
+  <p><b>怎么读：</b>上面这段回答「为什么是或不是加权」——没有任何乘法或权重，只有一个 <code>endsWith("_CRITICAL")</code> 的存在性判断；分类器甚至不知道并发上限的存在。下面这段回答「BUSY 为什么有三种结果」——三个 <code>return</code> 依次检查全局上限、本租户活跃数，然后才放行；<b>第 102 行的 <code>&gt; 0</code> 就是「半满容量留给别的租户」那句话的全部实现</b>。两段各测各的，分类器错了不会连累策略的测试。</p>
+</div>
 
 <h2>场景 2 · GPU 空闲（NORMAL）→ 提交即启动</h2>
 <p>这是整条链路最短的一次，但能证明一件具体的事：<b>「提交即可跑」不靠等待，靠一次主动推进</b>。</p>
@@ -729,6 +958,59 @@
 
 <div class="note"><b><code>position</code> 是投影，不是权威顺序。</b><code>position</code> / <code>tenantPosition</code> 由 <code>listQueue()</code> 在队列副本上跑另一遍同样的轮转规则算出；<code>claimNext()</code> 则在真实结构上跑，并且额外应用单租户上限与会话串行。<b>两者可以分歧</b>——被租户上限挡下的 Run 仍留在队列里占着 <code>position</code>，而 <code>claimNext()</code> 会跳到下一个租户。所以 <code>QueueBlocker</code> 的注释说它是 <i>"diagnostic evidence, not a new scheduler decision"</i>。</div>
 
+<div class="card">
+  <b>为什么这么设计 · 轮转指针，而不是每租户限流</b>
+  <p><b>为什么用轮转。</b>限流（比如「每租户最多 3 个并发」）回答的是「允许多少」，<b>不回答「先给谁」</b>——10 个租户各排 10 个任务时，限流之后仍然需要一个次序政策，而轮转指针就是那个政策本身：O(1) 的 push/pop，不需要全局锁，不需要跨租户的计数器同步。它的代价也要说清：一个只排 1 个任务的租户和一个排 100 个的租户，拿名额的速度一样——这里对「公平」的定义选了<b>机会均等</b>，而不是「按需分配」。若要按需，就得引入权重和饥饿计数，复杂度和出错面都会放大。<br>
+  <b>为什么 <code>position</code> 不做成权威顺序。</b>如果 <code>position</code> 由 <code>claimNext()</code> 维护，「查询队列」就要和「领取队列」竞争同一份结构——诊断接口会拖慢调度热路径。让 <code>listQueue()</code> 在副本上独立算一遍，调度与诊断完全解耦；<b>代价</b>是两段代码各自实现同一套规则、可能分歧（所以 <code>QueueBlocker</code> 自称 <i>diagnostic evidence</i>）。这是「热路径纯净性」换「代码重复」——对调度器，这个方向通常是对的：调度错一毫秒影响所有租户，诊断错一毫秒影响一个人。</p>
+</div>
+
+<div class="card">
+  <b>对应到真实代码 · 公平性的全部实现就在一个 for 循环里</b>
+<pre>// src/scheduling/tenant-run-scheduler.ts:140-219（逐字摘录；省略两段与公平无关的分支）
+claimNext() : QueuedRun | null {
+    // 首先检查全局 slot
+    if (this.activeTenantByRunId.size &gt;= this.config.maxActiveRuns){
+        return null;
+    }
+    …
+    for (
+        let inspected = 0;
+        inspected &lt; tenantsToInspect;
+        inspected += 1
+    ) {
+        // 从轮转队列头部取出本轮tenant
+        const tenantId = this.tenantOrder.shift();
+        …
+        // 当前 tenant 已经达到并发上限，它仍有等待任务，所以放回轮转队尾.
+        if (activeTenantByRunCount &gt;= this.config.maxActiveRunsPerTenant){
+            this.tenantOrder.push(tenantId);
+            continue;
+        }
+
+        const run = tenantQueue.shift();
+        …
+        // 如果这个 tenant 还有等待任务，那么将它放在下一轮队尾
+        // 如果已经情况，那么就从queuesByTenant删除
+        if (tenantQueue.length &gt; 0){
+            this.tenantOrder.push(tenantId);
+        }   else {
+            this.queuesByTenant.delete(tenantId);
+        }
+
+        this.activeTenantByRunId.set(
+            run.runId,
+            run.tenantId
+        );
+        …
+        return run;
+    }
+
+    // 有等待任务，但是所有tenant都达到了自己的并发上限;
+    return null;
+}</pre>
+  <p><b>怎么读：</b>公平的全部机制就是这一对 <code>shift()</code> / <code>push()</code>——第 156 行把本轮租户从头取出，第 201-205 行决定它去队尾还是出局；<b>没有权重、没有计数器、没有饥饿检测</b>。第 207 行的 <code>set()</code> 与第 214 行的 <code>return run</code> 之间没有 <code>await</code>——这就是「选 Run 和占 slot 是一个同步动作」的含义，也是它不会超额启动的原因。注释是原作者写的中文，一字未改。</p>
+</div>
+
 <h3>调度侧的三道门与 /queue 的租户切片</h3>
 <div class="fig">
 <svg viewBox="0 0 680 568" width="100%" role="img" xmlns="http://www.w3.org/2000/svg">
@@ -923,9 +1205,43 @@
 </tbody>
 </table>
 
+<div class="card">
+  <b>对应到真实代码 · F-1 的缺陷是第 158-162 行把两个概念划了等号</b>
+<pre>// src/scheduling/run-queue-coordinator.ts:155-183（逐字摘录）
+const blockers = this.scheduler.listQueueBlockers();
+const queuedRunIds = new Set(blockers.map((blocker) =&gt; blocker.runId));
+
+for (const runId of this.lastQueueBlockerByRunId.keys()) {
+    if (!queuedRunIds.has(runId)) {
+        this.lastQueueBlockerByRunId.delete(runId);
+    }
+}
+
+for (const blocker of blockers) {
+    // Normal queue residency is already represented by RUN_CREATED /
+    // RUN_QUEUED. Persist only a concrete blocker that explains why
+    // this Run cannot advance right now.
+    if (blocker.reasonCode === "AWAITING_SCHEDULING") {
+        continue;
+    }
+    if (this.lastQueueBlockerByRunId.get(blocker.runId) === blocker.reasonCode) {
+        continue;
+    }
+    …
+    this.lastQueueBlockerByRunId.set(blocker.runId, blocker.reasonCode);
+}</pre>
+  <p><b>怎么读：</b>第 159 行的删除判据是 <code>!queuedRunIds.has(runId)</code>——它把「<b>不在本次队列快照里</b>」当成了「<b>不再排队</b>」。但 <code>claimNext()</code> 会先把 Run 摘出队列，直到 <code>release()</code> 之后再 <code>enqueue()</code> 才放回；并发 <code>drain</code> 时，另一个请求者的 <code>synchronize</code> 恰好在这个窗口里跑，就会误删它的折叠基准 → 下一轮重写一条一模一样的 <code>QUEUE_BLOCKED</code>。第 171 行的折叠本身是对的，错的只是上游那个等号。</p>
+</div>
+
 <div class="warn"><b>影响面，按实测数据推算。</b>生产默认 <code>pumpIntervalMs = 1000</code>，所以每个「被反复拒绝且需要重新入队」的 Run 会以 <b>1 条/秒</b>的速率写 <code>QUEUE_BLOCKED</code>。缓解因素是 <code>queueTtlMs</code> 默认 300000ms：Run 最多在队列里待 5 分钟就被 <code>FAILED(QUEUE_TIMEOUT)</code> 熔断，所以单个 Run 的上界约 300 条。但如果把 <code>queueTtlMs</code> 调大、或设为 <code>undefined</code> 关闭 TTL（<code>enforceQueueTtl()</code> 会直接 return），而队列因资源长期 CRITICAL 而无法推进，<b>事件写入就是无界的</b>。<code>run_events</code> 是不可变事件日志，只会增长。</div>
 
 <div class="note"><b>建议的修法（我没有改代码，先报给你判断）。</b>把「不在队列里」与「已不再排队」区分开：删除判据不应只看当前队列快照，而应显式检查调度器是否仍持有该 Run——例如提供 <code>isTracked(runId)</code>（队列中 <b>或</b> 已领取活跃），仅当它既不在队列也不是活跃时才删除表项。或者更简单：把折叠从「比较上一次原因」改成「比较上一次写入到事件日志的原因」，并让删除逻辑只在 Run 真正进入终态或离开调度器时才触发。</div>
+
+<div class="card">
+  <b>为什么这么设计 · 恢复不走特权通道</b>
+  <p><b>为什么恢复不绕过准入。</b>如果恢复任务直接 <code>RUN_STARTED</code>，它就成了一条特权通道——一个被中断的重型任务在恢复时，会把准入规则甩在一边，<b>而规则可能已经变了</b>（中断时 GPU 空闲，恢复时可能已是 CRITICAL）。D1 实测的 <code>RUN_QUEUED → QUEUE_BLOCKED×2 → RUN_RESUMED</code> 序列正是这条原则的证据：恢复走的和 <code>POST /runs</code> 完全同一条路。<b>代价</b>是恢复可能被再次排队、甚至被 TTL 熔断——但那正是准入的本意：没有任何任务，包括「中断过的」，有资格无视当前资源状态。<br>
+  <b>为什么 fail-closed 要重算，而不是信计划。</b>恢复计划是中断前生成的：它说 <code>AUTO_RESUME</code> 时的世界，和现在不是同一个世界——工具副作用历史可能已经变了。<code>RecoveryExecutor.execute()</code> 按<b>当前</b>历史重算 <code>decideRecovery()</code>，重算为 <code>MANUAL_REVIEW</code> 就拒绝。<b>授权必须基于当前证据，不能基于历史声明。</b><code>IDEMPOTENT_WRITE</code> 同理被拒绝自动重放——「声明幂等」不足以证明外部系统真的实现了稳定幂等键，证明的责任在声明方，接受的标准在证据侧。</p>
+</div>
 
 <h2>场景 F1–F3 · 三条故障分支</h2>
 <p>前面所有场景都在验证「正常路径走对了」。F1–F3 换一个角度：<b>同一套生产入口，只换 Worker 的注入模式</b>，看失败是否被正确归因、Run 是否收敛、执行环境是否被回收。</p>
@@ -933,6 +1249,34 @@
 <div class="ok"><b>这次是真的端到端，不是手工构造。</b>注入模块只在 <code>HARNESS_WORKER_SIMULATE</code> 显式设置时由 <code>worker-main.ts</code> <b>动态 import</b>——默认生产路径不含任何注入逻辑。所以故障是在真实的 Worker 子进程里、经真实 IPC 触发的。三个用例还都用了 <code>HARNESS_PUMP_INTERVAL_MS = 500</code>（默认是 1000），这一点在后面算 onError 次数时要用到。</div>
 
 <div class="warn"><b>更正：我把终态分流的落点画错了。</b>下面这张图初版把「按有没有 <code>agent_failed</code> 分流终态」归给了 <code>ManagedAgentRuntime</code>。重读源码后确认实际落点有两处，都在 <code>RunService</code>：<b>①</b> <code>subscribeToRuntime(runId)</code>（<code>run-service.ts:532</code>）把 runtime 事件经 <code>eventBridge.map()</code> 落库，<code>agent_failed</code> → <code>RUN_FAILED</code> 是在这里写下去的；<b>②</b> <code>executeQueuedRun</code> 的 <code>catch</code>（<code>:288-294</code>）调 <code>markRuntimeInvocationFailureInterrupted(runId, error, "START_FAILED")</code>，那里有一条我原先没注意到的<b>优先级规则</b>。已按下图更正。</div>
+
+<h3>补课：这条 IPC 到底长什么样</h3>
+<p>上面反复说「跨进程」「经真实 IPC 触发」。这里把它拆到能看见的程度——主进程和 Worker 之间没有魔法，只有<b>两根管道</b>（stdin / stdout）和一套<b>行式 JSON 协议</b>：</p>
+
+<pre><span class="c">master → worker（写入 child.stdin）        worker → master（监听 child.stdout）</span>
+────────────────────────────────           ─────────────────────────────────
+START_RUN              :80                 WORKER_READY          :137
+RESUME_RUN             :88                 RUNTIME_EVENT         :144
+INTERRUPT_RUN          :96                 RUN_COMPLETED         :151
+SHUTDOWN               :103                RUN_FAILED            :158
+TOOL_PREPARE_RESPONSE  :109                RUN_INTERRUPTED       :166
+TOOL_COMPLETE_RESPONSE :117                TOOL_PREPARE_REQUEST  :173
+                                           TOOL_COMPLETE_REQUEST :181</pre>
+
+<p>序列化只有一个函数（<code>worker-protocol.ts:424</code>）：</p>
+<pre>export function formatJsonLine&lt;T&gt;(message: T): string {
+    return JSON.stringify(message) + "\n";   <span class="c">// 一个 JSON 对象占一行，接收方按行切</span>
+}</pre>
+
+<p>共 13 种消息、<code>WORKER_PROTOCOL_VERSION = 2</code>（<code>:17</code>），行号即 <code>src/worker/worker-protocol.ts</code> 里的定义处，可逐一打开对照。发送端在 <code>worker-process-runtime.ts:261</code>：<code>child.stdin.write(formatJsonLine(msg)); child.stdin.flush();</code></p>
+
+<div class="note">
+<b>两个容易被忽略、但决定成败的工程细节：</b><br><br>
+<b>① 为什么 console 必须重定向到 stderr。</b><code>worker-process-runtime.ts:298</code> 的注释原文：「worker-main.ts 把 console.* 全部重定向到 stderr 以免污染 stdout 上的[协议]」。协议消息和日志共用一根 stdout 管道——如果 Worker 里一句 <code>console.log</code> 直接打到 stdout，接收方就会试图<b>把日志当协议消息解析</b>。这不是代码风格问题，是正确性问题：管道是共享信道，谁都能往里写字节，协议的完整性全靠纪律维持。<br><br>
+<b>② RUN_FAILED 和 RUNTIME_EVENT 是两条不同的通道</b>——这正是 F2 根因的协议层形状。<code>RUN_FAILED</code>（<code>:158</code>，带 <code>error/stack</code> 字段）是一条「带类型的错误报告」；而 <code>agent_failed</code> 是包在 <code>RUNTIME_EVENT</code>（<code>:144</code>）里的一类<b>事件</b>。Worker 自报失败走的是前者；崩溃路径则由主进程的看门狗<b>合成</b>一条 <code>RUNTIME_EVENT</code> 补上。两条通道在接收端被不同地处理——这就是 F2 终态分叉（FAILED vs INTERRUPTED）的全部来源。读完下面两张图再回来看这段，会更清楚。
+</div>
+
+<p>握手也是协议的一部分：<code>WORKER_READY</code> 带 <code>pid</code> 与 <code>protocolVersion</code>（<code>:136-142</code>），主进程等它有 15 秒看门狗（<code>worker-process-runtime.ts:205</code>，<code>workerHandshakeTimeoutMs ?? 15_000</code>），超时即 SIGKILL 并合成失败原因（<code>:284</code>）。这是场景 0「启动顺序」在进程层面的对应物：<b>连「你准备好了吗」都必须是一条显式消息，而不是想当然。</b>一个任务从生到死的全部对话，就是上面这 13 种消息的排列组合。</p>
 
 <div class="fig">
 <svg viewBox="0 0 680 596" width="100%" role="img" xmlns="http://www.w3.org/2000/svg">
@@ -1012,6 +1356,33 @@
 于是 <code>RunService</code> 里那条优先级规则（<code>:662-668</code>）<b>不命中</b>——「已持久化终态」不存在，状态仍是 RUNNING——于是 <code>markRuntimeInvocationFailureInterrupted</code> 把状态改写成 <code>INTERRUPTED</code>，而这条路径<b>从不写 <code>agent_runs.failure_reason</code></b>，所以 Run 级 <code>failureReason = null</code>。注入意图完全相同，Run 级终态却不同，且失败原因在 Run 级不可见（只留在 <code>RUN_INTERRUPTED</code> 的 <code>payload.message</code> 与 <code>attempt.failureReason</code>）。</div>
 
 <div class="note"><b>反过来说，F1 之所以能保住 FAILED，靠的正是那条优先级规则。</b><code>markRuntimeInvocationFailureInterrupted</code> 开头有一段守卫：<code>if (currentRun.status !== "RUNNING" &amp;&amp; currentRun.status !== "WAITING_TOOL") return;</code>，代码注释写着「Runtime 已经发出终态事件时，以已持久化的终态为准」。F1 里合成的 <code>agent_failed</code> 已经把 <code>RUN_FAILED</code> 落库，所以这次调用直接早退，不会被改写成 INTERRUPTED。换句话说：<b>这条规则本身是对的，F2 的问题是它的前置条件从未被满足</b>——那条路径根本没落任何终态。</div>
+
+<div class="card">
+  <b>为什么这么设计 · 三层各管一件事，以及 F2 该修哪</b>
+  <p><b>为什么运行时要分三层而不是一层。</b>一个失败要回答三个不同的问题，而三个问题的<b>输入完全不同</b>：「发生了什么」看进程信号（崩溃 / 握手超时，由 <code>WorkerProcessAgentRuntime</code> 翻译）；「什么时候该放弃」看时钟（<code>SupervisedAgentRuntime</code> 决定何时中断）；「Run 最终算什么」看已落库的事件（<code>RunService</code> 裁决）。合在一层，你就得在一个函数里同时处理信号、时钟和状态机——而且任何一处的 bug 都会污染其它两处的语义。分层之后，每一层的测试只需要伪造一种输入。<br>
+  <b>为什么修 F2 是补 <code>agent_failed</code>，而不是改那条优先级规则。</b>那条规则（「Runtime 已发出终态事件时，以已持久化的终态为准」）保护的是 F1 的正确性——没有它，后到的 catch 会把已落库的 FAILED 改写成 INTERRUPTED。F2 的问题在<b>协议层</b>：<code>case "RUN_FAILED"</code> 只 reject、不发 <code>agent_failed</code>，导致优先级规则的前置条件（已有终态落库）从未被满足。<b>改规则会破坏 F1；补一条 <code>agent_failed</code> 让两条通道对齐，才是修根因。</b>这也解释了「两分支各有测试、却没人断言二者终态一致」为什么危险——两个测试各自为真，合起来却在保护一个不一致的契约。</p>
+</div>
+
+<div class="card">
+  <b>对应到真实代码 · F-4 的全部根因是第 133 行的一个三元组</b>
+<pre>// src/runtime/supervised-agent-runtime.ts:102-105（逐字摘录）
+private async interruptWithinGrace(runId: string): Promise&lt;void&gt; {
+    const interrupt = this.inner.interrupt(runId);
+    if (!(await settlesWithin(interrupt, this.config.interruptGraceMs))) void interrupt.catch(() =&gt; undefined);
+}
+
+// src/runtime/supervised-agent-runtime.ts:129-137（逐字摘录）——缺陷在 133 行
+async function settlesWithin(promise: Promise&lt;unknown&gt;, ms: number): Promise&lt;boolean&gt; {
+    const timeout = deferredTimeout(ms);
+    try {
+        return await Promise.race([
+            promise.then(() =&gt; true, () =&gt; true),
+            timeout.promise.then(() =&gt; false),
+        ]);
+    } finally { timeout.cancel(); }
+}</pre>
+  <p><b>怎么读：</b>第 133 行 <code>promise.then(() =&gt; true, () =&gt; true)</code> 的两个参数——成功返回 true，<b>失败也返回 true</b>。所以 <code>settlesWithin</code> 回答的是「有没有结束」，而第 104 行的调用方把它当成了「有没有成功」：内层 <code>interrupt</code> 被拒时 <code>settlesWithin</code> 返回 true，<code>!(true)</code> 为假，于是那条负责兜底的 <code>void interrupt.catch(...)</code> 永远不执行——<b>异常既没被吞也没被抛，直接消失</b>。修法就是让这个函数返回三态（fulfilled / rejected / timeout），或让调用方分别处理两种 settled 结果。</p>
+</div>
 
 <h3>中断升级阶梯与 onError 的 9 次重复上报</h3>
 <div class="fig">
