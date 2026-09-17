@@ -74,8 +74,8 @@ import { RunOutputStore } from "../runs/run-output-store.ts";
 import { HarnessSessionStore } from "../sessions/harness-session-store.ts";
 import { ConversationStore } from "../conversations/conversation-store.ts";
 import {
-    RunQueueCoordinator,
-} from "../scheduling/run-queue-coordinator.ts";
+    RunScheduler,
+} from "../scheduling/run-scheduler.ts";
 import {
     TenantRunScheduler,
 } from "../scheduling/tenant-run-scheduler.ts";
@@ -129,7 +129,7 @@ export interface HarnessComposition {
     workspaceService:WorkspaceService;
     accessAuditStore:AccessAuditStore;
     scheduler:TenantRunScheduler;
-    queuePump:RunQueueCoordinator;
+    queuePump:RunScheduler;
     runtime:AgentRuntime;
     resourceObserver:ResourceObserver;
     /** 支柱 2：双卡 vLLM 网关（未配置后端时为 undefined）。 */
@@ -349,7 +349,7 @@ export async function createHarnessApplication(
         policy,
         decisionStore,
     );
-    const coordinator = new RunQueueCoordinator(
+    const coordinator = new RunScheduler(
         runService,
         scheduler,
         admission,
@@ -368,7 +368,7 @@ export async function createHarnessApplication(
             checkpointStoreForRecovery: checkpointStore,
             intervalMs: config.pumpIntervalMs,
             onError: dependencies.onPumpError ?? ((error) => {
-                console.error("RunQueueCoordinator pump 推进失败", error);
+                console.error("RunScheduler pump 推进失败", error);
             }),
         },
     );

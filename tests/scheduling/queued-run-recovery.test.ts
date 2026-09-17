@@ -15,7 +15,7 @@ import { RunStore } from "../../src/runs/runstore.ts";
 import { ToolExecutionStore } from "../../src/tools/tool-execution-store.ts";
 import {
     restoreQueuedRunInputs,
-} from "../../src/scheduling/run-queue-coordinator.ts";
+} from "../../src/scheduling/run-scheduler.ts";
 import {
     openHarnessDatabase,
 } from "../../src/storage/database.ts";

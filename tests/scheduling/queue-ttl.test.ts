@@ -12,8 +12,8 @@ import type {
     ResourceAdmissionRequest,
 } from "../../src/resources/resource-admission-service.ts";
 import {
-    RunQueueCoordinator,
-} from "../../src/scheduling/run-queue-coordinator.ts";
+    RunScheduler,
+} from "../../src/scheduling/run-scheduler.ts";
 import {
     TenantRunScheduler,
 } from "../../src/scheduling/tenant-run-scheduler.ts";
@@ -79,7 +79,7 @@ test("排队超过 TTL 的 Run 被熔断为 FAILED(QUEUE_TIMEOUT) 并释放队�
         maxActiveRuns: 2,
         maxActiveRunsPerTenant: 2,
     });
-    const coordinator = new RunQueueCoordinator(
+    const coordinator = new RunScheduler(
         runService,
         scheduler,
         alwaysQueueAdmission(),
@@ -135,7 +135,7 @@ test("未超 TTL 的排队 Run 不受影响，已摘除的 Run 不再被重复�
         maxActiveRuns: 5,
         maxActiveRunsPerTenant: 5,
     });
-    const coordinator = new RunQueueCoordinator(
+    const coordinator = new RunScheduler(
         runService,
         scheduler,
         alwaysQueueAdmission(),

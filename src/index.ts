@@ -60,7 +60,7 @@ export * from "./sandbox/sandbox-provider.ts";
 export * from "./sandbox/sandbox-store.ts";
 export * from "./sandbox/sandbox-startup-reconciler.ts";
 
-export * from "./scheduling/run-queue-coordinator.ts";
+export * from "./scheduling/run-scheduler.ts";
 export * from "./scheduling/tenant-run-scheduler.ts";
 
 export * from "./sessions/harness-session.ts";

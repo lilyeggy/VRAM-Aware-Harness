@@ -1,6 +1,6 @@
 import type{AgentRun} from "../runs/agent-run.ts";
 import { buildRecoveryContinuationInput } from "../runs/run-service.ts";
-import type { RunQueueCoordinator } from "../scheduling/run-queue-coordinator.ts";
+import type { RunScheduler } from "../scheduling/run-scheduler.ts";
 import {
     decideRecovery,
     type RecoveryDecision,
@@ -31,7 +31,7 @@ export type RecoveryManualReviewAuditor = (
 export class RecoveryExecutor {
     constructor(
         private readonly coordinator:
-            Pick<RunQueueCoordinator, "submitResume">,
+            Pick<RunScheduler, "submitResume">,
         private readonly onManualReview?:RecoveryManualReviewAuditor,
         /**
          * N18：与 RecoveryService 同一份会话引用可达性判定。

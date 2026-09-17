@@ -4,12 +4,12 @@
  * 用项目里真实的三个组件跑一遍（不是伪代码）：
  *   - TenantRunScheduler：真实租户轮转队列，负责算出 blocker
  *   - RunService + RunStore(SQLite :memory:)：真实落库，写 QUEUE_BLOCKED 事件
- *   - RunQueueCoordinator：真实协调器，负责把 blocker 同步成 Run 事实
+ *   - RunScheduler：真实协调器，负责把 blocker 同步成 Run 事实
  *
  * 运行：bun run scripts/queue-blocker-demo.ts
  */
 
-import { RunQueueCoordinator } from "../src/scheduling/run-queue-coordinator.ts";
+import { RunScheduler } from "../src/scheduling/run-scheduler.ts";
 import { TenantRunScheduler } from "../src/scheduling/tenant-run-scheduler.ts";
 import type { QueueBlocker } from "../src/scheduling/tenant-run-scheduler.ts";
 import { RunService } from "../src/runs/run-service.ts";
@@ -147,7 +147,7 @@ const scheduler = new TenantRunScheduler({
     maxActiveRunsPerTenant: 1, // 每个租户同时只能跑 1 个
 });
 
-const coordinator = new RunQueueCoordinator(
+const coordinator = new RunScheduler(
     runService,
     scheduler,
     new StubAdmission("START", "RESOURCE_NORMAL"),
@@ -211,7 +211,7 @@ const sessionScheduler = new TenantRunScheduler({
     maxActiveRuns: 4,
     maxActiveRunsPerTenant: 4,
 });
-const sessionCoordinator = new RunQueueCoordinator(
+const sessionCoordinator = new RunScheduler(
     runService,
     sessionScheduler,
     new StubAdmission("START", "RESOURCE_NORMAL"),
@@ -241,7 +241,7 @@ const resourceScheduler = new TenantRunScheduler({
     maxActiveRuns: 4,
     maxActiveRunsPerTenant: 4,
 });
-const resourceCoordinator = new RunQueueCoordinator(
+const resourceCoordinator = new RunScheduler(
     runService,
     resourceScheduler,
     // 模拟显存吃紧：准入直接判 QUEUE

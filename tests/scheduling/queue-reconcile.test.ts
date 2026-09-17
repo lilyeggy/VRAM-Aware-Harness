@@ -12,8 +12,8 @@ import type {
     ResourceAdmissionRequest,
 } from "../../src/resources/resource-admission-service.ts";
 import {
-    RunQueueCoordinator,
-} from "../../src/scheduling/run-queue-coordinator.ts";
+    RunScheduler,
+} from "../../src/scheduling/run-scheduler.ts";
 import {
     TenantRunScheduler,
 } from "../../src/scheduling/tenant-run-scheduler.ts";
@@ -71,9 +71,9 @@ function alwaysQueueAdmission(): ResourceAdmissionEvaluator {
 function buildCoordinator(
     runService: RunService,
     scheduler: TenantRunScheduler,
-    options: ConstructorParameters<typeof RunQueueCoordinator>[7],
-): RunQueueCoordinator {
-    return new RunQueueCoordinator(
+    options: ConstructorParameters<typeof RunScheduler>[7],
+): RunScheduler {
+    return new RunScheduler(
         runService,
         scheduler,
         alwaysQueueAdmission(),

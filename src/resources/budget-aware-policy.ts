@@ -124,7 +124,7 @@ export class BudgetAwareExecutionPolicy implements ExecutionPolicy {
         // N23 修复：用量必须只取**一个**来源，也就是本次准入事实。
         //
         // coordinator 在 `claimNext()` 之后、为当前 Run 扣过一次，得到
-        // `input.activeTenantRunCount`（见 run-queue-coordinator.ts 的
+        // `input.activeTenantRunCount`（见 run-scheduler.ts 的
         // `capacity.activeTenantRunCount - 1`）；base policy 用的也是它。
         // 此前这里调用 `usage.availableUnits(tenantId)`，而
         // `SchedulerCapacityBudgetUsage` 会**回读调度器**、拿到仍含当前 Run 的

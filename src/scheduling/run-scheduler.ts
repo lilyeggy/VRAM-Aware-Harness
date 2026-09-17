@@ -32,7 +32,7 @@ import type {
 
 
 
-export type CoordinatorResult =
+export type SchedulerDrainResult =
     | {
         kind: "EMPTY";
     }
@@ -47,7 +47,7 @@ export type CoordinatorResult =
         decision: PolicyDecision;
     };
 
-export interface RunQueueCoordinatorOptions {
+export interface RunSchedulerOptions {
     /**
      * 支柱 3：排队 TTL（ms）。undefined 表示不启用排队超时熔断。
      */
@@ -155,16 +155,16 @@ function getRecoveryCheckpointId(
         : null;
 }
 
-export class RunQueueCoordinator  {
+export class RunScheduler  {
     constructor(
         private readonly runService:RunService,
         private readonly scheduler:TenantRunScheduler,
         private readonly admission: ResourceAdmissionEvaluator,
         private readonly pendingResumeByRunId = new Map<string,ResumeRunInput>(),
         private readonly lastQueueBlockerByRunId = new Map<string, QueueReasonCode>(),
-        private drainPromise: Promise<CoordinatorResult[]> | null = null, // 当前是否有drain正在运行
+        private drainPromise: Promise<SchedulerDrainResult[]> | null = null, // 当前是否有drain正在运行
         private drainRequested = false, // 正在运行期间，是否又收到了新的推进请求
-        private readonly options: RunQueueCoordinatorOptions = {},
+        private readonly options: RunSchedulerOptions = {},
     ) {}
 
     private timer: ReturnType<typeof setInterval> | null = null;
@@ -292,7 +292,7 @@ export class RunQueueCoordinator  {
         const runStore = this.options.runStoreForRecovery;
         const checkpointStore = this.options.checkpointStoreForRecovery;
         if (runStore === undefined || checkpointStore === undefined) {
-            throw new Error("RunQueueCoordinator 未配置启动恢复所需的 runStore/checkpointStore");
+            throw new Error("RunScheduler 未配置启动恢复所需的 runStore/checkpointStore");
         }
         restoreQueuedRunInputs(runStore, checkpointStore, this);
     }
@@ -410,7 +410,7 @@ export class RunQueueCoordinator  {
         return { requeued, timedOut };
     }
 
-    async attemptNext() : Promise<CoordinatorResult> {
+    async attemptNext() : Promise<SchedulerDrainResult> {
         // 它做的是把一个等待中的 run 从队列里推进到运行状态，但是不管如何选
         // 如何选这个 run，是scheduler做的事
         // 最终控制流
@@ -519,7 +519,7 @@ export class RunQueueCoordinator  {
         }
     }
     
-    private async drainOnce():Promise<CoordinatorResult[]> {
+    private async drainOnce():Promise<SchedulerDrainResult[]> {
         // 支柱 3：先熔断排队超时的 Run，再推进队列。
         this.enforceQueueTtl();
 
@@ -531,7 +531,7 @@ export class RunQueueCoordinator  {
         // 看看当前有多少要处理的请求
         let remainingAttempts = this.scheduler.listQueue().length;
 
-        const results : CoordinatorResult[] = [];
+        const results : SchedulerDrainResult[] = [];
 
         // 只要还有请求，那么就交给attemptNext去执行
         while(remainingAttempts > 0) {
@@ -574,8 +574,8 @@ export class RunQueueCoordinator  {
         return results;
     }
 
-    private async runDrainLoop():Promise<CoordinatorResult[]> {
-        const results: CoordinatorResult[] = [];
+    private async runDrainLoop():Promise<SchedulerDrainResult[]> {
+        const results: SchedulerDrainResult[] = [];
         try {
             while(this.drainRequested) {
                 // 消费掉当前的请求
@@ -601,7 +601,7 @@ export class RunQueueCoordinator  {
     // drain 的主要职责是：1. 遍历当前队列并尽可能启动 Run； 2. 处理多个地方同时发起的 drain 请求
     // drain 是负责“当前有空位，看看哪些 run 可以启动的”
     // attemptNext就是调度一个 run
-    drain() : Promise<CoordinatorResult[]> {
+    drain() : Promise<SchedulerDrainResult[]> {
         // 每次调用都代表系统状态可能发生了变化
         // 因此至少请求进行一轮队列检查
         this.drainRequested = true;

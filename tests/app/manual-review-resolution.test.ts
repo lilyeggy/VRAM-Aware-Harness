@@ -4,7 +4,7 @@ import { HarnessApplication, type QueuePump } from "../../src/app/harness-applic
 import type { PolicyDecisionStore } from "../../src/resources/policy-decision-store.ts";
 import type { ResourceObserver } from "../../src/resources/resource-observer.ts";
 import type { AgentRun, RunEvent } from "../../src/runs/agent-run.ts";
-import type { RunQueueCoordinator } from "../../src/scheduling/run-queue-coordinator.ts";
+import type { RunScheduler } from "../../src/scheduling/run-scheduler.ts";
 import type { TenantRunScheduler } from "../../src/scheduling/tenant-run-scheduler.ts";
 import type { RunStore } from "../../src/runs/runstore.ts";
 import type { ToolExecution } from "../../src/tools/tool-execution.ts";
@@ -76,7 +76,7 @@ function makeApp(run: AgentRun, prepared: readonly ToolExecution[]) {
     };
 
     const app = new HarnessApplication(
-        {} as unknown as RunQueueCoordinator,
+        {} as unknown as RunScheduler,
         {} as unknown as QueuePump,
         store as unknown as RunStore,
         {} as unknown as PolicyDecisionStore,
@@ -154,7 +154,7 @@ test("N16：没有待核对的不确定副作用时拒绝消解", () => {
 
 test("N16：未装配工具执行库时读数为空（不伪装成已装配）", () => {
     const app = new HarnessApplication(
-        {} as unknown as RunQueueCoordinator,
+        {} as unknown as RunScheduler,
         {} as unknown as QueuePump,
         {} as unknown as RunStore,
         {} as unknown as PolicyDecisionStore,

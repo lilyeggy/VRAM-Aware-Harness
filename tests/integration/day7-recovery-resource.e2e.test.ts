@@ -25,8 +25,8 @@ import type {
 import { RunService } from "../../src/runs/run-service.ts";
 import { RunStore } from "../../src/runs/runstore.ts";
 import {
-    RunQueueCoordinator,
-} from "../../src/scheduling/run-queue-coordinator.ts";
+    RunScheduler,
+} from "../../src/scheduling/run-scheduler.ts";
 import {
     TenantRunScheduler,
 } from "../../src/scheduling/tenant-run-scheduler.ts";
@@ -178,7 +178,7 @@ test("Day7：重启后恢复安全 Run，并在资源恢复时自动推进全部
             new DeterministicExecutionPolicy({ maxActiveRuns:2 }),
             decisionStore,
         );
-        const coordinator = new RunQueueCoordinator(
+        const coordinator = new RunScheduler(
             runService,
             scheduler,
             admission,

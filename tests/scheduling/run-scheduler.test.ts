@@ -25,9 +25,9 @@ import type {
     ResourceAdmissionResult,
 } from "../../src/resources/resource-admission-service.ts";
 import {
-    RunQueueCoordinator,
+    RunScheduler,
     toQueueReasonCode,
-} from "../../src/scheduling/run-queue-coordinator.ts";
+} from "../../src/scheduling/run-scheduler.ts";
 import {
     TenantRunScheduler,
 } from "../../src/scheduling/tenant-run-scheduler.ts";
@@ -237,7 +237,7 @@ test("submit 持久化 QUEUED Run 并入队，但不启动 Runtime", () => {
             throw new Error("submit 不应该执行资源准入");
         },
     };
-    const coordinator = new RunQueueCoordinator(
+    const coordinator = new RunScheduler(
         runService,
         scheduler,
         admission,
@@ -327,7 +327,7 @@ test("attemptNext 在空队列时不调用 Admission", async () => {
             throw new Error("空队列不应执行 Admission");
         },
     };
-    const coordinator = new RunQueueCoordinator(
+    const coordinator = new RunScheduler(
         runService,
         scheduler,
         admission,
@@ -364,7 +364,7 @@ test("attemptNext 在 CRITICAL 决策后释放 slot 并保留原入队时间", a
             ));
         },
     };
-    const coordinator = new RunQueueCoordinator(
+    const coordinator = new RunScheduler(
         runService,
         scheduler,
         admission,
@@ -428,7 +428,7 @@ test("attemptNext 在 START 决策后执行 Run 并释放 slot", async () => {
             ));
         },
     };
-    const coordinator = new RunQueueCoordinator(
+    const coordinator = new RunScheduler(
         runService,
         scheduler,
         admission,
@@ -474,7 +474,7 @@ test("Admission 抛错时 attemptNext 释放 slot 并恢复等待 Run", async ()
             throw new Error("决策记录器暂时不可用");
         },
     };
-    const coordinator = new RunQueueCoordinator(
+    const coordinator = new RunScheduler(
         runService,
         scheduler,
         admission,
@@ -528,7 +528,7 @@ test("drain 在全部 START 时执行当前队列中的所有 Run", async () => 
             ));
         },
     };
-    const coordinator = new RunQueueCoordinator(
+    const coordinator = new RunScheduler(
         runService,
         scheduler,
         admission,
@@ -585,7 +585,7 @@ test("drain 在全部 CRITICAL 时每个当前 Run 只检查一次", async () =>
             ));
         },
     };
-    const coordinator = new RunQueueCoordinator(
+    const coordinator = new RunScheduler(
         runService,
         scheduler,
         admission,
@@ -657,7 +657,7 @@ test("drain 中一个 Run DEFERRED 不会阻止后续 Run 执行", async () => {
             );
         },
     };
-    const coordinator = new RunQueueCoordinator(
+    const coordinator = new RunScheduler(
         runService,
         scheduler,
         admission,
@@ -710,7 +710,7 @@ test("drain 的真实并发不会超过 Scheduler 全局 slot", async () => {
             ));
         },
     };
-    const coordinator = new RunQueueCoordinator(
+    const coordinator = new RunScheduler(
         runService,
         scheduler,
         admission,
@@ -778,7 +778,7 @@ test("并发 drain 调用复用同一个推进循环", async () => {
             ));
         },
     };
-    const coordinator = new RunQueueCoordinator(
+    const coordinator = new RunScheduler(
         runService,
         scheduler,
         admission,
@@ -834,7 +834,7 @@ test("drain 执行期间的新推进请求会在下一轮处理新 Run", async (
             ));
         },
     };
-    const coordinator = new RunQueueCoordinator(
+    const coordinator = new RunScheduler(
         runService,
         scheduler,
         admission,
@@ -904,7 +904,7 @@ test("drain 完成后可以启动新的独立推进循环", async () => {
             ));
         },
     };
-    const coordinator = new RunQueueCoordinator(
+    const coordinator = new RunScheduler(
         runService,
         scheduler,
         admission,
@@ -968,7 +968,7 @@ test("drain 异常结束后会清理 single-flight 状态", async () => {
             ));
         },
     };
-    const coordinator = new RunQueueCoordinator(
+    const coordinator = new RunScheduler(
         runService,
         scheduler,
         admission,
@@ -1015,7 +1015,7 @@ test("Runtime 启动失败不会泄漏 slot，且 drain 继续推进后续 Run",
             ));
         },
     };
-    const coordinator = new RunQueueCoordinator(
+    const coordinator = new RunScheduler(
         runService,
         scheduler,
         admission,
@@ -1070,7 +1070,7 @@ test("全局并发为 1 时 Tenant B 不会排在 Tenant A 的全部 Run 之后"
             ));
         },
     };
-    const coordinator = new RunQueueCoordinator(
+    const coordinator = new RunScheduler(
         runService,
         scheduler,
         admission,
@@ -1139,7 +1139,7 @@ test("恢复 Run 在资源拒绝后保留恢复参数，资源正常后占用 sl
             ));
         },
     };
-    const coordinator = new RunQueueCoordinator(
+    const coordinator = new RunScheduler(
         runService,
         scheduler,
         admission,
@@ -1251,7 +1251,7 @@ test("interrupt 移除排队 Run，使后续 drain 不会启动它", async () =>
         maxActiveRuns:1,
         maxActiveRunsPerTenant:1,
     });
-    const coordinator = new RunQueueCoordinator(
+    const coordinator = new RunScheduler(
         new RunService(store, runtime),
         scheduler,
         {
@@ -1289,7 +1289,7 @@ test("运行中 interrupt 不提前释放 slot，Runtime 退出后才允许后�
         maxActiveRuns:1,
         maxActiveRunsPerTenant:1,
     });
-    const coordinator = new RunQueueCoordinator(
+    const coordinator = new RunScheduler(
         new RunService(store, runtime),
         scheduler,
         {
@@ -1388,7 +1388,7 @@ test("scheduler-only queue blockers are persisted once per reason transition", a
                 ));
             },
         };
-        const coordinator = new RunQueueCoordinator(
+        const coordinator = new RunScheduler(
             runService,
             scheduler,
             admission,
@@ -1453,7 +1453,7 @@ test("提交到已满 scheduler 时立即记录阻塞原因，不等待下一次
             ));
         },
     };
-    const coordinator = new RunQueueCoordinator(runService, scheduler, admission);
+    const coordinator = new RunScheduler(runService, scheduler, admission);
 
     try {
         coordinator.submit({

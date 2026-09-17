@@ -25,8 +25,8 @@ import type {
 } from "../../src/runs/agent-run.ts";
 import { RunStore } from "../../src/runs/runstore.ts";
 import {
-    RunQueueCoordinator,
-} from "../../src/scheduling/run-queue-coordinator.ts";
+    RunScheduler,
+} from "../../src/scheduling/run-scheduler.ts";
 import {
     TenantRunScheduler,
 } from "../../src/scheduling/tenant-run-scheduler.ts";
@@ -73,7 +73,7 @@ function createApplication(
             throw new Error("空队列启动不应调用 Admission");
         },
     };
-    const coordinator = new RunQueueCoordinator(
+    const coordinator = new RunScheduler(
         runService,
         scheduler,
         admission,

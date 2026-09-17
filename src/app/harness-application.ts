@@ -16,8 +16,8 @@ import type { WorkspaceDiff } from "../workspaces/workspace-snapshot.ts";
 import type { RunWorkspaceResultCoordinator } from "../workspaces/run-workspace-result.ts";
 import type { RunArtifact } from "../workspaces/run-artifact-store.ts";
 import type {
-    RunQueueCoordinator,
-} from "../scheduling/run-queue-coordinator.ts";
+    RunScheduler,
+} from "../scheduling/run-scheduler.ts";
 import type {
     QueueEntry,
     SchedulerCapacity,
@@ -77,7 +77,7 @@ export class HarnessApplication {
     private stopPromise : Promise<void> | null = null;
 
     constructor(
-        private readonly coordinator: RunQueueCoordinator,
+        private readonly coordinator: RunScheduler,
         private readonly queuePump: QueuePump,
         private readonly runStore: RunStore,
         private readonly decisionStore: PolicyDecisionStore,
