@@ -378,28 +378,6 @@ describe("WorkerProcessAgentRuntime Unit & Integration Tests", () => {
         expect(duration).toBeLessThan(1000);
     });
 
-    test("Capability Profile: Reports PI runtime capabilities with deployment key", () => {
-        const runtime = new WorkerProcessAgentRuntime({
-            workerConfig: {
-                piProvider: "vllm-dual-card",
-                piModelId: "qwen-72b",
-                piTools: ["read", "write"],
-                piModelsPath: ".pi/models.json",
-                sandboxProvider: "container",
-                sandboxProfile: "default",
-                sandboxRuntime: "runsc",
-                containerImage: "alpine:3.20",
-                containerUserId: 65532,
-            },
-        });
-
-        const profile = runtime.getCapabilityProfile();
-        expect(profile.runtimeKind).toBe("PI");
-        expect(profile.deploymentKey).toBe("vllm-dual-card/qwen-72b");
-        expect(profile.supported).toContain("SESSION_CREATE");
-        expect(profile.supported).toContain("INTERRUPT");
-        expect(profile.supported).toContain("EXTERNAL_SANDBOX");
-    });
 });
 
 describe("Worker Protocol Stream Framing & Serialization", () => {

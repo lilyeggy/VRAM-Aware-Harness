@@ -437,21 +437,11 @@ async function main(): Promise<void> {
             const snapshots = running.composition.effectivePolicyStore.listSnapshotsForRun(runId);
             for (const snap of snapshots) {
                 console.log(`policySnapshot id=${snap.id} profile=${snap.sandboxProfile} allowNetwork=${snap.allowNetwork} allowedTools=${JSON.stringify(snap.allowedTools)} workspaceRoots=${JSON.stringify(snap.workspaceRoots)}`);
-                const compilations = running.composition.effectivePolicyStore.listCompilations(snap.id);
-                for (const compilation of compilations) {
-                    console.log(`  compilation status=${compilation.status} reasons=${JSON.stringify(compilation.reasons)}`);
-                }
                 const toolDecisions = running.composition.effectivePolicyStore.listToolDecisions(runId);
                 console.log(`  toolDecisions = ${JSON.stringify(toolDecisions)}`);
             }
             const chunks = running.composition.runOutputStore.list(runId);
             console.log(`outputChunks = ${chunks.length} 条，finalText=${JSON.stringify(running.composition.runOutputStore.finalText(runId))}`);
-            const instances = running.composition.instanceStore.listForTenant(
-                finalA.run.tenantId,
-            );
-            for (const instance of instances) {
-                console.log(`instance ${instance.id} actual=${instance.actualState} activeRunCount=${instance.activeRunCount} capability=${instance.capabilityProfileId}`);
-            }
         }
 
         heading("6. 审计：ALLOW / DENY 均落库，按租户可查");

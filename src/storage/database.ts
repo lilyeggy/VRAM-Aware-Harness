@@ -15,6 +15,8 @@ import {Database} from "bun:sqlite"
 
 import {migrations} from "./migrations.ts"
 
+import {ensureDefaultRuntimeProfile} from "./default-runtime-profile.ts"
+
 
 /**
  * 打开 Harness 使用的 SQLite 数据库。
@@ -40,6 +42,7 @@ export function openHarnessDatabase(databasePath:string): Database{
 
     configureDatabase(db);
     runMigrations(db);
+    ensureDefaultRuntimeProfile(db);
 
     return db;
 }

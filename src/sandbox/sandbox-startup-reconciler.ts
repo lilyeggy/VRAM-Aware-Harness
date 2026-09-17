@@ -1,5 +1,3 @@
-import { transitionHarnessInstance } from "../instances/harness-instance.ts";
-import type { HarnessInstanceStore } from "../instances/harness-instance-store.ts";
 import { finishRunAttempt } from "../runs/run-attempt.ts";
 import type { RunAttemptStore } from "../runs/run-attempt-store.ts";
 import type { SandboxProvider, SandboxRecord } from "./sandbox-provider.ts";
@@ -15,7 +13,6 @@ export class SandboxStartupReconciler {
         private readonly sandboxes: SandboxStore,
         private readonly provider: SandboxProvider,
         private readonly attempts: RunAttemptStore,
-        private readonly instances: HarnessInstanceStore,
     ) {}
 
     async reconcile(): Promise<void> {
@@ -76,18 +73,6 @@ export class SandboxStartupReconciler {
             this.attempts.update(
                 finishRunAttempt(attempt, "INTERRUPTED", timestamp),
                 attempt.status,
-            );
-        }
-        const instance = this.instances.get(record.instanceId);
-        if (instance?.actualState === "ACTIVE") {
-            this.instances.update(
-                transitionHarnessInstance(
-                    instance,
-                    "FAILED",
-                    timestamp,
-                    `SANDBOX_RECONCILE:${reason}`,
-                ),
-                instance.actualState,
             );
         }
     }

@@ -31,7 +31,6 @@ import {
 import {
     createFileSessionRefReachability,
 } from "./session-ref-reachability.ts";
-import { createPiCapabilityProfile } from "./runtime-capability.ts";
 import type {
     SandboxCommandExecutor,
     SandboxEnforcementCapabilities,
@@ -102,13 +101,6 @@ export class PiAdapter implements AgentRuntime{
             PiAdapterToolGatewayBinding,
     ){
 
-    }
-
-    getCapabilityProfile() {
-        return createPiCapabilityProfile(
-            `pi-capability:${this.config.provider}/${this.config.modelId}`,
-            `${this.config.provider}/${this.config.modelId}`,
-        );
     }
 
     subscribe(runId: string, handler: RuntimeEventHandler): () => void {

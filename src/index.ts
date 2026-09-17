@@ -9,7 +9,6 @@ export * from "./checkpoints/recovery-executor.ts";
 export * from "./checkpoints/recovery-service.ts";
 export * from "./checkpoints/recovery-startup-coordinator.ts";
 
-export * from "./control-plane/default-pi-control-plane.ts";
 
 export * from "./conversations/conversation.ts";
 export * from "./conversations/conversation-store.ts";
@@ -24,8 +23,6 @@ export * from "./http/harness-http-api.ts";
 export * from "./http/harness-http-server.ts";
 export * from "./http/harness-user-console.ts";
 
-export * from "./instances/harness-instance.ts";
-export * from "./instances/harness-instance-store.ts";
 
 export * from "./main.ts";
 
@@ -39,7 +36,6 @@ export * from "./resources/resource-metrics-sampler.ts";
 
 export * from "./policies/effective-policy.ts";
 export * from "./policies/effective-policy-store.ts";
-export * from "./policies/policy-compilation.ts";
 export * from "./policies/policy-registry.ts";
 export * from "./policies/tool-policy-guard.ts";
 
@@ -51,11 +47,9 @@ export * from "./runs/run-state-machine.ts";
 export * from "./runs/runstore.ts";
 
 export type * from "./runtime/agent-runtime.ts";
-export * from "./runtime/managed-agent-runtime.ts";
 export * from "./runtime/pi-adapter.ts";
 export * from "./runtime/pi-tool-gateway.ts";
-export * from "./runtime/runtime-capability.ts";
-export * from "./runtime/runtime-capability-store.ts";
+export * from "./runtime/run-executor.ts";
 export * from "./runtime/supervised-agent-runtime.ts";
 
 export * from "./sandbox/container-runtime-adapter.ts";
@@ -83,9 +77,6 @@ export * from "./workspaces/run-workspace-result-store.ts";
 export * from "./workspaces/run-artifact-store.ts";
 export * from "./workspaces/workspace-snapshot.ts";
 
-export * from "./templates/harness-template.ts";
-export * from "./templates/harness-template-store.ts";
-export * from "./templates/template-version-policy.ts";
 
 export * from "./tools/tool-execution-store.ts";
 export * from "./tools/tool-execution.ts";

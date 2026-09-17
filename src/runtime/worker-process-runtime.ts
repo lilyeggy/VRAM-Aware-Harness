@@ -14,8 +14,6 @@ import type {
     RuntimeStartRequest,
     RuntimeResumeRequest,
 } from "./agent-runtime.ts";
-import { createPiCapabilityProfile } from "./runtime-capability.ts";
-import type { RuntimeCapabilityProfile } from "./runtime-capability.ts";
 import type {
     ExecuteToolInput,
     ToolGatewayOutcome,
@@ -92,15 +90,6 @@ export class WorkerProcessAgentRuntime implements AgentRuntime {
     }>();
 
     constructor(private readonly options: WorkerProcessRuntimeOptions = {}) {}
-
-    getCapabilityProfile(): RuntimeCapabilityProfile {
-        const provider = this.options.workerConfig?.piProvider ?? "local-vllm";
-        const modelId = this.options.workerConfig?.piModelId ?? "default";
-        return createPiCapabilityProfile(
-            `worker-process:${provider}/${modelId}`,
-            `${provider}/${modelId}`,
-        );
-    }
 
     subscribe(runId: string, handler: RuntimeEventHandler): () => void {
         let handlers = this.handlersByRunId.get(runId);

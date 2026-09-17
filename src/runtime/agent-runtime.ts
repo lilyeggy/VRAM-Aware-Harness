@@ -222,9 +222,6 @@ export type RuntimeEvent =
 export type RuntimeEventHandler = (event:RuntimeEvent) => void;
 
 export interface AgentRuntime {
-    /** Adapter 可报告部署组合的细粒度真实能力。 */
-    getCapabilityProfile?(): import("./runtime-capability.ts").RuntimeCapabilityProfile;
-
     start(request:RuntimeStartRequest):Promise<void>;
 
     resume(request:RuntimeResumeRequest):Promise<void>;

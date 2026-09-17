@@ -34,8 +34,6 @@ import type {
     ResumeRunInput,
     StartRunInput,
 }   from "../runs/run-service.ts";
-import type { HarnessInstance } from "../instances/harness-instance.ts";
-import type { HarnessInstanceStore } from "../instances/harness-instance-store.ts";
 import type { Conversation } from "../conversations/conversation.ts";
 import { createConversation } from "../conversations/conversation.ts";
 import type { ConversationStore } from "../conversations/conversation-store.ts";
@@ -56,6 +54,10 @@ export interface ToolExecutionReviewStore {
 
 export interface StartupRecoveryCoordinator {
     recover():Promise<void>;
+}
+
+interface AgentListingStore {
+    listForTenant(tenantId: string): readonly unknown[];
 }
 
 /**
@@ -80,7 +82,7 @@ export class HarnessApplication {
         private readonly startupRecovery:StartupRecoveryCoordinator,
         private readonly runOutputStore?: RunOutputStore,
         private readonly workspaceResults?: RunWorkspaceResultCoordinator,
-        private readonly instanceStore?: HarnessInstanceStore,
+        private readonly instanceStore?: AgentListingStore,
         private readonly conversationStore?: ConversationStore,
         private readonly toolPolicyStore?: { listToolDecisions(runId: string): readonly { toolName: string; action: string; reason: string; decidedAt: string }[] },
         /** N15：租户/平台策略注册表（策略管理面）。 */
@@ -221,7 +223,7 @@ export class HarnessApplication {
         this.conversationStore?.touch(id, tenantId);
     }
 
-    getAgentsForTenant(tenantId: string): HarnessInstance[] {
+    getAgentsForTenant(tenantId: string): readonly unknown[] {
         return this.instanceStore?.listForTenant(tenantId) ?? [];
     }
 

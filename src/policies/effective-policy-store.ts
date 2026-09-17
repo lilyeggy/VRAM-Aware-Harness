@@ -6,11 +6,6 @@ import {
     type PolicyConstraints,
     type PolicyLayer,
 } from "./effective-policy.ts";
-import type {
-    PiCompiledPolicy,
-    PolicyCompilationRecord,
-} from "./policy-compilation.ts";
-
 interface SnapshotRow {
     id: string;
     runId: string;
@@ -103,59 +98,6 @@ export class EffectivePolicyStore {
         return ids.map(({ id }) => this.getSnapshot(id)).filter(
             (snapshot): snapshot is EffectivePolicySnapshot => snapshot !== null,
         );
-    }
-
-    listCompilations(snapshotId: string): PolicyCompilationRecord[] {
-        const rows = this.db.query<{
-            id: string;
-            snapshotId: string;
-            runtimeKind: "PI";
-            status: PolicyCompilationRecord["status"];
-            compiledJson: string | null;
-            reasonsJson: string;
-            createdAt: string;
-        }, { snapshotId: string }>(`
-            SELECT id, snapshot_id AS snapshotId,
-                runtime_kind AS runtimeKind, status,
-                compiled_json AS compiledJson,
-                reasons_json AS reasonsJson, created_at AS createdAt
-            FROM policy_compilations WHERE snapshot_id = $snapshotId
-            ORDER BY created_at ASC, rowid ASC;
-        `).all({ snapshotId });
-        return rows.map((row) => ({
-            id: row.id,
-            snapshotId: row.snapshotId,
-            runtimeKind: row.runtimeKind,
-            status: row.status,
-            compiled: row.compiledJson === null
-                ? null
-                : JSON.parse(row.compiledJson) as PiCompiledPolicy,
-            reasons: Object.freeze(JSON.parse(row.reasonsJson) as string[]),
-            createdAt: row.createdAt,
-        }));
-    }
-
-    saveCompilation(record: PolicyCompilationRecord): void {
-        const parameters = {
-            id: record.id,
-            snapshotId: record.snapshotId,
-            runtimeKind: record.runtimeKind,
-            status: record.status,
-            compiledJson: record.compiled === null
-                ? null
-                : JSON.stringify(record.compiled),
-            reasonsJson: JSON.stringify(record.reasons),
-            createdAt: record.createdAt,
-        };
-        this.db.query<unknown, typeof parameters>(`
-            INSERT INTO policy_compilations (
-                id, snapshot_id, runtime_kind, status,
-                compiled_json, reasons_json, created_at
-            ) VALUES (
-                $id, $snapshotId, $runtimeKind, $status,
-                $compiledJson, $reasonsJson, $createdAt
-            );
-        `).run(parameters);
     }
 
     recordToolDecision(decision: ToolPolicyDecision): void {

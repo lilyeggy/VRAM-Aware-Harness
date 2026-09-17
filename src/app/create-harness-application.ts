@@ -6,8 +6,6 @@ import {
     ModelRuntime,
 } from "@earendil-works/pi-coding-agent";
 
-import { DefaultPiControlPlane } from "../control-plane/default-pi-control-plane.ts";
-import { HarnessInstanceStore } from "../instances/harness-instance-store.ts";
 import { HarnessHttpApi } from "../http/harness-http-api.ts";
 import { ApiCredentialStore } from "../auth/api-credential-store.ts";
 import { AccessAuditStore } from "../audit/access-audit-store.ts";
@@ -49,11 +47,9 @@ import type {
 } from "../runtime/agent-runtime.ts";
 import { PiAdapter } from "../runtime/pi-adapter.ts";
 import type { PiCompactionConfig } from "../runtime/pi-adapter.ts";
-import { RuntimeCapabilityProfileStore } from "../runtime/runtime-capability-store.ts";
-import type { RuntimeCapabilityProfile } from "../runtime/runtime-capability.ts";
-import { ManagedAgentRuntime } from "../runtime/managed-agent-runtime.ts";
 import { SupervisedAgentRuntime } from "../runtime/supervised-agent-runtime.ts";
 import { WorkerProcessAgentRuntime } from "../runtime/worker-process-runtime.ts";
+import { RunExecutor } from "../runtime/run-executor.ts";
 import { EffectivePolicyStore } from "../policies/effective-policy-store.ts";
 import { PolicyRegistry } from "../policies/policy-registry.ts";
 import { PersistentToolPolicyGuard } from "../policies/tool-policy-guard.ts";
@@ -97,7 +93,6 @@ import { LlmGateway } from "../llm-gateway/llm-gateway.ts";
 import {
     BackendHealthMonitor,
 } from "../llm-gateway/backend-health-monitor.ts";
-import { HarnessTemplateStore } from "../templates/harness-template-store.ts";
 import { ToolExecutionStore } from "../tools/tool-execution-store.ts";
 import { ToolGateway } from "../tools/tool-gateway.ts";
 import { HarnessApplication } from "./harness-application.ts";
@@ -112,7 +107,6 @@ export interface HarnessCompositionDependencies {
     policyRegistry?:PolicyRegistry;
     sandboxProvider?:SandboxProvider;
     secretProvider?:SecretProvider;
-    capabilityProfile?:RuntimeCapabilityProfile;
 }
 
 import { ResourceMetricsSampler } from "../resources/resource-metrics-sampler.ts";
@@ -125,12 +119,9 @@ export interface HarnessComposition {
     runStore:RunStore;
     checkpointStore:CheckpointStore;
     decisionStore:PolicyDecisionStore;
-    templateStore:HarnessTemplateStore;
-    instanceStore:HarnessInstanceStore;
     sessionStore:HarnessSessionStore;
     conversationStore:ConversationStore;
     attemptStore:RunAttemptStore;
-    capabilityStore:RuntimeCapabilityProfileStore;
     effectivePolicyStore:EffectivePolicyStore;
     policyRegistry:PolicyRegistry;
     sandboxStore:SandboxStore;
@@ -177,12 +168,9 @@ export async function createHarnessApplication(
     const checkpointStore = new CheckpointStore(database);
     const toolExecutionStore = new ToolExecutionStore(database);
     const decisionStore = new PolicyDecisionStore(database);
-    const templateStore = new HarnessTemplateStore(database);
-    const instanceStore = new HarnessInstanceStore(database);
     const sessionStore = new HarnessSessionStore(database);
     const conversationStore = new ConversationStore(database);
     const attemptStore = new RunAttemptStore(database);
-    const capabilityStore = new RuntimeCapabilityProfileStore(database);
     const effectivePolicyStore = new EffectivePolicyStore(database);
     const policyRegistry = dependencies.policyRegistry ?? new PolicyRegistry();
     const sandboxStore = new SandboxStore(database);
@@ -309,17 +297,20 @@ export async function createHarnessApplication(
             interruptGraceMs: config.interruptGraceMs ?? 10_000,
         },
     );
-    const runtime = new ManagedAgentRuntime(
+    const runtime = new RunExecutor(
         supervisedRuntime,
         runStore,
-        templateStore,
-        instanceStore,
         sessionStore,
-        capabilityStore,
         attemptStore,
         effectivePolicyStore,
         policyRegistry,
         sandboxProvider,
+        {
+            provider: config.piProvider,
+            modelId: config.piModelId,
+            tools: config.piTools,
+            skills: [],
+        },
         config.sandboxProfile,
     );
     const resourceObserver = dependencies.resourceObserver
@@ -328,21 +319,8 @@ export async function createHarnessApplication(
             timeoutMs:config.resourceObservationTimeoutMs,
             gpuIds:config.gpuIds,
         });
-    const controlPlane = new DefaultPiControlPlane(
-        templateStore,
-        instanceStore,
-        sessionStore,
-        capabilityStore,
-        {
-            provider: config.piProvider,
-            modelId: config.piModelId,
-            tools: config.piTools,
-            capabilityProfile: dependencies.capabilityProfile
-                ?? baseRuntime.getCapabilityProfile?.(),
-        },
-    );
     const runService = new RunService(
-        runStore, runtime, controlPlane, undefined, runOutputStore,
+        runStore, runtime, undefined, undefined, runOutputStore,
         workspaceResultCoordinator,
     );
     runServiceRef = runService;
@@ -456,17 +434,12 @@ export async function createHarnessApplication(
         sandboxStore,
         sandboxProvider,
         attemptStore,
-        instanceStore,
     );
     const startupRecovery = new RecoveryStartupCoordinator(
         recoveryService,
         recoveryExecutor,
         queuedRunRestorer,
         sandboxReconciler,
-        // N19：启动时先清掉上次进程异常退出留下的实例槽位残留
-        // （FAILED + active_run_count>0），否则恢复任务会撞
-        // INSTANCE_NOT_READY 活锁并反复泄漏沙箱。
-        instanceStore,
     );
     const application = new HarnessApplication(
         coordinator,
@@ -478,7 +451,7 @@ export async function createHarnessApplication(
         startupRecovery,
         runOutputStore,
         workspaceResultCoordinator,
-        instanceStore,
+        undefined,
         conversationStore,
         effectivePolicyStore,
         // N15：策略管理面（/admin/policies）背后的注册表。
@@ -556,12 +529,9 @@ export async function createHarnessApplication(
         runStore,
         checkpointStore,
         decisionStore,
-        templateStore,
-        instanceStore,
         sessionStore,
         conversationStore,
         attemptStore,
-        capabilityStore,
         effectivePolicyStore,
         policyRegistry,
         sandboxStore,

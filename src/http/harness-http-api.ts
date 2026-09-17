@@ -28,7 +28,6 @@ import type { RunOutputChunk } from "../runs/run-output-store.ts";
 import type { WorkspaceDiff } from "../workspaces/workspace-snapshot.ts";
 import type { RunArtifact } from "../workspaces/run-artifact-store.ts";
 import type { AccessAuditStore } from "../audit/access-audit-store.ts";
-import type { HarnessInstance } from "../instances/harness-instance.ts";
 import type { EvaluationAggregator } from "../eval/evaluation-aggregator.ts";
 import type { LlmGateway } from "../llm-gateway/llm-gateway.ts";
 import { platformDashboardResponse } from "./harness-platform-dashboard.ts";
@@ -52,7 +51,7 @@ export interface HarnessHttpApplication {
     touchConversation?(id: string, tenantId: string): void;
     /** B6：会话归属查询；未提供时跳过会话抢注校验（兼容最小装配）。 */
     resolveSessionOwner?(harnessSessionId: string): string | null;
-    getAgentsForTenant?(tenantId:string):HarnessInstance[];
+    getAgentsForTenant?(tenantId:string):readonly unknown[];
     getRunEvents(runId:string):RunEvent[];
     getRunOutput(runId:string):{ chunks: RunOutputChunk[]; finalText: string; thinkingText?: string };
     getRunWorkspaceDiff(runId:string):WorkspaceDiff | null;
