@@ -33,67 +33,33 @@ import { userConsoleResponse } from "./harness-user-console.ts";
 import type { Conversation } from "../conversations/conversation.ts";
 import type { PolicyConstraints, PolicyLayer, ResourceLimits } from "../policies/effective-policy.ts";
 import type { ToolExecution } from "../tools/tool-execution.ts";
+import type {
+    CheckpointLookup,
+    HarnessHttpApplication,
+    HttpAccessControl,
+    UnknownEffectResolution,
+} from "./http-contracts.ts";
+
+import {
+    autoWorkspaceName,
+    HttpError,
+    jsonResponse,
+    optionalString,
+    parseRunPolicy,
+    parseThinkingLevel,
+    readJsonObject,
+    readOptionalJsonObject,
+    requiredString,
+} from "./http-utils.ts";
+
+export type {
+    CheckpointLookup,
+    HarnessHttpApplication,
+    HttpAccessControl,
+    UnknownEffectResolution,
+} from "./http-contracts.ts";
 
 /** N16：人工消解 UNKNOWN_EFFECT 的两种结论。 */
-export type UnknownEffectResolution = "NO_EFFECT" | "EFFECT_OCCURRED";
-
-export interface HarnessHttpApplication {
-    isStarted():boolean;
-    submitRun(input:StartRunInput):AgentRun;
-    getRun(runId:string):AgentRun | null;
-    getRunsForTenant(tenantId:string):AgentRun[];
-    createConversation?(input: { tenantId: string; workspaceId: string; title?: string }): Conversation;
-    getConversation?(id: string, tenantId: string): Conversation | null;
-    getConversationsForWorkspace?(tenantId: string, workspaceId: string): Conversation[];
-    getRunsForConversation?(tenantId: string, conversationId: string): AgentRun[];
-    touchConversation?(id: string, tenantId: string): void;
-    /** B6：会话归属查询；未提供时跳过会话抢注校验（兼容最小装配）。 */
-    resolveSessionOwner?(harnessSessionId: string): string | null;
-    getRunEvents(runId:string):RunEvent[];
-    getRunOutput(runId:string):{ chunks: RunOutputChunk[]; finalText: string; thinkingText?: string };
-    getRunWorkspaceDiff(runId:string):WorkspaceDiff | null;
-    getRunArtifacts(runId:string):RunArtifact[];
-    getRunArtifact(runId:string, path:string):Promise<Uint8Array | null>;
-    getRunDecisions(runId:string):PolicyDecision[];
-    /** N3：完成但受限的 Run 的 DENY 聚合；未装配时为空数组。 */
-    getRunLimitations?(runId:string):RunLimitation[];
-    getQueue():QueueEntry[];
-    observeResources():Promise<ResourceObservation>;
-    interruptRun(runId:string):Promise<AgentRun>;
-    resumeRun(input:ResumeRunInput):AgentRun;
-    /** N15：策略管理面（读写租户/平台策略层）。未装配时相关路由返回 503。 */
-    /** N16：UNKNOWN_EFFECT 的人工消解出口。 */
-    getRunUnknownEffects?(runId:string):ToolExecution[];
-    resolveUnknownEffect?(
-        runId:string,
-        input:{ resolution:UnknownEffectResolution; note?:string; actor:string | null },
-    ):{ run:AgentRun; resolvedExecutionIds:string[] };
-}
-
-export interface CheckpointLookup {
-    get(checkpointId:string):Checkpoint | null;
-}
-
-export interface HttpAccessControl {
-    authenticate(rawKey: string): RequestPrincipal | null;
-    registerUser?(email: string, password: string): Promise<{ userId: string; tenantId: string }>;
-    loginUser?(email: string, password: string): Promise<{ token: string; userId: string; tenantId: string; expiresAt: string } | null>;
-    revokeSession?(token: string): boolean;
-    revokeAllSessions?(userId: string): number;
-    /** D4：会话归属查询，供登出审计归因。 */
-    sessionOwner?(token: string): string | null;
-    workspaceService: WorkspaceService;
-    auditStore?: AccessAuditStore;
-}
-
-class HttpError extends Error {
-    constructor(
-        readonly status:number,
-        message:string,
-    ) {
-        super(message);
-    }
-}
 
 /**
  * Day7 的最小 HTTP 协议层。
@@ -881,196 +847,4 @@ export class HarnessHttpApi {
             attemptedKeyDigest: null,
         });
     }
-}
-
-async function readJsonObject(
-    request:Request,
-):Promise<Record<string,unknown>> {
-    let body:unknown;
-
-    try {
-        body = await request.json();
-    } catch {
-        throw new HttpError(400, "请求体必须是有效 JSON");
-    }
-
-    if (typeof body !== "object" || body === null || Array.isArray(body)) {
-        throw new HttpError(400, "请求体必须是 JSON 对象");
-    }
-
-    return body as Record<string,unknown>;
-}
-
-async function readOptionalJsonObject(
-    request:Request,
-):Promise<Record<string,unknown>> {
-    const text = await request.text();
-
-    if (text.trim().length === 0) {
-        return {};
-    }
-
-    let body:unknown;
-
-    try {
-        body = JSON.parse(text) as unknown;
-    } catch {
-        throw new HttpError(400, "请求体必须是有效 JSON");
-    }
-
-    if (typeof body !== "object" || body === null || Array.isArray(body)) {
-        throw new HttpError(400, "请求体必须是 JSON 对象");
-    }
-
-    return body as Record<string,unknown>;
-}
-
-function requiredString(
-    body:Record<string,unknown>,
-    field:string,
-):string {
-    const value = optionalString(body, field);
-
-    if (value === null) {
-        throw new HttpError(400, `${field} 必须是非空字符串`);
-    }
-
-    return value;
-}
-
-/**
- * 自动工作区名。
- *
- * WorkspaceService 只接受 [a-zA-Z0-9_-] 且最长 64 位，所以不能直接用会话标题
- * （可能含中文）——否则建会话会被命名校验拒掉。改用时间戳加随机后缀。
- */
-function autoWorkspaceName(): string {
-    const stamp = new Date().toISOString().replace(/\D/g, "").slice(0, 14);
-    return `conv-${stamp}-${crypto.randomUUID().slice(0, 8)}`;
-}
-
-function optionalString(
-    body:Record<string,unknown>,
-    field:string,
-):string | null {
-    const value = body[field];
-
-    if (value === undefined) {
-        return null;
-    }
-
-    if (typeof value !== "string" || value.trim().length === 0) {
-        throw new HttpError(400, `${field} 必须是非空字符串`);
-    }
-
-    return value;
-}
-
-function parseThinkingLevel(body:Record<string,unknown>): StartRunInput["thinkingLevel"] {
-    const value = optionalString(body, "thinkingLevel");
-    if (value === null) return undefined;
-    if (!["off", "minimal", "low", "medium", "high"].includes(value)) {
-        throw new HttpError(400, "thinkingLevel 必须是 off、minimal、low、medium 或 high");
-    }
-    return value as StartRunInput["thinkingLevel"];
-}
-
-/**
- * N15：解析 PolicyConstraints。策略管理面（PUT /admin/policies/*）与请求级
- * `runPolicy` 共用同一套校验：未提供的字段按 unrestricted 语义取默认值，
- * 类型错误一律 400（不静默降级成"无限额"）。
- */
-function parsePolicyConstraints(value:unknown, field:string):PolicyConstraints {
-    if (typeof value !== "object" || value === null || Array.isArray(value)) {
-        throw new HttpError(400, `${field} 必须是 JSON 对象`);
-    }
-
-    const raw = value as Record<string, unknown>;
-
-    return {
-        allowedTools: optionalStringArray(raw.allowedTools, `${field}.allowedTools`),
-        allowedSkills: optionalStringArray(raw.allowedSkills, `${field}.allowedSkills`),
-        allowedModels: optionalStringArray(raw.allowedModels, `${field}.allowedModels`),
-        workspaceRoots: optionalStringArray(raw.workspaceRoots, `${field}.workspaceRoots`),
-        allowNetwork: optionalBoolean(raw.allowNetwork, `${field}.allowNetwork`, true),
-        allowProcess: optionalBoolean(raw.allowProcess, `${field}.allowProcess`, true),
-        allowedSecrets: optionalStringArray(raw.allowedSecrets, `${field}.allowedSecrets`),
-        resourceLimits: parseResourceLimits(raw.resourceLimits, `${field}.resourceLimits`),
-    };
-}
-
-function parseRunPolicy(body:Record<string,unknown>):PolicyConstraints | undefined {
-    if (body.runPolicy === undefined) {
-        return undefined;
-    }
-    return parsePolicyConstraints(body.runPolicy, "runPolicy");
-}
-
-function optionalStringArray(value:unknown, field:string):string[] | null {
-    if (value === undefined || value === null) {
-        return null;
-    }
-    if (
-        !Array.isArray(value)
-        || value.some((item) => typeof item !== "string" || item.length === 0)
-    ) {
-        throw new HttpError(400, `${field} 必须是非空字符串数组`);
-    }
-    return value as string[];
-}
-
-function optionalBoolean(value:unknown, field:string, fallback:boolean):boolean {
-    if (value === undefined || value === null) {
-        return fallback;
-    }
-    if (typeof value !== "boolean") {
-        throw new HttpError(400, `${field} 必须是布尔值`);
-    }
-    return value;
-}
-
-function parseResourceLimits(value:unknown, field:string):ResourceLimits {
-    if (value === undefined || value === null) {
-        return { cpuCores: null, memoryMiB: null, diskMiB: null };
-    }
-    if (typeof value !== "object" || Array.isArray(value)) {
-        throw new HttpError(400, `${field} 必须是 JSON 对象`);
-    }
-
-    const raw = value as Record<string, unknown>;
-
-    return {
-        cpuCores: optionalPositiveNumber(raw.cpuCores, `${field}.cpuCores`),
-        memoryMiB: optionalPositiveInteger(raw.memoryMiB, `${field}.memoryMiB`),
-        diskMiB: optionalPositiveInteger(raw.diskMiB, `${field}.diskMiB`),
-    };
-}
-
-function optionalPositiveNumber(value:unknown, field:string):number | null {
-    if (value === undefined || value === null) {
-        return null;
-    }
-    if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
-        throw new HttpError(400, `${field} 必须是正数`);
-    }
-    return value;
-}
-
-function optionalPositiveInteger(value:unknown, field:string):number | null {
-    if (value === undefined || value === null) {
-        return null;
-    }
-    if (typeof value !== "number" || !Number.isInteger(value) || value <= 0) {
-        throw new HttpError(400, `${field} 必须是正整数`);
-    }
-    return value;
-}
-
-function jsonResponse(value:unknown, status = 200):Response {
-    return new Response(JSON.stringify(value), {
-        status,
-        headers:{
-            "content-type":"application/json; charset=utf-8",
-        },
-    });
 }
