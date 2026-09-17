@@ -8,10 +8,10 @@ export class HarnessSessionStore {
         const parameters = { ...session };
         this.db.query<unknown, typeof parameters>(`
             INSERT INTO harness_sessions (
-                id, tenant_id, instance_id, runtime_session_ref,
+                id, tenant_id, runtime_session_ref,
                 created_at, updated_at
             ) VALUES (
-                $id, $tenantId, $instanceId, $runtimeSessionRef,
+                $id, $tenantId, $runtimeSessionRef,
                 $createdAt, $updatedAt
             );
         `).run(parameters);
@@ -19,7 +19,7 @@ export class HarnessSessionStore {
 
     get(id: string): HarnessSession | null {
         return this.db.query<HarnessSession, { id: string }>(`
-            SELECT id, tenant_id AS tenantId, instance_id AS instanceId,
+            SELECT id, tenant_id AS tenantId,
                 runtime_session_ref AS runtimeSessionRef,
                 created_at AS createdAt, updated_at AS updatedAt
             FROM harness_sessions WHERE id = $id;

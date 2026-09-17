@@ -146,8 +146,7 @@ export class RunExecutor implements AgentRuntime {
             handle = await this.sandbox.create({
                 id: crypto.randomUUID(),
                 runId: run.id,
-                instanceId: "runtime:default",
-                workspacePath: run.workspacePath,
+                    workspacePath: run.workspacePath,
                 policy: snapshot,
             });
         } catch (error) {
@@ -265,7 +264,6 @@ export class RunExecutor implements AgentRuntime {
         const created = createHarnessSession({
             id: sessionId,
             tenantId,
-            instanceId: "runtime:default",
             createdAt: new Date().toISOString(),
         });
         this.sessions.create(created);

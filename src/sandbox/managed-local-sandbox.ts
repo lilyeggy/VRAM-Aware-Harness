@@ -37,7 +37,6 @@ export class ManagedLocalSandboxProvider implements SandboxProvider {
     async create(input: {
         id: string;
         runId: string;
-        instanceId: string;
         workspacePath: string;
         policy: EffectivePolicySnapshot;
     }): Promise<SandboxHandle> {
@@ -81,7 +80,6 @@ export class ManagedLocalSandboxProvider implements SandboxProvider {
         });
         const provisioning: SandboxRecord = {
             id: input.id,
-            instanceId: input.instanceId,
             runId: input.runId,
             policySnapshotId: input.policy.id,
             provider: "MANAGED_LOCAL",
@@ -164,7 +162,6 @@ export class ManagedLocalSandboxProvider implements SandboxProvider {
             handler({
                 sandboxId,
                 runId: current.runId,
-                instanceId: current.instanceId,
                 status: "LOST",
                 reason,
                 timestamp,

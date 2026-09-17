@@ -1,7 +1,6 @@
 export interface HarnessSession {
     readonly id: string;
     readonly tenantId: string;
-    readonly instanceId: string;
     readonly runtimeSessionRef: string | null;
     readonly createdAt: string;
     readonly updatedAt: string;

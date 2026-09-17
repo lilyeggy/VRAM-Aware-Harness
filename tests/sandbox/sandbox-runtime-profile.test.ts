@@ -49,7 +49,7 @@ test("default profile 必须取得 runsc 的实际 inspect 证据", async () => 
         runtime,
     );
     await provider.create({
-        id: "sandbox-profile", runId: "run", instanceId: "instance",
+        id: "sandbox-profile", runId: "run",
         workspacePath: "/srv/workspaces/tenant/workspace", policy: policy(),
     });
     expect(runtime.calls[0]).toContain("runsc");
@@ -74,7 +74,7 @@ test("default profile 使用 runc 或 inspect 非 runsc 时 fail closed", async 
         runtime,
     );
     await expect(provider.create({
-        id: "sandbox-mismatch", runId: "run", instanceId: "instance",
+        id: "sandbox-mismatch", runId: "run",
         workspacePath: "/srv/workspaces/tenant/workspace", policy: policy(),
     })).rejects.toThrow("runtime 证据校验失败");
     expect(store.records.get("sandbox-mismatch")?.status).toBe("FAILED");
@@ -88,7 +88,7 @@ test("strict profile 没有 microVM Provider 时不静默回退", async () => {
     const strict = new UnavailableStrictSandboxProvider();
     const router = new SandboxProviderRouter({ strict }, "strict");
     await expect(router.create({
-        id: "strict-sandbox", runId: "run", instanceId: "instance",
+        id: "strict-sandbox", runId: "run",
         workspacePath: "/srv/workspaces/tenant/workspace",
         policy: policy({ sandboxProfile: "strict" }),
     })).rejects.toThrow("尚未接入");

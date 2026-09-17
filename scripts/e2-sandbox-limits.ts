@@ -84,7 +84,7 @@ try {
         const workspace = join(root, name);
         mkdirSync(workspace, { recursive: true, mode: 0o700 });
         const handle = await provider.create({
-            id: crypto.randomUUID(), runId: crypto.randomUUID(), instanceId: crypto.randomUUID(),
+            id: crypto.randomUUID(), runId: crypto.randomUUID(),
             workspacePath: workspace, policy: policy(workspace, overrides),
         });
         created.push(handle.id);

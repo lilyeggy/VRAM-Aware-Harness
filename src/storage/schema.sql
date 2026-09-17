@@ -119,7 +119,6 @@ CREATE TABLE effective_policy_snapshots (
 CREATE TABLE harness_sessions (
                 id TEXT PRIMARY KEY,
                 tenant_id TEXT NOT NULL,
-                instance_id TEXT NOT NULL,
                 runtime_session_ref TEXT,
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
@@ -318,7 +317,6 @@ CREATE TABLE run_workspace_snapshots (
 
 CREATE TABLE sandboxes (
                 id TEXT PRIMARY KEY,
-                instance_id TEXT NOT NULL,
                 run_id TEXT NOT NULL,
                 policy_snapshot_id TEXT NOT NULL,
                 provider TEXT NOT NULL,
@@ -460,8 +458,6 @@ CREATE INDEX idx_checkpoints_run_created
 CREATE INDEX idx_conversations_workspace_updated
                 ON conversations(tenant_id, workspace_id, updated_at DESC);
 
-CREATE INDEX idx_harness_sessions_instance
-                ON harness_sessions(instance_id, created_at);
 
 CREATE INDEX idx_llm_cache_metrics_backend
                 ON llm_cache_metrics(backend_id, recorded_at);

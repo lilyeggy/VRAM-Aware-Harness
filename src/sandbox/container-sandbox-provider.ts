@@ -139,7 +139,7 @@ export class ContainerSandboxProvider implements SandboxProvider, SandboxCommand
     }
 
     async create(input: {
-        id: string; runId: string; instanceId: string; workspacePath: string;
+        id: string; runId: string; workspacePath: string;
         policy: EffectivePolicySnapshot;
     }): Promise<SandboxHandle> {
         // 1. 档位再校验
@@ -175,7 +175,7 @@ export class ContainerSandboxProvider implements SandboxProvider, SandboxCommand
 
         // 落库PROVISIONING
         const record: SandboxRecord = {
-            id: input.id, instanceId: input.instanceId, runId: input.runId,
+            id: input.id, runId: input.runId,
             policySnapshotId: input.policy.id, provider: "CONTAINER",
             profile: compiled.spec.profile, runtime: compiled.spec.runtime,
             spec: compiled.spec, runtimeEvidence: evidence,
@@ -380,7 +380,7 @@ export class ContainerSandboxProvider implements SandboxProvider, SandboxCommand
 
     private emit(record: SandboxRecord, status: "LOST" | "FAILED", reason: string): void {
         for (const handler of this.handlers) handler({
-            sandboxId: record.id, runId: record.runId, instanceId: record.instanceId,
+            sandboxId: record.id, runId: record.runId,
             status, reason, timestamp: new Date().toISOString(),
         });
     }

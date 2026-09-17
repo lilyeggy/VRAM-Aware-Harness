@@ -67,7 +67,7 @@ function workspace(name: string): string {
 
 async function create(path: string, tenantId: string) {
     return provider.create({
-        id: crypto.randomUUID(), runId: crypto.randomUUID(), instanceId: crypto.randomUUID(),
+        id: crypto.randomUUID(), runId: crypto.randomUUID(),
         workspacePath: path, policy: policy(path, tenantId),
     });
 }

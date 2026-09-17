@@ -70,7 +70,7 @@ test("容器 Sandbox 将隔离策略编译为可审计 Docker 参数，并仅持
         { image: "agent-sandbox:test" }, docker,
     );
     const handle = await provider.create({
-        id: "sandbox-1", runId: "run", instanceId: "instance",
+        id: "sandbox-1", runId: "run",
         workspacePath: "/srv/workspaces/tenant/workspace", policy: policy({ allowedSecrets: ["TOKEN"] }),
     });
     const create = docker.calls[0]!;
@@ -143,7 +143,7 @@ test("docker exec 发现容器消失时发出 LOST，而不是把它当成普通
     const events: unknown[] = [];
     provider.subscribe((event) => events.push(event));
     const handle = await provider.create({
-        id: "sandbox-lost", runId: "run", instanceId: "instance",
+        id: "sandbox-lost", runId: "run",
         workspacePath: "/srv/workspaces/tenant/workspace", policy: policy(),
     });
     docker.nextExecResult = { exitCode: 1, stdout: "", stderr: "Error response from daemon: No such container: agent-harness-sandbox-lost" };
@@ -163,7 +163,7 @@ test("gVisor 沙箱被资源上限终结的报错同样判为失联，不必等�
     const events: unknown[] = [];
     provider.subscribe((event) => events.push(event));
     const handle = await provider.create({
-        id: "sandbox-oom", runId: "run", instanceId: "instance",
+        id: "sandbox-oom", runId: "run",
         workspacePath: "/srv/workspaces/tenant/workspace", policy: policy(),
     });
     // 真机原文：A6000 上 32MiB 限额容器分配 ~200MB 时，触发那一次 exec 的 stderr
@@ -187,7 +187,7 @@ test("启动对账可按持久化 Sandbox ID 回收旧进程未登记的容器",
         { get: () => null }, { image: "agent-sandbox:test" }, docker,
     );
     const handle = await provider.create({
-        id: "sandbox-stale", runId: "run", instanceId: "instance",
+        id: "sandbox-stale", runId: "run",
         workspacePath: "/srv/workspaces/tenant/workspace", policy: policy(),
     });
     await provider.cleanupStale(store.get(handle.id)!);
@@ -203,12 +203,12 @@ test("无法强制 bind mount 磁盘配额或越出 Workspace 根时拒绝执行
         { image: "agent-sandbox:test" }, new FakeDocker(),
     );
     await expect(provider.create({
-        id: "sandbox-disk", runId: "run", instanceId: "instance",
+        id: "sandbox-disk", runId: "run",
         workspacePath: "/srv/workspaces/tenant/workspace",
         policy: policy({ resourceLimits: { cpuCores: null, memoryMiB: null, diskMiB: 10 } }),
     })).rejects.toThrow("磁盘配额");
     await expect(provider.create({
-        id: "sandbox-escape", runId: "run", instanceId: "instance",
+        id: "sandbox-escape", runId: "run",
         workspacePath: "/etc", policy: policy(),
     })).rejects.toThrow("超出策略范围");
 });
@@ -223,7 +223,7 @@ test("预热容器命中后补上本次策略的资源限额，并立即补货",
         docker,
     );
     const input = (id: string) => ({
-        id, runId: "run", instanceId: "instance",
+        id, runId: "run",
         workspacePath: "/srv/workspaces/tenant/workspace", policy: policy(),
     });
 
@@ -262,7 +262,7 @@ test("命中后仍会走过 runtime 举证，复用不等于免检", async () =>
         docker,
     );
     const input = (id: string) => ({
-        id, runId: "run", instanceId: "instance",
+        id, runId: "run",
         workspacePath: "/srv/workspaces/tenant/workspace", policy: policy(),
     });
     const first = await provider.create(input("sandbox-proof-1"));
@@ -293,7 +293,7 @@ test("TENANT 视野：容器挂租户根，工具工作目录落到本 Run 的�
         docker,
     );
     const handle = await provider.create({
-        id: "sandbox-tenant", runId: "run", instanceId: "instance",
+        id: "sandbox-tenant", runId: "run",
         workspacePath: "/srv/workspaces/tenant/ws-1",
         policy: policy({ workspaceRoots: ["/srv/workspaces/tenant"] }),
     });
@@ -326,7 +326,7 @@ test("TENANT 视野下同租户不同工作区命中同一个预热容器", asyn
         docker,
     );
     const input = (id: string, workspace: string) => ({
-        id, runId: "run", instanceId: "instance",
+        id, runId: "run",
         workspacePath: workspace,
         policy: policy({ workspaceRoots: ["/srv/workspaces/tenant"] }),
     });

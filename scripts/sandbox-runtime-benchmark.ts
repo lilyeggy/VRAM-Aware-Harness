@@ -91,7 +91,6 @@ async function benchmarkRuntime(
             handle = await provider.create({
                 id: sandboxId,
                 runId: `benchmark-${runtime}-${index}`,
-                instanceId: `benchmark-instance-${runtime}-${index}`,
                 workspacePath: workspace,
                 policy,
             });

@@ -30,7 +30,6 @@ try {
     const handle = await provider.create({
         id: sandboxId,
         runId: crypto.randomUUID(),
-        instanceId: crypto.randomUUID(),
         workspacePath: workspace,
         policy: policy(workspace),
     });

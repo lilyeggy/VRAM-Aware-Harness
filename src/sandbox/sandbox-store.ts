@@ -4,7 +4,6 @@ import type { SandboxRuntimeEvidence, SandboxSpec } from "./sandbox-profile.ts";
 
 interface SandboxRow {
     id: string;
-    instanceId: string;
     runId: string;
     policySnapshotId: string;
     provider: string;
@@ -26,7 +25,6 @@ export class SandboxStore {
     create(record: SandboxRecord): void {
         const parameters = {
             id: record.id,
-            instanceId: record.instanceId,
             runId: record.runId,
             policySnapshotId: record.policySnapshotId,
             provider: record.provider,
@@ -43,12 +41,12 @@ export class SandboxStore {
         };
         this.db.query<unknown, typeof parameters>(`
             INSERT INTO sandboxes (
-                id, instance_id, run_id, policy_snapshot_id, provider,
+                id, run_id, policy_snapshot_id, provider,
                 profile, runtime, spec_json, runtime_evidence_json,
                 status, workspace_path, secret_names_json,
                 created_at, updated_at, failure_reason
             ) VALUES (
-                $id, $instanceId, $runId, $policySnapshotId, $provider,
+                $id, $runId, $policySnapshotId, $provider,
                 $profile, $runtime, $specJson, $runtimeEvidenceJson,
                 $status, $workspacePath, $secretNamesJson,
                 $createdAt, $updatedAt, $failureReason
@@ -78,7 +76,7 @@ export class SandboxStore {
 
     get(id: string): SandboxRecord | null {
         const row = this.db.query<SandboxRow, { id: string }>(`
-            SELECT id, instance_id AS instanceId, run_id AS runId,
+            SELECT id, run_id AS runId,
                 policy_snapshot_id AS policySnapshotId, provider,
                 profile, runtime, spec_json AS specJson,
                 runtime_evidence_json AS runtimeEvidenceJson,
@@ -90,7 +88,6 @@ export class SandboxStore {
         `).get({ id });
         return row === null ? null : {
             id: row.id,
-            instanceId: row.instanceId,
             runId: row.runId,
             policySnapshotId: row.policySnapshotId,
             provider: row.provider,

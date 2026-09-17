@@ -35,7 +35,6 @@ export class SandboxProviderRouter implements SandboxProvider, SandboxCommandExe
     async create(input: {
         id: string;
         runId: string;
-        instanceId: string;
         workspacePath: string;
         policy: EffectivePolicySnapshot;
     }): Promise<SandboxHandle> {

@@ -75,7 +75,7 @@ try {
     let missingImageError: string | null = null;
     try {
         await missingImageProvider.create({
-            id: missingImageId, runId: crypto.randomUUID(), instanceId: crypto.randomUUID(),
+            id: missingImageId, runId: crypto.randomUUID(),
             workspacePath: missingWs, policy: policy(missingWs),
         });
     } catch (error) {
@@ -90,7 +90,7 @@ try {
     // 2) 正常沙箱创建后，移除容器 -> 必须收敛为 LOST
     const victimWs = workspace("victim");
     const victim = await provider.create({
-        id: crypto.randomUUID(), runId: crypto.randomUUID(), instanceId: crypto.randomUUID(),
+        id: crypto.randomUUID(), runId: crypto.randomUUID(),
         workspacePath: victimWs, policy: policy(victimWs),
     });
     created.push(victim.id);
@@ -107,7 +107,7 @@ try {
     // 3) 失败之后仍能继续服务
     const recoveryWs = workspace("recovery");
     const recovery = await provider.create({
-        id: crypto.randomUUID(), runId: crypto.randomUUID(), instanceId: crypto.randomUUID(),
+        id: crypto.randomUUID(), runId: crypto.randomUUID(),
         workspacePath: recoveryWs, policy: policy(recoveryWs),
     });
     created.push(recovery.id);

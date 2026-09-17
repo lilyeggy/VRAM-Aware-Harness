@@ -14,7 +14,6 @@ export type SandboxStatus =
 
 export interface SandboxRecord {
     readonly id: string;
-    readonly instanceId: string;
     readonly runId: string;
     readonly policySnapshotId: string;
     readonly provider: string;
@@ -75,7 +74,6 @@ export interface SandboxEnforcementCapabilities {
 export interface SandboxLifecycleEvent {
     readonly sandboxId: string;
     readonly runId: string;
-    readonly instanceId: string;
     readonly status: "LOST" | "FAILED";
     readonly reason: string;
     readonly timestamp: string;
@@ -86,7 +84,6 @@ export interface SandboxProvider {
     create(input: {
         id: string;
         runId: string;
-        instanceId: string;
         workspacePath: string;
         policy: EffectivePolicySnapshot;
     }): Promise<SandboxHandle>;

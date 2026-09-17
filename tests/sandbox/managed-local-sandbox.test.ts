@@ -39,7 +39,6 @@ test("Secret 只在 Handle 回调中出现，持久化记录只保存名称", as
     const handle = await provider.create({
         id: "sandbox-1",
         runId: "run-1",
-        instanceId: "instance-1",
         workspacePath: "/tmp/workspace",
         policy: snapshot({ allowedSecrets: ["API_TOKEN"] }),
     });
@@ -81,7 +80,6 @@ test("本地 Provider 无法落实硬资源限制时 fail closed", async () => {
     await expect(provider.create({
         id: "sandbox-1",
         runId: "run-1",
-        instanceId: "instance-1",
         workspacePath: "/tmp/workspace",
         policy: snapshot({
             resourceLimits: { cpuCores: 1, memoryMiB: null, diskMiB: null },
