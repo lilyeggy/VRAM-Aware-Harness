@@ -25,9 +25,6 @@ import type {
 import { RunService } from "../../src/runs/run-service.ts";
 import { RunStore } from "../../src/runs/runstore.ts";
 import {
-    QueuedRunRecoveryService,
-} from "../../src/scheduling/queued-run-recovery-service.ts";
-import {
     RunQueueCoordinator,
 } from "../../src/scheduling/run-queue-coordinator.ts";
 import { RunQueuePump } from "../../src/scheduling/run-queue-pump.ts";
@@ -186,6 +183,14 @@ test("Day7：重启后恢复安全 Run，并在资源恢复时自动推进全部
             runService,
             scheduler,
             admission,
+            undefined,
+            undefined,
+            null,
+            false,
+            {
+                runStoreForRecovery: runStore,
+                checkpointStoreForRecovery: checkpointStore,
+            },
         );
         const queuePump = new RunQueuePump(coordinator, {
             intervalMs:60_000,
@@ -196,15 +201,10 @@ test("Day7：重启后恢复安全 Run，并在资源恢复时自动推进全部
             checkpointStore,
         );
         const recoveryExecutor = new RecoveryExecutor(coordinator);
-        const queuedRunRestorer = new QueuedRunRecoveryService(
-            runStore,
-            checkpointStore,
-            coordinator,
-        );
         const startupRecovery = new RecoveryStartupCoordinator(
             recoveryService,
             recoveryExecutor,
-            queuedRunRestorer,
+            coordinator,
         );
         const application = new HarnessApplication(
             coordinator,

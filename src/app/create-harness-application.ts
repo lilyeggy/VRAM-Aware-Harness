@@ -74,9 +74,6 @@ import { RunOutputStore } from "../runs/run-output-store.ts";
 import { HarnessSessionStore } from "../sessions/harness-session-store.ts";
 import { ConversationStore } from "../conversations/conversation-store.ts";
 import {
-    QueuedRunRecoveryService,
-} from "../scheduling/queued-run-recovery-service.ts";
-import {
     RunQueueCoordinator,
 } from "../scheduling/run-queue-coordinator.ts";
 import { RunQueuePump } from "../scheduling/run-queue-pump.ts";
@@ -367,6 +364,9 @@ export async function createHarnessApplication(
             queueTtlMs: config.queueTtlMs,
             // B4/B5：DB 对账——孤儿 QUEUED Run 重入队 + TTL 不依赖 pump 存活。
             queuedRunReader: runStore,
+            // 启动恢复：把 DB 中 QUEUED Run 重建进内存队列。
+            runStoreForRecovery: runStore,
+            checkpointStoreForRecovery: checkpointStore,
         },
     );
     const queuePump = new RunQueuePump(coordinator, {
@@ -420,11 +420,6 @@ export async function createHarnessApplication(
         },
         isSessionRefReachable,
     );
-    const queuedRunRestorer = new QueuedRunRecoveryService(
-        runStore,
-        checkpointStore,
-        coordinator,
-    );
     const sandboxReconciler = new SandboxStartupReconciler(
         sandboxStore,
         sandboxProvider,
@@ -433,7 +428,7 @@ export async function createHarnessApplication(
     const startupRecovery = new RecoveryStartupCoordinator(
         recoveryService,
         recoveryExecutor,
-        queuedRunRestorer,
+        coordinator,
         sandboxReconciler,
     );
     const application = new HarnessApplication(

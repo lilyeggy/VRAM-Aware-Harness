@@ -62,7 +62,6 @@ export * from "./sandbox/sandbox-startup-reconciler.ts";
 
 export * from "./scheduling/run-queue-coordinator.ts";
 export * from "./scheduling/run-queue-pump.ts";
-export * from "./scheduling/queued-run-recovery-service.ts";
 export * from "./scheduling/tenant-run-scheduler.ts";
 
 export * from "./sessions/harness-session.ts";

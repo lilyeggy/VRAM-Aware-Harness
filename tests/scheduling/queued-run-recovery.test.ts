@@ -14,8 +14,8 @@ import { RunService } from "../../src/runs/run-service.ts";
 import { RunStore } from "../../src/runs/runstore.ts";
 import { ToolExecutionStore } from "../../src/tools/tool-execution-store.ts";
 import {
-    QueuedRunRecoveryService,
-} from "../../src/scheduling/queued-run-recovery-service.ts";
+    restoreQueuedRunInputs,
+} from "../../src/scheduling/run-queue-coordinator.ts";
 import {
     openHarnessDatabase,
 } from "../../src/storage/database.ts";
@@ -25,7 +25,7 @@ import { FakeAgentRuntime } from "../fakes/fake-agent-runtime.ts";
  * B3：启动恢复重建 ResumeRunInput 时，续跑输入必须携带原始任务语境
  * 与恢复点标识，而不是一句"请从恢复点继续完成任务"的空泛指令。
  */
-test("QueuedRunRecoveryService 重建恢复输入时携带原始任务与 Checkpoint", () => {
+test("启动恢复重建输入时携带原始任务与 Checkpoint", () => {
     const db = openHarnessDatabase(":memory:");
 
     try {
@@ -101,7 +101,7 @@ test("QueuedRunRecoveryService 重建恢复输入时携带原始任务与 Checkp
 
         const queuedRuns:AgentRun[] = [];
         const resumedInputs:ResumeRunInput[] = [];
-        const restorer = new QueuedRunRecoveryService(
+        restoreQueuedRunInputs(
             store,
             checkpointStore,
             {
@@ -116,8 +116,6 @@ test("QueuedRunRecoveryService 重建恢复输入时携带原始任务与 Checkp
                 },
             },
         );
-
-        restorer.restore();
 
         expect(queuedRuns.map((queued) => queued.id).sort()).toEqual(
             [run.id, plainRun.id].sort(),

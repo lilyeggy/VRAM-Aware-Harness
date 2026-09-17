@@ -20,6 +20,10 @@ import type {
     StartRunInput,
     ResumeRunInput,
 }   from "../runs/run-service.ts";
+import { buildRecoveryContinuationInput } from "../runs/run-service.ts";
+import type { CheckpointStore } from "../checkpoints/checkpoint-store.ts";
+import type { RunEvent } from "../runs/agent-run.ts";
+import type { RunStore } from "../runs/runstore.ts";
 
 import type {
     QueueReasonCode,
@@ -57,6 +61,10 @@ export interface RunQueueCoordinatorOptions {
      * 重新入队，并对超过 TTL 的 DB QUEUED Run 熔断——不依赖 pump 是否存活。
      */
     readonly queuedRunReader?: { listQueuedRuns(): readonly AgentRun[] };
+    /** 启动恢复：读取 QUEUED Run 与事件。 */
+    readonly runStoreForRecovery?: Pick<RunStore, "listQueuedRuns" | "listEvents">;
+    /** 启动恢复：读取 Checkpoint。 */
+    readonly checkpointStoreForRecovery?: Pick<CheckpointStore, "get">;
 }
 
 export function toQueueReasonCode(
@@ -87,6 +95,60 @@ export function toQueueReasonCode(
                 `START reason 不能作为排队原因：${decision.reasonCode}`,
             );
     }
+}
+
+export interface QueuedRunRestoreTarget {
+    restoreQueuedRun(run: AgentRun): AgentRun;
+    restoreQueuedResume(run: AgentRun, input: ResumeRunInput): AgentRun;
+}
+
+export function restoreQueuedRunInputs(
+    runStore: Pick<RunStore, "listQueuedRuns" | "listEvents">,
+    checkpointStore: Pick<CheckpointStore, "get">,
+    target: QueuedRunRestoreTarget,
+): void {
+    for (const run of runStore.listQueuedRuns()) {
+        const checkpointId = getRecoveryCheckpointId(runStore.listEvents(run.id));
+        if (checkpointId === null) {
+            target.restoreQueuedRun(run);
+            continue;
+        }
+
+        const checkpoint = checkpointStore.get(checkpointId);
+        if (checkpoint === null || checkpoint.runId !== run.id) {
+            throw new Error(`QUEUED 恢复任务缺少有效 Checkpoint：${run.id}`);
+        }
+        target.restoreQueuedResume(run, {
+            runId: run.id,
+            checkpoint,
+            continuationInput: buildRecoveryContinuationInput(
+                run.userInput,
+                checkpoint.id,
+            ),
+        });
+    }
+}
+
+function getRecoveryCheckpointId(
+    events: readonly RunEvent[],
+): string | null {
+    const queuedEvent = [...events]
+        .reverse()
+        .find((event) => event.type === "RUN_QUEUED");
+
+    if (
+        queuedEvent === undefined
+        || typeof queuedEvent.payload !== "object"
+        || queuedEvent.payload === null
+    ) {
+        return null;
+    }
+
+    const payload = queuedEvent.payload as Record<string, unknown>;
+    return payload.reason === "AUTO_RECOVERY"
+        && typeof payload.checkpointId === "string"
+        ? payload.checkpointId
+        : null;
 }
 
 export class RunQueueCoordinator  {
@@ -180,6 +242,19 @@ export class RunQueueCoordinator  {
             this.lastQueueBlockerByRunId.set(blocker.runId, blocker.reasonCode);
         }
     }
+    restoreQueuedRuns(): void {
+        const runStore = this.options.runStoreForRecovery;
+        const checkpointStore = this.options.checkpointStoreForRecovery;
+        if (runStore === undefined || checkpointStore === undefined) {
+            throw new Error("RunQueueCoordinator 未配置启动恢复所需的 runStore/checkpointStore");
+        }
+        restoreQueuedRunInputs(runStore, checkpointStore, this);
+    }
+
+    restore(): void {
+        this.restoreQueuedRuns();
+    }
+
     // submit只负责把用户任务变成 run 队列
     submit(input:StartRunInput) : AgentRun {
         // 接收到用户任务输入后，创建对应持久化的Queued Run
