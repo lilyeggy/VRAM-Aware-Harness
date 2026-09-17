@@ -114,7 +114,7 @@ describe("支柱 2：双卡负载均衡", () => {
         expect(decision.attemptedBackendIds).toEqual(["vllm-gpu1"]);
     });
 
-    it("路由决策台账完整记录策略与缓存字段", async () => {
+    it("路由决策台账记录策略与选中后端", async () => {
         const { router, gateway } = makeGateway(
             DUAL_GPU,
             "round-robin",
@@ -130,8 +130,6 @@ describe("支柱 2：双卡负载均衡", () => {
         await gateway.handleChatCompletions(chatRequest());
         const d = router.recentDecisions(1)[0]!;
         expect(d.strategy).toBe("round-robin");
-        expect(d.promptTokens).toBe(100);
-        expect(d.cachedTokens).toBe(64);
     });
 
     it("高并发模拟：30 个并发请求在双卡间均衡分发且活跃槽位正确释放", async () => {

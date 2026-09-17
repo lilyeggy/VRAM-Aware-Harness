@@ -338,26 +338,6 @@ export class HarnessHttpApi {
             return this.llmGateway.handleListModels();
         }
 
-        // 方向 C：LLM 网关路由统计与近期决策（观测用）。
-        if (
-            request.method === "GET"
-            && segments.length === 2
-            && segments[0] === "llm-gateway"
-            && segments[1] === "stats"
-        ) {
-            if (this.llmGateway === undefined) {
-                throw new HttpError(503, "LLM 网关未启用");
-            }
-            this.requirePrincipal(request, "models:observe");
-            return jsonResponse({
-                enabled:true,
-                ...this.llmGateway.router.stats(),
-                recentDecisions:this.llmGateway.router.recentDecisions(50),
-                // 支柱 2：前缀缓存命中指标（cached_tokens 采集）。
-                cacheMetrics:this.llmGateway.cacheMetrics(),
-            });
-        }
-
         if (
             request.method === "GET"
             && segments.length === 1

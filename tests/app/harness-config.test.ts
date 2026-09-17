@@ -25,7 +25,6 @@ test("loadHarnessConfig 提供本地安全默认值并派生 metrics URL", () =>
         maxActiveRunsPerTenant:10,
         llmGatewayStrategy:"round-robin",
         llmHealthProbeIntervalMs:10_000,
-        llmPrefixCacheEnabled:true,
         pumpIntervalMs:1_000,
         containerUserId:65532,
     });

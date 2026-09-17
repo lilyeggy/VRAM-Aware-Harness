@@ -12,7 +12,7 @@ import {
     ModelRouter,
     type LlmBackend,
 } from "../../src/llm-gateway/model-router.ts";
-import type { ChatMessage } from "../../src/llm-gateway/prompt-prefix.ts";
+import type { ChatMessage } from "../../src/llm-gateway/context-budget.ts";
 
 const LIMITS: ContextBudgetLimits = { budgetTokens: 400 };
 
@@ -156,8 +156,6 @@ describe("N28 网关集成：压缩在转发前生效", () => {
         const seen: { body?: Record<string, unknown> } = {};
         const gateway = new LlmGateway(new ModelRouter(BACKEND), {
             fetchImpl: capturingUpstream(seen),
-            prefixCacheEnabled: true,
-            streamUsageCapture: false,
             ...options,
         });
         const messages: ChatMessage[] = [

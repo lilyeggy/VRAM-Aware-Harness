@@ -464,8 +464,6 @@ export async function createHarnessApplication(
             loadBalancing: config.llmGatewayStrategy,
         });
         llmGateway = new LlmGateway(llmRouter, {
-            prefixCacheEnabled: config.llmPrefixCacheEnabled,
-            streamUsageCapture: config.llmStreamUsageCapture,
             requestTimeoutMs: config.llmRequestTimeoutMs,
             contextBudgetTokens: config.llmContextBudgetTokens,
         });

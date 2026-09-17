@@ -14,7 +14,11 @@
  * 不可能拆散工具调用对（拆散会直接产生非法消息序列）。
  */
 
-import type { ChatMessage } from "./prompt-prefix.ts";
+export interface ChatMessage {
+    role: string;
+    content?: unknown;
+    [key: string]: unknown;
+}
 
 export interface ContextBudgetLimits {
     /** 预算 token 数；<= 0 表示关闭压缩。 */

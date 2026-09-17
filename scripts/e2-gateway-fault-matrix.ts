@@ -144,7 +144,6 @@ async function runCase(mode: Mode) {
     const response = await gateway.handleChatCompletions(chatRequest());
     const text = await response.text().catch(() => "<stream error>");
     const decision = router.recentDecisions(1)[0] ?? null;
-    const metrics = gateway.cacheMetrics();
     return {
         mode,
         status: response.status,
@@ -153,8 +152,6 @@ async function runCase(mode: Mode) {
         chosenBackendId: decision?.chosenBackendId ?? null,
         fallback: decision?.fallback ?? null,
         decisionStatus: decision?.status ?? null,
-        cacheSamples: metrics.totalRequests,
-        promptTokensTotal: metrics.promptTokensTotal,
         bodyHead: text.slice(0, 120),
         circuitOpen: router.backendStates()["fault-a"]?.circuitOpen ?? null,
     };
@@ -191,11 +188,6 @@ const checks = {
     // 坏 SSE / 截断 SSE：透传不崩，且不伪造完整
     bad_sse_survives: results["bad-sse"]!.status === 200,
     cut_sse_survives: results["cut-sse"]!.status === 200,
-    // usage 缺失不计入
-    usage_missing_not_counted: results["usage-missing"]!.cacheSamples === 0,
-    // usage 重复不重复累计
-    usage_duplicated_counted_once: results["usage-duplicated"]!.cacheSamples === 1
-        && results["usage-duplicated"]!.promptTokensTotal === 120,
 };
 
 const failed = Object.entries(checks).filter(([, ok]) => !ok).map(([k]) => k);

@@ -117,10 +117,6 @@ export interface HarnessConfig {
      * 空操作（见 piCompactionReserveTokens 的说明）。
      */
     piCompactionKeepRecentTokens:number;
-    /** 支柱 2：是否启用稳定前缀规范化（vLLM Prefix Caching 优化）。 */
-    llmPrefixCacheEnabled:boolean;
-    /** 支柱 2：流式请求是否由网关注入 include_usage 并采集末尾 usage chunk。 */
-    llmStreamUsageCapture:boolean;
     /**
      * B7：租户预算/fair-share 配置（tenantId → weight + maxUnits）。
      * 空 Record = 不启用预算策略（ admission 行为与历史完全一致）；
@@ -295,12 +291,6 @@ export function loadHarnessConfig(
             "PI_COMPACTION_KEEP_RECENT_TOKENS",
             8_192,
         ),
-        llmPrefixCacheEnabled:environment.LLM_PREFIX_CACHE
-            !== "false"
-            && environment.LLM_PREFIX_CACHE !== "0",
-        llmStreamUsageCapture:environment.LLM_STREAM_USAGE_CAPTURE
-            !== "false"
-            && environment.LLM_STREAM_USAGE_CAPTURE !== "0",
         tenantBudgets:parseTenantBudgets(environment.HARNESS_TENANT_BUDGETS),
 
         vllmMetricsUrl:environment.VLLM_METRICS_URL

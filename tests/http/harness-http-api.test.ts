@@ -357,14 +357,6 @@ test("LLM 网关入口走统一身份主干：无 key 401、作用域不足 403�
             return new Response(JSON.stringify({ choices: [] }), { status: 200 });
         },
         router: fakeRouter,
-        // 支柱 2：stats 端点会一并读取缓存命中指标。
-        cacheMetrics: () => ({
-            totalRequests: 0,
-            promptTokensTotal: 0,
-            cachedTokensTotal: 0,
-            cacheHitRate: null,
-            recentSamples: [],
-        }),
     };
 
     const build = (scopes: string[], keyOk: boolean) => new HarnessHttpApi(
@@ -413,15 +405,6 @@ test("LLM 网关入口走统一身份主干：无 key 401、作用域不足 403�
     expect(ok.status).toBe(200);
     expect(threwForward).toBe(true);
 
-    // 5) 网关统计端点同样要求鉴权
-    threwForward = false;
-    const statsNoKey = await build(["models:observe"], true).fetch(new Request("http://h/llm-gateway/stats"));
-    expect(statsNoKey.status).toBe(401);
-    const statsOk = await build(["models:observe"], true).fetch(new Request(
-        "http://h/llm-gateway/stats",
-        { headers: { authorization: "Bearer good" } },
-    ));
-    expect(statsOk.status).toBe(200);
 });
 
 test("HTTP API 为无效输入和不存在的资源返回稳定错误", async () => {
