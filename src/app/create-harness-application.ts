@@ -76,7 +76,6 @@ import { ConversationStore } from "../conversations/conversation-store.ts";
 import {
     RunQueueCoordinator,
 } from "../scheduling/run-queue-coordinator.ts";
-import { RunQueuePump } from "../scheduling/run-queue-pump.ts";
 import {
     TenantRunScheduler,
 } from "../scheduling/tenant-run-scheduler.ts";
@@ -130,7 +129,7 @@ export interface HarnessComposition {
     workspaceService:WorkspaceService;
     accessAuditStore:AccessAuditStore;
     scheduler:TenantRunScheduler;
-    queuePump:RunQueuePump;
+    queuePump:RunQueueCoordinator;
     runtime:AgentRuntime;
     resourceObserver:ResourceObserver;
     /** 支柱 2：双卡 vLLM 网关（未配置后端时为 undefined）。 */
@@ -367,14 +366,13 @@ export async function createHarnessApplication(
             // 启动恢复：把 DB 中 QUEUED Run 重建进内存队列。
             runStoreForRecovery: runStore,
             checkpointStoreForRecovery: checkpointStore,
+            intervalMs: config.pumpIntervalMs,
+            onError: dependencies.onPumpError ?? ((error) => {
+                console.error("RunQueueCoordinator pump 推进失败", error);
+            }),
         },
     );
-    const queuePump = new RunQueuePump(coordinator, {
-        intervalMs:config.pumpIntervalMs,
-        onError:dependencies.onPumpError ?? ((error) => {
-            console.error("RunQueuePump 推进失败", error);
-        }),
-    });
+    const queuePump = coordinator;
     // N18：**仅在我们自己装配真实 Pi 运行时**（未注入 runtime）时注入会话引用
     // 可达性校验。注入式 runtime 是 demo / 测试替身，它们用的是合成引用
     // （如 `/tmp/demo-pi-session.jsonl`、`demo-session-<runId>`），不对应真实

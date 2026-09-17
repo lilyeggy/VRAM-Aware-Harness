@@ -19,9 +19,6 @@ import type {
     RunQueueCoordinator,
 } from "../scheduling/run-queue-coordinator.ts";
 import type {
-    RunQueuePump,
-} from "../scheduling/run-queue-pump.ts";
-import type {
     QueueEntry,
     SchedulerCapacity,
     TenantRunScheduler,
@@ -56,6 +53,13 @@ export interface StartupRecoveryCoordinator {
     recover():Promise<void>;
 }
 
+export interface QueuePump {
+    start(): void;
+    stop(): void;
+    stopAndDrain(): Promise<void>;
+    tick(): Promise<void>;
+}
+
 interface AgentListingStore {
     listForTenant(tenantId: string): readonly unknown[];
 }
@@ -74,7 +78,7 @@ export class HarnessApplication {
 
     constructor(
         private readonly coordinator: RunQueueCoordinator,
-        private readonly queuePump: RunQueuePump,
+        private readonly queuePump: QueuePump,
         private readonly runStore: RunStore,
         private readonly decisionStore: PolicyDecisionStore,
         private readonly scheduler: TenantRunScheduler,

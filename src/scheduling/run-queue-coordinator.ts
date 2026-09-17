@@ -65,6 +65,10 @@ export interface RunQueueCoordinatorOptions {
     readonly runStoreForRecovery?: Pick<RunStore, "listQueuedRuns" | "listEvents">;
     /** 启动恢复：读取 Checkpoint。 */
     readonly checkpointStoreForRecovery?: Pick<CheckpointStore, "get">;
+    /** 自动轮询间隔；未设置时只能手动 tick()。 */
+    readonly intervalMs?: number;
+    /** 自动轮询异常回调。 */
+    readonly onError?: (error: unknown) => void;
 }
 
 export function toQueueReasonCode(
@@ -162,6 +166,48 @@ export class RunQueueCoordinator  {
         private drainRequested = false, // 正在运行期间，是否又收到了新的推进请求
         private readonly options: RunQueueCoordinatorOptions = {},
     ) {}
+
+    private timer: ReturnType<typeof setInterval> | null = null;
+    private inFlight: Promise<void> | null = null;
+
+    start(): void {
+        if (this.timer !== null || this.options.intervalMs === undefined) return;
+        this.timer = setInterval(() => {
+            void this.tick();
+        }, this.options.intervalMs);
+        void this.tick();
+    }
+
+    stop(): void {
+        if (this.timer === null) return;
+        clearInterval(this.timer);
+        this.timer = null;
+    }
+
+    async stopAndDrain(): Promise<void> {
+        this.stop();
+        while (this.inFlight !== null) {
+            await this.inFlight;
+        }
+    }
+
+    async tick(): Promise<void> {
+        const work = (async () => {
+            try {
+                await this.drain();
+            } catch (error) {
+                this.options.onError?.(error);
+            }
+        })();
+        this.inFlight = work;
+        try {
+            await work;
+        } finally {
+            if (this.inFlight === work) {
+                this.inFlight = null;
+            }
+        }
+    }
 
     /**
      * 支柱 3：一级排队超时（Queue TTL）。

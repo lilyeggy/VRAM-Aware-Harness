@@ -27,7 +27,6 @@ import { RunStore } from "../../src/runs/runstore.ts";
 import {
     RunQueueCoordinator,
 } from "../../src/scheduling/run-queue-coordinator.ts";
-import { RunQueuePump } from "../../src/scheduling/run-queue-pump.ts";
 import {
     TenantRunScheduler,
 } from "../../src/scheduling/tenant-run-scheduler.ts";
@@ -190,11 +189,10 @@ test("Day7：重启后恢复安全 Run，并在资源恢复时自动推进全部
             {
                 runStoreForRecovery: runStore,
                 checkpointStoreForRecovery: checkpointStore,
+                intervalMs: 60_000,
             },
         );
-        const queuePump = new RunQueuePump(coordinator, {
-            intervalMs:60_000,
-        });
+        const queuePump = coordinator;
         const recoveryService = new RecoveryService(
             runStore,
             toolStore,

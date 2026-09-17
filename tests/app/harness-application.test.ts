@@ -28,9 +28,6 @@ import {
     RunQueueCoordinator,
 } from "../../src/scheduling/run-queue-coordinator.ts";
 import {
-    RunQueuePump,
-} from "../../src/scheduling/run-queue-pump.ts";
-import {
     TenantRunScheduler,
 } from "../../src/scheduling/tenant-run-scheduler.ts";
 import {
@@ -81,14 +78,18 @@ function createApplication(
         scheduler,
         admission,
     );
-    const queuePump = new RunQueuePump({
-        async drain() {
+    const queuePump = {
+        start() {
             lifecycleEvents.push("pump:drain");
-            return coordinator.drain();
+            void coordinator.drain();
         },
-    }, {
-        intervalMs: 60_000,
-    });
+        stop() {},
+        async stopAndDrain() {},
+        async tick() {
+            lifecycleEvents.push("pump:drain");
+            await coordinator.drain();
+        },
+    };
     const decisionStore = new PolicyDecisionStore(db);
     const resourceObserver = new FakeResourceObserver({
         ok: false,
