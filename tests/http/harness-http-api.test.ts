@@ -9,10 +9,6 @@ import {
     type HttpAccessControl,
 } from "../../src/http/harness-http-api.ts";
 import type {
-    PolicyConstraints,
-    PolicyLayer,
-} from "../../src/policies/effective-policy.ts";
-import type {
     ToolExecution,
 } from "../../src/tools/tool-execution.ts";
 import type {
@@ -56,19 +52,6 @@ function createApi(
     let currentRun = createRun();
     let submittedInput:StartRunInput | null = null;
     let resumeInput:ResumeRunInput | null = null;
-    // N15/N16：策略管理面与人工消解的观测点。
-    const unrestricted: PolicyConstraints = {
-        allowedTools: null,
-        allowedSkills: null,
-        allowedModels: null,
-        workspaceRoots: null,
-        allowNetwork: true,
-        allowProcess: true,
-        allowedSecrets: null,
-        resourceLimits: { cpuCores: null, memoryMiB: null, diskMiB: null },
-    };
-    let platformPolicy: PolicyLayer = { ...unrestricted, id: "platform:default", kind: "PLATFORM" };
-    let tenantPolicy: PolicyLayer = { ...unrestricted, id: "tenant:tenant-http:default", kind: "TENANT" };
     let preparedExecutions: ToolExecution[] = [];
     let resolveInput: { runId: string; resolution: string; note?: string; actor: string | null } | null = null;
     const event:RunEvent = {
@@ -178,20 +161,6 @@ function createApi(
             };
             return currentRun;
         },
-        getPlatformPolicy() {
-            return platformPolicy;
-        },
-        getTenantPolicy(tenantId) {
-            return tenantId === currentRun.tenantId ? tenantPolicy : tenantPolicy;
-        },
-        setPlatformPolicy(id, policy) {
-            platformPolicy = { ...policy, id, kind: "PLATFORM" };
-            return true;
-        },
-        setTenantPolicy(_tenantId, id, policy) {
-            tenantPolicy = { ...policy, id, kind: "TENANT" };
-            return true;
-        },
         getRunUnknownEffects(runId) {
             return runId === currentRun.id ? preparedExecutions : [];
         },
@@ -221,8 +190,6 @@ function createApi(
         getSubmittedInput:() => submittedInput,
         getResolveInput:() => resolveInput,
         setPreparedExecutions:(executions: ToolExecution[]) => { preparedExecutions = executions; },
-        getPlatformPolicy:() => platformPolicy,
-        getTenantPolicy:() => tenantPolicy,
     };
 }
 
@@ -557,58 +524,6 @@ function createToolExecution(overrides: Partial<ToolExecution> = {}): ToolExecut
     };
 }
 
-test("N15：PUT /admin/policies/tenants/:id 落地租户资源限额与授权 Secret", async () => {
-    const { api, getTenantPolicy } = createApi();
-
-    const response = await api.fetch(new Request(
-        "http://harness.local/admin/policies/tenants/tenant-http",
-        {
-            method: "PUT",
-            headers: { "content-type": "application/json" },
-            body: JSON.stringify({
-                policy: {
-                    allowedTools: ["read", "bash"],
-                    allowedSecrets: ["GITHUB_TOKEN"],
-                    allowNetwork: false,
-                    resourceLimits: { cpuCores: 1.5, memoryMiB: 1024 },
-                },
-            }),
-        },
-    ));
-
-    expect(response.status).toBe(200);
-    const body = await jsonBody<{ tenant: PolicyLayer }>(response);
-    expect(body.tenant.allowedTools).toEqual(["read", "bash"]);
-    expect(body.tenant.allowedSecrets).toEqual(["GITHUB_TOKEN"]);
-    expect(body.tenant.allowNetwork).toBe(false);
-    expect(body.tenant.resourceLimits).toEqual({ cpuCores: 1.5, memoryMiB: 1024, diskMiB: null });
-    expect(getTenantPolicy().resourceLimits.memoryMiB).toBe(1024);
-});
-
-test("N15：GET /admin/policies 返回平台层与租户层", async () => {
-    const { api } = createApi();
-
-    const response = await api.fetch(new Request("http://harness.local/admin/policies"));
-    expect(response.status).toBe(200);
-    const body = await jsonBody<{ platform: PolicyLayer; tenant: PolicyLayer }>(response);
-    expect(body.platform.kind).toBe("PLATFORM");
-    expect(body.tenant.kind).toBe("TENANT");
-});
-
-test("N15：策略字段类型错误 → 400，不静默降级成无限额", async () => {
-    const { api } = createApi();
-
-    const response = await api.fetch(new Request(
-        "http://harness.local/admin/policies/tenants/tenant-http",
-        {
-            method: "PUT",
-            headers: { "content-type": "application/json" },
-            body: JSON.stringify({ policy: { resourceLimits: { memoryMiB: "1024" } } }),
-        },
-    ));
-
-    expect(response.status).toBe(400);
-});
 
 test("N15：POST /runs 的 runPolicy 透传到 StartRunInput（此前无产品调用方）", async () => {
     const { api, getSubmittedInput } = createApi();
@@ -630,39 +545,6 @@ test("N15：POST /runs 的 runPolicy 透传到 StartRunInput（此前无产品�
     expect(submitted?.runPolicy?.resourceLimits.cpuCores).toBe(2);
 });
 
-test("N15：非通配 scope 不能改别的租户（404）；缺写权限 → 403", async () => {
-    const scoped = createApi(undefined, {
-        authenticate(rawKey: string) {
-            if (rawKey === "other-tenant-key") {
-                return { tenantId: "tenant-other", scopes: ["policies:read", "policies:write"] };
-            }
-            if (rawKey === "readonly-key") {
-                return { tenantId: "tenant-http", scopes: ["policies:read"] };
-            }
-            return null;
-        },
-    } as unknown as HttpAccessControl);
-
-    const denied = await scoped.api.fetch(new Request(
-        "http://harness.local/admin/policies/tenants/tenant-http",
-        {
-            method: "PUT",
-            headers: { "content-type": "application/json", authorization: "Bearer other-tenant-key" },
-            body: JSON.stringify({ policy: { allowNetwork: false } }),
-        },
-    ));
-    expect(denied.status).toBe(404);
-
-    const forbidden = await scoped.api.fetch(new Request(
-        "http://harness.local/admin/policies/tenants/tenant-http",
-        {
-            method: "PUT",
-            headers: { "content-type": "application/json", authorization: "Bearer readonly-key" },
-            body: JSON.stringify({ policy: { allowNetwork: false } }),
-        },
-    ));
-    expect(forbidden.status).toBe(403);
-});
 
 // ---------------------------------------------------------------------------
 // N16：UNKNOWN_EFFECT 的人工消解出口

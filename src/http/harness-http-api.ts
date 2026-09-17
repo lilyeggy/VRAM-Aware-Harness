@@ -62,10 +62,6 @@ export interface HarnessHttpApplication {
     interruptRun(runId:string):Promise<AgentRun>;
     resumeRun(input:ResumeRunInput):AgentRun;
     /** N15：策略管理面（读写租户/平台策略层）。未装配时相关路由返回 503。 */
-    getPlatformPolicy?():PolicyLayer | null;
-    getTenantPolicy?(tenantId:string):PolicyLayer | null;
-    setPlatformPolicy?(id:string, policy:PolicyConstraints):boolean;
-    setTenantPolicy?(tenantId:string, id:string, policy:PolicyConstraints):boolean;
     /** N16：UNKNOWN_EFFECT 的人工消解出口。 */
     getRunUnknownEffects?(runId:string):ToolExecution[];
     resolveUnknownEffect?(
@@ -303,12 +299,6 @@ export class HarnessHttpApi {
             }
         }
 
-        // N15：策略管理面——租户资源限额与授权 Secret 的配置入口。
-        // 此前 PolicyRegistry.setTenantPolicy/setPlatformPolicy 只被测试调用，
-        // 真实产品路径没有任何地方能表达"受限租户"。
-        if (segments[0] === "admin" && segments[1] === "policies") {
-            return this.handlePolicyAdmin(request, segments);
-        }
 
         if (
             request.method === "POST"
@@ -776,95 +766,6 @@ export class HarnessHttpApi {
      * 读用 `policies:read`，写用 `policies:write`；非通配 scope 的调用方
      * 只能读写自己租户的策略，避免越权改配额或授权 Secret。
      */
-    private async handlePolicyAdmin(
-        request:Request,
-        segments:readonly string[],
-    ):Promise<Response> {
-        const principal = this.requirePrincipal(request, "policies:read");
-        const platform = this.application.getPlatformPolicy?.();
-
-        if (request.method === "GET" && segments.length === 2) {
-            if (platform === undefined) {
-                throw new HttpError(503, "策略管理面未装配");
-            }
-            return jsonResponse({
-                platform,
-                tenant: this.application.getTenantPolicy?.(principal.tenantId) ?? null,
-            });
-        }
-
-        if (segments.length === 3 && segments[2] === "platform") {
-            const writer = this.requirePrincipal(request, "policies:write");
-
-            if (request.method === "GET") {
-                if (platform === undefined) {
-                    throw new HttpError(503, "策略管理面未装配");
-                }
-                return jsonResponse({ platform });
-            }
-
-            if (request.method === "PUT") {
-                const body = await readJsonObject(request);
-                const policy = parsePolicyConstraints(body.policy, "policy");
-                const applied = this.application.setPlatformPolicy?.(
-                    "platform:http-admin",
-                    policy,
-                ) ?? false;
-
-                if (!applied) {
-                    throw new HttpError(503, "策略管理面未装配");
-                }
-                this.audit("PLATFORM_POLICY_SET", "ALLOW", writer, "platform_policy_updated");
-                return jsonResponse({
-                    platform: this.application.getPlatformPolicy?.() ?? null,
-                });
-            }
-
-            throw new HttpError(405, "不支持的请求方法");
-        }
-
-        if (segments.length === 4 && segments[2] === "tenants") {
-            const tenantId = segments[3] ?? "";
-            const writer = this.requirePrincipal(request, "policies:write");
-            const isWildcard = writer.scopes.includes("*");
-
-            if (!isWildcard && writer.tenantId !== tenantId) {
-                this.audit("TENANT_POLICY_ACCESS", "DENY", writer, "tenant_not_owned");
-                throw new HttpError(404, `找不到租户：${tenantId}`);
-            }
-
-            if (request.method === "GET") {
-                const tenantPolicy = this.application.getTenantPolicy?.(tenantId);
-
-                if (tenantPolicy === undefined || tenantPolicy === null) {
-                    throw new HttpError(503, "策略管理面未装配");
-                }
-                return jsonResponse({ tenant: tenantPolicy });
-            }
-
-            if (request.method === "PUT") {
-                const body = await readJsonObject(request);
-                const policy = parsePolicyConstraints(body.policy, "policy");
-                const applied = this.application.setTenantPolicy?.(
-                    tenantId,
-                    `tenant:${tenantId}:http-admin`,
-                    policy,
-                ) ?? false;
-
-                if (!applied) {
-                    throw new HttpError(503, "策略管理面未装配");
-                }
-                this.audit("TENANT_POLICY_SET", "ALLOW", writer, `tenant_policy_updated:${tenantId}`);
-                return jsonResponse({
-                    tenant: this.application.getTenantPolicy?.(tenantId) ?? null,
-                });
-            }
-
-            throw new HttpError(405, "不支持的请求方法");
-        }
-
-        throw new HttpError(404, "找不到 HTTP 路由");
-    }
 
     private getRequiredRun(
         runId:string,

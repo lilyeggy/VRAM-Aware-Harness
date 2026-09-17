@@ -275,30 +275,6 @@ export class HarnessApplication {
         return this.coordinator.interrupt(runId);
     }
 
-    // ------------------------------------------------------------------
-    // N15：策略管理面。HTTP /admin/policies 背后的读写入口。
-    // 注册表未装配时 get* 返回 null、set* 返回 false，由协议层决定 503。
-    // ------------------------------------------------------------------
-
-    getPlatformPolicy():PolicyLayer | null {
-        return this.policyRegistry?.getPlatformPolicy() ?? null;
-    }
-
-    getTenantPolicy(tenantId:string):PolicyLayer | null {
-        return this.policyRegistry?.getTenantPolicy(tenantId) ?? null;
-    }
-
-    setPlatformPolicy(id:string, policy:PolicyConstraints):boolean {
-        if (this.policyRegistry === undefined) return false;
-        this.policyRegistry.setPlatformPolicy(id, policy);
-        return true;
-    }
-
-    setTenantPolicy(tenantId:string, id:string, policy:PolicyConstraints):boolean {
-        if (this.policyRegistry === undefined) return false;
-        this.policyRegistry.setTenantPolicy(tenantId, id, policy);
-        return true;
-    }
 
     // ------------------------------------------------------------------
     // N16：UNKNOWN_EFFECT 的人工消解出口。
