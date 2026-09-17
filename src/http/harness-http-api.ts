@@ -28,7 +28,6 @@ import type { RunOutputChunk } from "../runs/run-output-store.ts";
 import type { WorkspaceDiff } from "../workspaces/workspace-snapshot.ts";
 import type { RunArtifact } from "../workspaces/run-artifact-store.ts";
 import type { AccessAuditStore } from "../audit/access-audit-store.ts";
-import type { EvaluationAggregator } from "../eval/evaluation-aggregator.ts";
 import type { LlmGateway } from "../llm-gateway/llm-gateway.ts";
 import { platformDashboardResponse } from "./harness-platform-dashboard.ts";
 import { userConsoleResponse } from "./harness-user-console.ts";
@@ -116,7 +115,6 @@ export class HarnessHttpApi {
         private readonly application:HarnessHttpApplication,
         private readonly checkpointLookup:CheckpointLookup,
         private readonly accessControl?:HttpAccessControl,
-        private readonly evaluation?:EvaluationAggregator,
         private readonly llmGateway?:LlmGateway,
         private readonly resourceMetrics?: ResourceMetricsSampler,
         private readonly limits?: { maxUserInputChars: number },
@@ -268,51 +266,6 @@ export class HarnessHttpApi {
                 }
                 case "audit":
                     return this.listAuditEvents(request);
-                case "eval": {
-                    if (this.evaluation === undefined) {
-                        throw new HttpError(503, "评测能力未启用");
-                    }
-                    // 无认证模式（本地/演示）可用 ?tenant= 过滤；有认证则按租户隔离。
-                    if (this.accessControl === undefined) {
-                        const evaluation = this.evaluation;
-                        const tenantFilter =
-                            url.searchParams.get("tenant") ?? undefined;
-                        const runs = evaluation.listRunMetrics(tenantFilter);
-                        const tenants = evaluation.listTenants();
-                        // 每个租户各自的指标，供观测页画租户对比图。
-                        const perTenant = tenants.map((t) => ({
-                            tenant: t,
-                            summary: evaluation.summarize(
-                                evaluation.listRunMetrics(t),
-                            ),
-                        }));
-                        return jsonResponse({
-                            scope: tenantFilter ?? "all-tenants",
-                            tenants,
-                            perTenant,
-                            executionQuality: evaluation.summarize(runs),
-                            resourceAdmission:
-                                this.evaluation.computeResourceEvaluation(
-                                    tenantFilter,
-                                ),
-                            runs,
-                        });
-                    }
-                    const principal =
-                        this.requirePrincipal(request, "tasks:read");
-                    const runs =
-                        this.evaluation.listRunMetrics(principal.tenantId);
-                    return jsonResponse({
-                        scope: principal.tenantId,
-                        tenants: [principal.tenantId],
-                        executionQuality: this.evaluation.summarize(runs),
-                        resourceAdmission:
-                            this.evaluation.computeResourceEvaluation(
-                                principal.tenantId,
-                            ),
-                        runs,
-                    });
-                }
             }
         }
 

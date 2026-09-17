@@ -84,10 +84,6 @@ import {
     TenantRunScheduler,
 } from "../scheduling/tenant-run-scheduler.ts";
 import { openHarnessDatabase } from "../storage/database.ts";
-import { EvaluationAggregator } from "../eval/evaluation-aggregator.ts";
-import {
-    LlmCacheMetricsStore,
-} from "../eval/llm-cache-metrics-store.ts";
 import { ModelRouter } from "../llm-gateway/model-router.ts";
 import { LlmGateway } from "../llm-gateway/llm-gateway.ts";
 import {
@@ -145,7 +141,6 @@ export interface HarnessComposition {
     /** 支柱 2：后端健康探测（网关未启用或探测周期为 0 时为 undefined）。 */
     llmHealthMonitor:BackendHealthMonitor | undefined;
     /** 支柱 2：缓存命中指标持久化台账（网关未启用时为 undefined）。 */
-    llmCacheMetricsStore:LlmCacheMetricsStore | undefined;
     /** 支柱 3：恢复执行器（含 MANUAL_REVIEW 审计与 fail-closed 重校验）。 */
     recoveryExecutor:RecoveryExecutor;
     close():Promise<void>;
@@ -459,7 +454,6 @@ export async function createHarnessApplication(
         // N16：UNKNOWN_EFFECT 人工消解需要读写 tool_executions。
         toolExecutionStore,
     );
-    const evaluationAggregator = new EvaluationAggregator(database);
     // Separate observer instance: token-rate counters must not race admission probes.
     const resourceMetrics = new ResourceMetricsSampler(dependencies.resourceObserver ?? new VllmResourceObserver({
         metricsUrl: config.vllmMetricsUrl,
@@ -472,16 +466,11 @@ export async function createHarnessApplication(
     // - 缓存命中：cached_tokens 样本同步落 SQLite（llm_cache_metrics）。
     let llmGateway:LlmGateway | undefined;
     let llmHealthMonitor:BackendHealthMonitor | undefined;
-    let llmCacheMetricsStore:LlmCacheMetricsStore | undefined;
     if (config.llmBackends.length > 0) {
         const llmRouter = new ModelRouter(config.llmBackends, {
             loadBalancing: config.llmGatewayStrategy,
         });
-        llmCacheMetricsStore = new LlmCacheMetricsStore(database);
         llmGateway = new LlmGateway(llmRouter, {
-            cacheSampleSink: (sample) => {
-                llmCacheMetricsStore?.record(sample);
-            },
             prefixCacheEnabled: config.llmPrefixCacheEnabled,
             streamUsageCapture: config.llmStreamUsageCapture,
             requestTimeoutMs: config.llmRequestTimeoutMs,
@@ -512,7 +501,6 @@ export async function createHarnessApplication(
             workspaceService,
             auditStore: accessAuditStore,
         },
-        evaluationAggregator,
         llmGateway,
         resourceMetrics,
         // N8：提交期输入上界。
@@ -552,7 +540,6 @@ export async function createHarnessApplication(
         resourceObserver,
         llmGateway,
         llmHealthMonitor,
-        llmCacheMetricsStore,
         recoveryExecutor,
         async close() {
             if (closed) {

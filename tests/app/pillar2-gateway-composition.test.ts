@@ -77,8 +77,6 @@ test("支柱 2：组合根装配双卡网关、健康探测与缓存台账并放
     try {
         expect(composition.llmGateway).toBeDefined();
         expect(composition.llmHealthMonitor).toBeDefined();
-        expect(composition.llmCacheMetricsStore).toBeDefined();
-
         // 并发放开：默认 30 全局 / 10 每租户。
         expect(config.maxActiveRuns).toBe(30);
         expect(config.maxActiveRunsPerTenant).toBe(10);
@@ -110,16 +108,6 @@ test("支柱 2：组合根装配双卡网关、健康探测与缓存台账并放
         expect(states["vllm-gpu0"]!.healthy).toBe(true);
         expect(states["vllm-gpu1"]!.healthy).toBe(true);
 
-        // 缓存命中指标持久化到 SQLite，并可从评测聚合器读取。
-        const metrics = composition.llmCacheMetricsStore!.aggregate();
-        expect(metrics.totalRequests).toBe(2);
-        expect(metrics.cachedTokensTotal).toBe(160);
-        const evalMetrics = new (await import(
-            "../../src/eval/evaluation-aggregator.ts"
-        )).EvaluationAggregator(composition.database);
-        expect(evalMetrics.computeLlmCacheMetrics().totalRequests).toBe(2);
-        expect(evalMetrics.computeLlmCacheMetrics().cacheHitRate)
-            .toBeCloseTo(160 / 200);
     } finally {
         await composition.close();
         globalThis.fetch = originalFetch;

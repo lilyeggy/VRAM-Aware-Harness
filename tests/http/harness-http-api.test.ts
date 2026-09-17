@@ -219,7 +219,7 @@ function createApi(
                     ? checkpoint
                     : null;
             },
-        }, accessControl, undefined, undefined, undefined, limits),
+        }, accessControl, undefined, undefined, limits),
         getResumeInput:() => resumeInput,
         getSubmittedInput:() => submittedInput,
         getResolveInput:() => resolveInput,
@@ -420,7 +420,6 @@ test("LLM 网关入口走统一身份主干：无 key 401、作用域不足 403�
                 : null,
             workspaceService: {} as never,
         },
-        undefined,
         fakeGateway as never,
     );
 
