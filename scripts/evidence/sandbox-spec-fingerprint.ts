@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
-import type { ResourceLimits } from "../policies/effective-policy.ts";
-import type { SandboxSpec } from "../sandbox/sandbox-profile.ts";
+import type { ResourceLimits } from "../../src/policies/effective-policy.ts";
+import type { SandboxSpec } from "../../src/sandbox/sandbox-profile.ts";
 
 /**
  * Deterministic, canonical serialization of the isolation-relevant facts of a

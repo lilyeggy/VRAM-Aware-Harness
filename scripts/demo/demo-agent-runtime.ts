@@ -4,7 +4,7 @@ import type {
     RuntimeEventHandler,
     RuntimeResumeRequest,
     RuntimeStartRequest,
-} from "../runtime/agent-runtime.ts";
+} from "../../src/runtime/agent-runtime.ts";
 
 /** 只用于本地演示控制流，不发起任何模型或工具请求。 */
 export class DemoAgentRuntime implements AgentRuntime {

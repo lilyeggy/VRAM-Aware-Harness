@@ -1,5 +1,5 @@
-import type { EffectivePolicySnapshot } from "../policies/effective-policy.ts";
-import type { SandboxRuntimeEvidence } from "../sandbox/sandbox-profile.ts";
+import type { EffectivePolicySnapshot } from "../../src/policies/effective-policy.ts";
+import type { SandboxRuntimeEvidence } from "../../src/sandbox/sandbox-profile.ts";
 import { policyBoundaryFingerprint } from "./policy-boundary-fingerprint.ts";
 
 /**

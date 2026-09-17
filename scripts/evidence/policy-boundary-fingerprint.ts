@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import type { EffectivePolicySnapshot } from "../policies/effective-policy.ts";
+import type { EffectivePolicySnapshot } from "../../src/policies/effective-policy.ts";
 
 /**
  * Canonical serialization of the *isolation-relevant* fields of an effective

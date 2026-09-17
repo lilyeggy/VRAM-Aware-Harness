@@ -6,19 +6,19 @@ import type { SandboxRuntimeEvidence, SandboxSpec } from "../src/sandbox/sandbox
 import type { EffectivePolicySnapshot } from "../src/policies/effective-policy.ts";
 import {
     fingerprintSandboxSpec,
-} from "../src/evidence/sandbox-spec-fingerprint.ts";
+} from "./evidence/sandbox-spec-fingerprint.ts";
 import {
     makeEnvironmentFingerprint,
     probeCpuVirt,
-} from "../src/evidence/environment-fingerprint.ts";
+} from "./evidence/environment-fingerprint.ts";
 import {
     runEvidenceChecks,
     type IsolationEvidence,
-} from "../src/evidence/isolation-evidence.ts";
+} from "./evidence/isolation-evidence.ts";
 import {
     buildIsolationTriple,
     verifyIsolationTriple,
-} from "../src/evidence/isolation-triple.ts";
+} from "./evidence/isolation-triple.ts";
 
 /**
  * Isolation evidence report (regression gate).

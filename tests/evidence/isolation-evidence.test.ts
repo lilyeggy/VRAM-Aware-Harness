@@ -7,16 +7,16 @@ import type { SandboxRuntimeEvidence, SandboxSpec } from "../../src/sandbox/sand
 import {
     canonicalSandboxSpec,
     fingerprintSandboxSpec,
-} from "../../src/evidence/sandbox-spec-fingerprint.ts";
+} from "../../scripts/evidence/sandbox-spec-fingerprint.ts";
 import {
     makeEnvironmentFingerprint,
     probeCpuVirt,
-} from "../../src/evidence/environment-fingerprint.ts";
+} from "../../scripts/evidence/environment-fingerprint.ts";
 import {
     defaultEvidenceChecks,
     runEvidenceChecks,
     type IsolationEvidence,
-} from "../../src/evidence/isolation-evidence.ts";
+} from "../../scripts/evidence/isolation-evidence.ts";
 
 function makeSpec(overrides: Partial<SandboxSpec> = {}): SandboxSpec {
     return {

@@ -3,7 +3,7 @@ import { expect, test } from "bun:test";
 import {
     formatDay7FakeDemoReport,
     runDay7FakeDemo,
-} from "../../src/demo/day7-fake-demo.ts";
+} from "../../scripts/demo/day7-fake-demo.ts";
 
 test("demo:day7 输出资源排队、重启恢复和完整审计证据", async () => {
     const report = await runDay7FakeDemo();

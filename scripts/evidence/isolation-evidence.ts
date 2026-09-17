@@ -1,4 +1,4 @@
-import type { SandboxRuntimeEvidence } from "../sandbox/sandbox-profile.ts";
+import type { SandboxRuntimeEvidence } from "../../src/sandbox/sandbox-profile.ts";
 import type { EnvironmentFingerprint } from "./environment-fingerprint.ts";
 
 export type EvidenceStatus = "PASS" | "WARN" | "FAIL" | "INFO";

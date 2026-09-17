@@ -13,8 +13,6 @@ export * from "./checkpoints/recovery-startup-coordinator.ts";
 export * from "./conversations/conversation.ts";
 export * from "./conversations/conversation-store.ts";
 
-export * from "./demo/day7-fake-demo.ts";
-export * from "./demo/demo-agent-runtime.ts";
 
 export * from "./events/run-event-timeline.ts";
 export * from "./events/runtime-event-bridge.ts";

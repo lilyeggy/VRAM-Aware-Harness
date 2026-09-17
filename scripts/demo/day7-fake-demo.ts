@@ -4,27 +4,27 @@ import { join } from "node:path";
 
 import {
     createHarnessApplication,
-} from "../app/create-harness-application.ts";
-import { loadHarnessConfig } from "../app/harness-config.ts";
-import { formatRunEventTimeline } from "../events/run-event-timeline.ts";
+} from "../../src/app/create-harness-application.ts";
+import { loadHarnessConfig } from "../../src/app/harness-config.ts";
+import { formatRunEventTimeline } from "../../src/events/run-event-timeline.ts";
 import type {
     PolicyDecision,
-} from "../resources/execution-policy.ts";
+} from "../../src/resources/execution-policy.ts";
 import type {
     ResourceObservation,
     ResourceObserver,
     ResourceSnapshot,
-} from "../resources/resource-observer.ts";
-import type { AgentRun } from "../runs/agent-run.ts";
-import { RunService } from "../runs/run-service.ts";
-import { RunStore } from "../runs/runstore.ts";
-import { openHarnessDatabase } from "../storage/database.ts";
+} from "../../src/resources/resource-observer.ts";
+import type { AgentRun } from "../../src/runs/agent-run.ts";
+import { RunService } from "../../src/runs/run-service.ts";
+import { RunStore } from "../../src/runs/runstore.ts";
+import { openHarnessDatabase } from "../../src/storage/database.ts";
 import type {
     ToolExecution,
-} from "../tools/tool-execution.ts";
+} from "../../src/tools/tool-execution.ts";
 import {
     ToolExecutionStore,
-} from "../tools/tool-execution-store.ts";
+} from "../../src/tools/tool-execution-store.ts";
 import { DemoAgentRuntime } from "./demo-agent-runtime.ts";
 
 class DemoResourceObserver implements ResourceObserver {

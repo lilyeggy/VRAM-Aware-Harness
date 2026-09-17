@@ -13,7 +13,7 @@ import { createHarnessApplication } from "../src/app/create-harness-application.
 import { loadHarnessConfig } from "../src/app/harness-config.ts";
 import { startHarnessHttpServer } from "../src/http/harness-http-server.ts";
 import type { ResourceObservation, ResourceObserver } from "../src/resources/resource-observer.ts";
-import { DemoAgentRuntime } from "../src/demo/demo-agent-runtime.ts";
+import { DemoAgentRuntime } from "./demo/demo-agent-runtime.ts";
 
 class FakeResourceObserver implements ResourceObserver {
     async observe(): Promise<ResourceObservation> {

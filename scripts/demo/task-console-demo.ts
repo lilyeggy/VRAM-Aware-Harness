@@ -1,9 +1,9 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { startHarnessProcess } from "../main.ts";
-import { loadHarnessConfig } from "../app/harness-config.ts";
-import type { ResourceObservation, ResourceObserver, ResourceSnapshot } from "../resources/resource-observer.ts";
+import { startHarnessProcess } from "../../src/main.ts";
+import { loadHarnessConfig } from "../../src/app/harness-config.ts";
+import type { ResourceObservation, ResourceObserver, ResourceSnapshot } from "../../src/resources/resource-observer.ts";
 import { DemoAgentRuntime } from "./demo-agent-runtime.ts";
 
 /**

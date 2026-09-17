@@ -2,13 +2,13 @@ import { expect, test } from "bun:test";
 import type { EffectivePolicySnapshot } from "../../src/policies/effective-policy.ts";
 import type { SandboxRuntimeEvidence, SandboxSpec } from "../../src/sandbox/sandbox-profile.ts";
 import { OciSandboxSpecCompiler } from "../../src/sandbox/oci-sandbox-spec.ts";
-import { fingerprintSandboxSpec } from "../../src/evidence/sandbox-spec-fingerprint.ts";
-import { policyBoundaryFingerprint } from "../../src/evidence/policy-boundary-fingerprint.ts";
+import { fingerprintSandboxSpec } from "../../scripts/evidence/sandbox-spec-fingerprint.ts";
+import { policyBoundaryFingerprint } from "../../scripts/evidence/policy-boundary-fingerprint.ts";
 import {
     buildIsolationTriple,
     verifyIsolationTriple,
     type IsolationTriple,
-} from "../../src/evidence/isolation-triple.ts";
+} from "../../scripts/evidence/isolation-triple.ts";
 
 function makePolicy(overrides: Partial<EffectivePolicySnapshot> = {}): EffectivePolicySnapshot {
     return {
