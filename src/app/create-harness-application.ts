@@ -456,7 +456,6 @@ export async function createHarnessApplication(
     // 支柱 2：LLM 网关（仅当配置了后端时启用）。
     // - 双卡负载均衡：策略来自 config.llmGatewayStrategy（默认 round-robin）；
     // - 健康探测：周期回填 ModelRouter 健康状态；
-    // - 缓存命中：cached_tokens 样本同步落 SQLite（llm_cache_metrics）。
     let llmGateway:LlmGateway | undefined;
     let llmHealthMonitor:BackendHealthMonitor | undefined;
     if (config.llmBackends.length > 0) {

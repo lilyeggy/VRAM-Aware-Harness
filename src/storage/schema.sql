@@ -121,17 +121,6 @@ CREATE TABLE harness_sessions (
                 updated_at TEXT NOT NULL
             );
 
-CREATE TABLE llm_cache_metrics (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                request_id TEXT NOT NULL,
-                backend_id TEXT NOT NULL,
-                logical_model TEXT NOT NULL,
-                prefix_cache_key TEXT,
-                prompt_tokens INTEGER,
-                cached_tokens INTEGER,
-                recorded_at TEXT NOT NULL
-            );
-
 CREATE TABLE "policy_decisions" (
                 decision_id TEXT PRIMARY KEY,
                 run_id TEXT NOT NULL,
@@ -454,13 +443,6 @@ CREATE INDEX idx_checkpoints_run_created
 
 CREATE INDEX idx_conversations_workspace_updated
                 ON conversations(tenant_id, workspace_id, updated_at DESC);
-
-
-CREATE INDEX idx_llm_cache_metrics_backend
-                ON llm_cache_metrics(backend_id, recorded_at);
-
-CREATE INDEX idx_llm_cache_metrics_recorded_at
-                ON llm_cache_metrics(recorded_at);
 
 CREATE INDEX idx_policy_snapshots_run
                 ON effective_policy_snapshots(run_id, created_at);
