@@ -604,7 +604,7 @@ async function failureWalkthrough(): Promise<void> {
             }
 
             const distinctPumpErrors = new Set(pumpErrors);
-            console.log(`\nRunQueuePump onError 触发次数 = ${pumpErrors.length}，去重后 = ${distinctPumpErrors.size}`);
+            console.log(`\nRunScheduler pump onError 触发次数 = ${pumpErrors.length}，去重后 = ${distinctPumpErrors.size}`);
             for (const message of distinctPumpErrors) {
                 console.log(`  ${message}`);
             }
