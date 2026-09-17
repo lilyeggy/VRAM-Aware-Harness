@@ -119,9 +119,6 @@ function createApi(
         getRunsForTenant(tenantId) {
             return tenantId === currentRun.tenantId ? [currentRun] : [];
         },
-        getAgentsForTenant() {
-            return [];
-        },
         getRunEvents(runId) {
             return runId === currentRun.id ? [event] : [];
         },
@@ -253,10 +250,6 @@ test("最小 HTTP API 覆盖提交、查询、中断、恢复、队列、资源�
     const readyResponse = await api.fetch(new Request("http://harness.local/ready"));
     expect(readyResponse.status).toBe(200);
     expect(await jsonBody<{ ready:boolean }>(readyResponse)).toEqual({ ready:true });
-
-    const agentsResponse = await api.fetch(new Request("http://harness.local/agents"));
-    expect(agentsResponse.status).toBe(200);
-    expect(await jsonBody<{ agents:unknown[] }>(agentsResponse)).toEqual({ agents:[] });
 
     const submitResponse = await api.fetch(new Request(
         "http://harness.local/runs",

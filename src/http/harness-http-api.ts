@@ -49,7 +49,6 @@ export interface HarnessHttpApplication {
     touchConversation?(id: string, tenantId: string): void;
     /** B6：会话归属查询；未提供时跳过会话抢注校验（兼容最小装配）。 */
     resolveSessionOwner?(harnessSessionId: string): string | null;
-    getAgentsForTenant?(tenantId:string):readonly unknown[];
     getRunEvents(runId:string):RunEvent[];
     getRunOutput(runId:string):{ chunks: RunOutputChunk[]; finalText: string; thinkingText?: string };
     getRunWorkspaceDiff(runId:string):WorkspaceDiff | null;
@@ -242,12 +241,6 @@ export class HarnessHttpApi {
                 }
                 case "queue":
                     return this.getQueue(request);
-                case "agents": {
-                    const principal = this.requirePrincipal(request, "tasks:read");
-                    return jsonResponse({
-                        agents:this.application.getAgentsForTenant?.(principal.tenantId) ?? [],
-                    });
-                }
                 case "workspaces":
                     return this.listWorkspaces(request);
                 case "resources": {

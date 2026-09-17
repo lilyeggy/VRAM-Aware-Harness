@@ -223,10 +223,6 @@ export class HarnessApplication {
         this.conversationStore?.touch(id, tenantId);
     }
 
-    getAgentsForTenant(tenantId: string): readonly unknown[] {
-        return this.instanceStore?.listForTenant(tenantId) ?? [];
-    }
-
     getRunEvents(runId:string):RunEvent[] {
         return this.runStore.listEvents(runId);
     }
