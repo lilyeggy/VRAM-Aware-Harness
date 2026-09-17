@@ -237,12 +237,8 @@ test("最小 HTTP API 覆盖提交、查询、中断、恢复、队列、资源�
     const { api, getResumeInput, getSubmittedInput } = createApi();
 
     const consoleResponse = await api.fetch(new Request("http://harness.local/"));
-    expect(consoleResponse.status).toBe(200);
-    const consoleHtml = await consoleResponse.text();
-    expect(consoleHtml).toContain("Agent Harbor");
-    expect(consoleHtml).toContain("多 Agent 执行工作台");
-    expect(consoleHtml).not.toContain("\\\\u63D0\\\\u4EA4");
-
+    expect(consoleResponse.status).toBe(302);
+    expect(consoleResponse.headers.get("location")).toBe("http://harness.local/app");
     const healthResponse = await api.fetch(new Request(
         "http://harness.local/health",
     ));

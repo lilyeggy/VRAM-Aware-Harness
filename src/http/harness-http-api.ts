@@ -29,7 +29,6 @@ import type { WorkspaceDiff } from "../workspaces/workspace-snapshot.ts";
 import type { RunArtifact } from "../workspaces/run-artifact-store.ts";
 import type { AccessAuditStore } from "../audit/access-audit-store.ts";
 import type { LlmGateway } from "../llm-gateway/llm-gateway.ts";
-import { platformDashboardResponse } from "./harness-platform-dashboard.ts";
 import { userConsoleResponse } from "./harness-user-console.ts";
 import type { Conversation } from "../conversations/conversation.ts";
 import type { PolicyConstraints, PolicyLayer, ResourceLimits } from "../policies/effective-policy.ts";
@@ -218,7 +217,7 @@ export class HarnessHttpApi {
         }
 
         if (request.method === "GET" && segments.length === 0) {
-            return platformDashboardResponse();
+            return Response.redirect(new URL("/app", request.url).toString(), 302);
         }
 
         // 用户工作台：面向最终用户的对话式任务页面（与运营控制台分离）。

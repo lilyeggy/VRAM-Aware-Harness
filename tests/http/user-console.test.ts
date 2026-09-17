@@ -82,7 +82,7 @@ test("用户工作台必须在提交在途时防重（N7 回归）", async () =>
     expect(script).toContain("btn.disabled = !!busy;");
 });
 
-test("GET /app 路由返回用户工作台，而 / 仍然是运营控制台", async () => {
+test("GET /app 返回用户工作台，/ 重定向到 /app", async () => {
     const application: HarnessHttpApplication = {
         isStarted: () => true,
         submitRun: () => {
@@ -118,8 +118,8 @@ test("GET /app 路由返回用户工作台，而 / 仍然是运营控制台", as
     expect(await userPage.text()).toContain("用户工作台");
 
     const operatorPage = await api.fetch(new Request("http://localhost/"));
-    expect(operatorPage.status).toBe(200);
-    expect(await operatorPage.text()).toContain("Agent Harbor");
+    expect(operatorPage.status).toBe(302);
+    expect(operatorPage.headers.get("location")).toBe("http://localhost/app");
 
     const missing = await api.fetch(new Request("http://localhost/app/nope"));
     expect(missing.status).toBe(404);
