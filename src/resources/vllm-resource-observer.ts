@@ -22,6 +22,12 @@ export interface VllmResourceObserverConfig {
 
 // vllm的原始观测内容
 // 其实对应了部分ResourceObservation里的内容
+// 注意这里面我们观测几个内容：
+// 1. 当前正在运行的请求（但是这个和我们的 run 并不是一一对应的关系，我们一个 run 可能对应多个requests）
+// 2. 正在等待的请求
+// 3. KV cache 占比
+// 4. 总共的prompt token
+// 5. 总生成的 token 数
 export interface VllmMetricsSample {
     runningRequests : number | null;
     waitingRequests : number | null;
@@ -31,6 +37,7 @@ export interface VllmMetricsSample {
     generationTokensTotal : number | null;
 }
 
+// 这个是从 nvidia-smi拿到的，主要是1. 总共的 GPU 显存 2. 已经使用的 GPU 显存 3. 空闲的 GPU 显存 4. GPU 使用占比
 interface NvidiaGpuSample {
     gpuTotalMemoryMiB : number;
     gpuUsedMemoryMiB : number;

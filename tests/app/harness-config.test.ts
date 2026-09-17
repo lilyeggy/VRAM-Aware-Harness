@@ -1,8 +1,11 @@
-import { expect, test } from "bun:test";
+import { describe, expect, test } from "bun:test";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 import {
     loadHarnessConfig,
 } from "../../src/app/harness-config.ts";
+import { tempWorkspaceEnv } from "../support/temp-workspace-root.ts";
 
 test("loadHarnessConfig 提供本地安全默认值并派生 metrics URL", () => {
     const config = loadHarnessConfig({
@@ -41,6 +44,7 @@ test("loadHarnessConfig 解析显式环境变量", () => {
     const config = loadHarnessConfig({
         VLLM_MODEL_ID:"qwen3.5-9b",
         VLLM_BASE_URL:"http://vllm.internal:9000/v1/",
+        ...tempWorkspaceEnv(),
         HARNESS_DATABASE_PATH:":memory:",
         HARNESS_HOST:"0.0.0.0",
         HARNESS_PORT:"8080",
@@ -63,6 +67,79 @@ test("loadHarnessConfig 解析显式环境变量", () => {
         piTools:["read", "grep"],
         piModelsPath:"/tmp/harness-project/config/models.json",
         vllmMetricsUrl:"http://vllm.internal:9000/metrics",
+    });
+});
+
+/**
+ * 回归：数据库与工作区根目录生命周期不一致，曾经产出 1339 个无人引用的空目录。
+ * 归属信息只存在于库里（workspaces.root_path），库一消失目录就成了孤儿。
+ * 根因不是有人忘了配，而是这套组合当时**允许被配出来**。
+ */
+describe("工作区根目录必须与数据库同生命周期", () => {
+    test("内存库不设 HARNESS_WORKSPACE_ROOT 时拒绝启动", () => {
+        expect(() => loadHarnessConfig({
+            VLLM_MODEL_ID:"fake-model",
+            HARNESS_DATABASE_PATH:":memory:",
+        })).toThrow("必须也指向系统临时目录");
+    });
+
+    test("内存库的工作区根目录落在仓库内时拒绝启动", () => {
+        expect(() => loadHarnessConfig({
+            VLLM_MODEL_ID:"fake-model",
+            HARNESS_DATABASE_PATH:":memory:",
+            HARNESS_WORKSPACE_ROOT:"data/workspaces",
+        }, "/tmp/harness-project")).toThrow("必须也指向系统临时目录");
+    });
+
+    test("临时文件库的工作区根目录落在仓库内时同样拒绝启动", () => {
+        // 这条对应真实的漏网案例：库放临时目录、工作区却回落到仓库默认值。
+        // 只检查 :memory: 是不够的——临时文件库一样会让归属记录随进程消失。
+        expect(() => loadHarnessConfig({
+            VLLM_MODEL_ID:"fake-model",
+            HARNESS_DATABASE_PATH:join(tmpdir(), "harness-probe", "harness.db"),
+        }, "/tmp/harness-project")).toThrow("必须也指向系统临时目录");
+    });
+
+    test("持久库配临时工作区根目录时也拒绝启动（反向不一致）", () => {
+        // 刻意不用 /tmp：在 Linux 上 tmpdir() 就是 /tmp，会被判成临时路径，
+        // 这条用例就失去意义了。用一个两边都不在临时目录下的绝对路径。
+        expect(() => loadHarnessConfig({
+            VLLM_MODEL_ID:"fake-model",
+            HARNESS_DATABASE_PATH:"/var/lib/harness/harness.sqlite",
+            ...tempWorkspaceEnv(),
+        }, "/tmp/harness-project")).toThrow("系统会清理临时目录");
+    });
+
+    test("两者都在临时目录时放行", () => {
+        const config = loadHarnessConfig({
+            VLLM_MODEL_ID:"fake-model",
+            HARNESS_DATABASE_PATH:":memory:",
+            ...tempWorkspaceEnv(),
+        });
+
+        expect(config.workspaceRoot.startsWith(tmpdir())).toBe(true);
+        expect(config.workspaceRoot).not.toBe(join(process.cwd(), "data/workspaces"));
+    });
+
+    test("两者都是持久路径时放行，仍回落到仓库内默认值", () => {
+        const config = loadHarnessConfig({
+            VLLM_MODEL_ID:"fake-model",
+            HARNESS_DATABASE_PATH:"/tmp/harness-project/data/harness.sqlite",
+        }, "/tmp/harness-project");
+
+        expect(config.workspaceRoot).toBe("/tmp/harness-project/data/workspaces");
+    });
+
+    test("生产式部署布局（库与工作区同在生产目录下）放行", () => {
+        // 部署样例把两者都放在 runtime/ 之下：既不在 cwd 也不在临时目录。
+        // 判据必须是「临时目录」而不是「仓库外」，否则会误伤这种正常配置。
+        const config = loadHarnessConfig({
+            VLLM_MODEL_ID:"fake-model",
+            HARNESS_DATABASE_PATH:"/home/cxr/harness-deploy/runtime/harness.sqlite",
+            HARNESS_WORKSPACE_ROOT:"/home/cxr/harness-deploy/runtime/workspaces",
+        }, "/tmp/harness-project");
+
+        expect(config.workspaceRoot).toBe("/home/cxr/harness-deploy/runtime/workspaces");
     });
 });
 

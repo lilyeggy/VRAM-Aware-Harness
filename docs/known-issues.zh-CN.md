@@ -27,7 +27,7 @@
 | B5 | TOCTOU 归档窗口：`claimNext` 与 release+re-enqueue 之间崩溃，Run 脱离内存队列但 DB 仍 QUEUED，进程内不自动补 | 手册 14.5 ④ | **FIXED**（2026-09-09，见 §9） |
 | B6 | `harnessSessionId` 客户端可自选 → 会话抢注/撞车 DoS | 手册 14.5 ① | **FIXED**（2026-09-09，见 §9） |
 | B7 | 租户预算子系统未接线：组合根只用 `DeterministicExecutionPolicy`，`TENANT_BUDGET_EXCEEDED` 为生产死代码，账本内存态 | `src/app/create-harness-application.ts:307-315` | **FIXED**（2026-09-09，见 §9） |
-| B8 | Secret 值经 `docker run` argv 注入，同用户进程可从 /proc 读到 | `src/sandbox/container-sandbox-provider.ts:263-266` | OPEN |
+| B8 | Secret 值经 `docker run` argv 注入，同用户进程可从 /proc 读到 | `src/sandbox/container-sandbox-provider.ts:263-266` | **FIXED**（N13：改为执行期 `docker exec --env NAME`，明文不入 argv、不写容器 `Config.Env`；2026-09-16 状态更正，详见 §14） |
 | B9 | Worker 容器绑定靠命名约定 `agent-harness-${sandboxId}`；`EphemeralSandboxStore` 经 `as unknown as SandboxStore` 强转 | `src/worker/worker-main.ts:111-132` | OPEN |
 | B10 | 会话串行化导致租户内队头阻塞（同会话 Run 永不并发，设计使然但需明示） | `src/scheduling/tenant-run-scheduler.ts:189-196, 233-238` | WONTFIX（设计选择） |
 | B11 | 调度启动与并发中断竞态：`executeQueuedRun`/`executeQueuedResume` 读到 QUEUED 后无条件写 RUNNING，用户恰在此时中断排队中的 Run（或准入 DEFER 重入队后再次被claim）即撞状态机 `INTERRUPTED -> RUNNING` 非法转换，pump 每轮推进报"RunQueuePump 推进失败" | `src/runs/run-service.ts`（executeQueuedRun/executeQueuedResume） | **FIXED**（2026-09-10 A6000 真机 harness.log 抓到，见 §11） |
@@ -955,4 +955,74 @@ drain"。而关闭顺序是 `application.stop()` → `llmHealthMonitor.stop()` �
   跑测脚本，有既存的严格模式告警（不由本轮引入）。
 - **未做真机复验**：以上 7 项都在本地确定性环境验证（含构造出的 SSE 截断流、HTTP 路由、
   调度器单测、OCI argv 断言）。N5/N10/N27 在真机上的行为变化尚未重跑 campaign。
+
+## §26 N29 修复记录：预热池遗留容器永不回收（2026-09-16，A6000 真机验证）
+
+用户在过执行层流程时追问一个细节："改了端口重启，上一次留下的预热容器还会被清掉吗？"
+顺着这条线核代码，发现 `ContainerWarmPool.initialize()` 的清场条件永远匹配不上旧容器——真实缺陷。
+
+### 缺陷
+
+| 项 | 内容 |
+| --- | --- |
+| 现象 | 上一个进程留下的预热容器永不被清理，成为宿主上的永久孤儿 |
+| 根因 | 清场按 `label=agent-harness.warm-owner=<owner>` 过滤，而 `owner` 传的是 `port-${config.httpPort}`——**端口是可变配置**。改端口重启（或实例迁目录）后 owner 就变了，旧容器再也匹配不上 |
+| 为什么既有对账覆盖不到 | **预热容器不写 `sandboxes` 表**（`ContainerWarmPool.create` 直接 `docker run`，不经 `store.create`），所以 `SandboxStartupReconciler.listUnsettled()` 扫不到它们 |
+| 次生问题 | 清场只在 `take()`/`warm()` 里惰性触发——一个配了池、但长期没有可复用 Run 的实例可以一直不清场 |
+| 影响面 | 仅资源占用（内存 / PID 额度），**不影响隔离与正确性**：预热容器不含 Secret（`eligible` 要求 Secret 数为 0），且不在池 `entries` 里就不可能被 `take()` 命中 |
+
+### 修法
+
+1. **owner 改为由部署身份推导**（`container-warm-pool.ts` 新增 `deriveWarmPoolOwner`）：
+   用 `config.databasePath` 取代 HTTP 端口作为身份，做确定性净化（只保留 `[A-Za-z0-9_.-]`；
+   超长时附 FNV-1a 短哈希保证仍可分辨）。选数据库路径的理由是"同一个库不可能被两个实例同时使用"——
+   既能稳定标识本部署，又天然把同机其它实例的预热容器隔开。装配点改为
+   `warmPoolOwner: deriveWarmPoolOwner(config.databasePath)`。
+2. **清场提前到 Provider 构造期**（`container-sandbox-provider.ts`）：配了池就立即
+   `void warmPool.initialize()`，让清理确定性地发生在启动时，而不是"等第一次取用"。
+   `initialize()` 本身幂等（memoized promise），后续 `take()`/`warm()` 复用同一个 promise，不会重复清场。
+   失败只记录日志、不阻断构造——预热容器不含密钥、不属于任何 Run，清不掉不影响正确性，
+   为它挡住服务启动不成比例。
+
+### 真机验证（A6000 / runsc release-20260817.0）
+
+造三个假遗留容器（名字都符合 `agent-harness-warm-<hex>` 命名契约），然后用新代码重启：
+
+| 容器 | 标签 owner | 重启后 | 结论 |
+| --- | --- | --- | --- |
+| A | 新推导出的 owner（`home-f630-…-harness.sqlite`） | **已清掉** | 本部署遗留被正确回收 |
+| B | `port-99999` | **保留** | 未误删同机其它实例正在用的预热容器 |
+| C | `port-13000`（旧代码的 owner） | 保留 | **过渡期残留**（见下方边界） |
+
+随后一次性手工清理 B/C 并再次重启：`/health` 返回 `{"ok":true,"started":true}`，
+清场 0 条报错，重启后预热容器 0 个（空池符合预期），并跑通一次真实 Run（事件链到 `RUN_COMPLETED`）。
+
+### 必须一并说清的边界
+
+- **过渡期残留要手工清一次**：新 owner 不匹配历史 `port-*` 标签，本次修复**不会**回收旧方案留下的容器。
+  已在 A6000 上执行一次性 `docker rm`；任何从旧版本升级的部署都要做同样一步。
+- **清场时机仍是"构造期 + 惰性"两处**：构造期发起一次，`take()`/`warm()` 仍会 await 同一个 promise。
+  若某部署把 `sandboxWarmPoolSize` 整个去掉，该进程不再有池、也不会清场，上一轮遗留仍需手工处理。
+- **未做**：没有把预热容器纳入 `SandboxStartupReconciler` 的启动屏障。当前做法（Provider 构造期自清）
+  已达到同样效果且不动对账器接口；将来若要支持多实例共享宿主，再考虑统一屏障更合适。
+
+### 顺带更正一处文档漂移
+
+B8 的状态由 `OPEN` 更正为指向 N13：Secret 明文经 `docker run` argv 注入的问题已在 N13 修复
+（改为执行期 `docker exec --env NAME`，明文既不入 argv、也不写进容器 `Config.Env`）。
+
+### 本轮回归
+
+- `bun run typecheck`：干净。
+- `bun test tests/sandbox`：**36 pass / 0 fail**。N29 新增 6 例——
+  `tests/sandbox/warm-pool-owner.test.ts`（4 例：owner 稳定性/标签安全/超长可分辨/清场只跑一次/命名契约抛错）
+  与 `tests/sandbox/warm-pool-startup-sweep.test.ts`（2 例：构造期清场、未配池不清场）。
+- `bun test ./tests`：**499 pass / 8 fail**（102 个文件 / 507 个用例）。**这 8 个失败与本次改动无关**，
+  用受控实验证明：把三处源码改动与两个新测试文件全部临时还原后重跑，结果同样是 **493 pass / 8 fail**
+  （差额恰好等于新增的 6 例）。8 个失败全部集中在 `tests/integration/` 的真实子进程 E2E
+  （`harness-process-http`、`blast-radius-stress-challenge` 的 Challenge 5–8、`blast-radius-isolation`、
+  `worker-tool-governance`），报错是 `Received: 403`、`SyntaxError: Failed to parse JSON`、
+  HTTP 监听 5s 超时——**全量并发时的跨文件干扰**；这些文件单独跑、或按
+  `bun test tests/integration tests/runtime` 成组跑，均为 **70 pass / 0 fail**。
+  这是一条既存的测试隔离问题，本轮只做归因（证明与 N29 无关），**未修**，如实登记以免冒充。
 

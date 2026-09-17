@@ -56,6 +56,7 @@ test("Sandbox 已落实禁网与文件系统隔离时允许 bash", () => {
             memoryLimitEnforced: false,
             diskLimitEnforced: false,
             pidLimitEnforced: true,
+            workspaceScope: "RUN",
         },
     }))).not.toThrow();
     expect(decisions).toMatchObject([{ action: "ALLOW", toolName: "bash" }]);
@@ -73,6 +74,7 @@ test("宿主机工具无法落实禁网策略时在副作用前拒绝 bash", () 
             memoryLimitEnforced: false,
             diskLimitEnforced: false,
             pidLimitEnforced: false,
+            workspaceScope: "RUN",
         },
     }))).toThrow("无法落实禁网策略");
     expect(decisions).toMatchObject([{ action: "DENY", toolName: "bash" }]);

@@ -41,6 +41,8 @@ const tempDirectory = mkdtempSync(join(tmpdir(), "vram-aware-harness-user-demo-"
 const config = loadHarnessConfig({
     VLLM_MODEL_ID: "demo-model",
     HARNESS_DATABASE_PATH: join(tempDirectory, "harness.sqlite"),
+    // 与临时库配对，避免把工作区目录写进仓库（详见 harness-config.ts 的断言）。
+    HARNESS_WORKSPACE_ROOT: join(tempDirectory, "workspaces"),
     HARNESS_PUMP_INTERVAL_MS: "300",
 });
 const composition = await createHarnessApplication(config, {

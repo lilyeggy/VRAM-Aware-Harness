@@ -13,6 +13,7 @@ import { FakeAgentRuntime } from "../fakes/fake-agent-runtime.ts";
 import {
     FakeResourceObserver,
 } from "../fakes/fake-resource-observer.ts";
+import { tempWorkspaceEnv } from "../support/temp-workspace-root.ts";
 
 const normalSnapshot: ResourceSnapshot = {
     snapshotId: "pillar2-snapshot",
@@ -37,6 +38,7 @@ const DUAL_BACKENDS = [
 test("支柱 2：组合根装配双卡网关、健康探测与缓存台账并放开发并发", async () => {
     const config = loadHarnessConfig({
         VLLM_MODEL_ID: "fake-model",
+        ...tempWorkspaceEnv(),
         HARNESS_DATABASE_PATH: ":memory:",
         HARNESS_PUMP_INTERVAL_MS: "60000",
         LLM_BACKENDS: JSON.stringify(DUAL_BACKENDS),

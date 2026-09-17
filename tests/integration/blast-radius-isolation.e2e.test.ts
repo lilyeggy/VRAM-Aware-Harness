@@ -5,6 +5,7 @@ import { loadHarnessConfig } from "../../src/app/harness-config.ts";
 import type { ResourceSnapshot } from "../../src/resources/resource-observer.ts";
 import { startHarnessProcess } from "../../src/main.ts";
 import { FakeResourceObserver } from "../fakes/fake-resource-observer.ts";
+import { tempWorkspaceEnv } from "../support/temp-workspace-root.ts";
 
 const normalSnapshot: ResourceSnapshot = {
     snapshotId: "process-e2e-normal",
@@ -56,6 +57,7 @@ describe("Blast Radius Isolation & Subprocess Watchdog E2E Tests", () => {
         const config = {
             ...loadHarnessConfig({
                 VLLM_MODEL_ID: "fake-model",
+                ...tempWorkspaceEnv(),
                 HARNESS_DATABASE_PATH: ":memory:",
                 HARNESS_PUMP_INTERVAL_MS: "60000",
                 HARNESS_BOOTSTRAP_API_KEY: apiKey,
@@ -176,6 +178,7 @@ describe("Blast Radius Isolation & Subprocess Watchdog E2E Tests", () => {
         const config = {
             ...loadHarnessConfig({
                 VLLM_MODEL_ID: "fake-model",
+                ...tempWorkspaceEnv(),
                 HARNESS_DATABASE_PATH: ":memory:",
                 HARNESS_PUMP_INTERVAL_MS: "60000",
                 HARNESS_BOOTSTRAP_API_KEY: apiKey,

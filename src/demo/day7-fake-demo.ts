@@ -77,6 +77,9 @@ export async function runDay7FakeDemo():Promise<Day7FakeDemoReport> {
         const config = loadHarnessConfig({
             VLLM_MODEL_ID:"demo-model",
             HARNESS_DATABASE_PATH:databasePath,
+            // 必须与上面的临时库配对：库在临时目录、工作区却在仓库里，
+            // 会让 demo 往仓库写一批无人引用的工作空间目录。
+            HARNESS_WORKSPACE_ROOT:join(tempDirectory, "workspaces"),
             HARNESS_PUMP_INTERVAL_MS:"60000",
         });
         const composition = await createHarnessApplication(config, {

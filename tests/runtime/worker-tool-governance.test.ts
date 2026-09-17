@@ -52,6 +52,7 @@ function createSampleStartRequest(runId: string): RuntimeStartRequest {
                 memoryLimitEnforced: false,
                 diskLimitEnforced: false,
                 pidLimitEnforced: false,
+                workspaceScope: "RUN",
             },
             runtimeConfig: {
                 runtimeKind: "PI",

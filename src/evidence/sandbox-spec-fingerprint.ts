@@ -4,9 +4,10 @@ import type { SandboxSpec } from "../sandbox/sandbox-profile.ts";
 
 /**
  * Deterministic, canonical serialization of the isolation-relevant facts of a
- * compiled SandboxSpec. Instance-local values (workspacePath) are deliberately
- * excluded so the fingerprint reflects the isolation boundary (policy + profile
- * + runtime), not where that particular run happened to live.
+ * compiled SandboxSpec. Instance-local values (workspacePath / mountedRoot) are
+ * deliberately excluded so the fingerprint reflects the isolation boundary
+ * (policy + profile + runtime + workspace scope), not where that particular run
+ * happened to live.
  */
 export function canonicalSandboxSpec(spec: SandboxSpec): string {
     const canonical = {
@@ -15,6 +16,9 @@ export function canonicalSandboxSpec(spec: SandboxSpec): string {
         image: spec.image,
         userId: spec.userId,
         workspaceMount: spec.workspaceMount,
+        // 视野粒度改变的是"本 Run 被承诺了什么"，属于隔离边界，因此进指纹；
+        // 而 mountedRoot 是实例局部值（含租户与工作区 ID），不进指纹。
+        workspaceScope: spec.workspaceScope,
         networkMode: spec.networkMode,
         readOnlyRootfs: spec.readOnlyRootfs,
         droppedCapabilities: spec.droppedCapabilities,

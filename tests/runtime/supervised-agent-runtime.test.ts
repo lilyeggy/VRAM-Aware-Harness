@@ -14,6 +14,7 @@ const request: RuntimeStartRequest = {
             processIsolation: true, networkPolicyEnforced: true,
             cpuLimitEnforced: false, memoryLimitEnforced: false,
             diskLimitEnforced: false, pidLimitEnforced: true,
+            workspaceScope: "RUN",
         },
         runtimeConfig: { runtimeKind: "PI", provider: "test", modelId: "model", tools: [], skills: [] },
     },

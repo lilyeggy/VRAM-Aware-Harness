@@ -40,6 +40,7 @@ function createSampleStartRequest(runId: string, sandboxId?: string): RuntimeSta
                           memoryLimitEnforced: false,
                           diskLimitEnforced: false,
                           pidLimitEnforced: false,
+                          workspaceScope: "RUN",
                       },
                       runtimeConfig: {
                           runtimeKind: "PI",

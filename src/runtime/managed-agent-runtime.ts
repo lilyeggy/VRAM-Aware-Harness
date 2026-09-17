@@ -289,6 +289,8 @@ export class ManagedAgentRuntime implements AgentRuntime {
                 policySnapshotId: snapshot.id,
                 sandboxId: handle.id,
                 sandboxEnforcement: handle.enforcement,
+                sandboxMountRoot: handle.mountRoot,
+                sandboxWorkdir: handle.containerWorkdir,
                 runtimeConfig: {
                     ...compiled,
                     thinkingLevel: request.run.thinkingLevel ?? "off",

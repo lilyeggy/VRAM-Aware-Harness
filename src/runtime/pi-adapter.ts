@@ -191,6 +191,8 @@ export class PiAdapter implements AgentRuntime{
             request.execution?.policySnapshotId,
             request.execution?.sandboxId,
             request.execution?.sandboxEnforcement,
+            request.execution?.sandboxMountRoot,
+            request.execution?.sandboxWorkdir,
         );
         const resourceLoader = request.execution === undefined
             ? undefined
@@ -548,6 +550,8 @@ export class PiAdapter implements AgentRuntime{
             request.execution?.policySnapshotId,
             request.execution?.sandboxId,
             request.execution?.sandboxEnforcement,
+            request.execution?.sandboxMountRoot,
+            request.execution?.sandboxWorkdir,
         );
         const resourceLoader = request.execution === undefined
             ? undefined
@@ -843,6 +847,8 @@ export class PiAdapter implements AgentRuntime{
         policySnapshotId?: string,
         sandboxId?: string,
         sandboxEnforcement?: SandboxEnforcementCapabilities,
+        sandboxMountRoot?: string,
+        sandboxWorkdir?: string,
     ) {
         return createGatewayPiTools(
             toolNames,
@@ -871,6 +877,8 @@ export class PiAdapter implements AgentRuntime{
                         .getLastEventSequence(runId),
             },
             this.toolGatewayBinding.sandboxExecutor,
+            sandboxMountRoot,
+            sandboxWorkdir,
         );
     }
 

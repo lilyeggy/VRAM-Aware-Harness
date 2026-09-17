@@ -1,3 +1,4 @@
+import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 
 import type {
@@ -26,6 +27,13 @@ export interface HarnessConfig {
     /** N14：沙箱容器的 PID 上限（docker --pids-limit）。未配置时沿用 128。 */
     containerPidsLimit?:number;
     sandboxWarmPoolSize?:number;
+    /**
+     * 容器工作区视野粒度。
+     * `run`（默认）：容器只挂本 Run 的工作区，同租户跨 Run 物理不可见。
+     * `tenant`：容器挂租户工作区根，同租户所有 Run 共用挂载点，预热池因此
+     * 可以跨工作区复用；代价是同租户跨 Run 的文件隔离由物理视野降为策略约束。
+     */
+    sandboxWorkspaceScope?: "run" | "tenant";
 
     piProvider:string;
     piModelId:string;
@@ -178,18 +186,28 @@ export function loadHarnessConfig(
         throw new Error(`${sandboxProfile} sandbox profile 禁止回退到 ${sandboxRuntime}`);
     }
 
+    const databasePath = environment.HARNESS_DATABASE_PATH
+        ?? resolve(cwd, "data/harness.sqlite");
+    const workspaceRoot = resolve(
+        cwd,
+        environment.HARNESS_WORKSPACE_ROOT ?? "data/workspaces",
+    );
+    // 工作区根目录必须与数据库同生命周期，否则会产生无人引用的孤儿目录。
+    // 详见 assertWorkspaceRootMatchesDatabaseLifetime 的注释。
+    assertWorkspaceRootMatchesDatabaseLifetime(databasePath, workspaceRoot);
+
     return {
         ...(environment.HARNESS_SANDBOX_WARM_POOL_SIZE === undefined ? {} : {
             sandboxWarmPoolSize: positiveInteger(environment, 'HARNESS_SANDBOX_WARM_POOL_SIZE', 2),
         }),
-        databasePath:environment.HARNESS_DATABASE_PATH
-            ?? resolve(cwd, "data/harness.sqlite"),
+        // 只有显式声明 tenant 才放宽视野；默认（含拼错的值）保持 Run 级隔离。
+        ...(environment.HARNESS_SANDBOX_WORKSPACE_SCOPE === "tenant"
+            ? { sandboxWorkspaceScope: "tenant" as const }
+            : {}),
+        databasePath,
         httpHost:environment.HARNESS_HOST ?? "127.0.0.1",
         httpPort:port(environment, "HARNESS_PORT", 3000),
-        workspaceRoot:resolve(
-            cwd,
-            environment.HARNESS_WORKSPACE_ROOT ?? "data/workspaces",
-        ),
+        workspaceRoot,
         bootstrapApiKey:environment.HARNESS_BOOTSTRAP_API_KEY,
         agentApiKey:environment.HARNESS_AGENT_API_KEY,
         sandboxProvider:environment.HARNESS_SANDBOX_PROVIDER === "container"
@@ -637,4 +655,57 @@ function metricsUrlFromBaseUrl(baseUrl:string):string {
     url.search = "";
     url.hash = "";
     return url.toString().replace(/\/$/, "");
+}
+
+/**
+ * 工作区根目录必须与数据库处于相同的生命周期（fail closed）。
+ *
+ * 曾经的真实事故：测试把数据库放在内存或临时目录，却没有设
+ * `HARNESS_WORKSPACE_ROOT`，于是工作区回落到仓库里的默认值
+ * `./data/workspaces`。结果是「库是临时的、目录是持久的」——进程一退出，
+ * 库连同里面的归属记录一起消失，磁盘上那些目录再没有任何记录引用它们。
+ * 累积下来在仓库里留下了 1339 个无主空目录。
+ *
+ * 这类组合之所以危险，是因为**归属信息只存在于库里**：
+ * `workspaces.root_path` 和外键是唯一能把目录认回去的凭据。库没了，
+ * 目录就是孤儿——既不能安全删除（无法证明无人引用），也不能安全复用
+ * （可能与历史 Run 的 `workspace_path` 撞上）。
+ *
+ * 判定：凡是「库在临时目录（含内存库）」，工作区根目录**也**必须在系统
+ * 临时目录；反过来「库是持久的」，工作区根目录也不能在临时目录，否则
+ * 数据库里的路径会指向随时可能被系统清理的目录。
+ *
+ * 刻意不用「库在仓库外」当判据：生产部署把库和工作区都放在
+ * `/home/.../runtime/` 之下，那既不在 cwd 也不在临时目录，是完全合法的。
+ * 临时目录是唯一一个「系统会替你回收」的信号，用它做判据才准确。
+ */
+function assertWorkspaceRootMatchesDatabaseLifetime(
+    databasePath:string,
+    workspaceRoot:string,
+):void {
+    const databaseIsEphemeral =
+        databasePath === ":memory:" || isInsideTempDirectory(databasePath);
+    const workspaceIsInTemp = isInsideTempDirectory(workspaceRoot);
+
+    if (databaseIsEphemeral && !workspaceIsInTemp) {
+        throw new Error(
+            `数据库位于临时目录或为内存库（${databasePath}）时，`
+            + `HARNESS_WORKSPACE_ROOT 必须也指向系统临时目录 ${resolve(tmpdir())}，`
+            + `当前为 ${workspaceRoot}。两者的生命周期必须对齐：库是临时的而`
+            + "目录落在持久位置，会让这些目录在进程退出后永久失去归属记录。",
+        );
+    }
+
+    if (!databaseIsEphemeral && workspaceIsInTemp) {
+        throw new Error(
+            `数据库是持久的（${databasePath}），但 HARNESS_WORKSPACE_ROOT `
+            + `指向了临时目录 ${workspaceRoot}。系统会清理临时目录，`
+            + "届时数据库里的 workspace_path 将指向不存在的路径。",
+        );
+    }
+}
+
+function isInsideTempDirectory(path:string):boolean {
+    const tempRoot = resolve(tmpdir());
+    return path === tempRoot || path.startsWith(`${tempRoot}/`);
 }

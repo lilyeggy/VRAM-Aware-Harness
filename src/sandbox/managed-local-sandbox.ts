@@ -69,6 +69,8 @@ export class ManagedLocalSandboxProvider implements SandboxProvider {
             userId: null,
             workspaceMount: "/workspace",
             workspacePath: input.workspacePath,
+            mountedRoot: input.workspacePath,
+            workspaceScope: "RUN",
             networkMode: input.policy.allowNetwork ? "bridge" : "none",
             readOnlyRootfs: false,
             droppedCapabilities: "NONE",
@@ -110,6 +112,10 @@ export class ManagedLocalSandboxProvider implements SandboxProvider {
             id: input.id,
             workspacePath: input.workspacePath,
             secretNames: provisioning.secretNames,
+            // HOST 边界没有容器路径语义：挂载根与工作目录都直接用宿主路径，
+            // 工具定义里的路径映射会退化为恒等映射。
+            mountRoot: input.workspacePath,
+            containerWorkdir: input.workspacePath,
             enforcement: Object.freeze({
                 toolExecutionBoundary: "HOST" as const,
                 filesystemIsolation: false,
@@ -119,6 +125,7 @@ export class ManagedLocalSandboxProvider implements SandboxProvider {
                 memoryLimitEnforced: false,
                 diskLimitEnforced: false,
                 pidLimitEnforced: false,
+                workspaceScope: "RUN" as const,
             }),
             withSecrets: <T>(callback: (values: Readonly<Record<string, string>>) => T) =>
                 callback(this.secretValues.get(input.id) ?? Object.freeze({})),

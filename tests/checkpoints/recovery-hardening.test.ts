@@ -28,6 +28,7 @@ import type {
 import type {
     ToolExecution,
 } from "../../src/tools/tool-execution.ts";
+import { tempWorkspaceEnv } from "../support/temp-workspace-root.ts";
 
 function createExecution(
     id: string,
@@ -188,6 +189,7 @@ describe("支柱 3：副作用感知恢复防线（fail closed）", () => {
 test("支柱 3 集成：组合根把 MANUAL_REVIEW 审计写进 Run 事件时间线", async () => {
     const config = loadHarnessConfig({
         VLLM_MODEL_ID: "fake-model",
+        ...tempWorkspaceEnv(),
         HARNESS_DATABASE_PATH: ":memory:",
         HARNESS_PUMP_INTERVAL_MS: "60000",
     }, "/tmp/harness-project");

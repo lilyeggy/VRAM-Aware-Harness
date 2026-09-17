@@ -19,6 +19,12 @@ export type SandboxRuntime =
     | "kata"
     | "firecracker";
 
+/**
+ * 工作区视野粒度，与隔离边界同属"该 Run 被承诺了什么"的一部分，
+ * 因此进 spec 指纹；而具体的挂载路径（含租户/工作区 ID）只是实例局部值。
+ */
+export type SandboxWorkspaceScope = "RUN" | "TENANT";
+
 export interface SandboxSpec {
     readonly profile: SandboxProfile;
     readonly runtime: SandboxRuntime;
@@ -26,6 +32,9 @@ export interface SandboxSpec {
     readonly userId: number | null;
     readonly workspaceMount: "/workspace";
     readonly workspacePath: string;
+    /** 容器内 /workspace 实际绑定的宿主目录。 */
+    readonly mountedRoot: string;
+    readonly workspaceScope: SandboxWorkspaceScope;
     readonly networkMode: "none" | "bridge" | "controlled-egress";
     readonly readOnlyRootfs: boolean;
     readonly droppedCapabilities: "ALL" | "NONE";

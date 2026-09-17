@@ -26,6 +26,8 @@ function makeSpec(overrides: Partial<SandboxSpec> = {}): SandboxSpec {
         userId: 65532,
         workspaceMount: "/workspace",
         workspacePath: "/srv/workspaces/tenant-a/run",
+        mountedRoot: "/srv/workspaces/tenant-a",
+        workspaceScope: "RUN",
         networkMode: "none",
         readOnlyRootfs: true,
         droppedCapabilities: "ALL",

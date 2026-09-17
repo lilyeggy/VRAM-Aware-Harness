@@ -12,6 +12,7 @@ import { FakeAgentRuntime } from "../fakes/fake-agent-runtime.ts";
 import {
     FakeResourceObserver,
 } from "../fakes/fake-resource-observer.ts";
+import { tempWorkspaceEnv } from "../support/temp-workspace-root.ts";
 
 const normalSnapshot:ResourceSnapshot = {
     snapshotId:"process-http-normal",
@@ -65,6 +66,7 @@ test("完整进程入口启动真实 HTTP 监听并安全关闭", async () => {
     const config = {
         ...loadHarnessConfig({
             VLLM_MODEL_ID:"fake-model",
+            ...tempWorkspaceEnv(),
             HARNESS_DATABASE_PATH:":memory:",
             HARNESS_PUMP_INTERVAL_MS:"60000",
             HARNESS_BOOTSTRAP_API_KEY:"test-bootstrap-key-12345",

@@ -70,6 +70,7 @@ import {
     ManagedLocalSandboxProvider,
 } from "../sandbox/managed-local-sandbox.ts";
 import { ContainerSandboxProvider } from "../sandbox/container-sandbox-provider.ts";
+import { deriveWarmPoolOwner } from "../sandbox/container-warm-pool.ts";
 import { RunService } from "../runs/run-service.ts";
 import { RunStore } from "../runs/runstore.ts";
 import { RunAttemptStore } from "../runs/run-attempt-store.ts";
@@ -620,7 +621,15 @@ function createContainerSandboxRouter(
             ? {}
             : { pidsLimit: config.containerPidsLimit }),
         warmPoolSize: config.sandboxWarmPoolSize,
-        warmPoolOwner: `port-${config.httpPort}`,
+        // N29：owner 必须跨进程重启稳定。原先传 `port-<HTTP 端口>`，改端口重启后
+        // 上一个进程的遗留预热容器永远匹配不上、清不掉（它们不写 sandboxes 表，
+        // 启动对账屏障也扫不到）。改用数据库路径作为部署身份：它满足"同库不共存
+        // 两实例"，既能稳定标识本部署，又不会误删同机其它实例的预热容器。
+        warmPoolOwner: deriveWarmPoolOwner(config.databasePath),
+        // TENANT 视野：容器挂租户工作区根，同租户全量复用预热容器。
+        ...(config.sandboxWorkspaceScope === "tenant"
+            ? { workspaceScope: "tenant" as const, tenantWorkspaceRoot: config.workspaceRoot }
+            : {}),
     });
     return new SandboxProviderRouter({
         default: container,

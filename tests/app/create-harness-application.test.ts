@@ -13,6 +13,7 @@ import { FakeAgentRuntime } from "../fakes/fake-agent-runtime.ts";
 import {
     FakeResourceObserver,
 } from "../fakes/fake-resource-observer.ts";
+import { tempWorkspaceEnv } from "../support/temp-workspace-root.ts";
 
 const normalSnapshot:ResourceSnapshot = {
     snapshotId:"composition-snapshot-normal",
@@ -37,6 +38,7 @@ test("createHarnessApplication 用 Fake 外部依赖组装完整真实应用链"
     });
     const config = loadHarnessConfig({
         VLLM_MODEL_ID:"fake-model",
+        ...tempWorkspaceEnv(),
         HARNESS_DATABASE_PATH:":memory:",
         HARNESS_PUMP_INTERVAL_MS:"60000",
     });

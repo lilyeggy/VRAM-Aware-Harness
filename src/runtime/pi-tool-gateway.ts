@@ -154,6 +154,8 @@ export function createGatewayPiTools(
     gateway: ToolGatewayExecutor,
     runContext: PiGatewayRunContext,
     sandboxExecutor?: SandboxCommandExecutor,
+    mountRoot?: string,
+    containerWorkdir?: string,
 ): AnyPiToolDefinition[] {
     return toolNames.map((toolName) => {
         if (!isPiBuiltInToolName(toolName)) {
@@ -169,6 +171,8 @@ export function createGatewayPiTools(
                 runContext.getSandboxId?.(),
                 sandboxExecutor,
                 runContext.getSandboxEnforcement?.(),
+                mountRoot,
+                containerWorkdir,
             ),
             classifyPiToolEffect(toolName),
             gateway,
@@ -197,6 +201,8 @@ function createPiToolDefinition(
     sandboxId?: string,
     sandboxExecutor?: SandboxCommandExecutor,
     enforcement?: SandboxEnforcementCapabilities,
+    mountRoot?: string,
+    containerWorkdir?: string,
 ): AnyPiToolDefinition {
     if (
         enforcement?.toolExecutionBoundary === "SANDBOX"
@@ -214,6 +220,7 @@ function createPiToolDefinition(
     if (sandboxId !== undefined && sandboxExecutor !== undefined) {
         return createSandboxedPiToolDefinition(
             toolName, workspacePath, sandboxId, sandboxExecutor,
+            mountRoot, containerWorkdir,
         );
     }
     // HOST 边界（managed-local）：sandboxId 仅为 workspace 归属标识，
@@ -241,14 +248,20 @@ function createSandboxedPiToolDefinition(
     workspacePath: string,
     sandboxId: string,
     executor: SandboxCommandExecutor,
+    mountRoot: string = workspacePath,
+    containerWorkdir: string = "/workspace",
 ): AnyPiToolDefinition {
-    const shell = (command: string) => executor.execute(sandboxId, ["sh", "-lc", command]);
+    const shell = (command: string) =>
+        executor.execute(sandboxId, ["sh", "-lc", command], { workdir: containerWorkdir });
+    // 路径换算以**挂载根**为基准，而不是工作区。TENANT 视野下容器的 /workspace
+    // 是整个租户根，本 Run 的工作区只是它下面的一个子目录；用工作区做基准会把
+    // 兄弟 Run 的目录误判为"越界"（而它们其实是策略允许范围内可见的）。
     const containerPath = (hostPath: string) => {
-        if (hostPath === workspacePath) return "/workspace";
-        if (!hostPath.startsWith(`${workspacePath}/`)) {
-            throw new Error(`工具路径超出 Workspace：${hostPath}`);
+        if (hostPath === mountRoot) return "/workspace";
+        if (!hostPath.startsWith(`${mountRoot}/`)) {
+            throw new Error(`工具路径超出沙箱挂载范围：${hostPath}`);
         }
-        return `/workspace/${hostPath.slice(workspacePath.length + 1)}`;
+        return `/workspace/${hostPath.slice(mountRoot.length + 1)}`;
     };
     const requestedPath = (value: unknown) => {
         const raw = typeof value === "string" && value.length > 0 ? value : ".";

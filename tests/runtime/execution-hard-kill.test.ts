@@ -40,6 +40,7 @@ function makeRequest(runId: string, sandboxId?: string): RuntimeStartRequest {
                         memoryLimitEnforced: false,
                         diskLimitEnforced: false,
                         pidLimitEnforced: true,
+                        workspaceScope: "RUN",
                     },
                     runtimeConfig: {
                         runtimeKind: "PI" as const,

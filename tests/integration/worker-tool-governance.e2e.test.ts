@@ -10,6 +10,7 @@ import type { ResourceSnapshot } from "../../src/resources/resource-observer.ts"
 import { startHarnessProcess } from "../../src/main.ts";
 import { FakeResourceObserver } from "../fakes/fake-resource-observer.ts";
 import { canAutomaticallyReplay } from "../../src/tools/tool-execution.ts";
+import { tempWorkspaceEnv } from "../support/temp-workspace-root.ts";
 
 const normalSnapshot: ResourceSnapshot = {
     snapshotId: "governance-e2e-normal",
@@ -82,6 +83,7 @@ describe("Worker 模式工具治理端到端（真实子进程 + SQLite 账本�
         const config = {
             ...loadHarnessConfig({
                 VLLM_MODEL_ID: "fake-model",
+                ...tempWorkspaceEnv(),
                 HARNESS_DATABASE_PATH: dbPath,
                 HARNESS_PUMP_INTERVAL_MS: "60000",
                 HARNESS_BOOTSTRAP_API_KEY: apiKey,

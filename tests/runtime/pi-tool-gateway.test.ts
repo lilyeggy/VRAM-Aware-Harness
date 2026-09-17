@@ -24,6 +24,7 @@ const sandboxEnforcement = Object.freeze({
     memoryLimitEnforced: true,
     diskLimitEnforced: false,
     pidLimitEnforced: true,
+    workspaceScope: "RUN",
 });
 
 test("Pi 内置工具采用保守副作用分类", () => {

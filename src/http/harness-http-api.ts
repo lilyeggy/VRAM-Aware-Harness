@@ -326,6 +326,14 @@ export class HarnessHttpApi {
         }
 
         if (
+            request.method === "POST"
+            && segments.length === 1
+            && segments[0] === "conversations"
+        ) {
+            return this.createConversationWithAutoWorkspace(request);
+        }
+
+        if (
             segments.length === 3
             && segments[0] === "workspaces"
             && segments[2] === "conversations"
@@ -600,6 +608,51 @@ export class HarnessHttpApi {
         this.auditResource("RUN", run.id, "RUN_SUBMIT", "ALLOW", principal.tenantId, "run_submitted");
 
         return jsonResponse({ run: this.runForResponse(run) }, 202);
+    }
+
+    /**
+     * 自动建工作区并开一个会话 —— 会话成为用户唯一需要管理的单位。
+     *
+     * 为什么把两步合成一步：一个会话的所有 Run 共用同一个工作区，而预热池的
+     * 匹配键里含挂载源（bind mount 在容器创建时固化），所以「会话 = 一个工作区」
+     * 正是池能在连续对话里反复命中的前提。让调用方先手工建工作区、再把 id 传进来，
+     * 只会把内部概念泄露给使用者，也让"同一会话内复用"退化成一个需要人配合的约定。
+     *
+     * 显式传 workspaceId 仍然支持（走归属校验），留给需要固定目录的场景。
+     */
+    private async createConversationWithAutoWorkspace(request: Request): Promise<Response> {
+        const principal = this.requirePrincipal(request, "tasks:write");
+        if (this.accessControl === undefined || this.application.createConversation === undefined) {
+            throw new HttpError(501, "对话服务未启用");
+        }
+        const body = await readOptionalJsonObject(request);
+        const title = optionalString(body, "title");
+        const requestedWorkspaceId = optionalString(body, "workspaceId");
+
+        let workspaceId: string;
+        if (requestedWorkspaceId !== null) {
+            const workspace = this.accessControl.workspaceService.getForTenant(
+                requestedWorkspaceId,
+                principal.tenantId,
+            );
+            if (workspace === null) throw new HttpError(404, "找不到 Workspace");
+            workspaceId = requestedWorkspaceId;
+        } else {
+            // 自动建出来的工作区同样是资源创建，权限不因为"包装成建会话"而豁免。
+            this.requirePrincipal(request, "workspaces:write");
+            workspaceId = this.accessControl.workspaceService.create(
+                principal.tenantId,
+                autoWorkspaceName(),
+            ).id;
+        }
+
+        return jsonResponse({
+            conversation: this.application.createConversation({
+                tenantId: principal.tenantId,
+                workspaceId,
+                ...(title == null ? {} : { title }),
+            }),
+        }, 201);
     }
 
     private async createConversation(request: Request, workspaceId: string): Promise<Response> {
@@ -1064,6 +1117,17 @@ function requiredString(
     }
 
     return value;
+}
+
+/**
+ * 自动工作区名。
+ *
+ * WorkspaceService 只接受 [a-zA-Z0-9_-] 且最长 64 位，所以不能直接用会话标题
+ * （可能含中文）——否则建会话会被命名校验拒掉。改用时间戳加随机后缀。
+ */
+function autoWorkspaceName(): string {
+    const stamp = new Date().toISOString().replace(/\D/g, "").slice(0, 14);
+    return `conv-${stamp}-${crypto.randomUUID().slice(0, 8)}`;
 }
 
 function optionalString(

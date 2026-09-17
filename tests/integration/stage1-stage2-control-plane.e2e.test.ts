@@ -19,6 +19,7 @@ import type {
     RuntimeResumeRequest,
 } from "../../src/runtime/agent-runtime.ts";
 import { ManagedLocalSandboxProvider } from "../../src/sandbox/managed-local-sandbox.ts";
+import { tempWorkspaceEnv } from "../support/temp-workspace-root.ts";
 
 class BlockingRuntime implements AgentRuntime {
     private readonly handlers = new Map<string, Set<RuntimeEventHandler>>();
@@ -107,6 +108,7 @@ function config() {
         VLLM_MODEL_ID: "fake-model",
         PI_PROVIDER: "fake-provider",
         PI_TOOLS: "read,write,bash",
+        ...tempWorkspaceEnv(),
         HARNESS_DATABASE_PATH: ":memory:",
         HARNESS_PUMP_INTERVAL_MS: "60000",
         HARNESS_MAX_ACTIVE_RUNS: "2",

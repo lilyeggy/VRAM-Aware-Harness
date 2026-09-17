@@ -70,6 +70,14 @@ export interface RuntimeExecutionContext {
     readonly policySnapshotId: string;
     readonly sandboxId: string;
     readonly sandboxEnforcement: SandboxEnforcementCapabilities;
+    /**
+     * 容器内 /workspace 对应的宿主目录。工具定义必须以它为前缀把宿主路径
+     * 换算成容器路径——它不一定等于 run.workspacePath（TENANT 视野下是租户根）。
+     * HOST 边界（managed-local）不传，此时路径映射退化为恒等。
+     */
+    readonly sandboxMountRoot?: string;
+    /** 容器内的工作目录（bash 等工具的 cwd）。 */
+    readonly sandboxWorkdir?: string;
     readonly runtimeConfig: {
         readonly runtimeKind: "PI";
         readonly provider: string;

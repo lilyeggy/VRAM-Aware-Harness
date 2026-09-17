@@ -8,6 +8,7 @@ import { startHarnessProcess } from "../../src/main.ts";
 import { FakeResourceObserver } from "../fakes/fake-resource-observer.ts";
 import { WorkerProcessAgentRuntime } from "../../src/runtime/worker-process-runtime.ts";
 import type { RuntimeEvent, RuntimeStartRequest } from "../../src/runtime/agent-runtime.ts";
+import { tempWorkspaceEnv } from "../support/temp-workspace-root.ts";
 
 const STRESS_WORKER_PATH = resolve(process.cwd(), "tests/fakes/stress-challenge-worker.ts");
 
@@ -75,6 +76,7 @@ function createSampleStartRequest(runId: string, tenantId: string = "tenant-test
                           memoryLimitEnforced: false,
                           diskLimitEnforced: false,
                           pidLimitEnforced: false,
+                          workspaceScope: "RUN",
                       },
                       runtimeConfig: {
                           runtimeKind: "PI",
@@ -264,6 +266,7 @@ describe("Empirical Blast Radius & Crash Recovery Stress Challenge Suite", () =>
         const config = {
             ...loadHarnessConfig({
                 VLLM_MODEL_ID: "fake-model",
+                ...tempWorkspaceEnv(),
                 HARNESS_DATABASE_PATH: ":memory:",
                 HARNESS_PUMP_INTERVAL_MS: "60000",
                 HARNESS_BOOTSTRAP_API_KEY: apiKey,
@@ -367,6 +370,7 @@ describe("Empirical Blast Radius & Crash Recovery Stress Challenge Suite", () =>
         const config = {
             ...loadHarnessConfig({
                 VLLM_MODEL_ID: "fake-model",
+                ...tempWorkspaceEnv(),
                 HARNESS_DATABASE_PATH: ":memory:",
                 HARNESS_PUMP_INTERVAL_MS: "60000",
                 HARNESS_WORKER_ISOLATION: "process",
@@ -544,6 +548,7 @@ describe("Empirical Blast Radius & Crash Recovery Stress Challenge Suite", () =>
         const config = {
             ...loadHarnessConfig({
                 VLLM_MODEL_ID: "fake-model",
+                ...tempWorkspaceEnv(),
                 HARNESS_DATABASE_PATH: ":memory:",
                 HARNESS_PUMP_INTERVAL_MS: "60000",
                 HARNESS_BOOTSTRAP_API_KEY: apiKey,
@@ -615,6 +620,7 @@ describe("Empirical Blast Radius & Crash Recovery Stress Challenge Suite", () =>
         const config = {
             ...loadHarnessConfig({
                 VLLM_MODEL_ID: "fake-model",
+                ...tempWorkspaceEnv(),
                 HARNESS_DATABASE_PATH: ":memory:",
                 HARNESS_PUMP_INTERVAL_MS: "60000",
                 HARNESS_BOOTSTRAP_API_KEY: apiKey,
