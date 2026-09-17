@@ -36,7 +36,6 @@ export interface EffectivePolicySnapshot extends PolicyConstraints {
     readonly id: string;
     readonly runId: string;
     readonly tenantId: string;
-    readonly templateVersionId: string;
     readonly layers: readonly PolicyLayer[];
     readonly createdAt: string;
 }
@@ -76,7 +75,6 @@ export function computeEffectivePolicy(input: {
     id: string;
     runId: string;
     tenantId: string;
-    templateVersionId: string;
     layers: readonly PolicyLayer[];
     createdAt: string;
 }): EffectivePolicySnapshot {
@@ -95,7 +93,6 @@ export function computeEffectivePolicy(input: {
         id: input.id,
         runId: input.runId,
         tenantId: input.tenantId,
-        templateVersionId: input.templateVersionId,
         layers: Object.freeze([...input.layers]),
         createdAt: input.createdAt,
         ...freezeConstraints(effective),

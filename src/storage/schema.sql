@@ -56,8 +56,6 @@ CREATE TABLE agent_runs (
                 failure_reason TEXT,
 
                 -- 兼容列：RunExecutor 不再使用，保留为空以兼容旧查询/旧数据形态。
-                template_version_id TEXT,
-                harness_instance_id TEXT,
 
                 run_policy_json TEXT CHECK (
                     run_policy_json IS NULL OR json_valid(run_policy_json)
@@ -109,7 +107,6 @@ CREATE TABLE effective_policy_snapshots (
                 id TEXT PRIMARY KEY,
                 run_id TEXT NOT NULL,
                 tenant_id TEXT NOT NULL,
-                template_version_id TEXT NOT NULL,
                 layers_json TEXT NOT NULL CHECK (json_valid(layers_json)),
                 effective_json TEXT NOT NULL CHECK (json_valid(effective_json)),
                 created_at TEXT NOT NULL,

@@ -36,9 +36,6 @@ export interface RuntimeRunRef{
     /** 本次执行使用的 Workspace 工作目录；真正的 Tenant 隔离由上层负责校验 */
     workspacePath:string;
 
-    /** Stage 1 控制面正式入口必须提供；旧的直接 Runtime 测试保持兼容。 */
-    templateVersionId?:string;
-    harnessInstanceId?:string;
 }
 
 export interface RuntimeCheckpointRef{

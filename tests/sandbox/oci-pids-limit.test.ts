@@ -8,7 +8,6 @@ function makePolicy(overrides: Partial<EffectivePolicySnapshot> = {}): Effective
         id: "policy-pids",
         runId: "run",
         tenantId: "tenant",
-        templateVersionId: "template",
         createdAt: "2026-09-11T00:00:00.000Z",
         sandboxProfile: "default",
         allowedTools: null,

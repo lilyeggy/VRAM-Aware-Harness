@@ -52,8 +52,9 @@ async function warmContainerNames(): Promise<string[]> {
 function policy(workspacePath: string, tenantId: string): EffectivePolicySnapshot {
     return {
         ...unrestrictedPolicy,
+        layers: [],
+        createdAt: new Date().toISOString(),
         id: crypto.randomUUID(), runId: crypto.randomUUID(), tenantId,
-        templateVersionId: "e2-warm", layers: [], createdAt: new Date().toISOString(),
         workspaceRoots: [workspacePath], allowNetwork: false, allowedSecrets: [],
         resourceLimits: { cpuCores: null, memoryMiB: null, diskMiB: null },
     };

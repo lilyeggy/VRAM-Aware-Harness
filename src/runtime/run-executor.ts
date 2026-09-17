@@ -114,7 +114,6 @@ export class RunExecutor implements AgentRuntime {
                 id: crypto.randomUUID(),
                 runId: run.id,
                 tenantId: run.tenantId,
-                templateVersionId: "runtime:default",
                 layers: this.policyLayers(run),
                 createdAt: now,
             }),

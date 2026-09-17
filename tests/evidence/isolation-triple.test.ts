@@ -15,7 +15,6 @@ function makePolicy(overrides: Partial<EffectivePolicySnapshot> = {}): Effective
         id: "policy-1",
         runId: "run",
         tenantId: "tenant",
-        templateVersionId: "template",
         createdAt: "2026-08-18T00:00:00.000Z",
         sandboxProfile: "default",
         allowedTools: null,

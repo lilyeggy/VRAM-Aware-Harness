@@ -45,8 +45,6 @@ export interface AgentRun{
     thinkingLevel?: ThinkingLevel;
 
     /** Stage 1 正式控制面入口为新 Run 固定的不可变执行证据。 */
-    templateVersionId?:string;
-    harnessInstanceId?:string;
     runPolicy?:PolicyConstraints;
 }
 // 这个就是对于一个任务，我们一定要区分这个任务的来源、这个任务属于的 session等等

@@ -11,7 +11,6 @@ function snapshot(): EffectivePolicySnapshot {
         id: "policy-1",
         runId: "run-1",
         tenantId: "tenant-1",
-        templateVersionId: "version-1",
         layers: [],
         allowProcess: true,
         allowNetwork: false,

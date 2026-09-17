@@ -112,8 +112,8 @@ try {
 function policy(runId: string, tenantId: string, workspacePath: string): EffectivePolicySnapshot {
     return {
         ...unrestrictedPolicy,
+        layers: [],
         id: crypto.randomUUID(), runId, tenantId,
-        templateVersionId: "attack-smoke-template", layers: [],
         createdAt: new Date().toISOString(),
         workspaceRoots: [workspacePath], allowNetwork: false,
         allowedSecrets: ["TOKEN"],

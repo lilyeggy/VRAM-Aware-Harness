@@ -280,8 +280,6 @@ async function main(): Promise<void> {
         console.log(`响应 run = ${JSON.stringify({
             id: submitA.json.run.id,
             status: submitA.json.run.status,
-            templateVersionId: submitA.json.run.templateVersionId,
-            harnessInstanceId: submitA.json.run.harnessInstanceId,
         })}`);
         const runIdA = submitA.json.run.id as string;
 

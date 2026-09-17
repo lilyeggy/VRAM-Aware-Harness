@@ -30,7 +30,6 @@ function policy(overrides: Partial<EffectivePolicySnapshot> = {}): EffectivePoli
         id: "policy",
         runId: "run",
         tenantId: "tenant",
-        templateVersionId: "version",
         layers: [],
         createdAt: "2026-08-17T00:00:00.000Z",
         workspaceRoots: ["/srv/workspaces/tenant"],

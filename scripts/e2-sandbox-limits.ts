@@ -57,8 +57,9 @@ function hex(value: string): string {
 function policy(workspacePath: string, overrides: Partial<EffectivePolicySnapshot> = {}): EffectivePolicySnapshot {
     return {
         ...unrestrictedPolicy,
+        layers: [],
+        createdAt: new Date().toISOString(),
         id: crypto.randomUUID(), runId: crypto.randomUUID(), tenantId: tenant,
-        templateVersionId: "e2-limits", layers: [], createdAt: new Date().toISOString(),
         workspaceRoots: [workspacePath], allowNetwork: false, allowedSecrets: [],
         resourceLimits: { cpuCores: null, memoryMiB: null, diskMiB: null },
         ...overrides,

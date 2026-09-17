@@ -17,7 +17,6 @@ test("五层策略对集合、布尔权限和资源上限取交集", () => {
         id: "snapshot-1",
         runId: "run-1",
         tenantId: "tenant-1",
-        templateVersionId: "version-1",
         layers: [
             createPolicyLayer("platform", "PLATFORM", constraints({
                 allowedTools: ["read", "write", "bash"],
@@ -61,7 +60,6 @@ test("Sandbox profile 进入不可变快照，冲突时 fail closed", () => {
         id: "profile-snapshot",
         runId: "run-profile",
         tenantId: "tenant-profile",
-        templateVersionId: "version-profile",
         layers: [
             createPolicyLayer("platform", "PLATFORM"),
             createPolicyLayer("tenant", "TENANT", constraints({ sandboxProfile: "strict" })),
@@ -77,7 +75,6 @@ test("Sandbox profile 进入不可变快照，冲突时 fail closed", () => {
         id: "conflict",
         runId: "run-conflict",
         tenantId: "tenant-conflict",
-        templateVersionId: "version-conflict",
         layers: [
             createPolicyLayer("platform", "PLATFORM", constraints({ sandboxProfile: "default" })),
             createPolicyLayer("tenant", "TENANT", constraints({ sandboxProfile: "strict" })),
@@ -94,7 +91,6 @@ test("缺少任一规范策略层时拒绝生成有效快照", () => {
         id: "snapshot-1",
         runId: "run-1",
         tenantId: "tenant-1",
-        templateVersionId: "version-1",
         layers: [createPolicyLayer("platform", "PLATFORM")],
         createdAt: "2026-08-10T10:00:00.000Z",
     })).toThrow("缺少策略层：TENANT");

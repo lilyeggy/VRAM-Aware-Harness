@@ -48,8 +48,9 @@ async function docker(args: readonly string[]): Promise<string> {
 function policy(workspacePath: string): EffectivePolicySnapshot {
     return {
         ...unrestrictedPolicy,
+        layers: [],
+        createdAt: new Date().toISOString(),
         id: crypto.randomUUID(), runId: crypto.randomUUID(), tenantId: "tenant-g09",
-        templateVersionId: "e2-g09", layers: [], createdAt: new Date().toISOString(),
         workspaceRoots: [workspacePath], allowNetwork: false, allowedSecrets: [],
         resourceLimits: { cpuCores: null, memoryMiB: null, diskMiB: null },
     };

@@ -151,7 +151,6 @@ function benchmarkPolicy(
         id: crypto.randomUUID(),
         runId,
         tenantId: "benchmark-tenant",
-        templateVersionId: "benchmark-template",
         layers: [],
         createdAt: new Date().toISOString(),
         workspaceRoots: [workspacePath],

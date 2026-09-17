@@ -4,8 +4,9 @@ import { unrestrictedPolicy, type EffectivePolicySnapshot } from "../../src/poli
 
 function policy(overrides: Partial<EffectivePolicySnapshot> = {}): EffectivePolicySnapshot {
     return {
-        ...unrestrictedPolicy, id: "policy", runId: "run", tenantId: "tenant",
-        templateVersionId: "version", layers: [], createdAt: "2026-08-17T00:00:00.000Z",
+        ...unrestrictedPolicy,
+        layers: [],
+        createdAt: new Date().toISOString(), id: "policy", runId: "run", tenantId: "tenant",
         workspaceRoots: ["/srv/workspaces"], allowNetwork: false,
         resourceLimits: { cpuCores: null, memoryMiB: null, diskMiB: null },
         ...overrides,

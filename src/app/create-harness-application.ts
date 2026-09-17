@@ -311,7 +311,7 @@ export async function createHarnessApplication(
             gpuIds:config.gpuIds,
         });
     const runService = new RunService(
-        runStore, runtime, undefined, undefined, runOutputStore,
+        runStore, runtime, undefined, runOutputStore,
         workspaceResultCoordinator,
     );
     runServiceRef = runService;

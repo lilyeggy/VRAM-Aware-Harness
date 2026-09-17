@@ -53,8 +53,9 @@ async function waitUntil(predicate: () => boolean, timeoutMs = 2_000): Promise<v
 
 function policy(overrides: Partial<EffectivePolicySnapshot> = {}): EffectivePolicySnapshot {
     return {
-        ...unrestrictedPolicy, id: "policy", runId: "run", tenantId: "tenant",
-        templateVersionId: "version", layers: [], createdAt: "2026-08-17T00:00:00.000Z",
+        ...unrestrictedPolicy,
+        layers: [],
+        createdAt: new Date().toISOString(), id: "policy", runId: "run", tenantId: "tenant",
         workspaceRoots: ["/srv/workspaces/tenant"], allowNetwork: false,
         resourceLimits: { cpuCores: 1.5, memoryMiB: 512, diskMiB: null },
         ...overrides,

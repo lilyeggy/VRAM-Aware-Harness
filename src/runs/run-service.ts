@@ -28,15 +28,6 @@ export interface StartRunInput {
     thinkingLevel?: ThinkingLevel;
 }
 
-export interface RunControlBinding {
-    readonly templateVersionId: string;
-    readonly harnessInstanceId: string;
-}
-
-export interface RunControlBindingResolver {
-    resolve(input: StartRunInput): RunControlBinding;
-}
-
 export interface ResumeRunInput {
     runId: string;
     checkpoint: Checkpoint;
@@ -93,7 +84,6 @@ export class RunService{
     constructor(
         private readonly store : RunStore,
         private readonly runtime : AgentRuntime,
-        private readonly controlBindingResolver?: RunControlBindingResolver,
         private readonly eventBridge = new RuntimeEventBridge(),
         private readonly outputStore?: RunOutputStore,
         private readonly workspaceResults?: RunWorkspaceResultCoordinator,
@@ -103,8 +93,6 @@ export class RunService{
     createQueuedRun(input : StartRunInput) : AgentRun {
         const runId = crypto.randomUUID(); 
         const timestamp = new Date().toISOString();
-        const controlBinding = this.controlBindingResolver?.resolve(input);
-
         // 创建真实的 AgentRun
         const run : AgentRun = {
             id:runId,
@@ -123,7 +111,6 @@ export class RunService{
             ...(input.runPolicy === undefined
                 ? {}
                 : { runPolicy: input.runPolicy }),
-            ...(controlBinding ?? {}),
         };
 
         // 创建 run 以后要创建对应的 event
@@ -275,12 +262,6 @@ export class RunService{
                     tenantId: run.tenantId,
                     harnessSessionId: run.harnessSessionId,
                     workspacePath: run.workspacePath,
-                    ...(run.templateVersionId === undefined
-                        ? {}
-                        : { templateVersionId: run.templateVersionId }),
-                    ...(run.harnessInstanceId === undefined
-                        ? {}
-                        : { harnessInstanceId: run.harnessInstanceId }),
                     ...(run.thinkingLevel === undefined ? {} : { thinkingLevel: run.thinkingLevel }),
                 },
                 input: run.userInput,
@@ -425,12 +406,6 @@ export class RunService{
                     tenantId: runningRun.tenantId,
                     harnessSessionId: runningRun.harnessSessionId,
                     workspacePath: runningRun.workspacePath,
-                    ...(runningRun.templateVersionId === undefined
-                        ? {}
-                        : { templateVersionId: runningRun.templateVersionId }),
-                    ...(runningRun.harnessInstanceId === undefined
-                        ? {}
-                        : { harnessInstanceId: runningRun.harnessInstanceId }),
                     ...(runningRun.thinkingLevel === undefined ? {} : { thinkingLevel: runningRun.thinkingLevel }),
                 },
                 checkpoint: {

@@ -49,8 +49,6 @@ interface AgentRunRow {
     finishedAt: string | null;
     checkpointId: string | null;
     failureReason: string | null;
-    templateVersionId: string | null;
-    harnessInstanceId: string | null;
     runPolicyJson: string | null;
     thinkingLevel: "off" | "minimal" | "low" | "medium" | "high";
 }
@@ -89,8 +87,6 @@ export class RunStore {
             finishedAt: run.finishedAt,
             checkpointId: run.checkpointId,
             failureReason: run.failureReason,
-            templateVersionId: run.templateVersionId ?? null,
-            harnessInstanceId: run.harnessInstanceId ?? null,
             runPolicyJson: run.runPolicy === undefined
                 ? null
                 : JSON.stringify(run.runPolicy),
@@ -113,8 +109,6 @@ export class RunStore {
                         finished_at,
                         checkpoint_id,
                         failure_reason,
-                        template_version_id,
-                        harness_instance_id,
                         run_policy_json,
                         thinking_level
                     )
@@ -131,8 +125,6 @@ export class RunStore {
                         $finishedAt,
                         $checkpointId,
                         $failureReason,
-                        $templateVersionId,
-                        $harnessInstanceId,
                         $runPolicyJson,
                         $thinkingLevel
                     );
@@ -168,8 +160,6 @@ export class RunStore {
                     finished_at AS finishedAt,
                     checkpoint_id AS checkpointId,
                     failure_reason AS failureReason,
-                    template_version_id AS templateVersionId,
-                    harness_instance_id AS harnessInstanceId,
                     run_policy_json AS runPolicyJson,
                     thinking_level AS thinkingLevel
                 FROM agent_runs
@@ -190,8 +180,6 @@ export class RunStore {
                 status, user_input AS userInput, workspace_path AS workspacePath,
                 created_at AS createdAt, updated_at AS updatedAt, started_at AS startedAt,
                 finished_at AS finishedAt, checkpoint_id AS checkpointId,
-                failure_reason AS failureReason, template_version_id AS templateVersionId,
-                harness_instance_id AS harnessInstanceId, run_policy_json AS runPolicyJson,
                 thinking_level AS thinkingLevel
             FROM agent_runs
             WHERE tenant_id = $tenantId
@@ -208,8 +196,6 @@ export class RunStore {
                 status, user_input AS userInput, workspace_path AS workspacePath,
                 created_at AS createdAt, updated_at AS updatedAt, started_at AS startedAt,
                 finished_at AS finishedAt, checkpoint_id AS checkpointId,
-                failure_reason AS failureReason, template_version_id AS templateVersionId,
-                harness_instance_id AS harnessInstanceId, run_policy_json AS runPolicyJson,
                 thinking_level AS thinkingLevel
             FROM agent_runs
             WHERE tenant_id = $tenantId AND harness_session_id = $harnessSessionId
@@ -258,8 +244,6 @@ export class RunStore {
                     finished_at AS finishedAt,
                     checkpoint_id AS checkpointId,
                     failure_reason AS failureReason,
-                    template_version_id AS templateVersionId,
-                    harness_instance_id AS harnessInstanceId,
                     run_policy_json AS runPolicyJson,
                     thinking_level AS thinkingLevel
                 FROM agent_runs
@@ -290,8 +274,6 @@ export class RunStore {
                     finished_at AS finishedAt,
                     checkpoint_id AS checkpointId,
                     failure_reason AS failureReason,
-                    template_version_id AS templateVersionId,
-                    harness_instance_id AS harnessInstanceId,
                     run_policy_json AS runPolicyJson,
                     thinking_level AS thinkingLevel
                 FROM agent_runs
@@ -333,8 +315,6 @@ export class RunStore {
                 finishedAt: run.finishedAt,
                 checkpointId: run.checkpointId,
                 failureReason: run.failureReason,
-                templateVersionId: run.templateVersionId ?? null,
-                harnessInstanceId: run.harnessInstanceId ?? null,
                 runPolicyJson: run.runPolicy === undefined
                     ? null
                     : JSON.stringify(run.runPolicy),
@@ -358,8 +338,6 @@ export class RunStore {
                         finished_at = $finishedAt,
                         checkpoint_id = $checkpointId,
                         failure_reason = $failureReason,
-                        template_version_id = $templateVersionId,
-                        harness_instance_id = $harnessInstanceId,
                         run_policy_json = $runPolicyJson,
                         thinking_level = $thinkingLevel
                     WHERE id = $id
@@ -393,12 +371,6 @@ export class RunStore {
             failureReason: row.failureReason,
             thinkingLevel: row.thinkingLevel,
         };
-        if (row.templateVersionId !== null) {
-            run.templateVersionId = row.templateVersionId;
-        }
-        if (row.harnessInstanceId !== null) {
-            run.harnessInstanceId = row.harnessInstanceId;
-        }
         if (row.runPolicyJson !== null) {
             run.runPolicy = JSON.parse(row.runPolicyJson) as AgentRun["runPolicy"];
         }

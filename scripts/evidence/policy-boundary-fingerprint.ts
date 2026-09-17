@@ -3,8 +3,8 @@ import type { EffectivePolicySnapshot } from "../../src/policies/effective-polic
 
 /**
  * Canonical serialization of the *isolation-relevant* fields of an effective
- * policy. Purpose-identity fields (id, runId, tenantId, templateVersionId,
- * createdAt, layers metadata) are deliberately excluded: the fingerprint
+ * policy. Purpose-identity fields (id, runId, tenantId, createdAt,
+ * layers metadata) are deliberately excluded: the fingerprint
  * describes "what boundary was required", not which request happened to carry
  * it. Two policies that demand the same boundary get the same fingerprint.
  */

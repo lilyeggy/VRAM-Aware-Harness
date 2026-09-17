@@ -63,8 +63,9 @@ function configuredUid(): number {
 function policy(workspacePath: string): EffectivePolicySnapshot {
     return {
         ...unrestrictedPolicy,
+        layers: [],
+        createdAt: new Date().toISOString(),
         id: crypto.randomUUID(), runId: crypto.randomUUID(), tenantId: "SMOKE_TENANT",
-        templateVersionId: "smoke-template", layers: [], createdAt: new Date().toISOString(),
         workspaceRoots: [workspacePath], allowNetwork: false,
         resourceLimits: { cpuCores: 0.5, memoryMiB: 128, diskMiB: null },
     };

@@ -22,7 +22,6 @@ function snapshot(
         id: "policy-1",
         runId: "run-1",
         tenantId: "tenant-1",
-        templateVersionId: "version-1",
         layers: [],
         workspaceRoots: ["/tmp/workspace"],
         createdAt: "2026-08-10T10:00:00.000Z",

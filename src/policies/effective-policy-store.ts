@@ -10,7 +10,6 @@ interface SnapshotRow {
     id: string;
     runId: string;
     tenantId: string;
-    templateVersionId: string;
     layersJson: string;
     effectiveJson: string;
     createdAt: string;
@@ -36,17 +35,16 @@ export class EffectivePolicyStore {
             id: snapshot.id,
             runId: snapshot.runId,
             tenantId: snapshot.tenantId,
-            templateVersionId: snapshot.templateVersionId,
             layersJson: JSON.stringify(snapshot.layers),
             effectiveJson: JSON.stringify(effective),
             createdAt: snapshot.createdAt,
         };
         this.db.query<unknown, typeof parameters>(`
             INSERT INTO effective_policy_snapshots (
-                id, run_id, tenant_id, template_version_id,
+                id, run_id, tenant_id,
                 layers_json, effective_json, created_at
             ) VALUES (
-                $id, $runId, $tenantId, $templateVersionId,
+                $id, $runId, $tenantId,
                 $layersJson, $effectiveJson, $createdAt
             );
         `).run(parameters);
@@ -55,7 +53,6 @@ export class EffectivePolicyStore {
     getSnapshot(id: string): EffectivePolicySnapshot | null {
         const row = this.db.query<SnapshotRow, { id: string }>(`
             SELECT id, run_id AS runId, tenant_id AS tenantId,
-                template_version_id AS templateVersionId,
                 layers_json AS layersJson, effective_json AS effectiveJson,
                 created_at AS createdAt
             FROM effective_policy_snapshots WHERE id = $id;
@@ -71,7 +68,6 @@ export class EffectivePolicyStore {
             id: row.id,
             runId: row.runId,
             tenantId: row.tenantId,
-            templateVersionId: row.templateVersionId,
             layers,
             createdAt: row.createdAt,
         });
