@@ -36,14 +36,9 @@ test("打开新数据库时会创建当前版本所需的表", () => {
         expect(tableNames).toContain("checkpoints");
         expect(tableNames).toContain("resource_snapshots");
         expect(tableNames).toContain("policy_decisions");
-        expect(tableNames).toContain("harness_templates");
-        expect(tableNames).toContain("harness_template_versions");
-        expect(tableNames).toContain("runtime_capability_profiles");
-        expect(tableNames).toContain("harness_instances");
         expect(tableNames).toContain("harness_sessions");
         expect(tableNames).toContain("run_attempts");
         expect(tableNames).toContain("effective_policy_snapshots");
-        expect(tableNames).toContain("policy_compilations");
         expect(tableNames).toContain("tool_policy_decisions");
         expect(tableNames).toContain("sandboxes");
         expect(tableNames).toContain("api_credentials");
@@ -75,30 +70,7 @@ test("重复运行 migration 不会重复应用已有版本", () => {
             `)
             .all();
 
-        expect(rows.map((row) => row.version)).toEqual([
-            1,
-            2,
-            3,
-            4,
-            5,
-            6,
-            7,
-            8,
-            9,
-            10,
-            11,
-            12,
-            13,
-            14,
-            15,
-            16,
-            17,
-            18,
-            19,
-            20,
-            21,
-            22,
-        ]);
+        expect(rows.map((row) => row.version)).toEqual([1]);
     } finally {
         db.close();
     }

@@ -76,12 +76,12 @@ describe("支柱 2：缓存命中指标持久化与评测", () => {
         db.close();
     });
 
-    it("migration v22（最新 schema）在新库与旧库上都能应用", () => {
+    it("migration v1（压平 schema）在新库上应用", () => {
         const db = openHarnessDatabase(":memory:");
         const version = db.query<{ version: number }, []>(
             "SELECT MAX(version) AS version FROM schema_migrations",
         ).get()!.version;
-        expect(version).toBe(22);
+        expect(version).toBe(1);
         db.exec(
             "INSERT INTO llm_cache_metrics (request_id, backend_id, logical_model, recorded_at) VALUES ('r','b','m','t')",
         );
