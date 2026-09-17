@@ -8,13 +8,11 @@ export class RunAttemptStore {
         const parameters = { ...attempt };
         this.db.query<unknown, typeof parameters>(`
             INSERT INTO run_attempts (
-                id, run_id, attempt_number, kind, instance_id,
-                template_version_id, capability_profile_id,
+                id, run_id, attempt_number, kind,
                 policy_snapshot_id, sandbox_id, status, created_at,
                 started_at, finished_at, failure_reason
             ) VALUES (
-                $id, $runId, $attemptNumber, $kind, $instanceId,
-                $templateVersionId, $capabilityProfileId,
+                $id, $runId, $attemptNumber, $kind,
                 $policySnapshotId, $sandboxId, $status, $createdAt,
                 $startedAt, $finishedAt, $failureReason
             );
@@ -71,9 +69,7 @@ export class RunAttemptStore {
 
 const attemptSelect = `
     SELECT id, run_id AS runId, attempt_number AS attemptNumber,
-        kind, instance_id AS instanceId,
-        template_version_id AS templateVersionId,
-        capability_profile_id AS capabilityProfileId,
+        kind,
         policy_snapshot_id AS policySnapshotId,
         sandbox_id AS sandboxId, status,
         created_at AS createdAt, started_at AS startedAt,

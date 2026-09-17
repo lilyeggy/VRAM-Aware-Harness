@@ -238,9 +238,6 @@ CREATE TABLE run_attempts (
                 run_id TEXT NOT NULL,
                 attempt_number INTEGER NOT NULL CHECK (attempt_number > 0),
                 kind TEXT NOT NULL CHECK (kind IN ('START', 'RESUME')),
-                instance_id TEXT NOT NULL,
-                template_version_id TEXT NOT NULL,
-                capability_profile_id TEXT NOT NULL,
                 policy_snapshot_id TEXT,
                 sandbox_id TEXT,
                 status TEXT NOT NULL CHECK (

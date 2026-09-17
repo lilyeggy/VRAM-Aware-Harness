@@ -13,9 +13,6 @@ export interface RunAttempt {
     readonly runId: string;
     readonly attemptNumber: number;
     readonly kind: RunAttemptKind;
-    readonly instanceId: string;
-    readonly templateVersionId: string;
-    readonly capabilityProfileId: string;
     readonly policySnapshotId: string | null;
     readonly sandboxId: string | null;
     readonly status: RunAttemptStatus;

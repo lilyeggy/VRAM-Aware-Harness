@@ -12,9 +12,6 @@ function pendingAttempt() {
         runId: "run-1",
         attemptNumber: 1,
         kind: "START",
-        instanceId: "instance-1",
-        templateVersionId: "template-version-1",
-        capabilityProfileId: "profile-1",
         policySnapshotId: "policy-snapshot-1",
         sandboxId: null,
         createdAt: "2026-08-10T10:00:00.000Z",
@@ -36,8 +33,6 @@ test("RunAttempt 固定版本、能力和策略证据后再进入 RUNNING", () =
 
     expect(succeeded).toMatchObject({
         status: "SUCCEEDED",
-        templateVersionId: "template-version-1",
-        capabilityProfileId: "profile-1",
         policySnapshotId: "policy-snapshot-1",
         sandboxId: "sandbox-1",
     });
