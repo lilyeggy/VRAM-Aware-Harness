@@ -102,7 +102,6 @@ class HttpError extends Error {
  * 都继续由 HarnessApplication 及其下层组件负责。
  */
 import type { ResourceMetricsSampler } from "../resources/resource-metrics-sampler.ts";
-import { summarizeRunObservation } from "../resources/run-observation.ts";
 
 export class HarnessHttpApi {
     constructor(
@@ -417,11 +416,6 @@ export class HarnessHttpApi {
                 });
             }
 
-            if (request.method === "GET" && segments.length === 3 && segments[2] === "observability") {
-                const run = this.getRequiredRun(runId, request, "tasks:read");
-                this.requirePrincipal(request, "resources:read");
-                return jsonResponse(summarizeRunObservation(run, this.application.getRunEvents(runId), this.resourceMetrics?.getSamples() ?? []));
-            }
 
             if (
                 request.method === "GET"

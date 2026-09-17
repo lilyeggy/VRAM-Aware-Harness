@@ -302,9 +302,6 @@ async function main(): Promise<void> {
         const outputA = await call(context, "GET", `/runs/${runIdA}/output`);
         console.log(`\nGET /runs/:id/output -> finalText = ${JSON.stringify(outputA.json.finalText)}`);
 
-        const obsA = await call(context, "GET", `/runs/${runIdA}/observability`);
-        console.log(`\nGET /runs/:id/observability = ${JSON.stringify(obsA.json, null, 2)}`);
-
         heading("3. 场景 B：GPU 打满（CRITICAL）→ QUEUE，回落后 START");
         const workspaceB = await call(context, "POST", "/workspaces", {
             name: `demo-b-${Date.now()}`,
