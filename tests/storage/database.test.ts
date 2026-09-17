@@ -48,7 +48,6 @@ test("打开新数据库时会创建当前版本所需的表", () => {
         expect(tableNames).toContain("run_workspace_snapshots");
         expect(tableNames).toContain("run_workspace_diffs");
         expect(tableNames).toContain("run_artifacts");
-        expect(tableNames).toContain("conversations");
     } finally {
         db.close();
     }

@@ -31,9 +31,9 @@ import type {
     ResumeRunInput,
     StartRunInput,
 }   from "../runs/run-service.ts";
-import type { Conversation } from "../conversations/conversation.ts";
-import { createConversation } from "../conversations/conversation.ts";
-import type { ConversationStore } from "../conversations/conversation-store.ts";
+import type { Conversation } from "../sessions/harness-session.ts";
+import { createConversation } from "../sessions/harness-session.ts";
+import type { HarnessSessionStore } from "../sessions/harness-session-store.ts";
 import { summarizeToolDenials, type RunLimitation } from "../policies/run-limitations.ts";
 import type { PolicyConstraints, PolicyLayer } from "../policies/effective-policy.ts";
 import type { PolicyRegistry } from "../policies/policy-registry.ts";
@@ -87,7 +87,10 @@ export class HarnessApplication {
         private readonly runOutputStore?: RunOutputStore,
         private readonly workspaceResults?: RunWorkspaceResultCoordinator,
         private readonly instanceStore?: AgentListingStore,
-        private readonly conversationStore?: ConversationStore,
+        private readonly conversationStore?: Pick<
+            HarnessSessionStore,
+            "create" | "getForTenant" | "listForWorkspace" | "touch"
+        >,
         private readonly toolPolicyStore?: { listToolDecisions(runId: string): readonly { toolName: string; action: string; reason: string; decidedAt: string }[] },
         /** N15：租户/平台策略注册表（策略管理面）。 */
         private readonly policyRegistry?: PolicyRegistry,
@@ -199,7 +202,7 @@ export class HarnessApplication {
             throw new Error("对话服务未启用");
         }
         const conversation = createConversation(input);
-        this.conversationStore.create(conversation);
+        this.conversationStore.create({ ...conversation, runtimeSessionRef: null });
         return conversation;
     }
 

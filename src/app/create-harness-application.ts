@@ -72,7 +72,6 @@ import { RunStore } from "../runs/runstore.ts";
 import { RunAttemptStore } from "../runs/run-attempt-store.ts";
 import { RunOutputStore } from "../runs/run-output-store.ts";
 import { HarnessSessionStore } from "../sessions/harness-session-store.ts";
-import { ConversationStore } from "../conversations/conversation-store.ts";
 import {
     RunScheduler,
 } from "../scheduling/run-scheduler.ts";
@@ -112,7 +111,6 @@ export interface HarnessComposition {
     checkpointStore:CheckpointStore;
     decisionStore:PolicyDecisionStore;
     sessionStore:HarnessSessionStore;
-    conversationStore:ConversationStore;
     attemptStore:RunAttemptStore;
     effectivePolicyStore:EffectivePolicyStore;
     policyRegistry:PolicyRegistry;
@@ -160,7 +158,6 @@ export async function createHarnessApplication(
     const toolExecutionStore = new ToolExecutionStore(database);
     const decisionStore = new PolicyDecisionStore(database);
     const sessionStore = new HarnessSessionStore(database);
-    const conversationStore = new ConversationStore(database);
     const attemptStore = new RunAttemptStore(database);
     const effectivePolicyStore = new EffectivePolicyStore(database);
     const policyRegistry = dependencies.policyRegistry ?? new PolicyRegistry();
@@ -440,7 +437,7 @@ export async function createHarnessApplication(
         runOutputStore,
         workspaceResultCoordinator,
         undefined,
-        conversationStore,
+        sessionStore,
         effectivePolicyStore,
         // N15：策略管理面（/admin/policies）背后的注册表。
         policyRegistry,
@@ -508,7 +505,6 @@ export async function createHarnessApplication(
         checkpointStore,
         decisionStore,
         sessionStore,
-        conversationStore,
         attemptStore,
         effectivePolicyStore,
         policyRegistry,

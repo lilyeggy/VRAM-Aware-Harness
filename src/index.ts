@@ -10,8 +10,6 @@ export * from "./checkpoints/recovery-service.ts";
 export * from "./checkpoints/recovery-startup-coordinator.ts";
 
 
-export * from "./conversations/conversation.ts";
-export * from "./conversations/conversation-store.ts";
 
 
 export * from "./events/run-event-timeline.ts";

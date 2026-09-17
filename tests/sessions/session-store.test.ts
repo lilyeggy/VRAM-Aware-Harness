@@ -1,16 +1,16 @@
 import { expect, test } from "bun:test";
-import { createConversation } from "../../src/conversations/conversation.ts";
-import { ConversationStore } from "../../src/conversations/conversation-store.ts";
+import { createConversation } from "../../src/sessions/harness-session.ts";
+import { HarnessSessionStore } from "../../src/sessions/harness-session-store.ts";
 import { openHarnessDatabase } from "../../src/storage/database.ts";
 
-test("Conversation 固定归属 Tenant 和 Workspace，并按最近消息排序", () => {
+test("Session 固定归属 Tenant 和 Workspace，并按最近消息排序", () => {
     const db = openHarnessDatabase(":memory:");
     try {
         db.query(`
             INSERT INTO workspaces (id, tenant_id, name, root_path, created_at)
             VALUES ('workspace-a', 'tenant-a', 'project', '/tmp/project-a', '2026-08-30T00:00:00.000Z')
         `).run();
-        const store = new ConversationStore(db);
+        const store = new HarnessSessionStore(db);
         const conversation = createConversation({
             id: "conversation-a",
             tenantId: "tenant-a",
@@ -18,7 +18,7 @@ test("Conversation 固定归属 Tenant 和 Workspace，并按最近消息排序"
             title: "修复测试",
             createdAt: "2026-08-30T00:00:00.000Z",
         });
-        store.create(conversation);
+        store.create({ ...conversation, runtimeSessionRef: null });
 
         expect(store.getForTenant(conversation.id, "tenant-a")).toEqual(conversation);
         expect(store.getForTenant(conversation.id, "tenant-b")).toBeNull();

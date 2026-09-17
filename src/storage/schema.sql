@@ -93,16 +93,6 @@ CREATE TABLE checkpoints (
                 UNIQUE (tool_execution_id)
             );
 
-CREATE TABLE conversations (
-                id TEXT PRIMARY KEY,
-                tenant_id TEXT NOT NULL,
-                workspace_id TEXT NOT NULL,
-                title TEXT NOT NULL,
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL,
-                FOREIGN KEY (workspace_id) REFERENCES workspaces(id)
-            );
-
 CREATE TABLE effective_policy_snapshots (
                 id TEXT PRIMARY KEY,
                 run_id TEXT NOT NULL,
@@ -116,6 +106,8 @@ CREATE TABLE effective_policy_snapshots (
 CREATE TABLE harness_sessions (
                 id TEXT PRIMARY KEY,
                 tenant_id TEXT NOT NULL,
+                workspace_id TEXT,
+                title TEXT,
                 runtime_session_ref TEXT,
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
@@ -441,8 +433,6 @@ CREATE INDEX idx_api_credentials_tenant
 CREATE INDEX idx_checkpoints_run_created
                 ON checkpoints(run_id, created_at);
 
-CREATE INDEX idx_conversations_workspace_updated
-                ON conversations(tenant_id, workspace_id, updated_at DESC);
 
 CREATE INDEX idx_policy_snapshots_run
                 ON effective_policy_snapshots(run_id, created_at);

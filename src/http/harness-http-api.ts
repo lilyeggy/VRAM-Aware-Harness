@@ -30,7 +30,7 @@ import type { RunArtifact } from "../workspaces/run-artifact-store.ts";
 import type { AccessAuditStore } from "../audit/access-audit-store.ts";
 import type { LlmGateway } from "../llm-gateway/llm-gateway.ts";
 import { userConsoleResponse } from "./harness-user-console.ts";
-import type { Conversation } from "../conversations/conversation.ts";
+import type { Conversation } from "../sessions/harness-session.ts";
 import type { PolicyConstraints, PolicyLayer, ResourceLimits } from "../policies/effective-policy.ts";
 import type { ToolExecution } from "../tools/tool-execution.ts";
 import type {
