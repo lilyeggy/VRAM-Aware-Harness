@@ -69,3 +69,6 @@ docs/scenario-compliance-report.zh-CN.html
 
 # 本地归档区：只保留本机，不入库
 .local-archive/
+data/
+scheduling-practice/
+interview-prep/

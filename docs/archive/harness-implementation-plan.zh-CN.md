@@ -16,7 +16,7 @@
 > 条件式研究材料；Claude、异构 ResourcePool 和大型控制面内容也只保留为秋招后
 > 参考，不能覆盖新路线图的优先级。
 
-> **历史实施入口（2026-07-19）**：本文保留早期 Agent–Inference 联合调度的完整分析，用于理解项目背景和后续研究方向；第一周不依赖深度重写 vLLM Scheduler 或管理物理 KV Cache。当时的 Harness-first MVP 实现顺序和验收标准见 [`ONE_WEEK_HARNESS_MVP_GUIDE.zh-CN.md`](../ONE_WEEK_HARNESS_MVP_GUIDE.zh-CN.md)，该手册现已完成并冻结。
+> **历史实施入口（2026-07-19）**：本文保留早期 Agent–Inference 联合调度的完整分析，用于理解项目背景和后续研究方向；第一周不依赖深度重写 vLLM Scheduler 或管理物理 KV Cache。当时的 Harness-first MVP 实现顺序和验收标准见 [`ONE_WEEK_HARNESS_MVP_GUIDE.zh-CN.md`](ONE_WEEK_HARNESS_MVP_GUIDE.zh-CN.md)，该手册现已完成并冻结。
 >
 > **源码状态（2026-07-22）**：自研 Agent Loop、内存 ContextManager、直接 vLLM Client 与 `src/kv/*` 实验已经移除，避免与 Pi 主路径形成双重实现。新源码从 `runtime/` 的稳定接口和 `spikes/` 的 Pi 验证开始，随后进入 `runs/`、`events/`、`tools/`、`checkpoints/`、`policy/`、`resources/` 与 `storage/`。删除决策见 [`ADR 0002`](adr/0002-remove-legacy-agent-prototype.md)。
 >
