@@ -237,228 +237,12 @@ export class PiAdapter implements AgentRuntime{
         });
         // 把 runId和 session 对应起来
 
-        const modelStartedAtByCallId = new Map<string, number>();
-        const activeModelCallIdByRunId = new Map<string, string>();
-        const firstTokenEmittedByCallId = new Set<string>();
-        const modelInfoByCallId = new Map<string, { provider: string; model: string }>();
+        const unsubscribe = this.subscribeSessionEvents(
+            session,
+            runId,
+            runtimeSessionRef,
+        );
 
-        const unsubscribe = session.subscribe((piEvent) => {
-            const timestamp = new Date().toISOString();
-
-            switch (piEvent.type){
-                case "agent_start":
-                    this.emit({
-                        type:"agent_started",
-                        runId,
-                        timestamp,
-                        runtimeSessionRef,
-                    })
-                    break;
-
-                case "message_start": {
-                    if (piEvent.message.role !== "assistant") {
-                        break;
-                    }
-
-                    const modelCallId =
-                        `${runId}:model:${piEvent.message.timestamp}`;
-
-                    modelStartedAtByCallId.set(
-                        modelCallId,
-                        Date.now(),
-                    );
-                    activeModelCallIdByRunId.set(runId, modelCallId);
-                    modelInfoByCallId.set(modelCallId, { provider: piEvent.message.provider, model: piEvent.message.responseModel ?? piEvent.message.model });
-
-                    this.emit({
-                        type: "model_started",
-                        runId,
-                        timestamp,
-                        modelCallId,
-                        provider: piEvent.message.provider,
-                        model: piEvent.message.responseModel
-                            ?? piEvent.message.model,
-                    });
-                    break;
-                }
-
-                case "message_update":
-                    if (piEvent.assistantMessageEvent.type === "text_delta"){
-                        const modelCallId = activeModelCallIdByRunId.get(runId);
-                        const modelInfo = modelCallId === undefined ? undefined : modelInfoByCallId.get(modelCallId);
-                        if (modelCallId !== undefined && modelInfo !== undefined && !firstTokenEmittedByCallId.has(modelCallId)) {
-                            firstTokenEmittedByCallId.add(modelCallId);
-                            this.emit({ type: "model_first_token", runId, timestamp, modelCallId, ...modelInfo, channel: "text" });
-                        }
-                        this.emit({
-                            type:"text_delta",
-                            runId,
-                            timestamp,
-                            delta:piEvent.assistantMessageEvent.delta,
-                        })
-                    } else if (piEvent.assistantMessageEvent.type === "thinking_delta") {
-                        const modelCallId = activeModelCallIdByRunId.get(runId);
-                        const modelInfo = modelCallId === undefined ? undefined : modelInfoByCallId.get(modelCallId);
-                        if (modelCallId !== undefined && modelInfo !== undefined && !firstTokenEmittedByCallId.has(modelCallId)) {
-                            firstTokenEmittedByCallId.add(modelCallId);
-                            this.emit({ type: "model_first_token", runId, timestamp, modelCallId, ...modelInfo, channel: "thinking" });
-                        }
-                        this.emit({
-                            type:"thinking_delta",
-                            runId,
-                            timestamp,
-                            delta:piEvent.assistantMessageEvent.delta,
-                        });
-                    }
-                    break;
-
-                case "message_end": {
-                    if (piEvent.message.role !== "assistant") {
-                        break;
-                    }
-
-                    const modelCallId =
-                        `${runId}:model:${piEvent.message.timestamp}`;
-                    const startedAt =
-                        modelStartedAtByCallId.get(modelCallId);
-
-                    modelStartedAtByCallId.delete(modelCallId);
-                    activeModelCallIdByRunId.delete(runId);
-                    firstTokenEmittedByCallId.delete(modelCallId);
-                    modelInfoByCallId.delete(modelCallId);
-
-                    this.emit({
-                        type: "model_completed",
-                        runId,
-                        timestamp,
-                        modelCallId,
-                        provider: piEvent.message.provider,
-                        model: piEvent.message.responseModel
-                            ?? piEvent.message.model,
-                        durationMs: Math.max(
-                            0,
-                            Date.now() - (
-                                startedAt
-                                    ?? piEvent.message.timestamp
-                            ),
-                        ),
-                        stopReason: piEvent.message.stopReason,
-                        usage: {
-                            inputTokens:
-                                piEvent.message.usage.input,
-                            outputTokens:
-                                piEvent.message.usage.output,
-                            cacheReadTokens:
-                                piEvent.message.usage.cacheRead,
-                            cacheWriteTokens:
-                                piEvent.message.usage.cacheWrite,
-                            reasoningTokens:
-                                piEvent.message.usage.reasoning
-                                    ?? null,
-                            totalTokens:
-                                piEvent.message.usage.totalTokens,
-                            cost: {
-                                input:
-                                    piEvent.message.usage.cost.input,
-                                output:
-                                    piEvent.message.usage.cost.output,
-                                cacheRead:
-                                    piEvent.message.usage.cost.cacheRead,
-                                cacheWrite:
-                                    piEvent.message.usage.cost.cacheWrite,
-                                total:
-                                    piEvent.message.usage.cost.total,
-                            },
-                        },
-                    });
-                    break;
-                }
-
-                case "tool_execution_start":
-                    this.emit({
-                        type:"tool_started",
-                        runId,
-                        timestamp,
-                        toolCallId:piEvent.toolCallId,
-                        toolName:piEvent.toolName,
-                        arguments:piEvent.args,
-                    })
-                    break;
-
-                case "tool_execution_end":
-                    this.emit({
-                        type:"tool_completed",
-                        runId,
-                        timestamp,
-                        toolCallId:piEvent.toolCallId,
-                        toolName:piEvent.toolName,
-                        result:piEvent.result,
-                        isError:piEvent.isError,
-                    })
-                    break;
-                
-                
-                case "agent_end":
-                    // agent执行结束，也有可能是需要重试的情况
-                    if (piEvent.willRetry){
-                        break;
-                    }
-                    // 如果是不需要重试的情况，其实也有区分
-                    const lastMessage = piEvent.messages.at(-1);
-                    // 一种是 Agent 的执行被打断了
-                    if (
-                        lastMessage?.role === "assistant"
-                            && lastMessage.stopReason === "aborted"
-                    ){
-                        this.emit({
-                            type:"agent_interrupted",
-                            runId,
-                            timestamp,
-                        });
-                        break;
-                    }
-                    // 一种是 agent 执行失败了
-                    if (
-                        lastMessage?.role === "assistant"
-                            && lastMessage.stopReason === "error"
-                    ){
-                        this.emit({
-                            type:"agent_failed",
-                            runId,
-                            timestamp,
-                            message:lastMessage.errorMessage ?? "Pi Agent执行失败"
-                        });
-                        break;
-                    }
-                    this.emit({
-                        type:"agent_completed",
-                        runId,
-                        timestamp,
-                    })
-                    break;  
-
-                // Pi 内部状态和增量工具输出当前不形成 Harness 业务事实。
-                case "turn_start":
-                case "turn_end":
-                case "tool_execution_update":
-                case "agent_settled":
-                case "queue_update":
-                case "entry_appended":
-                case "session_info_changed":
-                case "thinking_level_changed":
-                case "auto_retry_start":
-                case "auto_retry_end":
-                    break;
-
-                case "compaction_start":
-                case "compaction_end":
-                    this.logPiCompaction(runId, piEvent);
-                    break;
-
-                default:
-                    this.warnUnknownPiEvent(piEvent);
-            }
-        })
         try{
             await session.prompt(
             request.input
@@ -580,77 +364,113 @@ export class PiAdapter implements AgentRuntime{
             mode: "RESUME_CHECKPOINT",
         });
 
+        const unsubscribe = this.subscribeSessionEvents(
+            session,
+            runId,
+            runtimeSessionRef,
+            checkpointId,
+        );
+
+        try {
+            await session.prompt(
+                request.continuationInput
+            );
+        }catch(error){
+            this.emit({
+                type:"agent_failed",
+                runId,
+                timestamp:new Date().toISOString(),
+                message:error instanceof Error
+                ? error.message
+                : String(error),
+            });
+            throw error;
+        } finally {
+            unsubscribe();
+            this.sessionsByRunId.delete(runId);
+            session.dispose();
+        }
+    }
+
+    /**
+     * start 与 resume 共用同一条 Pi 事件翻译链：两者只有 agent_start 事件
+     * 的类型不同（agent_started / agent_resumed），其余 Pi 事件语义完全一致。
+     */
+    private subscribeSessionEvents(
+        session: AgentSession,
+        runId: string,
+        runtimeSessionRef: string,
+        resumeCheckpointId?: string,
+    ): () => void {
         const modelStartedAtByCallId = new Map<string, number>();
         const activeModelCallIdByRunId = new Map<string, string>();
         const firstTokenEmittedByCallId = new Set<string>();
         const modelInfoByCallId = new Map<string, { provider: string; model: string }>();
 
-        const unsubscribe = session.subscribe((piEvent) => {
+        return session.subscribe((piEvent) => {
             const timestamp = new Date().toISOString();
 
-            switch(piEvent.type){
+            switch (piEvent.type) {
                 case "agent_start":
-                    this.emit({
-                        type:"agent_resumed",
-                        runId,
-                        timestamp,
-                        checkpointId,
-                        runtimeSessionRef,
-                    })
+                    this.emit(
+                        resumeCheckpointId === undefined
+                            ? { type: "agent_started", runId, timestamp, runtimeSessionRef }
+                            : { type: "agent_resumed", runId, timestamp, checkpointId: resumeCheckpointId, runtimeSessionRef },
+                    );
                     break;
+
                 case "message_start": {
                     if (piEvent.message.role !== "assistant") {
                         break;
                     }
-
-                    const modelCallId =
-                        `${runId}:model:${piEvent.message.timestamp}`;
-
-                    modelStartedAtByCallId.set(
-                        modelCallId,
-                        Date.now(),
-                    );
+                    const modelCallId = `${runId}:model:${piEvent.message.timestamp}`;
+                    modelStartedAtByCallId.set(modelCallId, Date.now());
                     activeModelCallIdByRunId.set(runId, modelCallId);
-                    modelInfoByCallId.set(modelCallId, { provider: piEvent.message.provider, model: piEvent.message.responseModel ?? piEvent.message.model });
-
+                    modelInfoByCallId.set(modelCallId, {
+                        provider: piEvent.message.provider,
+                        model: piEvent.message.responseModel ?? piEvent.message.model,
+                    });
                     this.emit({
                         type: "model_started",
                         runId,
                         timestamp,
                         modelCallId,
                         provider: piEvent.message.provider,
-                        model: piEvent.message.responseModel
-                            ?? piEvent.message.model,
+                        model: piEvent.message.responseModel ?? piEvent.message.model,
                     });
                     break;
                 }
 
                 case "message_update":
-                    if (piEvent.assistantMessageEvent.type === "text_delta"){
-                        const modelCallId = activeModelCallIdByRunId.get(runId);
-                        const modelInfo = modelCallId === undefined ? undefined : modelInfoByCallId.get(modelCallId);
-                        if (modelCallId !== undefined && modelInfo !== undefined && !firstTokenEmittedByCallId.has(modelCallId)) {
-                            firstTokenEmittedByCallId.add(modelCallId);
-                            this.emit({ type: "model_first_token", runId, timestamp, modelCallId, ...modelInfo, channel: "text" });
-                        }
-                        this.emit({
-                            type:"text_delta",
+                    if (piEvent.assistantMessageEvent.type === "text_delta") {
+                        this.emitFirstTokenIfNeeded(
                             runId,
                             timestamp,
-                            delta:piEvent.assistantMessageEvent.delta,
-                        })
+                            "text",
+                            activeModelCallIdByRunId,
+                            firstTokenEmittedByCallId,
+                            modelInfoByCallId,
+                        );
+                        this.emit({
+                            type: "text_delta",
+                            runId,
+                            timestamp,
+                            delta: piEvent.assistantMessageEvent.delta,
+                        });
                     } else if (piEvent.assistantMessageEvent.type === "thinking_delta") {
-                        const modelCallId = activeModelCallIdByRunId.get(runId);
-                        const modelInfo = modelCallId === undefined ? undefined : modelInfoByCallId.get(modelCallId);
-                        if (modelCallId !== undefined && modelInfo !== undefined && !firstTokenEmittedByCallId.has(modelCallId)) {
-                            firstTokenEmittedByCallId.add(modelCallId);
-                            this.emit({ type: "model_first_token", runId, timestamp, modelCallId, ...modelInfo, channel: "thinking" });
-                        }
-                        this.emit({
-                            type:"thinking_delta",
+                        this.emitFirstTokenIfNeeded(
                             runId,
                             timestamp,
-                            delta:piEvent.assistantMessageEvent.delta,
+                            "thinking",
+                            activeModelCallIdByRunId,
+                            firstTokenEmittedByCallId,
+                            modelInfoByCallId,
+                        );
+                        this.emit({
+                            type: "thinking_delta",
+                            runId,
+                            timestamp,
+                            delta: piEvent.assistantMessageEvent.delta,
                         });
                     }
                     break;
@@ -659,58 +479,34 @@ export class PiAdapter implements AgentRuntime{
                     if (piEvent.message.role !== "assistant") {
                         break;
                     }
-
-                    const modelCallId =
-                        `${runId}:model:${piEvent.message.timestamp}`;
-                    const startedAt =
-                        modelStartedAtByCallId.get(modelCallId);
-
+                    const modelCallId = `${runId}:model:${piEvent.message.timestamp}`;
+                    const startedAt = modelStartedAtByCallId.get(modelCallId);
                     modelStartedAtByCallId.delete(modelCallId);
                     activeModelCallIdByRunId.delete(runId);
                     firstTokenEmittedByCallId.delete(modelCallId);
                     modelInfoByCallId.delete(modelCallId);
-
                     this.emit({
                         type: "model_completed",
                         runId,
                         timestamp,
                         modelCallId,
                         provider: piEvent.message.provider,
-                        model: piEvent.message.responseModel
-                            ?? piEvent.message.model,
-                        durationMs: Math.max(
-                            0,
-                            Date.now() - (
-                                startedAt
-                                    ?? piEvent.message.timestamp
-                            ),
-                        ),
+                        model: piEvent.message.responseModel ?? piEvent.message.model,
+                        durationMs: Math.max(0, Date.now() - (startedAt ?? piEvent.message.timestamp)),
                         stopReason: piEvent.message.stopReason,
                         usage: {
-                            inputTokens:
-                                piEvent.message.usage.input,
-                            outputTokens:
-                                piEvent.message.usage.output,
-                            cacheReadTokens:
-                                piEvent.message.usage.cacheRead,
-                            cacheWriteTokens:
-                                piEvent.message.usage.cacheWrite,
-                            reasoningTokens:
-                                piEvent.message.usage.reasoning
-                                    ?? null,
-                            totalTokens:
-                                piEvent.message.usage.totalTokens,
+                            inputTokens: piEvent.message.usage.input,
+                            outputTokens: piEvent.message.usage.output,
+                            cacheReadTokens: piEvent.message.usage.cacheRead,
+                            cacheWriteTokens: piEvent.message.usage.cacheWrite,
+                            reasoningTokens: piEvent.message.usage.reasoning ?? null,
+                            totalTokens: piEvent.message.usage.totalTokens,
                             cost: {
-                                input:
-                                    piEvent.message.usage.cost.input,
-                                output:
-                                    piEvent.message.usage.cost.output,
-                                cacheRead:
-                                    piEvent.message.usage.cost.cacheRead,
-                                cacheWrite:
-                                    piEvent.message.usage.cost.cacheWrite,
-                                total:
-                                    piEvent.message.usage.cost.total,
+                                input: piEvent.message.usage.cost.input,
+                                output: piEvent.message.usage.cost.output,
+                                cacheRead: piEvent.message.usage.cost.cacheRead,
+                                cacheWrite: piEvent.message.usage.cost.cacheWrite,
+                                total: piEvent.message.usage.cost.total,
                             },
                         },
                     });
@@ -719,66 +515,48 @@ export class PiAdapter implements AgentRuntime{
 
                 case "tool_execution_start":
                     this.emit({
-                        type:"tool_started",
+                        type: "tool_started",
                         runId,
                         timestamp,
-                        toolCallId:piEvent.toolCallId,
-                        toolName:piEvent.toolName,
-                        arguments:piEvent.args,
-                    })
+                        toolCallId: piEvent.toolCallId,
+                        toolName: piEvent.toolName,
+                        arguments: piEvent.args,
+                    });
                     break;
 
                 case "tool_execution_end":
                     this.emit({
-                        type:"tool_completed",
+                        type: "tool_completed",
                         runId,
                         timestamp,
-                        toolCallId:piEvent.toolCallId,
-                        toolName:piEvent.toolName,
-                        result:piEvent.result,
-                        isError:piEvent.isError,
-                    })
+                        toolCallId: piEvent.toolCallId,
+                        toolName: piEvent.toolName,
+                        result: piEvent.result,
+                        isError: piEvent.isError,
+                    });
                     break;
-                
-                
-                case "agent_end":
-                    // agent执行结束，也有可能是需要重试的情况
-                    if (piEvent.willRetry){
+
+                case "agent_end": {
+                    if (piEvent.willRetry) {
                         break;
                     }
-                    // 如果是不需要重试的情况，其实也有区分
                     const lastMessage = piEvent.messages.at(-1);
-                    // 一种是 Agent 的执行被打断了
-                    if (
-                        lastMessage?.role === "assistant"
-                            && lastMessage.stopReason === "aborted"
-                    ){
+                    if (lastMessage?.role === "assistant" && lastMessage.stopReason === "aborted") {
+                        this.emit({ type: "agent_interrupted", runId, timestamp });
+                        break;
+                    }
+                    if (lastMessage?.role === "assistant" && lastMessage.stopReason === "error") {
                         this.emit({
-                            type:"agent_interrupted",
+                            type: "agent_failed",
                             runId,
                             timestamp,
+                            message: lastMessage.errorMessage ?? "Pi Agent执行失败",
                         });
                         break;
                     }
-                    // 一种是 agent 执行失败了
-                    if (
-                        lastMessage?.role === "assistant"
-                            && lastMessage.stopReason === "error"
-                    ){
-                        this.emit({
-                            type:"agent_failed",
-                            runId,
-                            timestamp,
-                            message:lastMessage.errorMessage ?? "Pi Agent执行失败"
-                        });
-                        break;
-                    }
-                    this.emit({
-                        type:"agent_completed",
-                        runId,
-                        timestamp,
-                    })
-                    break;  
+                    this.emit({ type: "agent_completed", runId, timestamp });
+                    break;
+                }
 
                 // Pi 内部状态和增量工具输出当前不形成 Harness 业务事实。
                 case "turn_start":
@@ -801,26 +579,24 @@ export class PiAdapter implements AgentRuntime{
                 default:
                     this.warnUnknownPiEvent(piEvent);
             }
-        })
-        try {
-            await session.prompt(
-                request.continuationInput
-            );
-        }catch(error){
-            this.emit({
-                type:"agent_failed",
-                runId,
-                timestamp:new Date().toISOString(),
-                message:error instanceof Error
-                ? error.message
-                : String(error),
-            });
-            throw error;
-        } finally {
-            unsubscribe();
-            this.sessionsByRunId.delete(runId);
-            session.dispose();
+        });
+    }
+
+    private emitFirstTokenIfNeeded(
+        runId: string,
+        timestamp: string,
+        channel: "text" | "thinking",
+        activeModelCallIdByRunId: Map<string, string>,
+        firstTokenEmittedByCallId: Set<string>,
+        modelInfoByCallId: Map<string, { provider: string; model: string }>,
+    ): void {
+        const modelCallId = activeModelCallIdByRunId.get(runId);
+        const modelInfo = modelCallId === undefined ? undefined : modelInfoByCallId.get(modelCallId);
+        if (modelCallId === undefined || modelInfo === undefined || firstTokenEmittedByCallId.has(modelCallId)) {
+            return;
         }
+        firstTokenEmittedByCallId.add(modelCallId);
+        this.emit({ type: "model_first_token", runId, timestamp, modelCallId, ...modelInfo, channel });
     }
 
     /**
