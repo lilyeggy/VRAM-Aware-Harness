@@ -13,10 +13,7 @@
     "smoke:http": "bun run scripts/day7-http-smoke.ts",
     "smoke:container": "bun run scripts/container-sandbox-smoke.ts",
     "smoke:container:attacks": "bun run scripts/container-sandbox-attack-smoke.ts",
-    "benchmark:sandbox": "bun run scripts/sandbox-runtime-benchmark.ts",
-    "preflight:server": "bash scripts/server-preflight.sh",
-    "course:open": "cd docs/course && python3 -m http.server 8770",
-    "basics:open": "python3 -m http.server 8789"
+    "preflight:server": "bash scripts/server-preflight.sh"
   },
   "devDependencies": {
     "@types/bun": "latest",
