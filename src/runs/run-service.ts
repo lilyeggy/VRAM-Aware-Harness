@@ -54,7 +54,7 @@ export function buildRecoveryContinuationInput(
  * QUEUED Run 在调度启动前后被并发处置（用户中断 / 排队超时熔断）后的
  * 落点状态。启动方遇到这些状态时放弃启动并交还调度器释放 slot，
  * 而不是把已被接管的 Run 强行推进 RUNNING（真机 A6000 抓到的
- * INTERRUPTED -> RUNNING 非法转换毒丸，见 docs/known-issues A4）。
+ * INTERRUPTED -> RUNNING 非法转换毒丸）。
  */
 function isTakenOverByConcurrentHandling(status: AgentRunStatus): boolean {
     return status === "INTERRUPTED" || status === "FAILED";
