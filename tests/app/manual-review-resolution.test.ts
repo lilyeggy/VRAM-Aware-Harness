@@ -87,8 +87,6 @@ function makeApp(run: AgentRun, prepared: readonly ToolExecution[]) {
         undefined,
         undefined,
         undefined,
-        undefined,
-        undefined,
         toolExecutions,
     );
 

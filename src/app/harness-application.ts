@@ -36,7 +36,6 @@ import { createConversation } from "../sessions/harness-session.ts";
 import type { HarnessSessionStore } from "../sessions/harness-session-store.ts";
 import { summarizeToolDenials, type RunLimitation } from "../policies/run-limitations.ts";
 import type { PolicyConstraints, PolicyLayer } from "../policies/effective-policy.ts";
-import type { PolicyRegistry } from "../policies/policy-registry.ts";
 import type { ToolExecution } from "../tools/tool-execution.ts";
 
 /**
@@ -58,10 +57,6 @@ export interface QueuePump {
     stop(): void;
     stopAndDrain(): Promise<void>;
     tick(): Promise<void>;
-}
-
-interface AgentListingStore {
-    listForTenant(tenantId: string): readonly unknown[];
 }
 
 /**
@@ -86,14 +81,11 @@ export class HarnessApplication {
         private readonly startupRecovery:StartupRecoveryCoordinator,
         private readonly runOutputStore?: RunOutputStore,
         private readonly workspaceResults?: RunWorkspaceResultCoordinator,
-        private readonly instanceStore?: AgentListingStore,
         private readonly conversationStore?: Pick<
             HarnessSessionStore,
             "create" | "getForTenant" | "listForWorkspace" | "touch"
         >,
         private readonly toolPolicyStore?: { listToolDecisions(runId: string): readonly { toolName: string; action: string; reason: string; decidedAt: string }[] },
-        /** N15：租户/平台策略注册表（策略管理面）。 */
-        private readonly policyRegistry?: PolicyRegistry,
         /** N16：工具执行库（人工消解 UNKNOWN_EFFECT）。 */
         private readonly toolExecutions?: ToolExecutionReviewStore,
     ) {}

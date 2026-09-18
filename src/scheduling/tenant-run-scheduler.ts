@@ -186,14 +186,6 @@ export class TenantRunScheduler {
                 continue;
             }
 
-            const activeTenantByRunCount = this.getActiveTenantRunCount(tenantId);
-
-            // 当前 tenant 已经达到并发上限，它仍有等待任务，所以放回轮转队尾.
-            if (activeTenantByRunCount >= this.config.maxActiveRunsPerTenant){
-                this.tenantOrder.push(tenantId);
-                continue;
-            }
-
             const run = tenantQueue.shift();
 
             if (run === undefined){
@@ -201,12 +193,8 @@ export class TenantRunScheduler {
                 continue;
             }
 
-            // A conversation is an ordered message stream. Keep the candidate
-            // queued while an earlier Run from the same conversation is active.
-            if (
-                run.sessionId !== undefined
-                && this.hasActiveSession(run.sessionId)
-            ) {
+            // 本 tenant 已达并发上限，或会话前序 Run 仍在执行：放回队尾等待下一轮。
+            if (this.canClaim(tenantId, run) === false) {
                 tenantQueue.unshift(run);
                 this.tenantOrder.push(tenantId);
                 continue;
@@ -265,17 +253,7 @@ export class TenantRunScheduler {
                 continue;
             }
 
-            if (
-                this.getActiveTenantRunCount(tenantId)
-                >= this.config.maxActiveRunsPerTenant
-            ) {
-                continue;
-            }
-
-            if (
-                head.sessionId !== undefined
-                && this.hasActiveSession(head.sessionId)
-            ) {
+            if (this.canClaim(tenantId, head) === false) {
                 continue;
             }
 
@@ -317,6 +295,18 @@ export class TenantRunScheduler {
         }
 
         return run;
+    }
+
+    /**
+     * 单个 Run 当前是否具备启动资格：tenant 并发未满，且同一会话没有前序
+     * Run 在跑。claimNext 与 claimAged 共用，避免两套判断逻辑漂移。
+     */
+    private canClaim(tenantId: string, run: QueuedRun): boolean {
+        if (this.getActiveTenantRunCount(tenantId) >= this.config.maxActiveRunsPerTenant) {
+            return false;
+        }
+        return run.sessionId === undefined
+            || this.hasActiveSession(run.sessionId) === false;
     }
 
     private getActiveTenantRunCount(tenantId:string):number {

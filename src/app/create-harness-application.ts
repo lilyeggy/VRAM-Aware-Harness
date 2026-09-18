@@ -416,11 +416,8 @@ export async function createHarnessApplication(
         startupRecovery,
         runOutputStore,
         workspaceResultCoordinator,
-        undefined,
         sessionStore,
         effectivePolicyStore,
-        // N15：策略管理面（/admin/policies）背后的注册表。
-        policyRegistry,
         // N16：UNKNOWN_EFFECT 人工消解需要读写 tool_executions。
         toolExecutionStore,
     );
