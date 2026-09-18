@@ -57,6 +57,39 @@ export type DeduplicatedRunEvent = RunEvent & {
     dedupeKey: string;
 };
 
+const RUN_LIST_COLUMNS = `
+    id,
+    tenant_id AS tenantId,
+    harness_session_id AS harnessSessionId,
+    status,
+    user_input AS userInput,
+    workspace_path AS workspacePath,
+    created_at AS createdAt,
+    updated_at AS updatedAt,
+    started_at AS startedAt,
+    finished_at AS finishedAt,
+    checkpoint_id AS checkpointId,
+    thinking_level AS thinkingLevel
+`;
+
+const RUN_DETAIL_COLUMNS = `
+    id,
+    tenant_id AS tenantId,
+    harness_session_id AS harnessSessionId,
+    status,
+    user_input AS userInput,
+    workspace_path AS workspacePath,
+    created_at AS createdAt,
+    updated_at AS updatedAt,
+    started_at AS startedAt,
+    finished_at AS finishedAt,
+    checkpoint_id AS checkpointId,
+    failure_reason AS failureReason,
+    run_policy_json AS runPolicyJson,
+    thinking_level AS thinkingLevel
+`;
+
+
 export class RunStore {
     constructor(private readonly db: Database) {}
 
@@ -74,24 +107,7 @@ export class RunStore {
             throw new Error("AgentRun 的第一条事件 sequence 必须是 1");
         }
 
-        const parameters = {
-            id: run.id,
-            tenantId: run.tenantId,
-            harnessSessionId: run.harnessSessionId,
-            status: run.status,
-            userInput: run.userInput,
-            workspacePath: run.workspacePath,
-            createdAt: run.createdAt,
-            updatedAt: run.updatedAt,
-            startedAt: run.startedAt,
-            finishedAt: run.finishedAt,
-            checkpointId: run.checkpointId,
-            failureReason: run.failureReason,
-            runPolicyJson: run.runPolicy === undefined
-                ? null
-                : JSON.stringify(run.runPolicy),
-            thinkingLevel: run.thinkingLevel ?? "off",
-        };
+        const parameters = this.runParameters(run);
 
         const createRunAndInitialEvent = this.db.transaction(() => {
             this.db
@@ -147,21 +163,7 @@ export class RunStore {
     get(runId: string): AgentRun | null {
         const row = this.db
             .query<AgentRunRow, { runId: string }>(`
-                SELECT
-                    id,
-                    tenant_id AS tenantId,
-                    harness_session_id AS harnessSessionId,
-                    status,
-                    user_input AS userInput,
-                    workspace_path AS workspacePath,
-                    created_at AS createdAt,
-                    updated_at AS updatedAt,
-                    started_at AS startedAt,
-                    finished_at AS finishedAt,
-                    checkpoint_id AS checkpointId,
-                    failure_reason AS failureReason,
-                    run_policy_json AS runPolicyJson,
-                    thinking_level AS thinkingLevel
+                SELECT ${RUN_DETAIL_COLUMNS}
                 FROM agent_runs
                 WHERE id = $runId;
             `)
@@ -175,12 +177,7 @@ export class RunStore {
             throw new Error("Run 列表 limit 必须在 1 到 200 之间");
         }
         return this.db.query<AgentRunRow, { tenantId: string; limit: number }>(`
-            SELECT
-                id, tenant_id AS tenantId, harness_session_id AS harnessSessionId,
-                status, user_input AS userInput, workspace_path AS workspacePath,
-                created_at AS createdAt, updated_at AS updatedAt, started_at AS startedAt,
-                finished_at AS finishedAt, checkpoint_id AS checkpointId,
-                thinking_level AS thinkingLevel
+            SELECT ${RUN_LIST_COLUMNS}
             FROM agent_runs
             WHERE tenant_id = $tenantId
             ORDER BY created_at DESC, rowid DESC
@@ -191,12 +188,7 @@ export class RunStore {
     /** Conversation history in message order. */
     listForSession(tenantId: string, harnessSessionId: string): AgentRun[] {
         return this.db.query<AgentRunRow, { tenantId: string; harnessSessionId: string }>(`
-            SELECT
-                id, tenant_id AS tenantId, harness_session_id AS harnessSessionId,
-                status, user_input AS userInput, workspace_path AS workspacePath,
-                created_at AS createdAt, updated_at AS updatedAt, started_at AS startedAt,
-                finished_at AS finishedAt, checkpoint_id AS checkpointId,
-                thinking_level AS thinkingLevel
+            SELECT ${RUN_LIST_COLUMNS}
             FROM agent_runs
             WHERE tenant_id = $tenantId AND harness_session_id = $harnessSessionId
             ORDER BY created_at ASC, rowid ASC;
@@ -231,21 +223,7 @@ export class RunStore {
     listActiveRuns(): AgentRun[] {
         return this.db
             .query<AgentRunRow, []>(`
-                SELECT
-                    id,
-                    tenant_id AS tenantId,
-                    harness_session_id AS harnessSessionId,
-                    status,
-                    user_input AS userInput,
-                    workspace_path AS workspacePath,
-                    created_at AS createdAt,
-                    updated_at AS updatedAt,
-                    started_at AS startedAt,
-                    finished_at AS finishedAt,
-                    checkpoint_id AS checkpointId,
-                    failure_reason AS failureReason,
-                    run_policy_json AS runPolicyJson,
-                    thinking_level AS thinkingLevel
+                SELECT ${RUN_DETAIL_COLUMNS}
                 FROM agent_runs
                 WHERE status IN ('RUNNING', 'WAITING_TOOL')
                 ORDER BY created_at ASC, rowid ASC;
@@ -261,21 +239,7 @@ export class RunStore {
     listQueuedRuns(): AgentRun[] {
         return this.db
             .query<AgentRunRow, []>(`
-                SELECT
-                    id,
-                    tenant_id AS tenantId,
-                    harness_session_id AS harnessSessionId,
-                    status,
-                    user_input AS userInput,
-                    workspace_path AS workspacePath,
-                    created_at AS createdAt,
-                    updated_at AS updatedAt,
-                    started_at AS startedAt,
-                    finished_at AS finishedAt,
-                    checkpoint_id AS checkpointId,
-                    failure_reason AS failureReason,
-                    run_policy_json AS runPolicyJson,
-                    thinking_level AS thinkingLevel
+                SELECT ${RUN_DETAIL_COLUMNS}
                 FROM agent_runs
                 WHERE status = 'QUEUED'
                 ORDER BY created_at ASC, rowid ASC;
@@ -303,22 +267,7 @@ export class RunStore {
             assertValidTransition(currentRun.status, run.status);
 
             const parameters = {
-                id: run.id,
-                tenantId: run.tenantId,
-                harnessSessionId: run.harnessSessionId,
-                status: run.status,
-                userInput: run.userInput,
-                workspacePath: run.workspacePath,
-                createdAt: run.createdAt,
-                updatedAt: run.updatedAt,
-                startedAt: run.startedAt,
-                finishedAt: run.finishedAt,
-                checkpointId: run.checkpointId,
-                failureReason: run.failureReason,
-                runPolicyJson: run.runPolicy === undefined
-                    ? null
-                    : JSON.stringify(run.runPolicy),
-                thinkingLevel: run.thinkingLevel ?? "off",
+                ...this.runParameters(run),
                 previousStatus: currentRun.status,
             };
 
@@ -353,6 +302,27 @@ export class RunStore {
         });
 
         updateRunAndAppendEvent();
+    }
+
+    private runParameters(run: AgentRun) {
+        return {
+            id: run.id,
+            tenantId: run.tenantId,
+            harnessSessionId: run.harnessSessionId,
+            status: run.status,
+            userInput: run.userInput,
+            workspacePath: run.workspacePath,
+            createdAt: run.createdAt,
+            updatedAt: run.updatedAt,
+            startedAt: run.startedAt,
+            finishedAt: run.finishedAt,
+            checkpointId: run.checkpointId,
+            failureReason: run.failureReason,
+            runPolicyJson: run.runPolicy === undefined
+                ? null
+                : JSON.stringify(run.runPolicy),
+            thinkingLevel: run.thinkingLevel ?? "off",
+        };
     }
 
     private runFromRow(row: AgentRunRow): AgentRun {
