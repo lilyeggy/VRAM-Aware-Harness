@@ -76,14 +76,12 @@ export class WorkerToolGateway implements ToolGatewayExecutor {
     }
 
     /** Master → Worker 的 RPC 响应路由。 */
-    handleMasterMessage(msg: WorkerProtocolMessage): void {
-        if (msg.type !== "TOOL_PREPARE_RESPONSE" && msg.type !== "TOOL_COMPLETE_RESPONSE") {
-            return;
-        }
+    handleMasterMessage(
+        msg: Extract<WorkerProtocolMessage, { type: "TOOL_PREPARE_RESPONSE" | "TOOL_COMPLETE_RESPONSE" }>,
+    ): void {
         const pending = this.pending.get(msg.requestId);
-        if (!pending) {
-            return;
-        }
+        if (pending === undefined) return;
+
         this.pending.delete(msg.requestId);
         clearTimeout(pending.timer);
         if (msg.type === "TOOL_PREPARE_RESPONSE") {

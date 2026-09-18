@@ -218,49 +218,55 @@ export type WorkerProtocolMessage = MasterToWorkerMessage | WorkerToMasterMessag
 // 5. Type Guards
 // ============================================================================
 
+const MASTER_TO_WORKER_TYPES = new Set<unknown>([
+    "START_RUN",
+    "RESUME_RUN",
+    "INTERRUPT_RUN",
+    "SHUTDOWN",
+    "TOOL_PREPARE_RESPONSE",
+    "TOOL_COMPLETE_RESPONSE",
+]);
+
+const WORKER_TO_MASTER_TYPES = new Set<unknown>([
+    "WORKER_READY",
+    "RUNTIME_EVENT",
+    "RUN_COMPLETED",
+    "RUN_FAILED",
+    "RUN_INTERRUPTED",
+    "TOOL_PREPARE_REQUEST",
+    "TOOL_COMPLETE_REQUEST",
+]);
+
+function hasMessageType(value: unknown, knownTypes: ReadonlySet<unknown>): boolean {
+    return typeof value === "object"
+        && value !== null
+        && knownTypes.has((value as { type?: unknown }).type);
+}
+
 export function isMasterToWorkerMessage(value: unknown): value is MasterToWorkerMessage {
-    if (typeof value !== "object" || value === null) return false;
-    const type = (value as { type?: unknown }).type;
-    return (
-        type === "START_RUN" ||
-        type === "RESUME_RUN" ||
-        type === "INTERRUPT_RUN" ||
-        type === "SHUTDOWN" ||
-        type === "TOOL_PREPARE_RESPONSE" ||
-        type === "TOOL_COMPLETE_RESPONSE"
-    );
+    return hasMessageType(value, MASTER_TO_WORKER_TYPES);
 }
 
 export function isWorkerToMasterMessage(value: unknown): value is WorkerToMasterMessage {
-    if (typeof value !== "object" || value === null) return false;
-    const type = (value as { type?: unknown }).type;
-    return (
-        type === "WORKER_READY" ||
-        type === "RUNTIME_EVENT" ||
-        type === "RUN_COMPLETED" ||
-        type === "RUN_FAILED" ||
-        type === "RUN_INTERRUPTED" ||
-        type === "TOOL_PREPARE_REQUEST" ||
-        type === "TOOL_COMPLETE_REQUEST"
-    );
+    return hasMessageType(value, WORKER_TO_MASTER_TYPES);
 }
 
 // ============================================================================
 // 6. Message Factory Helpers
 // ============================================================================
 
+function createTimedMessage<T extends { readonly timestamp?: string }>(
+    message: Omit<T, "timestamp">,
+): T {
+    return { ...message, timestamp: new Date().toISOString() } as T;
+}
+
 export function createStartRunMessage(
     runId: string,
     request: RuntimeStartRequest,
     workerConfig?: WorkerRuntimeConfig,
 ): StartRunMessage {
-    return {
-        type: "START_RUN",
-        runId,
-        request,
-        workerConfig,
-        timestamp: new Date().toISOString(),
-    };
+    return createTimedMessage<StartRunMessage>({ type: "START_RUN", runId, request, workerConfig });
 }
 
 export function createResumeRunMessage(
@@ -268,92 +274,46 @@ export function createResumeRunMessage(
     request: RuntimeResumeRequest,
     workerConfig?: WorkerRuntimeConfig,
 ): ResumeRunMessage {
-    return {
-        type: "RESUME_RUN",
-        runId,
-        request,
-        workerConfig,
-        timestamp: new Date().toISOString(),
-    };
+    return createTimedMessage<ResumeRunMessage>({ type: "RESUME_RUN", runId, request, workerConfig });
 }
 
-export function createInterruptRunMessage(
-    runId: string,
-    reason?: string,
-): InterruptRunMessage {
-    return {
-        type: "INTERRUPT_RUN",
-        runId,
-        reason,
-        timestamp: new Date().toISOString(),
-    };
+export function createInterruptRunMessage(runId: string, reason?: string): InterruptRunMessage {
+    return createTimedMessage<InterruptRunMessage>({ type: "INTERRUPT_RUN", runId, reason });
 }
 
 export function createShutdownMessage(graceful = true): ShutdownMessage {
-    return {
-        type: "SHUTDOWN",
-        graceful,
-        timestamp: new Date().toISOString(),
-    };
+    return createTimedMessage<ShutdownMessage>({ type: "SHUTDOWN", graceful });
 }
 
 export function createWorkerReadyMessage(pid: number, runId?: string): WorkerReadyMessage {
-    return {
+    return createTimedMessage<WorkerReadyMessage>({
         type: "WORKER_READY",
         pid,
         protocolVersion: WORKER_PROTOCOL_VERSION,
         runId,
-        timestamp: new Date().toISOString(),
-    };
+    });
 }
 
-export function createRuntimeEventMessage(
-    runId: string,
-    event: RuntimeEvent,
-): RuntimeEventMessage {
-    return {
-        type: "RUNTIME_EVENT",
-        runId,
-        event,
-    };
+export function createRuntimeEventMessage(runId: string, event: RuntimeEvent): RuntimeEventMessage {
+    return { type: "RUNTIME_EVENT", runId, event };
 }
 
-export function createRunCompletedMessage(
-    runId: string,
-    output?: string,
-): RunCompletedMessage {
-    return {
-        type: "RUN_COMPLETED",
-        runId,
-        output,
-        timestamp: new Date().toISOString(),
-    };
+export function createRunCompletedMessage(runId: string, output?: string): RunCompletedMessage {
+    return createTimedMessage<RunCompletedMessage>({ type: "RUN_COMPLETED", runId, output });
 }
 
-export function createRunFailedMessage(
-    runId: string,
-    error: unknown,
-): RunFailedMessage {
+export function createRunFailedMessage(runId: string, error: unknown): RunFailedMessage {
     const serialized = serializeError(error);
-    return {
+    return createTimedMessage<RunFailedMessage>({
         type: "RUN_FAILED",
         runId,
         error: serialized.message,
         stack: serialized.stack,
-        timestamp: new Date().toISOString(),
-    };
+    });
 }
 
-export function createRunInterruptedMessage(
-    runId: string,
-    reason?: string,
-): RunInterruptedMessage {
-    return {
-        type: "RUN_INTERRUPTED",
-        runId,
-        reason,
-        timestamp: new Date().toISOString(),
-    };
+export function createRunInterruptedMessage(runId: string, reason?: string): RunInterruptedMessage {
+    return createTimedMessage<RunInterruptedMessage>({ type: "RUN_INTERRUPTED", runId, reason });
 }
 
 export function createToolPrepareRequestMessage(
@@ -361,13 +321,12 @@ export function createToolPrepareRequestMessage(
     requestId: number,
     input: ExecuteToolInput,
 ): ToolPrepareRequestMessage {
-    return {
+    return createTimedMessage<ToolPrepareRequestMessage>({
         type: "TOOL_PREPARE_REQUEST",
         runId,
         requestId,
         input,
-        timestamp: new Date().toISOString(),
-    };
+    });
 }
 
 export function createToolCompleteRequestMessage(
@@ -376,14 +335,13 @@ export function createToolCompleteRequestMessage(
     toolExecutionId: string,
     outcome: ToolCompleteRequestMessage["outcome"],
 ): ToolCompleteRequestMessage {
-    return {
+    return createTimedMessage<ToolCompleteRequestMessage>({
         type: "TOOL_COMPLETE_REQUEST",
         runId,
         requestId,
         toolExecutionId,
         outcome,
-        timestamp: new Date().toISOString(),
-    };
+    });
 }
 
 export function createToolPrepareResponseMessage(
@@ -391,13 +349,12 @@ export function createToolPrepareResponseMessage(
     requestId: number,
     decision: ToolPrepareDecisionPayload,
 ): ToolPrepareResponseMessage {
-    return {
+    return createTimedMessage<ToolPrepareResponseMessage>({
         type: "TOOL_PREPARE_RESPONSE",
         runId,
         requestId,
         decision,
-        timestamp: new Date().toISOString(),
-    };
+    });
 }
 
 export function createToolCompleteResponseMessage(
@@ -405,13 +362,12 @@ export function createToolCompleteResponseMessage(
     requestId: number,
     ok: boolean,
 ): ToolCompleteResponseMessage {
-    return {
+    return createTimedMessage<ToolCompleteResponseMessage>({
         type: "TOOL_COMPLETE_RESPONSE",
         runId,
         requestId,
         ok,
-        timestamp: new Date().toISOString(),
-    };
+    });
 }
 
 // ============================================================================
@@ -426,20 +382,26 @@ export function formatJsonLine<T>(message: T): string {
 }
 
 /**
- * Parses a single JSON line. Returns null if empty or malformed.
+ * Parses a JSON object from a protocol line, ignoring arrays and primitives.
  */
-export function parseJsonLine<T>(line: string): T | null {
+function parseJsonObject(line: string): Record<string, unknown> | null {
     const trimmed = line.trim();
-    if (trimmed.length === 0 || !trimmed.startsWith("{")) return null;
+    if (trimmed.length === 0 || trimmed.startsWith("{") === false) return null;
     try {
-        const parsed = JSON.parse(trimmed);
-        if (parsed !== null && typeof parsed === "object" && !Array.isArray(parsed)) {
-            return parsed as T;
-        }
-        return null;
+        const parsed: unknown = JSON.parse(trimmed);
+        return parsed !== null && typeof parsed === "object" && Array.isArray(parsed) === false
+            ? parsed as Record<string, unknown>
+            : null;
     } catch {
         return null;
     }
+}
+
+/**
+ * Parses a single JSON line. Returns null if empty or malformed.
+ */
+export function parseJsonLine<T>(line: string): T | null {
+    return parseJsonObject(line) as T | null;
 }
 
 /**
@@ -464,43 +426,26 @@ export class JsonLineParser<T> {
     private readonly decoder = new TextDecoder("utf-8");
 
     *feed(chunk: Uint8Array | string): Generator<T, void, unknown> {
-        if (typeof chunk === "string") {
-            this.buffer += chunk;
-        } else {
-            this.buffer += this.decoder.decode(chunk, { stream: true });
-        }
+        this.buffer += typeof chunk === "string"
+            ? chunk
+            : this.decoder.decode(chunk, { stream: true });
 
         let newlineIndex: number;
         while ((newlineIndex = this.buffer.indexOf("\n")) !== -1) {
-            const line = this.buffer.slice(0, newlineIndex).trim();
+            const parsed = parseJsonObject(this.buffer.slice(0, newlineIndex));
             this.buffer = this.buffer.slice(newlineIndex + 1);
-
-            if (line.length === 0 || !line.startsWith("{")) continue;
-
-            try {
-                const parsed = JSON.parse(line);
-                if (parsed !== null && typeof parsed === "object" && !Array.isArray(parsed)) {
-                    yield parsed as T;
-                }
-            } catch {
-                // Ignore extraneous or unformatted lines (e.g. non-protocol logs)
+            if (parsed) {
+                yield parsed as T;
             }
         }
     }
 
     *flush(): Generator<T, void, unknown> {
         this.buffer += this.decoder.decode();
-        const line = this.buffer.trim();
+        const parsed = parseJsonObject(this.buffer);
         this.buffer = "";
-        if (line.length > 0 && line.startsWith("{")) {
-            try {
-                const parsed = JSON.parse(line);
-                if (parsed !== null && typeof parsed === "object" && !Array.isArray(parsed)) {
-                    yield parsed as T;
-                }
-            } catch {
-                // Ignore trailing invalid line
-            }
+        if (parsed) {
+            yield parsed as T;
         }
     }
 }

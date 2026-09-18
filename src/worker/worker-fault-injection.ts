@@ -30,9 +30,15 @@ export interface WorkerFaultInjectionContext {
     notifyInterrupted(runId: string, reason?: string): Promise<void>;
 }
 
+export type InterruptInjectionMode = "normal" | "ignore" | "exit";
+
 export interface WorkerFaultInjection {
     /** 处理 START_RUN 注入分支；返回 true 表示已消费，调用方直接 return。 */
     onStartRun(msg: MasterToWorkerMessage): Promise<boolean>;
+    /** 处理 RESUME_RUN 注入分支；返回 true 表示已消费。 */
+    onResumeRun(msg: MasterToWorkerMessage): Promise<boolean>;
+    /** 中断注入模式：normal 走通用中断逻辑，ignore 完全忽略，exit 通知后退出。 */
+    onInterruptRun(msg: MasterToWorkerMessage): InterruptInjectionMode;
 }
 
 export function installWorkerFaultInjection(
@@ -146,6 +152,53 @@ export function installWorkerFaultInjection(
             }
 
             return false;
+        },
+
+        async onResumeRun(msg: MasterToWorkerMessage): Promise<boolean> {
+            if (msg.type !== "RESUME_RUN" || simulateMode !== "mock_stream") {
+                return false;
+            }
+            if (pendingInterruptRunIds.has(msg.runId)) {
+                await notifyInterrupted(msg.runId, pendingInterruptReasons.get(msg.runId) ?? "Interrupted before mock stream resume");
+                setTimeout(() => process.exit(0), 10);
+                return true;
+            }
+
+            await sendToMaster(createRuntimeEventMessage(msg.runId, {
+                type: "agent_resumed",
+                runId: msg.runId,
+                timestamp: new Date().toISOString(),
+                checkpointId: msg.request.checkpoint.checkpointId,
+                runtimeSessionRef: msg.request.checkpoint.runtimeSessionRef,
+            }));
+            await sendToMaster(createRuntimeEventMessage(msg.runId, {
+                type: "text_delta",
+                runId: msg.runId,
+                timestamp: new Date().toISOString(),
+                delta: "Resumed from worker subprocess" + String.fromCharCode(33),
+            }));
+            await sendToMaster(createRuntimeEventMessage(msg.runId, {
+                type: "agent_completed",
+                runId: msg.runId,
+                timestamp: new Date().toISOString(),
+            }));
+            await sendToMaster(createRunCompletedMessage(msg.runId, "Resumed done" + String.fromCharCode(33)));
+            setTimeout(() => process.exit(0), 10);
+            return true;
+        },
+
+        onInterruptRun(msg: MasterToWorkerMessage): InterruptInjectionMode {
+            if (msg.type !== "INTERRUPT_RUN") {
+                return "normal";
+            }
+            if (simulateMode === "hang_stubborn") {
+                console.error(`[Worker PID ${process.pid}] Simulating stubborn worker ignoring INTERRUPT_RUN`);
+                return "ignore";
+            }
+            if (simulateMode === "hang") {
+                return "exit";
+            }
+            return "normal";
         },
     };
 }

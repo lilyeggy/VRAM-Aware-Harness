@@ -18,7 +18,6 @@ import {
     createRuntimeEventMessage,
     createWorkerReadyMessage,
     formatJsonLine,
-    isMasterToWorkerMessage,
     JsonLineParser,
     type MasterToWorkerMessage,
     type WorkerRuntimeConfig,
@@ -168,10 +167,10 @@ async function setupRuntime(config: WorkerRuntimeConfig, sandboxId?: string, thi
 // 5. IPC Message Handler
 // D9：故障注入逻辑住在独立模块，仅在 HARNESS_WORKER_SIMULATE 显式设置时
 // 动态加载——默认生产入口不包含任何注入代码路径。
-const simulateMode = process.env.HARNESS_WORKER_SIMULATE;
-const faultInjection = simulateMode === undefined
+const simulationMode = process.env.HARNESS_WORKER_SIMULATE;
+const faultInjection = simulationMode === undefined
     ? undefined
-    : (await import("./worker-fault-injection.ts")).installWorkerFaultInjection(simulateMode, {
+    : (await import("./worker-fault-injection.ts")).installWorkerFaultInjection(simulationMode, {
         sendToMaster,
         toolGateway,
         pendingInterruptRunIds,
@@ -179,182 +178,105 @@ const faultInjection = simulateMode === undefined
         notifyInterrupted,
     });
 
-async function handleMasterMessage(msg: MasterToWorkerMessage): Promise<void> {
-    if (!isMasterToWorkerMessage(msg)) {
+type RunRequestMessage = Extract<MasterToWorkerMessage, { type: "START_RUN" | "RESUME_RUN" }>;
+
+function defaultWorkerConfig(): WorkerRuntimeConfig {
+    return {
+        piProvider: process.env.PI_PROVIDER ?? "local-vllm",
+        piModelId: process.env.VLLM_MODEL_ID ?? "mock-model",
+        piTools: ["read", "bash", "edit", "write", "grep", "find", "ls"],
+        piModelsPath: process.env.PI_MODELS_PATH ?? ".pi/spike/models.json",
+        sandboxProvider: "container",
+        sandboxProfile: "default",
+        sandboxRuntime: "runsc",
+        containerImage: "alpine:3.20",
+        containerUserId: 65532,
+    };
+}
+
+async function executeRunMessage(msg: RunRequestMessage): Promise<void> {
+    const isStart = msg.type === "START_RUN";
+    const runId = msg.runId;
+    activeRunId = runId;
+
+    // Gate 1: Check if already interrupted before START_RUN / RESUME_RUN arrived.
+    if (pendingInterruptRunIds.has(runId)) {
+        const phase = isStart ? "start" : "resume";
+        console.error(`[Worker PID ${process.pid}] Run ${runId} was interrupted before ${phase}, aborting`);
+        await notifyInterrupted(runId, pendingInterruptReasons.get(runId) ?? `Interrupted before ${phase}`);
+        setTimeout(() => process.exit(0), 10);
         return;
     }
-    switch (msg.type) {
-        case "START_RUN": {
-            activeRunId = msg.runId;
 
-            // Gate 1: Check if already interrupted before START_RUN arrived
-            if (pendingInterruptRunIds.has(msg.runId)) {
-                console.error(`[Worker PID ${process.pid}] Run ${msg.runId} was interrupted before start, aborting`);
-                await notifyInterrupted(msg.runId, pendingInterruptReasons.get(msg.runId) ?? "Interrupted before start");
-                setTimeout(() => process.exit(0), 10);
-                return;
-            }
+    // D9：故障注入分支全部由按需加载的独立模块消费，生产入口不再散落 mode 判断。
+    if (faultInjection) {
+        const consumed = isStart
+            ? await faultInjection.onStartRun(msg)
+            : await faultInjection.onResumeRun(msg);
+        if (consumed) return;
+    }
 
-            // D9：故障注入分支已全部搬入 worker-fault-injection.ts（按需动态加载）。
-            if (faultInjection && await faultInjection.onStartRun(msg)) {
-                return;
-            }
+    const setupLabel = isStart ? "setup" : "resume setup";
+    try {
+        const config = msg.workerConfig ?? defaultWorkerConfig();
+        const { piAdapter } = await setupRuntime(
+            config,
+            msg.request.execution?.sandboxId,
+            msg.request.run.thinkingLevel,
+        );
 
-            try {
-                const config: WorkerRuntimeConfig = msg.workerConfig ?? {
-                    piProvider: process.env.PI_PROVIDER ?? "local-vllm",
-                    piModelId: process.env.VLLM_MODEL_ID ?? "mock-model",
-                    piTools: ["read", "bash", "edit", "write", "grep", "find", "ls"],
-                    piModelsPath: process.env.PI_MODELS_PATH ?? ".pi/spike/models.json",
-                    sandboxProvider: "container",
-                    sandboxProfile: "default",
-                    sandboxRuntime: "runsc",
-                    containerImage: "alpine:3.20",
-                    containerUserId: 65532,
-                };
-                const { piAdapter } = await setupRuntime(
-                    config,
-                    msg.request.execution?.sandboxId,
-                    msg.request.run.thinkingLevel,
-                );
-
-                // Gate 2: Check if interrupted during asynchronous setupRuntime
-                if (pendingInterruptRunIds.has(msg.runId)) {
-                    console.error(`[Worker PID ${process.pid}] Run ${msg.runId} interrupted during setup, aborting`);
-                    await notifyInterrupted(msg.runId, pendingInterruptReasons.get(msg.runId) ?? "Interrupted during setup");
-                    return;
-                }
-
-                currentPiAdapter = piAdapter;
-
-                const unsubscribe = piAdapter.subscribe(msg.runId, (event) => {
-                    void sendToMaster(createRuntimeEventMessage(msg.runId, event));
-                });
-
-                try {
-                    await piAdapter.start(msg.request);
-                    // Gate 3: Suppress RUN_COMPLETED if interrupted during execution
-                    if (!pendingInterruptRunIds.has(msg.runId)) {
-                        await sendToMaster(createRunCompletedMessage(msg.runId));
-                    }
-                } finally {
-                    unsubscribe();
-                }
-            } catch (err) {
-                // Gate 4: Suppress RUN_FAILED if failure was due to interruption abort
-                if (pendingInterruptRunIds.has(msg.runId)) {
-                    console.error(`[Worker PID ${process.pid}] Interrupted run aborted (suppressing error):`, err);
-                } else {
-                    console.error(`[Worker PID ${process.pid}] Run failed:`, err);
-                    await sendToMaster(createRunFailedMessage(msg.runId, err));
-                }
-            } finally {
-                activeRunId = null;
-                currentPiAdapter = null;
-                setTimeout(() => process.exit(0), 10);
-            }
-            break;
+        // Gate 2: Check if interrupted during asynchronous setupRuntime.
+        if (pendingInterruptRunIds.has(runId)) {
+            console.error(`[Worker PID ${process.pid}] Run ${runId} interrupted during ${setupLabel}, aborting`);
+            await notifyInterrupted(runId, pendingInterruptReasons.get(runId) ?? `Interrupted during ${setupLabel}`);
+            return;
         }
 
+        currentPiAdapter = piAdapter;
+
+        const unsubscribe = piAdapter.subscribe(runId, (event) => {
+            void sendToMaster(createRuntimeEventMessage(runId, event));
+        });
+
+        try {
+            if (msg.type === "START_RUN") {
+                await piAdapter.start(msg.request);
+            } else {
+                await piAdapter.resume(msg.request);
+            }
+            // Gate 3: Suppress RUN_COMPLETED if interrupted during execution.
+            if (pendingInterruptRunIds.has(runId) === false) {
+                await sendToMaster(createRunCompletedMessage(runId));
+            }
+        } finally {
+            unsubscribe();
+        }
+    } catch (err) {
+        // Gate 4: Suppress RUN_FAILED if failure was due to interruption abort.
+        if (pendingInterruptRunIds.has(runId)) {
+            console.error(`[Worker PID ${process.pid}] ${isStart ? "Interrupted run" : "Interrupted resume"} aborted (suppressing error):`, err);
+        } else {
+            console.error(`[Worker PID ${process.pid}] ${isStart ? "Run" : "Resume"} failed:`, err);
+            await sendToMaster(createRunFailedMessage(runId, err));
+        }
+    } finally {
+        activeRunId = null;
+        currentPiAdapter = null;
+        setTimeout(() => process.exit(0), 10);
+    }
+}
+
+async function handleMasterMessage(msg: MasterToWorkerMessage): Promise<void> {
+    switch (msg.type) {
+        case "START_RUN":
         case "RESUME_RUN": {
-            activeRunId = msg.runId;
-
-            // Gate 1: Check if already interrupted before RESUME_RUN arrived
-            if (pendingInterruptRunIds.has(msg.runId)) {
-                console.error(`[Worker PID ${process.pid}] Run ${msg.runId} was interrupted before resume, aborting`);
-                await notifyInterrupted(msg.runId, pendingInterruptReasons.get(msg.runId) ?? "Interrupted before resume");
-                setTimeout(() => process.exit(0), 10);
-                return;
-            }
-
-            if (simulateMode === "mock_stream") {
-                if (pendingInterruptRunIds.has(msg.runId)) {
-                    await notifyInterrupted(msg.runId, pendingInterruptReasons.get(msg.runId) ?? "Interrupted before mock stream resume");
-                    setTimeout(() => process.exit(0), 10);
-                    return;
-                }
-                await sendToMaster(createRuntimeEventMessage(msg.runId, {
-                    type: "agent_resumed",
-                    runId: msg.runId,
-                    timestamp: new Date().toISOString(),
-                    checkpointId: msg.request.checkpoint.checkpointId,
-                    runtimeSessionRef: msg.request.checkpoint.runtimeSessionRef,
-                }));
-                await sendToMaster(createRuntimeEventMessage(msg.runId, {
-                    type: "text_delta",
-                    runId: msg.runId,
-                    timestamp: new Date().toISOString(),
-                    delta: "Resumed from worker subprocess!",
-                }));
-                await sendToMaster(createRuntimeEventMessage(msg.runId, {
-                    type: "agent_completed",
-                    runId: msg.runId,
-                    timestamp: new Date().toISOString(),
-                }));
-                await sendToMaster(createRunCompletedMessage(msg.runId, "Resumed done!"));
-                setTimeout(() => process.exit(0), 10);
-                return;
-            }
-
-            try {
-                const config: WorkerRuntimeConfig = msg.workerConfig ?? {
-                    piProvider: process.env.PI_PROVIDER ?? "local-vllm",
-                    piModelId: process.env.VLLM_MODEL_ID ?? "mock-model",
-                    piTools: ["read", "bash", "edit", "write", "grep", "find", "ls"],
-                    piModelsPath: process.env.PI_MODELS_PATH ?? ".pi/spike/models.json",
-                    sandboxProvider: "container",
-                    sandboxProfile: "default",
-                    sandboxRuntime: "runsc",
-                    containerImage: "alpine:3.20",
-                    containerUserId: 65532,
-                };
-                const { piAdapter } = await setupRuntime(
-                    config,
-                    msg.request.execution?.sandboxId,
-                    msg.request.run.thinkingLevel,
-                );
-
-                // Gate 2: Check if interrupted during asynchronous setupRuntime
-                if (pendingInterruptRunIds.has(msg.runId)) {
-                    console.error(`[Worker PID ${process.pid}] Run ${msg.runId} interrupted during resume setup, aborting`);
-                    await notifyInterrupted(msg.runId, pendingInterruptReasons.get(msg.runId) ?? "Interrupted during resume setup");
-                    return;
-                }
-
-                currentPiAdapter = piAdapter;
-
-                const unsubscribe = piAdapter.subscribe(msg.runId, (event) => {
-                    void sendToMaster(createRuntimeEventMessage(msg.runId, event));
-                });
-
-                try {
-                    await piAdapter.resume(msg.request);
-                    // Gate 3: Suppress RUN_COMPLETED if interrupted
-                    if (!pendingInterruptRunIds.has(msg.runId)) {
-                        await sendToMaster(createRunCompletedMessage(msg.runId));
-                    }
-                } finally {
-                    unsubscribe();
-                }
-            } catch (err) {
-                // Gate 4: Suppress RUN_FAILED if interrupted
-                if (pendingInterruptRunIds.has(msg.runId)) {
-                    console.error(`[Worker PID ${process.pid}] Interrupted run resume aborted (suppressing error):`, err);
-                } else {
-                    console.error(`[Worker PID ${process.pid}] Resume failed:`, err);
-                    await sendToMaster(createRunFailedMessage(msg.runId, err));
-                }
-            } finally {
-                activeRunId = null;
-                currentPiAdapter = null;
-                setTimeout(() => process.exit(0), 10);
-            }
+            await executeRunMessage(msg);
             break;
         }
 
         case "INTERRUPT_RUN": {
-            if (simulateMode === "hang_stubborn") {
-                console.error(`[Worker PID ${process.pid}] Simulating stubborn worker ignoring INTERRUPT_RUN`);
+            const interruptMode = faultInjection?.onInterruptRun(msg) ?? "normal";
+            if (interruptMode === "ignore") {
                 break;
             }
 
@@ -371,18 +293,17 @@ async function handleMasterMessage(msg: MasterToWorkerMessage): Promise<void> {
                 }
                 await notifyInterrupted(msg.runId, msg.reason);
             } else if (activeRunId === msg.runId) {
-                // activeRunId matches, but currentPiAdapter not yet set (during setupRuntime or simulateMode === "hang")
+                // activeRunId 匹配但 PiAdapter 尚未就绪（setupRuntime 中或 hang 模拟）。
                 await notifyInterrupted(msg.runId, msg.reason);
-                if (simulateMode === "hang") {
+                if (interruptMode === "exit") {
                     setTimeout(() => process.exit(0), 10);
                 }
             } else {
-                // activeRunId is null or not yet set (INTERRUPT_RUN arrived before START_RUN)
+                // activeRunId 为空或尚未设置（INTERRUPT_RUN 先于 START_RUN 到达）。
                 console.error(`[Worker PID ${process.pid}] Early INTERRUPT_RUN for ${msg.runId} buffered (activeRunId is ${activeRunId})`);
                 await notifyInterrupted(msg.runId, msg.reason);
-                // Graceful fallback exit if START_RUN never arrives
                 setTimeout(() => {
-                    if (!activeRunId) {
+                    if (activeRunId === null) {
                         process.exit(0);
                     }
                 }, 3000);

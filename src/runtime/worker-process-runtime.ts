@@ -31,6 +31,7 @@ import {
     isWorkerToMasterMessage,
     type MasterToWorkerMessage,
     type ToolCompleteRequestMessage,
+    type ToolPrepareDecisionPayload,
     type ToolPrepareRequestMessage,
     type WorkerRuntimeConfig,
     type WorkerToMasterMessage,
@@ -405,12 +406,15 @@ export class WorkerProcessAgentRuntime implements AgentRuntime {
         msg: ToolPrepareRequestMessage,
         send: (msg: MasterToWorkerMessage) => void,
     ): void {
+        const respond = (decision: ToolPrepareDecisionPayload): void => {
+            send(createToolPrepareResponseMessage(runId, msg.requestId, decision));
+        };
         const bridge = this.options.toolGatewayBridge;
-        if (!bridge) {
-            send(createToolPrepareResponseMessage(runId, msg.requestId, {
+        if (bridge === undefined) {
+            respond({
                 kind: "DENIED",
                 reason: "Worker 隔离模式未装配工具治理桥，fail-closed 拒绝执行",
-            }));
+            });
             return;
         }
         try {
@@ -429,28 +433,22 @@ export class WorkerProcessAgentRuntime implements AgentRuntime {
                     toolName: input.toolName,
                     toolCallId: input.toolCallId,
                 });
-                send(createToolPrepareResponseMessage(runId, msg.requestId, {
+                respond({
                     kind: "ALLOWED",
                     toolExecutionId: decision.execution.id,
                     lastEventSequence: input.lastEventSequence,
-                }));
+                });
             } else if (decision.kind === "REUSE") {
-                send(createToolPrepareResponseMessage(runId, msg.requestId, {
-                    kind: "REUSE",
-                    result: decision.result,
-                }));
+                respond({ kind: "REUSE", result: decision.result });
             } else {
-                send(createToolPrepareResponseMessage(runId, msg.requestId, {
-                    kind: "DENIED",
-                    reason: decision.reason,
-                }));
+                respond({ kind: "DENIED", reason: decision.reason });
             }
         } catch (err) {
             // 策略守卫抛出的拒绝原样转成 DENIED（保留消息），绝不放行。
-            send(createToolPrepareResponseMessage(runId, msg.requestId, {
+            respond({
                 kind: "DENIED",
                 reason: err instanceof Error ? err.message : String(err),
-            }));
+            });
         }
     }
 
