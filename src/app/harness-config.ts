@@ -128,21 +128,19 @@ export function loadHarnessConfig(
         environment,
         "VLLM_MODEL_ID",
     );
+    const posInt = (name: string, fallback: number): number =>
+        positiveInteger(environment, name, fallback);
+    const nonNeg = (name: string, fallback: number): number =>
+        nonNegativeInteger(environment, name, fallback);
+    const num = (name: string, fallback: number): number =>
+        numberValue(environment, name, fallback);
     const vllmBaseUrl = environment.VLLM_BASE_URL
         ?? "http://127.0.0.1:8000/v1";
     // 支柱 2：工具执行与模型等待期间 GPU 不应空转——默认并发上限放开到
     // 20~30 档位，工具与文件 I/O 在沙箱内并发执行，不独占 GPU 槽位。
     // 每租户并发仍然可配（HARNESS_MAX_ACTIVE_RUNS_PER_TENANT）。
-    const maxActiveRuns = positiveInteger(
-        environment,
-        "HARNESS_MAX_ACTIVE_RUNS",
-        30,
-    );
-    const maxActiveRunsPerTenant = positiveInteger(
-        environment,
-        "HARNESS_MAX_ACTIVE_RUNS_PER_TENANT",
-        10,
-    );
+    const maxActiveRuns = posInt("HARNESS_MAX_ACTIVE_RUNS", 30);
+    const maxActiveRunsPerTenant = posInt("HARNESS_MAX_ACTIVE_RUNS_PER_TENANT", 10);
 
     if (maxActiveRunsPerTenant > maxActiveRuns) {
         throw new Error(
@@ -185,7 +183,7 @@ export function loadHarnessConfig(
 
     return {
         ...(environment.HARNESS_SANDBOX_WARM_POOL_SIZE === undefined ? {} : {
-            sandboxWarmPoolSize: positiveInteger(environment, 'HARNESS_SANDBOX_WARM_POOL_SIZE', 2),
+            sandboxWarmPoolSize: posInt('HARNESS_SANDBOX_WARM_POOL_SIZE', 2),
         }),
         // 只有显式声明 tenant 才放宽视野；默认（含拼错的值）保持 Run 级隔离。
         ...(environment.HARNESS_SANDBOX_WORKSPACE_SCOPE === "tenant"
@@ -201,16 +199,8 @@ export function loadHarnessConfig(
         sandboxProfile,
         sandboxRuntime,
         containerImage:environment.HARNESS_CONTAINER_IMAGE ?? "alpine:3.20",
-        containerUserId:positiveInteger(
-            environment,
-            "HARNESS_CONTAINER_USER_ID",
-            65532,
-        ),
-        containerPidsLimit:positiveInteger(
-            environment,
-            "HARNESS_CONTAINER_PIDS_LIMIT",
-            128,
-        ),
+        containerUserId:posInt("HARNESS_CONTAINER_USER_ID", 65532),
+        containerPidsLimit:posInt("HARNESS_CONTAINER_PIDS_LIMIT", 128),
 
         piProvider:environment.PI_PROVIDER ?? "local-vllm",
         piModelId,
@@ -230,11 +220,7 @@ export function loadHarnessConfig(
         llmGatewayStrategy:loadLlmGatewayStrategy(
             environment.LLM_GATEWAY_STRATEGY,
         ),
-        llmHealthProbeIntervalMs:nonNegativeInteger(
-            environment,
-            "LLM_HEALTH_PROBE_INTERVAL_MS",
-            10_000,
-        ),
+        llmHealthProbeIntervalMs:nonNeg("LLM_HEALTH_PROBE_INTERVAL_MS", 10_000),
         // N4：探活路径可配置。默认 "/models"——与 /chat/completions 同一
         // 拼接约定（baseUrl 已含 /v1），得到 OpenAI 标准端点 /v1/models；
         // 个别后端只暴露其它端点时用 LLM_HEALTH_PROBE_PATH 覆盖。
@@ -243,130 +229,50 @@ export function loadHarnessConfig(
         // 长输入/长输出任务必然被掐断（真机实测：50k 字符任务连续 4 次
         // ~60s 中止后 RUN_FAILED）。默认放宽到 300s，可用
         // LLM_REQUEST_TIMEOUT_MS 覆盖（大输出/慢后端可调至 600s 以上）。
-        llmRequestTimeoutMs:positiveInteger(
-            environment,
-            "LLM_REQUEST_TIMEOUT_MS",
-            300_000,
-        ),
+        llmRequestTimeoutMs:posInt("LLM_REQUEST_TIMEOUT_MS", 300_000),
         // N28：会话历史超预算时按轮次边界压缩。旧行为下会话累积超过模型窗口后
         // 每个请求都会被上游 400 拒绝且永不恢复（8h 长稳实测 21.3% 的任务因此失败，
         // 最惨会话 142 连败 0 成功）。默认 24000：本部署模型窗口 32768、预留输出
         // 4096，留出安全余量。0 = 关闭压缩。
-        llmContextBudgetTokens:nonNegativeInteger(
-            environment,
-            "LLM_CONTEXT_BUDGET_TOKENS",
-            24_000,
-        ),
+        llmContextBudgetTokens:nonNeg("LLM_CONTEXT_BUDGET_TOKENS", 24_000),
         // N8：提交期输入上界。旧实现不校验，78 万字符会被 202 接受，
         // 直到模型侧返回 400 才失败，且提交响应回显全量输入。
-        maxUserInputChars:positiveInteger(
-            environment,
-            "HARNESS_MAX_USER_INPUT_CHARS",
-            100_000,
-        ),
+        maxUserInputChars:posInt("HARNESS_MAX_USER_INPUT_CHARS", 100_000),
         // N28 主机制：Pi 自身摘要式压缩。默认值按本部署的模型窗口（32768）与
         // 单次输出上限（4096）标定——触发点 32768-12288=20480，压缩后保留约
         // 8192，为输出留出 12288 的余量。详见 HarnessConfig 字段注释。
         piCompactionEnabled:environment.PI_COMPACTION_ENABLED
             !== "false"
             && environment.PI_COMPACTION_ENABLED !== "0",
-        piCompactionReserveTokens:positiveInteger(
-            environment,
-            "PI_COMPACTION_RESERVE_TOKENS",
-            12_288,
-        ),
-        piCompactionKeepRecentTokens:positiveInteger(
-            environment,
-            "PI_COMPACTION_KEEP_RECENT_TOKENS",
-            8_192,
-        ),
+        piCompactionReserveTokens:posInt("PI_COMPACTION_RESERVE_TOKENS", 12_288),
+        piCompactionKeepRecentTokens:posInt("PI_COMPACTION_KEEP_RECENT_TOKENS", 8_192),
 
         vllmMetricsUrl:environment.VLLM_METRICS_URL
             ?? metricsUrlFromBaseUrl(vllmBaseUrl),
-        resourceObservationTimeoutMs:positiveInteger(
-            environment,
-            "HARNESS_RESOURCE_TIMEOUT_MS",
-            3_000,
-        ),
-        resourceMetricsIntervalMs:positiveInteger(environment, "HARNESS_RESOURCE_METRICS_INTERVAL_MS", 1_000),
+        resourceObservationTimeoutMs:posInt("HARNESS_RESOURCE_TIMEOUT_MS", 3_000),
+        resourceMetricsIntervalMs:posInt("HARNESS_RESOURCE_METRICS_INTERVAL_MS", 1_000),
         gpuIds:stringList(environment.HARNESS_GPU_IDS, ["0"]),
         resourceThresholds:{
-            busyGpuMemoryPercent:numberValue(
-                environment,
-                "HARNESS_BUSY_GPU_MEMORY_PERCENT",
-                70,
-            ),
-            criticalGpuMemoryPercent:numberValue(
-                environment,
-                "HARNESS_CRITICAL_GPU_MEMORY_PERCENT",
-                90,
-            ),
+            busyGpuMemoryPercent:num("HARNESS_BUSY_GPU_MEMORY_PERCENT", 70),
+            criticalGpuMemoryPercent:num("HARNESS_CRITICAL_GPU_MEMORY_PERCENT", 90),
             // N5：同机推理服务（如 vLLM，默认预占 90% 显存）的稳态基线。
             // 准入按「基线之上的增量」判定；无同机推理服务的部署应显式设为 0。
-            gpuMemoryBaselinePercent:numberValue(
-                environment,
-                "HARNESS_GPU_MEMORY_BASELINE_PERCENT",
-                90,
-            ),
-            busyKvCachePercent:numberValue(
-                environment,
-                "HARNESS_BUSY_KV_CACHE_PERCENT",
-                60,
-            ),
-            criticalKvCachePercent:numberValue(
-                environment,
-                "HARNESS_CRITICAL_KV_CACHE_PERCENT",
-                85,
-            ),
-            busyRunningRequests:nonNegativeInteger(
-                environment,
-                "HARNESS_BUSY_RUNNING_REQUESTS",
-                4,
-            ),
-            criticalRunningRequests:nonNegativeInteger(
-                environment,
-                "HARNESS_CRITICAL_RUNNING_REQUESTS",
-                8,
-            ),
-            busyWaitingRequests:nonNegativeInteger(
-                environment,
-                "HARNESS_BUSY_WAITING_REQUESTS",
-                1,
-            ),
-            criticalWaitingRequests:nonNegativeInteger(
-                environment,
-                "HARNESS_CRITICAL_WAITING_REQUESTS",
-                4,
-            ),
+            gpuMemoryBaselinePercent:num("HARNESS_GPU_MEMORY_BASELINE_PERCENT", 90),
+            busyKvCachePercent:num("HARNESS_BUSY_KV_CACHE_PERCENT", 60),
+            criticalKvCachePercent:num("HARNESS_CRITICAL_KV_CACHE_PERCENT", 85),
+            busyRunningRequests:nonNeg("HARNESS_BUSY_RUNNING_REQUESTS", 4),
+            criticalRunningRequests:nonNeg("HARNESS_CRITICAL_RUNNING_REQUESTS", 8),
+            busyWaitingRequests:nonNeg("HARNESS_BUSY_WAITING_REQUESTS", 1),
+            criticalWaitingRequests:nonNeg("HARNESS_CRITICAL_WAITING_REQUESTS", 4),
         },
 
         maxActiveRuns,
         maxActiveRunsPerTenant,
-        pumpIntervalMs:positiveInteger(
-            environment,
-            "HARNESS_PUMP_INTERVAL_MS",
-            1_000,
-        ),
-        queueTtlMs:positiveInteger(
-            environment,
-            "HARNESS_QUEUE_TTL_MS",
-            300_000,
-        ),
-        schedulerAgingMs:nonNegativeInteger(
-            environment,
-            "HARNESS_SCHEDULER_AGING_MS",
-            60_000,
-        ),
-        executionTimeoutMs:positiveInteger(
-            environment,
-            "HARNESS_EXECUTION_TIMEOUT_MS",
-            30 * 60_000,
-        ),
-        interruptGraceMs:positiveInteger(
-            environment,
-            "HARNESS_INTERRUPT_GRACE_MS",
-            10_000,
-        ),
+        pumpIntervalMs:posInt("HARNESS_PUMP_INTERVAL_MS", 1_000),
+        queueTtlMs:posInt("HARNESS_QUEUE_TTL_MS", 300_000),
+        schedulerAgingMs:nonNeg("HARNESS_SCHEDULER_AGING_MS", 60_000),
+        executionTimeoutMs:posInt("HARNESS_EXECUTION_TIMEOUT_MS", 30 * 60_000),
+        interruptGraceMs:posInt("HARNESS_INTERRUPT_GRACE_MS", 10_000),
         workerIsolation: environment.HARNESS_WORKER_ISOLATION === "in-process"
             ? "in-process"
             : "process",
@@ -374,7 +280,7 @@ export function loadHarnessConfig(
             ? resolve(cwd, environment.HARNESS_WORKER_SCRIPT_PATH)
             : resolve(cwd, "src/worker/worker-main.ts"),
         workerHandshakeTimeoutMs: environment.HARNESS_WORKER_HANDSHAKE_TIMEOUT_MS !== undefined
-            ? positiveInteger(environment, "HARNESS_WORKER_HANDSHAKE_TIMEOUT_MS", 15_000)
+            ? posInt("HARNESS_WORKER_HANDSHAKE_TIMEOUT_MS", 15_000)
             : 15_000,
     };
 }
