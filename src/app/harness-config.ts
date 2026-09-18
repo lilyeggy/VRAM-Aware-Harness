@@ -197,9 +197,7 @@ export function loadHarnessConfig(
         workspaceRoot,
         bootstrapApiKey:environment.HARNESS_BOOTSTRAP_API_KEY,
         agentApiKey:environment.HARNESS_AGENT_API_KEY,
-        sandboxProvider:environment.HARNESS_SANDBOX_PROVIDER === "container"
-            ? "container"
-            : "managed-local",
+        sandboxProvider,
         sandboxProfile,
         sandboxRuntime,
         containerImage:environment.HARNESS_CONTAINER_IMAGE ?? "alpine:3.20",
