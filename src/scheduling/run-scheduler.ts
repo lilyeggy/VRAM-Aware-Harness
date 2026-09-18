@@ -26,6 +26,7 @@ import type { RunEvent } from "../runs/agent-run.ts";
 import type { RunStore } from "../runs/runstore.ts";
 
 import type {
+    QueuedRun,
     QueueReasonCode,
     TenantRunScheduler,
 }   from "./tenant-run-scheduler.ts";
@@ -410,6 +411,21 @@ export class RunScheduler  {
         return { requeued, timedOut };
     }
 
+    /**
+     * 先释放已 claim 的 slot，再带原因重新入队并同步 blocker；调用顺序不能反。
+     */
+    private requeueClaimed(run: QueuedRun, reasonCode: QueueReasonCode): void {
+        this.scheduler.release(run.runId);
+        this.scheduler.enqueue({
+            runId: run.runId,
+            tenantId: run.tenantId,
+            ...(run.sessionId === undefined ? {} : { sessionId: run.sessionId }),
+            reasonCode,
+            enqueuedAt: run.enqueuedAt,
+        });
+        this.synchronizeQueueBlockers();
+    }
+
     async attemptNext() : Promise<SchedulerDrainResult> {
         // 它做的是把一个等待中的 run 从队列里推进到运行状态，但是不管如何选
         // 如何选这个 run，是scheduler做的事
@@ -449,17 +465,8 @@ export class RunScheduler  {
                 admissionRequest,
             );
         } catch (error) {
-            this.scheduler.release(queuedRun.runId);
-
-            // 重新入队，防止 admission 自身异常导致Run从内存队列中丢失
-            this.scheduler.enqueue({
-                runId : queuedRun.runId,
-                tenantId : queuedRun.tenantId,
-                ...(queuedRun.sessionId === undefined ? {} : { sessionId: queuedRun.sessionId }),
-                reasonCode : "RESOURCE_OBSERVATION_FAILED",
-                enqueuedAt : queuedRun.enqueuedAt,
-            });
-            this.synchronizeQueueBlockers();
+            // 重新入队，防止 admission 自身异常导致 Run 从内存队列中丢失。
+            this.requeueClaimed(queuedRun, "RESOURCE_OBSERVATION_FAILED");
             throw error;
         }
 
@@ -468,19 +475,7 @@ export class RunScheduler  {
 
         // 资源评估结果是仍然排队，也就是不执行，那么就release然后重新入队,deferred
         if (decision.action === "QUEUE") {
-            const reasonCode = toQueueReasonCode(decision);
-
-            this.scheduler.release(queuedRun.runId);
-            // 顺序一定要是先release再 run，否则enqueue会认为 run 仍在执行并拒绝入队
-            this.scheduler.enqueue({
-                runId:queuedRun.runId,
-                tenantId:queuedRun.tenantId,
-                ...(queuedRun.sessionId === undefined ? {} : { sessionId: queuedRun.sessionId }),
-                reasonCode,
-                enqueuedAt:queuedRun.enqueuedAt,
-            });
-            this.synchronizeQueueBlockers();
-
+            this.requeueClaimed(queuedRun, toQueueReasonCode(decision));
             return {
                 kind:"DEFERRED",
                 runId:queuedRun.runId,
@@ -508,7 +503,6 @@ export class RunScheduler  {
                 decision,
             };
         } catch (error) {
-            throw error;
             throw error;
         } finally {
             if (resumeInput !== undefined){
