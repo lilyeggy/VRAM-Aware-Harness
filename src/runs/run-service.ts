@@ -141,15 +141,9 @@ export class RunService{
             return;
         }
 
-        this.store.appendEvent({
-            eventId: crypto.randomUUID(),
-            runId,
-            sequence: this.store.getLastEventSequence(runId) + 1,
-            type: "QUEUE_BLOCKED",
-            timestamp: new Date().toISOString(),
-            payloadVersion: 1,
-            payload,
-        });
+        this.store.appendEvent(
+            this.runEvent(runId, "QUEUE_BLOCKED", new Date().toISOString(), payload),
+        );
     }
 
     /**
@@ -185,19 +179,11 @@ export class RunService{
                 finishedAt,
                 failureReason: reason,
             },
-            {
-                eventId: crypto.randomUUID(),
-                runId,
-                sequence: this.store.getLastEventSequence(runId) + 1,
-                type: "RUN_FAILED",
-                timestamp: finishedAt,
-                payloadVersion: 1,
-                payload: {
-                    reason,
-                    message: failedMessage,
-                    ...details,
-                },
-            },
+            this.runEvent(runId, "RUN_FAILED", finishedAt, {
+                reason,
+                message: failedMessage,
+                ...details,
+            }),
         );
 
         return this.store.get(runId);
@@ -228,15 +214,7 @@ export class RunService{
             startedAt,
         }
 
-        const startedEvent : RunEvent = {
-            eventId : crypto.randomUUID(),
-            runId,
-            sequence : this.store.getLastEventSequence(runId) + 1,
-            type:"RUN_STARTED",
-            timestamp:startedAt,
-            payloadVersion:1,
-            payload:{},
-        };
+        const startedEvent = this.runEvent(runId, "RUN_STARTED", startedAt, {});
 
         try {
             this.store.update(runningRun,startedEvent);
@@ -324,18 +302,13 @@ export class RunService{
             updatedAt: queuedAt,
         };
 
-        this.store.update(queuedRun, {
-            eventId: crypto.randomUUID(),
-            runId: input.runId,
-            sequence: this.store.getLastEventSequence(input.runId) + 1,
-            type: "RUN_QUEUED",
-            timestamp: queuedAt,
-            payloadVersion: 1,
-            payload: {
+        this.store.update(
+            queuedRun,
+            this.runEvent(input.runId, "RUN_QUEUED", queuedAt, {
                 checkpointId: input.checkpoint.id,
                 reason: "AUTO_RECOVERY",
-            },
-        });
+            }),
+        );
 
         return queuedRun;
     }
@@ -372,17 +345,12 @@ export class RunService{
         };
 
         try {
-            this.store.update(runningRun, {
-                eventId: crypto.randomUUID(),
-                runId: input.runId,
-                sequence: this.store.getLastEventSequence(input.runId) + 1,
-                type: "RUN_RESUMED",
-                timestamp: resumedAt,
-                payloadVersion: 1,
-                payload: {
+            this.store.update(
+                runningRun,
+                this.runEvent(input.runId, "RUN_RESUMED", resumedAt, {
                     checkpointId: input.checkpoint.id,
-                },
-            });
+                }),
+            );
         } catch (error) {
             // QUEUED -> RUNNING 写入与并发中断竞争：状态机已拒绝本次恢复。
             // 此时尚未订阅 Runtime、未调用 resume，安全放弃并交还当前状态。
@@ -485,17 +453,10 @@ export class RunService{
             updatedAt:timestamp,
         }
 
-        this.store.update(interruptedRun,{
-            eventId:crypto.randomUUID(),
-            runId,
-            sequence:this.store.getLastEventSequence(runId) + 1,
-            type : "RUN_INTERRUPTED",
-            timestamp,
-            payloadVersion:1,
-            payload:{
-                reason,
-            }
-        });
+        this.store.update(
+            interruptedRun,
+            this.runEvent(runId, "RUN_INTERRUPTED", timestamp, { reason }),
+        );
 
         return interruptedRun;
     }
@@ -730,6 +691,23 @@ export class RunService{
                 payload: info,
             },
         );
+    }
+
+    private runEvent(
+        runId: string,
+        type: RunEvent["type"],
+        timestamp: string,
+        payload: unknown,
+    ): RunEvent {
+        return {
+            eventId: crypto.randomUUID(),
+            runId,
+            sequence: this.store.getLastEventSequence(runId) + 1,
+            type,
+            timestamp,
+            payloadVersion: 1,
+            payload,
+        };
     }
 
     private getRequiredRun(runId: string): AgentRun {        const run = this.store.get(runId);
