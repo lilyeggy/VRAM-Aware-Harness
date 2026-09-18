@@ -1,57 +1,22 @@
-import type {
-    Checkpoint,
-} from "../checkpoints/checkpoint.ts";
-import type {
-    PolicyDecision,
-} from "../resources/execution-policy.ts";
-import type {
-    ResourceObservation,
-} from "../resources/resource-observer.ts";
-import type {
-    AgentRun,
-    RunEvent,
-} from "../runs/agent-run.ts";
-import {
-    buildRecoveryContinuationInput,
-    type ResumeRunInput,
-    type StartRunInput,
-} from "../runs/run-service.ts";
-import type {
-    QueueEntry,
-} from "../scheduling/tenant-run-scheduler.ts";
 import type { RequestPrincipal } from "../auth/request-principal.ts";
 import { digest } from "../auth/api-credential-store.ts";
 import { hasScope } from "../auth/request-principal.ts";
-import type { WorkspaceService } from "../workspaces/workspace-service.ts";
-import type { RunLimitation } from "../policies/run-limitations.ts";
-import type { RunOutputChunk } from "../runs/run-output-store.ts";
-import type { WorkspaceDiff } from "../workspaces/workspace-snapshot.ts";
-import type { RunArtifact } from "../workspaces/run-artifact-store.ts";
-import type { AccessAuditStore } from "../audit/access-audit-store.ts";
 import type { LlmGateway } from "../llm-gateway/llm-gateway.ts";
-import { userConsoleResponse } from "./harness-user-console.ts";
-import type { Conversation } from "../sessions/harness-session.ts";
-import type { PolicyConstraints, PolicyLayer, ResourceLimits } from "../policies/effective-policy.ts";
-import type { ToolExecution } from "../tools/tool-execution.ts";
+import type { ResourceMetricsSampler } from "../resources/resource-metrics-sampler.ts";
+import type { AgentRun } from "../runs/agent-run.ts";
 import type {
     CheckpointLookup,
     HarnessHttpApplication,
     HttpAccessControl,
-    UnknownEffectResolution,
 } from "./http-contracts.ts";
-
-import { handleAuthRoute, type AuthRouteContext } from "./routes/auth.ts";
-import {
-    autoWorkspaceName,
-    HttpError,
-    jsonResponse,
-    optionalString,
-    parseRunPolicy,
-    parseThinkingLevel,
-    readJsonObject,
-    readOptionalJsonObject,
-    requiredString,
-} from "./http-utils.ts";
+import { HttpError, jsonResponse } from "./http-utils.ts";
+import { handleAuthRoute } from "./routes/auth.ts";
+import { handleConversationsRoute } from "./routes/conversations.ts";
+import { handleGatewayRoute } from "./routes/gateway.ts";
+import type { HttpRouteContext } from "./routes/route-context.ts";
+import { handleRunsRoute } from "./routes/runs.ts";
+import { handleSystemRoute } from "./routes/system.ts";
+import { handleWorkspacesRoute } from "./routes/workspaces.ts";
 
 export type {
     CheckpointLookup,
@@ -60,619 +25,72 @@ export type {
     UnknownEffectResolution,
 } from "./http-contracts.ts";
 
-/** N16：人工消解 UNKNOWN_EFFECT 的两种结论。 */
-
 /**
  * Day7 的最小 HTTP 协议层。
  *
- * 它只负责路由、输入校验和 JSON 转换；调度、恢复、资源准入和持久化
- * 都继续由 HarnessApplication 及其下层组件负责。
+ * 它只负责依赖注入、路由分发和共享 middleware；具体路由已经拆到
+ * ./routes/*。调度、恢复、资源准入和持久化继续由 HarnessApplication 负责。
  */
-import type { ResourceMetricsSampler } from "../resources/resource-metrics-sampler.ts";
-
 export class HarnessHttpApi {
     constructor(
-        private readonly application:HarnessHttpApplication,
-        private readonly checkpointLookup:CheckpointLookup,
-        private readonly accessControl?:HttpAccessControl,
-        private readonly llmGateway?:LlmGateway,
+        private readonly application: HarnessHttpApplication,
+        private readonly checkpointLookup: CheckpointLookup,
+        private readonly accessControl?: HttpAccessControl,
+        private readonly llmGateway?: LlmGateway,
         private readonly resourceMetrics?: ResourceMetricsSampler,
         private readonly limits?: { maxUserInputChars: number },
     ) {}
 
-    /** N8：提交期输入校验——超限直接 413，不创建 Run。 */
-    private requireUserInput(body: Record<string, unknown>): string {
-        const value = requiredString(body, "userInput");
-        const max = this.limits?.maxUserInputChars;
-        if (max !== undefined && value.length > max) {
-            throw new HttpError(
-                413,
-                `任务输入过长：${value.length} 字符，超过上限 ${max} 字符（可用 HARNESS_MAX_USER_INPUT_CHARS 调整）`,
-            );
-        }
-        return value;
-    }
-
-    /**
-     * N8：提交响应只回显输入摘要，不再把全量输入回传一遍
-     * （客户端渲染走 /runs 查询，不依赖这里的回显）。
-     */
-    private runForResponse(run: AgentRun): Record<string, unknown> {
-        const preview = 200;
-        if (run.userInput.length <= preview) return { ...run };
-        return {
-            ...run,
-            userInput: run.userInput.slice(0, preview),
-            userInputTruncated: true,
-            userInputLength: run.userInput.length,
-        };
-    }
-
-    async fetch(request:Request):Promise<Response> {
+    async fetch(request: Request): Promise<Response> {
         try {
             return await this.route(request);
         } catch (error) {
             if (error instanceof HttpError) {
-                return jsonResponse({ error:error.message }, error.status);
+                return jsonResponse({ error: error.message }, error.status);
             }
 
             return jsonResponse({
-                error:error instanceof Error
+                error: error instanceof Error
                     ? error.message
                     : String(error),
             }, 409);
         }
     }
 
-    private async route(request:Request):Promise<Response> {
+    private async route(request: Request): Promise<Response> {
         const url = new URL(request.url);
         const segments = url.pathname
             .split("/")
             .filter(Boolean)
             .map((segment) => decodeURIComponent(segment));
+        const ctx = this as unknown as HttpRouteContext;
 
+        const authResponse = await handleAuthRoute(request, segments, ctx);
+        if (authResponse !== null) return authResponse;
 
-        const authResponse = await handleAuthRoute(request, segments, this as unknown as AuthRouteContext);
-        if (authResponse !== null) {
-            return authResponse;
-        }
+        const systemResponse = await handleSystemRoute(request, segments, ctx);
+        if (systemResponse !== null) return systemResponse;
 
-        if (request.method === "GET" && segments.length === 0) {
-            return Response.redirect(new URL("/app", request.url).toString(), 302);
-        }
+        const workspacesResponse = await handleWorkspacesRoute(request, segments, ctx);
+        if (workspacesResponse !== null) return workspacesResponse;
 
-        // 用户工作台：面向最终用户的对话式任务页面（与运营控制台分离）。
-        if (
-            request.method === "GET"
-            && segments.length === 1
-            && segments[0] === "app"
-        ) {
-            return userConsoleResponse();
-        }
+        const conversationsResponse = await handleConversationsRoute(request, segments, ctx);
+        if (conversationsResponse !== null) return conversationsResponse;
 
-        if (request.method === "GET" && segments.length === 1) {
-            switch (segments[0]) {
-                case "health":
-                    return jsonResponse({
-                        ok:this.application.isStarted(),
-                        started:this.application.isStarted(),
-                    });
-                case "ready": {
-                    const ready = this.application.isStarted();
-                    return jsonResponse({ ready }, ready ? 200 : 503);
-                }
-                case "queue":
-                    return this.getQueue(request);
-                case "workspaces":
-                    return this.listWorkspaces(request);
-                case "resources": {
-                    const principal = this.requirePrincipal(request, "resources:read");
-                    // D3：主机级资源遥测（共享 GPU 池/vLLM 后端）不含跨租户数据，
-                    // 但可见性是"有意的主机级"而非"遗漏的租户过滤"——显式标注，
-                    // 并保留 principal 供将来引入租户切片视图（如按租户 token 配额）。
-                    return jsonResponse({
-                        visibility: "HOST_WIDE",
-                        requestedByTenant: principal.tenantId,
-                        samples: this.resourceMetrics?.getSamples() ?? [],
-                        observation:
-                            await this.application.observeResources(),
-                    });
-                }
-                case "audit":
-                    return this.listAuditEvents(request);
-            }
-        }
+        const runsResponse = await handleRunsRoute(request, segments, ctx);
+        if (runsResponse !== null) return runsResponse;
 
-        if (
-            request.method === "POST"
-            && segments.length === 1
-            && segments[0] === "workspaces"
-        ) {
-            return this.createWorkspace(request);
-        }
-
-        if (
-            request.method === "POST"
-            && segments.length === 1
-            && segments[0] === "conversations"
-        ) {
-            return this.createConversationWithAutoWorkspace(request);
-        }
-
-        if (
-            segments.length === 3
-            && segments[0] === "workspaces"
-            && segments[2] === "conversations"
-        ) {
-            return request.method === "POST"
-                ? this.createConversation(request, segments[1] ?? "")
-                : request.method === "GET"
-                    ? this.listConversations(request, segments[1] ?? "")
-                    : (() => { throw new HttpError(405, "不支持的请求方法"); })();
-        }
-
-        if (segments[0] === "conversations" && segments.length >= 2) {
-            const conversationId = segments[1] ?? "";
-            if (request.method === "GET" && segments.length === 2) {
-                return this.getConversation(request, conversationId);
-            }
-            if (
-                request.method === "POST"
-                && segments.length === 3
-                && segments[2] === "messages"
-            ) {
-                return this.sendConversationMessage(request, conversationId);
-            }
-        }
-
-
-        if (
-            request.method === "POST"
-            && segments.length === 1
-            && segments[0] === "runs"
-        ) {
-            return this.submitRun(request);
-        }
-
-        // 方向 C：LLM 网关——OpenAI 兼容模型路由入口。
-        if (
-            request.method === "POST"
-            && segments.length === 3
-            && segments[0] === "v1"
-            && segments[1] === "chat"
-            && segments[2] === "completions"
-        ) {
-            if (this.llmGateway === undefined) {
-                throw new HttpError(503, "LLM 网关未启用");
-            }
-            // 方向 C 的便利门也走统一身份主干：任何调用方都必须先证明自己是谁。
-            // 无 accessControl（纯单测/演示）时降级为 legacy Principal，与其它路由一致。
-            this.requirePrincipal(request, "models:generate");
-            return this.llmGateway.handleChatCompletions(request);
-        }
-
-        // A6000 真机补齐：Pi 启动时经网关做 GET /v1/models 模型发现。
-        if (
-            request.method === "GET"
-            && segments.length === 2
-            && segments[0] === "v1"
-            && segments[1] === "models"
-        ) {
-            if (this.llmGateway === undefined) {
-                throw new HttpError(503, "LLM 网关未启用");
-            }
-            this.requirePrincipal(request, "models:generate");
-            return this.llmGateway.handleListModels();
-        }
-
-        if (
-            request.method === "GET"
-            && segments.length === 1
-            && segments[0] === "runs"
-        ) {
-            const principal = this.requirePrincipal(request, "tasks:read");
-            return jsonResponse({
-                runs: this.accessControl === undefined
-                    ? []
-                    : this.application.getRunsForTenant(principal.tenantId),
-            });
-        }
-
-        if (segments[0] === "runs" && segments.length >= 2) {
-            const runId = segments[1];
-
-            if (runId === undefined || runId.length === 0) {
-                throw new HttpError(400, "runId 不能为空");
-            }
-
-            if (
-                request.method === "GET"
-                && segments.length === 2
-            ) {
-                const run = this.getRequiredRun(runId, request, "tasks:read");
-
-                // N16：把"结果不确定的副作用"显式暴露给界面，否则用户只看到
-                // 一个 INTERRUPTED 的 Run，不知道需要人工核对什么。
-                const unknownEffects = (
-                    this.application.getRunUnknownEffects?.(runId) ?? []
-                ).map((execution) => ({
-                    executionId: execution.id,
-                    toolCallId: execution.toolCallId,
-                    toolName: execution.toolName,
-                    effect: execution.effect,
-                    createdAt: execution.createdAt,
-                }));
-
-                return jsonResponse({
-                    run,
-                    decisions:this.application.getRunDecisions(runId),
-                    limitations:this.application.getRunLimitations?.(runId) ?? [],
-                    unknownEffects,
-                });
-            }
-
-            if (
-                request.method === "GET"
-                && segments.length === 3
-                && segments[2] === "events"
-            ) {
-                this.getRequiredRun(runId, request, "tasks:read");
-
-                return jsonResponse({
-                    events:this.application.getRunEvents(runId),
-                });
-            }
-
-
-            if (
-                request.method === "GET"
-                && segments.length === 3
-                && segments[2] === "output"
-            ) {
-                this.getRequiredRun(runId, request, "tasks:read");
-                return jsonResponse(this.application.getRunOutput(runId));
-            }
-
-            if (
-                request.method === "GET"
-                && segments.length === 3
-                && segments[2] === "workspace-diff"
-            ) {
-                this.getRequiredRun(runId, request, "tasks:read");
-                return jsonResponse({ diff: this.application.getRunWorkspaceDiff(runId) });
-            }
-
-            if (request.method === "GET" && segments.length === 3 && segments[2] === "artifacts") {
-                this.getRequiredRun(runId, request, "tasks:read");
-                return jsonResponse({ artifacts: this.application.getRunArtifacts(runId) });
-            }
-
-            if (request.method === "GET" && segments.length === 4 && segments[2] === "artifacts") {
-                this.getRequiredRun(runId, request, "tasks:read");
-                const body = await this.application.getRunArtifact(runId, segments[3] ?? "");
-                if (body === null) throw new HttpError(404, "找不到 Artifact");
-                return new Response(body, { headers: { "content-type": "application/octet-stream", "content-disposition": "attachment" } });
-            }
-
-            if (
-                request.method === "POST"
-                && segments.length === 3
-                && segments[2] === "interrupt"
-            ) {
-                const principal = this.requirePrincipal(request, "tasks:write");
-                const run = this.getRequiredRun(runId);
-                if (this.accessControl !== undefined && run.tenantId !== principal.tenantId) {
-                    this.auditResource("RUN", runId, "RUN_INTERRUPT", "DENY", principal.tenantId, "run_not_owned");
-                    throw new HttpError(404, `找不到 AgentRun：${runId}`);
-                }
-                this.auditResource("RUN", runId, "RUN_INTERRUPT", "ALLOW", principal.tenantId, "interrupt_requested");
-
-                return jsonResponse({
-                    run:await this.application.interruptRun(runId),
-                });
-            }
-
-            if (
-                request.method === "POST"
-                && segments.length === 3
-                && segments[2] === "resume"
-            ) {
-                return this.resumeRun(request, runId);
-            }
-
-            if (
-                request.method === "POST"
-                && segments.length === 3
-                && segments[2] === "resolve-unknown-effect"
-            ) {
-                return this.resolveUnknownEffect(request, runId);
-            }
-        }
+        const gatewayResponse = await handleGatewayRoute(request, segments, ctx);
+        if (gatewayResponse !== null) return gatewayResponse;
 
         throw new HttpError(404, "找不到 HTTP 路由");
     }
 
-    private async submitRun(request:Request):Promise<Response> {
-        const body = await readJsonObject(request);
-        const principal = this.requirePrincipal(request, "tasks:write");
-        const workspace = this.accessControl === undefined
-            ? null
-            : this.accessControl.workspaceService.getForTenant(
-                requiredString(body, "workspaceId"),
-                principal.tenantId,
-            );
-        if (this.accessControl !== undefined && workspace === null) {
-            // Deliberately indistinguishable from an absent resource (anti-enumeration).
-            throw new HttpError(404, "找不到 Workspace");
-        }
-        const requestedSessionId =
-            optionalString(body, "sessionId")
-            ?? optionalString(body, "harnessSessionId");
-
-        // B6：会话归属校验——sessionId 首次使用即认领给提交租户；已被
-        // 其他租户使用过则拒绝。防止客户端自选 sessionId 抢注/污染他人会话。
-        if (requestedSessionId !== null) {
-            const sessionOwner = this.application.resolveSessionOwner?.(requestedSessionId);
-            if (sessionOwner !== null && sessionOwner !== undefined) {
-                const submitterTenantId = this.accessControl === undefined
-                    ? requiredString(body, "tenantId")
-                    : principal.tenantId;
-                if (sessionOwner !== submitterTenantId) {
-                    throw new HttpError(409, "harnessSessionId 已被其他租户占用");
-                }
-            }
-        }
-
-        // N15：请求级策略层（RUN 层）。此前 StartRunInput.runPolicy
-        // 没有任何产品调用方，受限运行只能靠测试直接调 Runtime。
-        const runPolicy = parseRunPolicy(body);
-        const run = this.application.submitRun({
-            tenantId:this.accessControl === undefined
-                ? requiredString(body, "tenantId")
-                : principal.tenantId,
-            harnessSessionId:
-                requestedSessionId
-                ?? crypto.randomUUID(),
-            userInput:this.requireUserInput(body),
-            thinkingLevel: parseThinkingLevel(body),
-            ...(runPolicy === undefined ? {} : { runPolicy }),
-            workspacePath:this.accessControl === undefined
-                ? requiredString(body, "workspacePath")
-                : (workspace as NonNullable<typeof workspace>).rootPath,
-        });
-        this.auditResource("RUN", run.id, "RUN_SUBMIT", "ALLOW", principal.tenantId, "run_submitted");
-
-        return jsonResponse({ run: this.runForResponse(run) }, 202);
-    }
-
-    /**
-     * 自动建工作区并开一个会话 —— 会话成为用户唯一需要管理的单位。
-     *
-     * 为什么把两步合成一步：一个会话的所有 Run 共用同一个工作区，而预热池的
-     * 匹配键里含挂载源（bind mount 在容器创建时固化），所以「会话 = 一个工作区」
-     * 正是池能在连续对话里反复命中的前提。让调用方先手工建工作区、再把 id 传进来，
-     * 只会把内部概念泄露给使用者，也让"同一会话内复用"退化成一个需要人配合的约定。
-     *
-     * 显式传 workspaceId 仍然支持（走归属校验），留给需要固定目录的场景。
-     */
-    private async createConversationWithAutoWorkspace(request: Request): Promise<Response> {
-        const principal = this.requirePrincipal(request, "tasks:write");
-        if (this.accessControl === undefined || this.application.createConversation === undefined) {
-            throw new HttpError(501, "对话服务未启用");
-        }
-        const body = await readOptionalJsonObject(request);
-        const title = optionalString(body, "title");
-        const requestedWorkspaceId = optionalString(body, "workspaceId");
-
-        let workspaceId: string;
-        if (requestedWorkspaceId !== null) {
-            const workspace = this.accessControl.workspaceService.getForTenant(
-                requestedWorkspaceId,
-                principal.tenantId,
-            );
-            if (workspace === null) throw new HttpError(404, "找不到 Workspace");
-            workspaceId = requestedWorkspaceId;
-        } else {
-            // 自动建出来的工作区同样是资源创建，权限不因为"包装成建会话"而豁免。
-            this.requirePrincipal(request, "workspaces:write");
-            workspaceId = this.accessControl.workspaceService.create(
-                principal.tenantId,
-                autoWorkspaceName(),
-            ).id;
-        }
-
-        return jsonResponse({
-            conversation: this.application.createConversation({
-                tenantId: principal.tenantId,
-                workspaceId,
-                ...(title == null ? {} : { title }),
-            }),
-        }, 201);
-    }
-
-    private async createConversation(request: Request, workspaceId: string): Promise<Response> {
-        const principal = this.requirePrincipal(request, "tasks:write");
-        if (this.accessControl === undefined || this.application.createConversation === undefined) {
-            throw new HttpError(501, "对话服务未启用");
-        }
-        const workspace = this.accessControl.workspaceService.getForTenant(
-            workspaceId,
-            principal.tenantId,
-        );
-        if (workspace === null) throw new HttpError(404, "找不到 Workspace");
-        const body = await readOptionalJsonObject(request);
-        const title = optionalString(body, "title");
-        return jsonResponse({
-            conversation: this.application.createConversation({
-                tenantId: principal.tenantId,
-                workspaceId,
-                ...(title == null ? {} : { title }),
-            }),
-        }, 201);
-    }
-
-    private listConversations(request: Request, workspaceId: string): Response {
-        const principal = this.requirePrincipal(request, "tasks:read");
-        if (this.accessControl === undefined) throw new HttpError(501, "Workspace 服务未启用");
-        const workspace = this.accessControl.workspaceService.getForTenant(workspaceId, principal.tenantId);
-        if (workspace === null) throw new HttpError(404, "找不到 Workspace");
-        return jsonResponse({
-            conversations: this.application.getConversationsForWorkspace?.(
-                principal.tenantId,
-                workspaceId,
-            ) ?? [],
-        });
-    }
-
-    private getConversation(request: Request, conversationId: string): Response {
-        const principal = this.requirePrincipal(request, "tasks:read");
-        const conversation = this.application.getConversation?.(
-            conversationId,
-            principal.tenantId,
-        ) ?? null;
-        if (conversation === null) throw new HttpError(404, "找不到对话");
-        return jsonResponse({
-            conversation,
-            runs: this.application.getRunsForConversation?.(
-                principal.tenantId,
-                conversationId,
-            ) ?? [],
-        });
-    }
-
-    private async sendConversationMessage(request: Request, conversationId: string): Promise<Response> {
-        const principal = this.requirePrincipal(request, "tasks:write");
-        const conversation = this.application.getConversation?.(
-            conversationId,
-            principal.tenantId,
-        ) ?? null;
-        if (conversation === null) throw new HttpError(404, "找不到对话");
-        if (this.accessControl === undefined) throw new HttpError(501, "Workspace 服务未启用");
-        const workspace = this.accessControl.workspaceService.getForTenant(
-            conversation.workspaceId,
-            principal.tenantId,
-        );
-        if (workspace === null) throw new HttpError(404, "找不到 Workspace");
-        const body = await readJsonObject(request);
-        const run = this.application.submitRun({
-            tenantId: principal.tenantId,
-            harnessSessionId: conversation.id,
-            userInput: this.requireUserInput(body),
-            thinkingLevel: parseThinkingLevel(body),
-            workspacePath: workspace.rootPath,
-        });
-        this.application.touchConversation?.(conversation.id, principal.tenantId);
-        return jsonResponse({ run: this.runForResponse(run) }, 202);
-    }
-
-    private async resumeRun(
-        request:Request,
-        runId:string,
-    ):Promise<Response> {
-        const principal = this.requirePrincipal(request, "tasks:write");
-        const run = this.getRequiredRun(runId);
-        if (this.accessControl !== undefined && run.tenantId !== principal.tenantId) {
-            this.auditResource("RUN", runId, "RUN_RESUME", "DENY", principal.tenantId, "run_not_owned");
-            throw new HttpError(404, `找不到 AgentRun：${runId}`);
-        }
-
-        if (run.checkpointId === null) {
-            this.auditResource("RUN", runId, "RUN_RESUME", "DENY", principal.tenantId, "no_checkpoint");
-            throw new HttpError(409, `Run 没有可用 Checkpoint：${runId}`);
-        }
-
-        const checkpoint = this.checkpointLookup.get(run.checkpointId);
-
-        if (checkpoint === null || checkpoint.runId !== runId) {
-            this.auditResource("RUN", runId, "RUN_RESUME", "DENY", principal.tenantId, "checkpoint_mismatch");
-            throw new HttpError(
-                409,
-                `Run 的 Checkpoint 不存在或不匹配：${runId}`,
-            );
-        }
-
-        const body = await readOptionalJsonObject(request);
-        const queuedRun = this.application.resumeRun({
-            runId,
-            checkpoint,
-            // B3：手动恢复未提供续跑输入时，也携带原始任务语境。
-            continuationInput:
-                optionalString(body, "continuationInput")
-                ?? buildRecoveryContinuationInput(run.userInput, checkpoint.id),
-        });
-        this.auditResource("RUN", runId, "RUN_RESUME", "ALLOW", principal.tenantId, "run_resumed");
-
-        return jsonResponse({ run:queuedRun }, 202);
-    }
-
-    /**
-     * N16：人工核对 UNKNOWN_EFFECT 后的消解出口。
-     *
-     * 背景：工具在 PREPARED 之后崩溃/超时，"副作用是否已发生"无法由系统
-     * 判定（canAutomaticallyReplay 对 UNKNOWN_EFFECT 一律 fail-closed），
-     * Run 停在 INTERRUPTED。此前没有任何产品流程能消解它，界面也无法表达
-     * "该命令可能已执行过，请人工核对"。
-     */
-    private async resolveUnknownEffect(
-        request:Request,
-        runId:string,
-    ):Promise<Response> {
-        const principal = this.requirePrincipal(request, "tasks:write");
-        const run = this.getRequiredRun(runId);
-
-        if (this.accessControl !== undefined && run.tenantId !== principal.tenantId) {
-            this.auditResource("RUN", runId, "RUN_RESOLVE_UNKNOWN_EFFECT", "DENY", principal.tenantId, "run_not_owned");
-            throw new HttpError(404, `找不到 AgentRun：${runId}`);
-        }
-        if (this.application.resolveUnknownEffect === undefined) {
-            throw new HttpError(503, "人工消解服务未装配");
-        }
-
-        const body = await readJsonObject(request);
-        const resolution = requiredString(body, "resolution");
-
-        if (resolution !== "NO_EFFECT" && resolution !== "EFFECT_OCCURRED") {
-            throw new HttpError(
-                400,
-                "resolution 必须是 NO_EFFECT（确认无副作用）或 EFFECT_OCCURRED（确认副作用已发生）",
-            );
-        }
-
-        try {
-            const result = this.application.resolveUnknownEffect(runId, {
-                resolution,
-                note: optionalString(body, "note") ?? undefined,
-                actor: principal.tenantId,
-            });
-            this.auditResource(
-                "RUN", runId, "RUN_RESOLVE_UNKNOWN_EFFECT", "ALLOW",
-                principal.tenantId, `resolution=${resolution}`,
-            );
-            return jsonResponse(result);
-        } catch (error) {
-            this.auditResource(
-                "RUN", runId, "RUN_RESOLVE_UNKNOWN_EFFECT", "DENY",
-                principal.tenantId, "resolution_rejected",
-            );
-            throw new HttpError(
-                409,
-                error instanceof Error ? error.message : String(error),
-            );
-        }
-    }
-
-    /**
-     * N15：租户/平台策略管理面。
-     *
-     * 读用 `policies:read`，写用 `policies:write`；非通配 scope 的调用方
-     * 只能读写自己租户的策略，避免越权改配额或授权 Secret。
-     */
-
     private getRequiredRun(
-        runId:string,
-        request?:Request,
+        runId: string,
+        request?: Request,
         scope = "tasks:read",
-    ):AgentRun {
+    ): AgentRun {
         const run = this.application.getRun(runId);
 
         if (run === null) {
@@ -686,58 +104,6 @@ export class HarnessHttpApi {
         }
 
         return run;
-    }
-
-    private getQueue(request: Request): Response {
-        const principal = this.requirePrincipal(request, "tasks:read");
-        return jsonResponse({
-            queue: this.accessControl === undefined
-                ? this.application.getQueue()
-                : this.application.getQueue().filter((entry) =>
-                    entry.tenantId === principal.tenantId),
-        });
-    }
-
-    private async createWorkspace(request: Request): Promise<Response> {
-        const principal = this.requirePrincipal(request, "workspaces:write");
-        if (this.accessControl === undefined) {
-            throw new HttpError(501, "未配置受管 Workspace 服务");
-        }
-        const body = await readJsonObject(request);
-        return jsonResponse({
-            workspace: this.accessControl.workspaceService.create(
-                principal.tenantId,
-                requiredString(body, "name"),
-            ),
-        }, 201);
-    }
-
-    private listWorkspaces(request: Request): Response {
-        const principal = this.requirePrincipal(request, "workspaces:read");
-        if (this.accessControl === undefined) {
-            throw new HttpError(501, "未配置受管 Workspace 服务");
-        }
-        return jsonResponse({
-            workspaces: this.accessControl.workspaceService.listForTenant(
-                principal.tenantId,
-            ),
-        });
-    }
-
-    private listAuditEvents(request: Request): Response {
-        const principal = this.requirePrincipal(request, "audits:read");
-        if (this.accessControl?.auditStore === undefined) {
-            throw new HttpError(501, "未配置访问审计服务");
-        }
-        const url = new URL(request.url);
-        const limitParam = Number(url.searchParams.get("limit") ?? undefined);
-        const offsetParam = Number(url.searchParams.get("offset") ?? undefined);
-        return jsonResponse({
-            events: this.accessControl.auditStore.listForTenant(principal.tenantId, {
-                ...(Number.isFinite(limitParam) ? { limit: limitParam } : {}),
-                ...(Number.isFinite(offsetParam) ? { offset: offsetParam } : {}),
-            }),
-        });
     }
 
     private requirePrincipal(request: Request, scope: string): RequestPrincipal {
@@ -762,7 +128,7 @@ export class HarnessHttpApi {
             });
             throw new HttpError(401, "API Key 无效或已撤销");
         }
-        if (!hasScope(principal, scope)) {
+        if (hasScope(principal, scope) === false) {
             this.audit(scope, "DENY", principal, "missing_scope");
             throw new HttpError(403, `缺少权限：${scope}`);
         }

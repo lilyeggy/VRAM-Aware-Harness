@@ -3,6 +3,7 @@ import type {
     ResourceLimits,
 } from "../policies/effective-policy.ts";
 import type { StartRunInput } from "../runs/run-service.ts";
+import type { AgentRun } from "../runs/agent-run.ts";
 
 export class HttpError extends Error {
     constructor(
@@ -194,6 +195,38 @@ export function optionalPositiveInteger(value:unknown, field:string):number | nu
         throw new HttpError(400, `${field} 必须是正整数`);
     }
     return value;
+}
+
+/**
+ * N8：提交期输入校验——超限直接 413，不创建 Run。
+ */
+export function requireUserInput(
+    body: Record<string, unknown>,
+    maxUserInputChars?: number,
+): string {
+    const value = requiredString(body, "userInput");
+    if (maxUserInputChars !== undefined && value.length > maxUserInputChars) {
+        throw new HttpError(
+            413,
+            `任务输入过长：${value.length} 字符，超过上限 ${maxUserInputChars} 字符（可用 HARNESS_MAX_USER_INPUT_CHARS 调整）`,
+        );
+    }
+    return value;
+}
+
+/**
+ * N8：提交响应只回显输入摘要，不再把全量输入回传一遍
+ * （客户端渲染走 /runs 查询，不依赖这里的回显）。
+ */
+export function runForResponse(run: AgentRun): Record<string, unknown> {
+    const preview = 200;
+    if (run.userInput.length <= preview) return { ...run };
+    return {
+        ...run,
+        userInput: run.userInput.slice(0, preview),
+        userInputTruncated: true,
+        userInputLength: run.userInput.length,
+    };
 }
 
 export function jsonResponse(value:unknown, status = 200):Response {
