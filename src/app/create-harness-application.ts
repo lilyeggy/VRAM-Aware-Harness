@@ -27,10 +27,6 @@ import {
     DeterministicExecutionPolicy,
 } from "../resources/execution-policy.ts";
 import {
-    BudgetAwareExecutionPolicy,
-    SchedulerCapacityBudgetUsage,
-} from "../resources/budget-aware-policy.ts";
-import {
     PolicyDecisionStore,
 } from "../resources/policy-decision-store.ts";
 import {
@@ -323,23 +319,7 @@ export async function createHarnessApplication(
     });
     // B7：预算/fair-share 策略接线——仅在显式配置租户预算时叠加；
     // 未配置时 admission 行为与历史完全一致（opt-in 组合，非默认开启）。
-    const budgetTenantIds = Object.keys(config.tenantBudgets);
-    const policy = budgetTenantIds.length > 0
-        ? new BudgetAwareExecutionPolicy(
-            basePolicy,
-            new SchedulerCapacityBudgetUsage(
-                scheduler,
-                config.tenantBudgets,
-                config.maxActiveRuns,
-                Object.fromEntries(
-                    budgetTenantIds.map((tenantId) => [
-                        tenantId,
-                        config.tenantBudgets[tenantId]!.weight,
-                    ]),
-                ),
-            ),
-        )
-        : basePolicy;
+    const policy = basePolicy;
     const admission = new ResourceAdmissionService(
         resourceObserver,
         config.resourceThresholds,

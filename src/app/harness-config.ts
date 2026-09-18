@@ -5,7 +5,6 @@ import type {
     ResourceThresholds,
 } from "../resources/resource-classifier.ts";
 import type { SandboxProfile } from "../sandbox/sandbox-profile.ts";
-import type { TenantBudget } from "../resources/tenant-budget.ts";
 import type {
     LlmBackend,
     LoadBalancingStrategy,
@@ -117,14 +116,6 @@ export interface HarnessConfig {
      * 空操作（见 piCompactionReserveTokens 的说明）。
      */
     piCompactionKeepRecentTokens:number;
-    /**
-     * B7：租户预算/fair-share 配置（tenantId → weight + maxUnits）。
-     * 空 Record = 不启用预算策略（ admission 行为与历史完全一致）；
-     * 非空时 BudgetAwareExecutionPolicy 叠加在并发策略之上，
-     * 租户超出 min(fairShare, maxUnits) 的 START 决策降级为
-     * QUEUE(TENANT_BUDGET_EXCEEDED)。
-     */
-    tenantBudgets:Record<string, TenantBudget>;
 }
 
 export type HarnessEnvironment = Record<string,string | undefined>;
@@ -291,7 +282,6 @@ export function loadHarnessConfig(
             "PI_COMPACTION_KEEP_RECENT_TOKENS",
             8_192,
         ),
-        tenantBudgets:parseTenantBudgets(environment.HARNESS_TENANT_BUDGETS),
 
         vllmMetricsUrl:environment.VLLM_METRICS_URL
             ?? metricsUrlFromBaseUrl(vllmBaseUrl),
@@ -502,53 +492,6 @@ function loadSandboxProfile(
     return profile;
 }
 
-/**
- * B7：HARNESS_TENANT_BUDGETS——JSON Record<tenantId, { weight, maxUnits }>。
- * 例：{"team-a":{"weight":2,"maxUnits":8},"team-b":{"weight":1,"maxUnits":4}}
- * 未设置或空对象 = 不启用预算策略。
- */
-function parseTenantBudgets(
-    raw:string | undefined,
-):Record<string, TenantBudget> {
-    if (raw === undefined || raw.trim() === "") {
-        return {};
-    }
-    let parsed:unknown;
-    try {
-        parsed = JSON.parse(raw);
-    } catch {
-        throw new Error("HARNESS_TENANT_BUDGETS 不是合法 JSON");
-    }
-    if (
-        typeof parsed !== "object"
-        || parsed === null
-        || Array.isArray(parsed)
-    ) {
-        throw new Error("HARNESS_TENANT_BUDGETS 必须是 JSON 对象");
-    }
-    const budgets:Record<string, TenantBudget> = {};
-    for (const [tenantId, value] of Object.entries(parsed)) {
-        const budget = value as Partial<TenantBudget> | null;
-        if (
-            typeof budget?.weight !== "number"
-            || !Number.isFinite(budget.weight)
-            || budget.weight <= 0
-            || typeof budget?.maxUnits !== "number"
-            || !Number.isFinite(budget.maxUnits)
-            || budget.maxUnits <= 0
-        ) {
-            throw new Error(
-                `HARNESS_TENANT_BUDGETS[${tenantId}] 需要 weight > 0 和 maxUnits > 0（数字）`,
-            );
-        }
-        budgets[tenantId] = {
-            tenantId,
-            weight: budget.weight,
-            maxUnits: budget.maxUnits,
-        };
-    }
-    return budgets;
-}
 
 function parseLlmBackends(raw:string | undefined):LlmBackend[] {    if (raw === undefined || raw.trim() === "") {
         return [];
