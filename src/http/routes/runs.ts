@@ -1,4 +1,3 @@
-import type { AgentRun } from "../../runs/agent-run.ts";
 import { buildRecoveryContinuationInput } from "../../runs/run-service.ts";
 import {
     HttpError,
@@ -13,6 +12,7 @@ import {
     runForResponse,
 } from "../http-utils.ts";
 import type { HttpRouteContext } from "./route-context.ts";
+import { requireOwnedRun } from "./route-helpers.ts";
 
 export async function handleRunsRoute(
     request: Request,
@@ -168,12 +168,7 @@ async function interruptRun(
     runId: string,
     ctx: HttpRouteContext,
 ): Promise<Response> {
-    const principal = ctx.requirePrincipal(request, "tasks:write");
-    const run = ctx.getRequiredRun(runId);
-    if (ctx.accessControl !== undefined && run.tenantId !== principal.tenantId) {
-        ctx.auditResource("RUN", runId, "RUN_INTERRUPT", "DENY", principal.tenantId, "run_not_owned");
-        throw new HttpError(404, `找不到 AgentRun：${runId}`);
-    }
+    const { principal } = requireOwnedRun(request, runId, ctx, "RUN_INTERRUPT");
     ctx.auditResource("RUN", runId, "RUN_INTERRUPT", "ALLOW", principal.tenantId, "interrupt_requested");
     return jsonResponse({ run: await ctx.application.interruptRun(runId) });
 }
@@ -183,12 +178,7 @@ async function resumeRun(
     runId: string,
     ctx: HttpRouteContext,
 ): Promise<Response> {
-    const principal = ctx.requirePrincipal(request, "tasks:write");
-    const run = ctx.getRequiredRun(runId);
-    if (ctx.accessControl !== undefined && run.tenantId !== principal.tenantId) {
-        ctx.auditResource("RUN", runId, "RUN_RESUME", "DENY", principal.tenantId, "run_not_owned");
-        throw new HttpError(404, `找不到 AgentRun：${runId}`);
-    }
+    const { principal, run } = requireOwnedRun(request, runId, ctx, "RUN_RESUME");
 
     if (run.checkpointId === null) {
         ctx.auditResource("RUN", runId, "RUN_RESUME", "DENY", principal.tenantId, "no_checkpoint");
@@ -225,13 +215,8 @@ async function resolveUnknownEffect(
     runId: string,
     ctx: HttpRouteContext,
 ): Promise<Response> {
-    const principal = ctx.requirePrincipal(request, "tasks:write");
-    const run = ctx.getRequiredRun(runId);
+    const { principal } = requireOwnedRun(request, runId, ctx, "RUN_RESOLVE_UNKNOWN_EFFECT");
 
-    if (ctx.accessControl !== undefined && run.tenantId !== principal.tenantId) {
-        ctx.auditResource("RUN", runId, "RUN_RESOLVE_UNKNOWN_EFFECT", "DENY", principal.tenantId, "run_not_owned");
-        throw new HttpError(404, `找不到 AgentRun：${runId}`);
-    }
     if (ctx.application.resolveUnknownEffect === undefined) {
         throw new HttpError(503, "人工消解服务未装配");
     }

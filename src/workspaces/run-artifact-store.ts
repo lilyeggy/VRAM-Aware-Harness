@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { lstat, mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import type { Database } from "bun:sqlite";
+import { isWithin } from "../utils/path-utils.ts";
 import type { WorkspaceFileSnapshot } from "./workspace-snapshot.ts";
 
 export interface RunArtifact extends WorkspaceFileSnapshot {
@@ -66,7 +67,7 @@ export class RunArtifactStore {
         if (!/^[a-f0-9-]{36}$/i.test(runId) || path.length === 0) throw new Error("非法 Artifact 路径");
         const base = resolve(this.root, runId);
         const target = resolve(base, path);
-        if (!target.startsWith(`${base}/`)) throw new Error("Artifact 路径越界");
+        if (!isWithin(target, base)) throw new Error("Artifact 路径越界");
         return target;
     }
 }

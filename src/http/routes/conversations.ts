@@ -10,6 +10,7 @@ import {
     runForResponse,
 } from "../http-utils.ts";
 import type { HttpRouteContext } from "./route-context.ts";
+import { requireOwnedWorkspace } from "./route-helpers.ts";
 
 export async function handleConversationsRoute(
     request: Request,
@@ -58,8 +59,7 @@ async function createConversationWithAutoWorkspace(
     ctx: HttpRouteContext,
 ): Promise<Response> {
     const principal = ctx.requirePrincipal(request, "tasks:write");
-    const createConversation = ctx.application.createConversation;
-    if (ctx.accessControl === undefined || createConversation === undefined) {
+    if (ctx.accessControl === undefined) {
         throw new HttpError(501, "对话服务未启用");
     }
     const body = await readOptionalJsonObject(request);
@@ -68,11 +68,7 @@ async function createConversationWithAutoWorkspace(
 
     let workspaceId: string;
     if (requestedWorkspaceId !== null) {
-        const workspace = ctx.accessControl.workspaceService.getForTenant(
-            requestedWorkspaceId,
-            principal.tenantId,
-        );
-        if (workspace === null) throw new HttpError(404, "找不到 Workspace");
+        requireOwnedWorkspace(ctx, requestedWorkspaceId, principal.tenantId);
         workspaceId = requestedWorkspaceId;
     } else {
         // 自动建出来的工作区同样是资源创建，权限不因为"包装成建会话"而豁免。
@@ -83,13 +79,7 @@ async function createConversationWithAutoWorkspace(
         ).id;
     }
 
-    return jsonResponse({
-        conversation: createConversation({
-            tenantId: principal.tenantId,
-            workspaceId,
-            ...(title == null ? {} : { title }),
-        }),
-    }, 201);
+    return createConversationResponse(ctx, principal.tenantId, workspaceId, title);
 }
 
 async function createConversation(
@@ -98,20 +88,30 @@ async function createConversation(
     ctx: HttpRouteContext,
 ): Promise<Response> {
     const principal = ctx.requirePrincipal(request, "tasks:write");
+    requireOwnedWorkspace(ctx, workspaceId, principal.tenantId);
+    const body = await readOptionalJsonObject(request);
+    return createConversationResponse(
+        ctx,
+        principal.tenantId,
+        workspaceId,
+        optionalString(body, "title"),
+    );
+}
+
+/** 两条建会话入口（自动建工作区 / 指定工作区）共用的创建与响应。 */
+function createConversationResponse(
+    ctx: HttpRouteContext,
+    tenantId: string,
+    workspaceId: string,
+    title: string | null,
+): Response {
     const createConversation = ctx.application.createConversation;
-    if (ctx.accessControl === undefined || createConversation === undefined) {
+    if (createConversation === undefined) {
         throw new HttpError(501, "对话服务未启用");
     }
-    const workspace = ctx.accessControl.workspaceService.getForTenant(
-        workspaceId,
-        principal.tenantId,
-    );
-    if (workspace === null) throw new HttpError(404, "找不到 Workspace");
-    const body = await readOptionalJsonObject(request);
-    const title = optionalString(body, "title");
     return jsonResponse({
         conversation: createConversation({
-            tenantId: principal.tenantId,
+            tenantId,
             workspaceId,
             ...(title == null ? {} : { title }),
         }),
@@ -124,9 +124,7 @@ function listConversations(
     ctx: HttpRouteContext,
 ): Response {
     const principal = ctx.requirePrincipal(request, "tasks:read");
-    if (ctx.accessControl === undefined) throw new HttpError(501, "Workspace 服务未启用");
-    const workspace = ctx.accessControl.workspaceService.getForTenant(workspaceId, principal.tenantId);
-    if (workspace === null) throw new HttpError(404, "找不到 Workspace");
+    requireOwnedWorkspace(ctx, workspaceId, principal.tenantId);
     return jsonResponse({
         conversations: ctx.application.getConversationsForWorkspace?.(
             principal.tenantId,
@@ -166,12 +164,11 @@ async function sendConversationMessage(
         principal.tenantId,
     ) ?? null;
     if (conversation === null) throw new HttpError(404, "找不到对话");
-    if (ctx.accessControl === undefined) throw new HttpError(501, "Workspace 服务未启用");
-    const workspace = ctx.accessControl.workspaceService.getForTenant(
+    const workspace = requireOwnedWorkspace(
+        ctx,
         conversation.workspaceId,
         principal.tenantId,
     );
-    if (workspace === null) throw new HttpError(404, "找不到 Workspace");
     const body = await readJsonObject(request);
     const run = ctx.application.submitRun({
         tenantId: principal.tenantId,

@@ -67,10 +67,6 @@ describe("ModelRouter 熔断", () => {
 describe("LlmGateway 路由与回退", () => {
     it("主后端成功：选中主、不回退、model 被替换为后端真实模型", async () => {
         let seenModel: string | undefined;
-        const { router, gateway } = makeGateway(async (url) => {
-            expect(url).toBe("http://primary/v1/chat/completions");
-            return okResponse("primary");
-        });
         // 包装捕获 model
         const gw = new LlmGateway(new ModelRouter(BACKENDS), {
             fetchImpl: (async (_u: string, init: RequestInit) => {
@@ -81,7 +77,6 @@ describe("LlmGateway 路由与回退", () => {
         const res = await gw.handleChatCompletions(chatRequest());
         expect(res.status).toBe(200);
         expect(seenModel).toBe("real-model");
-        void router;
     });
 
     it("主 5xx → 回退备成功，决策标记 fallback 且记录尝试序列", async () => {

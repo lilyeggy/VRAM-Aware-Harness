@@ -101,11 +101,10 @@ test("HOST 边界下 sandboxId 仅为归属标识，无执行器时走宿主机�
         ...sandboxEnforcement,
         toolExecutionBoundary: "HOST" as const,
     });
-    let invoked = false;
     const tools = createGatewayPiTools(
         ["read"],
         "/srv/workspace",
-        { async execute(_input, invokeTool) { invoked = true; return invokeTool(); } },
+        { async execute(_input, invokeTool) { return invokeTool(); } },
         {
             runId: "run-host",
             workspacePath: "/srv/workspace",

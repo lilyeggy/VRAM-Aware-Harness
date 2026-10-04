@@ -418,23 +418,52 @@ export class RunStore {
             `)
             .all({ runId });
 
-        return rows.map((row) => {
-            const event: RunEvent = {
-                eventId: row.event_id,
-                runId: row.run_id,
-                sequence: row.sequence,
-                type: row.type,
-                timestamp: row.timestamp,
-                payloadVersion: row.payload_version,
-                payload: JSON.parse(row.payload_json) as unknown,
-            };
+        return rows.map((row) => this.mapEventRow(row));
+    }
 
-            if (row.dedupe_key !== null) {
-                event.dedupeKey = row.dedupe_key;
-            }
+    /**
+     * 只取某类事件的最后一条。启动恢复只关心最近的 RUN_QUEUED，
+     * 不需要把整段事件时间线读进内存（queued-run 恢复的旧实现是
+     * listEvents 全量加载，事件多时是明显的 N+1 放大）。
+     */
+    findLastEventByType(runId: string, type: RunEvent["type"]): RunEvent | null {
+        const row = this.db
+            .query<RunEventRow, { runId: string; type: string }>(`
+                SELECT
+                    event_id,
+                    run_id,
+                    sequence,
+                    type,
+                    timestamp,
+                    payload_version,
+                    payload_json,
+                    dedupe_key
+                FROM run_events
+                WHERE run_id = $runId AND type = $type
+                ORDER BY sequence DESC
+                LIMIT 1;
+            `)
+            .get({ runId, type });
 
-            return event;
-        });
+        return row === null ? null : this.mapEventRow(row);
+    }
+
+    private mapEventRow(row: RunEventRow): RunEvent {
+        const event: RunEvent = {
+            eventId: row.event_id,
+            runId: row.run_id,
+            sequence: row.sequence,
+            type: row.type,
+            timestamp: row.timestamp,
+            payloadVersion: row.payload_version,
+            payload: JSON.parse(row.payload_json) as unknown,
+        };
+
+        if (row.dedupe_key !== null) {
+            event.dedupeKey = row.dedupe_key;
+        }
+
+        return event;
     }
 
     /**

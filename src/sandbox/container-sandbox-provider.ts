@@ -1,5 +1,6 @@
 import { relative, sep } from "node:path";
 import type { EffectivePolicySnapshot } from "../policies/effective-policy.ts";
+import { redact } from "./redact.ts";
 import { ContainerWarmPool } from './container-warm-pool.ts';
 import {
     DockerRuncRuntimeAdapter,
@@ -74,7 +75,7 @@ export class ContainerSandboxProvider implements SandboxProvider, SandboxCommand
     constructor(
         private readonly store: SandboxStore,
         private readonly secrets: SecretProvider,
-        private readonly config: ContainerSandboxConfig,
+        config: ContainerSandboxConfig,
         private readonly commands: ContainerCommandRuntime = new BunContainerCommandRuntime(),
         adapter?: ContainerRuntimeAdapter,
     ) {
@@ -418,10 +419,6 @@ export class BunContainerCommandRuntime implements ContainerCommandRuntime {
         ]);
         return { exitCode, stdout, stderr };
     }
-}
-
-function redact(value: string): string {
-    return value.replace(/(?:[A-Z][A-Z0-9_]{2,})=\S+/g, "$1=[REDACTED]").slice(0, 1_000);
 }
 
 /** TENANT 视野下，本 Run 的工作区在容器内的绝对路径。 */

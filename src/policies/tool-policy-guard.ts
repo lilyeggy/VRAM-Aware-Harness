@@ -1,16 +1,31 @@
 import { resolve } from "node:path";
-import type { ExecuteToolInput } from "../tools/tool-gateway.ts";
-import { isWithin } from "./effective-policy.ts";
+import type { SandboxEnforcementCapabilities } from "../sandbox/sandbox-provider.ts";
+import { isWithin } from "../utils/path-utils.ts";
 import type { EffectivePolicyStore } from "./effective-policy-store.ts";
 
+/**
+ * 策略守卫需要的工具调用视图：与 tools/ExecuteToolInput 结构兼容，但
+ * 在 policies 层独立声明——policies 不再反向依赖 tools，tools 层注入时
+ * 由 TypeScript 结构化匹配自动满足。
+ */
+export interface ToolPolicyCheckInput {
+    runId: string;
+    toolCallId: string;
+    toolName: string;
+    arguments: unknown;
+    policySnapshotId?: string;
+    workspacePath?: string;
+    sandboxEnforcement?: SandboxEnforcementCapabilities;
+}
+
 export interface ToolPolicyGuard {
-    assertAllowed(input: ExecuteToolInput): void;
+    assertAllowed(input: ToolPolicyCheckInput): void;
 }
 
 export class PersistentToolPolicyGuard implements ToolPolicyGuard {
     constructor(private readonly policies: EffectivePolicyStore) {}
 
-    assertAllowed(input: ExecuteToolInput): void {
+    assertAllowed(input: ToolPolicyCheckInput): void {
         if (input.policySnapshotId === undefined) {
             return;
         }

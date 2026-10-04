@@ -22,9 +22,9 @@
     "noUncheckedIndexedAccess": true,
     "noImplicitOverride": true,
 
-    // Some stricter flags (disabled by default)
-    "noUnusedLocals": false,
-    "noUnusedParameters": false,
+    // Strict compiler flags
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
     "noPropertyAccessFromIndexSignature": false
   },
   "include": ["src/**/*.ts", "tests/**/*.ts", "scripts/**/*.ts"],

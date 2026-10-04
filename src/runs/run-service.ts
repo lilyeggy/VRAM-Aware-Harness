@@ -204,37 +204,13 @@ export class RunService{
             );
         }
 
-        const startedAt = new Date().toISOString();
-        await this.workspaceResults?.captureBefore(runId, run.workspacePath);
-
-        const runningRun: AgentRun = {
-            ...run, // 复制原先的 run 的所有字段，然后覆盖发生变化的字段
-            status : "RUNNING",
-            updatedAt:startedAt,
-            startedAt,
-        }
-
-        const startedEvent = this.runEvent(runId, "RUN_STARTED", startedAt, {});
-
-        try {
-            this.store.update(runningRun,startedEvent);
-        } catch (error) {
-            // QUEUED -> RUNNING 写入与并发中断竞争：状态机已拒绝本次启动。
-            // 此时尚未订阅 Runtime、未调用 start，安全放弃启动并交还当前状态。
-            const current = this.store.get(runId);
-            if (
-                current !== null
-                && isTakenOverByConcurrentHandling(current.status)
-            ) {
-                return current;
-            }
-            throw error;
-        }
-
-        const unsubscribe = this.subscribeToRuntime(runId);
-
-        try {
-            await this.runtime.start({
+        return this.executeRunLifecycle(run, {
+            startedEventType: "RUN_STARTED",
+            startedEventPayload: {},
+            invocationFailureReason: "START_FAILED",
+            captureBefore: true,
+            setStartedAt: true,
+            invoke: () => this.runtime.start({
                 run: {
                     runId:run.id,
                     tenantId: run.tenantId,
@@ -243,31 +219,8 @@ export class RunService{
                     ...(run.thinkingLevel === undefined ? {} : { thinkingLevel: run.thinkingLevel }),
                 },
                 input: run.userInput,
-            });
-        } catch (error) {
-            this.markRuntimeInvocationFailureInterrupted(
-                runId,
-                error,
-                "START_FAILED",
-            );
-            throw error;
-        } 
-        finally {
-            unsubscribe();
-            // Even an interrupted/failed attempt can leave user files behind; preserve that evidence.
-            await this.workspaceResults?.captureAfter(runId, run.workspacePath);
-            const current = this.store.get(runId);
-            if (current?.status === "COMPLETED" || current?.status === "FAILED") {
-                await this.workspaceResults?.captureArtifacts(runId, run.workspacePath);
-            }
-        }
-
-        const finalRun = this.store.get(runId);
-
-        if (finalRun === null) {
-            throw new Error(`Runtime 执行后找不到 AgentRun: ${runId}`);
-        }
-        return finalRun;
+            }),
+        });
     }
 
     async start (input:StartRunInput) : Promise<AgentRun> {
@@ -315,7 +268,7 @@ export class RunService{
 
     async executeQueuedResume(
         input : ResumeRunInput,
-    ):Promise<AgentRun> { 
+    ):Promise<AgentRun> {
         const queuedRun = this.getRequiredRun(input.runId);
         if (queuedRun.status !== "QUEUED") {
             // 等待恢复执行期间被并发处置（用户中断 / 排队超时熔断）：
@@ -328,53 +281,27 @@ export class RunService{
             );
         }
 
-        if (input.checkpoint.runId !== input.runId 
+        if (input.checkpoint.runId !== input.runId
             || queuedRun.checkpointId !== input.checkpoint.id
         )   {
             throw new Error (
                 `Checkpoint ${input.checkpoint.id} 不属于当前Run`
             )
         }
-        
 
-        const resumedAt = new Date().toISOString();
-        const runningRun: AgentRun = {
-            ...queuedRun,
-            status: "RUNNING",
-            updatedAt: resumedAt,
-        };
-
-        try {
-            this.store.update(
-                runningRun,
-                this.runEvent(input.runId, "RUN_RESUMED", resumedAt, {
-                    checkpointId: input.checkpoint.id,
-                }),
-            );
-        } catch (error) {
-            // QUEUED -> RUNNING 写入与并发中断竞争：状态机已拒绝本次恢复。
-            // 此时尚未订阅 Runtime、未调用 resume，安全放弃并交还当前状态。
-            const current = this.store.get(input.runId);
-            if (
-                current !== null
-                && isTakenOverByConcurrentHandling(current.status)
-            ) {
-                return current;
-            }
-            throw error;
-        }
-
-        // 必须先订阅再调用 resume，否则同步发出的首批 RuntimeEvent 会丢失。
-        const unsubscribe = this.subscribeToRuntime(input.runId);
-
-        try {
-            await this.runtime.resume({
+        return this.executeRunLifecycle(queuedRun, {
+            startedEventType: "RUN_RESUMED",
+            startedEventPayload: { checkpointId: input.checkpoint.id },
+            invocationFailureReason: "RESUME_FAILED",
+            captureBefore: false,
+            setStartedAt: false,
+            invoke: () => this.runtime.resume({
                 run: {
-                    runId: runningRun.id,
-                    tenantId: runningRun.tenantId,
-                    harnessSessionId: runningRun.harnessSessionId,
-                    workspacePath: runningRun.workspacePath,
-                    ...(runningRun.thinkingLevel === undefined ? {} : { thinkingLevel: runningRun.thinkingLevel }),
+                    runId: queuedRun.id,
+                    tenantId: queuedRun.tenantId,
+                    harnessSessionId: queuedRun.harnessSessionId,
+                    workspacePath: queuedRun.workspacePath,
+                    ...(queuedRun.thinkingLevel === undefined ? {} : { thinkingLevel: queuedRun.thinkingLevel }),
                 },
                 checkpoint: {
                     checkpointId: input.checkpoint.id,
@@ -384,20 +311,91 @@ export class RunService{
                         input.checkpoint.lastEventSequence,
                 },
                 continuationInput: input.continuationInput,
-            });
+            }),
+        });
+    }
+
+    /**
+     * start / resume 共用的执行生命周期：QUEUED -> RUNNING 落库（含并发
+     * 接管竞态处理）-> 订阅 -> 调用 Runtime -> 收尾快照。两条路径原先
+     * 各有一份大段平行代码，差异仅在事件类型、payload、失败原因与是否
+     * 拍 BEFORE 快照，这里收敛为一份，防止竞态处理逻辑漂移。
+     */
+    private async executeRunLifecycle(
+        run: AgentRun,
+        options: {
+            startedEventType: "RUN_STARTED" | "RUN_RESUMED";
+            startedEventPayload: Record<string, unknown>;
+            invocationFailureReason: "START_FAILED" | "RESUME_FAILED";
+            /** start 拍 BEFORE 快照；resume 复用首次执行的 BEFORE。 */
+            captureBefore: boolean;
+            /** start 覆盖 startedAt；resume 保留首次启动时刻。 */
+            setStartedAt: boolean;
+            invoke: () => Promise<void>;
+        },
+    ): Promise<AgentRun> {
+        const runId = run.id;
+        const startedAt = new Date().toISOString();
+
+        if (options.captureBefore) {
+            await this.workspaceResults?.captureBefore(runId, run.workspacePath);
+        }
+
+        const runningRun: AgentRun = {
+            ...run, // 复制原先的 run 的所有字段，然后覆盖发生变化的字段
+            status : "RUNNING",
+            updatedAt: startedAt,
+            ...(options.setStartedAt ? { startedAt } : {}),
+        };
+
+        try {
+            this.store.update(
+                runningRun,
+                this.runEvent(runId, options.startedEventType, startedAt, options.startedEventPayload),
+            );
         } catch (error) {
-            this.markRuntimeInvocationFailureInterrupted(input.runId, error,"RESUME_FAILED");
+            // QUEUED -> RUNNING 写入与并发中断竞争：状态机已拒绝本次启动。
+            // 此时尚未订阅 Runtime、未调用 start/resume，安全放弃并交还当前状态。
+            const current = this.store.get(runId);
+            if (
+                current !== null
+                && isTakenOverByConcurrentHandling(current.status)
+            ) {
+                return current;
+            }
             throw error;
-        } finally {
+        }
+
+        // 必须先订阅再调用 start/resume，否则同步发出的首批 RuntimeEvent 会丢失。
+        const unsubscribe = this.subscribeToRuntime(runId);
+
+        try {
+            await options.invoke();
+        } catch (error) {
+            this.markRuntimeInvocationFailureInterrupted(
+                runId,
+                error,
+                options.invocationFailureReason,
+            );
+            throw error;
+        }
+        finally {
             unsubscribe();
-            // The original BEFORE snapshot remains durable, so resumed work updates one whole-Run diff.
-            await this.workspaceResults?.captureAfter(input.runId, runningRun.workspacePath);
-            const current = this.store.get(input.runId);
+            // Even an interrupted/failed attempt can leave user files behind; preserve that evidence.
+            // resume 时 The original BEFORE snapshot remains durable, so resumed work updates one whole-Run diff.
+            await this.workspaceResults?.captureAfter(runId, run.workspacePath);
+            const current = this.store.get(runId);
             if (current?.status === "COMPLETED" || current?.status === "FAILED") {
-                await this.workspaceResults?.captureArtifacts(input.runId, runningRun.workspacePath);
+                await this.workspaceResults?.captureArtifacts(runId, run.workspacePath);
             }
         }
-        return this.getRequiredRun(input.runId);
+
+        const finalRun = this.store.get(runId);
+
+        if (finalRun === null) {
+            throw new Error(`Runtime 执行后找不到 AgentRun: ${runId}`);
+        }
+        return finalRun;
     }
 
 
@@ -531,13 +529,14 @@ export class RunService{
                     return;
                 }
 
+                const failureMessage = classifyModelFailure(event.message);
                 this.store.update(
                     {
                         ...currentRun,
                         status: "FAILED",
                         updatedAt: event.timestamp,
                         finishedAt: event.timestamp,
-                        failureReason: classifyModelFailure(event.message),
+                        failureReason: failureMessage,
                     },
                     {
                         eventId: crypto.randomUUID(),
@@ -547,7 +546,7 @@ export class RunService{
                         timestamp: event.timestamp,
                         payloadVersion: 1,
                         payload: {
-                            message: classifyModelFailure(event.message),
+                            message: failureMessage,
                         },
                     },
                 );

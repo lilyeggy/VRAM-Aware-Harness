@@ -138,10 +138,6 @@ test("B4：重启后 DB 侧等待超 TTL 的 QUEUED Run 被 reconcile 熔断，�
             maxActiveRunsPerTenant: 4,
         });
         const queueTtlMs = 60_000;
-        const coordinator = buildCoordinator(runService, scheduler, {
-            queueTtlMs,
-            queuedRunReader: store,
-        });
 
         const run = runService.createQueuedRun({
             tenantId: "tenant-b",

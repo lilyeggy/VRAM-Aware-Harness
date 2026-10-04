@@ -1,4 +1,5 @@
 import type { SandboxRuntime, SandboxRuntimeEvidence } from "./sandbox-profile.ts";
+import { redact } from "./redact.ts";
 
 export interface ContainerCommandRuntime {
     /**
@@ -66,8 +67,4 @@ export class DockerRunscRuntimeAdapter extends DockerRuntimeAdapter {
 export class DockerRuncRuntimeAdapter extends DockerRuntimeAdapter {
     readonly runtime = "runc" as const;
     readonly name = "docker-runc";
-}
-
-function redact(value: string): string {
-    return value.replace(/(?:[A-Z][A-Z0-9_]{2,})=\S+/g, "$1=[REDACTED]").slice(0, 1_000);
 }

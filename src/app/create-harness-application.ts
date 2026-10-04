@@ -38,6 +38,9 @@ import type {
 import {
     VllmResourceObserver,
 } from "../resources/vllm-resource-observer.ts";
+import {
+    CoalescingResourceObserver,
+} from "../resources/coalescing-resource-observer.ts";
 import type {
     AgentRuntime,
 } from "../runtime/agent-runtime.ts";
@@ -298,11 +301,15 @@ export async function createHarnessApplication(
         config.sandboxProfile,
     );
     const resourceObserver = dependencies.resourceObserver
-        ?? new VllmResourceObserver({
+        // 真实 vLLM 观测外包一层合并器：drain 扇出的 N 个并行准入评估共享
+        // 一次抓取，避免 N 倍 nvidia-smi/vLLM 探测，也保护 token 速率
+        // 计数器的采样间隔不被打散。注入式 observer（测试 fake）不包装，
+        // 保持每次 observe 都直达 fake 的旧语义。
+        ?? new CoalescingResourceObserver(new VllmResourceObserver({
             metricsUrl:config.vllmMetricsUrl,
             timeoutMs:config.resourceObservationTimeoutMs,
             gpuIds:config.gpuIds,
-        });
+        }));
     const runService = new RunService(
         runStore, runtime, undefined, runOutputStore,
         workspaceResultCoordinator,

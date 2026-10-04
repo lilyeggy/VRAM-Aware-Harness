@@ -63,7 +63,7 @@ export interface RunSchedulerOptions {
      */
     readonly queuedRunReader?: { listQueuedRuns(): readonly AgentRun[] };
     /** 启动恢复：读取 QUEUED Run 与事件。 */
-    readonly runStoreForRecovery?: Pick<RunStore, "listQueuedRuns" | "listEvents">;
+    readonly runStoreForRecovery?: Pick<RunStore, "listQueuedRuns" | "findLastEventByType">;
     /** 启动恢复：读取 Checkpoint。 */
     readonly checkpointStoreForRecovery?: Pick<CheckpointStore, "get">;
     /** 自动轮询间隔；未设置时只能手动 tick()。 */
@@ -108,12 +108,14 @@ export interface QueuedRunRestoreTarget {
 }
 
 export function restoreQueuedRunInputs(
-    runStore: Pick<RunStore, "listQueuedRuns" | "listEvents">,
+    runStore: Pick<RunStore, "listQueuedRuns" | "findLastEventByType">,
     checkpointStore: Pick<CheckpointStore, "get">,
     target: QueuedRunRestoreTarget,
 ): void {
     for (const run of runStore.listQueuedRuns()) {
-        const checkpointId = getRecoveryCheckpointId(runStore.listEvents(run.id));
+        const checkpointId = getRecoveryCheckpointId(
+            runStore.findLastEventByType(run.id, "RUN_QUEUED"),
+        );
         if (checkpointId === null) {
             target.restoreQueuedRun(run);
             continue;
@@ -135,14 +137,10 @@ export function restoreQueuedRunInputs(
 }
 
 function getRecoveryCheckpointId(
-    events: readonly RunEvent[],
+    queuedEvent: RunEvent | null,
 ): string | null {
-    const queuedEvent = [...events]
-        .reverse()
-        .find((event) => event.type === "RUN_QUEUED");
-
     if (
-        queuedEvent === undefined
+        queuedEvent === null
         || typeof queuedEvent.payload !== "object"
         || queuedEvent.payload === null
     ) {

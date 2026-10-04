@@ -50,7 +50,7 @@ const composition = await createHarnessApplication(config, {
     resourceObserver: new FakeResourceObserver(),
 });
 await composition.application.start();
-const server = startHarnessHttpServer(composition.httpApi, { port: 3977 });
+startHarnessHttpServer(composition.httpApi, { port: 3977 });
 
 // 预置演示账号（邮箱即租户身份，注册后登录可用）。
 composition.credentialStore.registerUser("demo@team.local", "demo-password-123");

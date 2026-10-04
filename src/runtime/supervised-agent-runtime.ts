@@ -6,6 +6,7 @@ import {
     type RuntimeResumeRequest,
     type RuntimeStartRequest,
 } from "./agent-runtime.ts";
+import { deferredTimeout, settlesWithin } from "./async-utils.ts";
 
 export interface ExecutionSupervisorConfig {
     readonly executionTimeoutMs: number;
@@ -118,22 +119,6 @@ export class SupervisedAgentRuntime implements AgentRuntime {
     private async terminate(sandboxId: string | undefined): Promise<void> {
         if (sandboxId !== undefined) await this.sandbox.terminate(sandboxId);
     }
-}
-
-function deferredTimeout(ms: number) {
-    let timer: ReturnType<typeof setTimeout>;
-    const promise = new Promise<void>((resolve) => { timer = setTimeout(resolve, ms); });
-    return { promise, cancel: () => clearTimeout(timer!) };
-}
-
-async function settlesWithin(promise: Promise<unknown>, ms: number): Promise<boolean> {
-    const timeout = deferredTimeout(ms);
-    try {
-        return await Promise.race([
-            promise.then(() => true, () => true),
-            timeout.promise.then(() => false),
-        ]);
-    } finally { timeout.cancel(); }
 }
 
 function assertPositive(value: number, name: string): void {

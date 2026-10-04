@@ -68,17 +68,18 @@ export class ApiCredentialStore {
     authenticate(rawKey: string): RequestPrincipal | null {
         const session = this.authenticateSession(rawKey);
         if (session !== null) return session;
+        const keyDigest = digest(rawKey);
         const row = this.db.query<CredentialRow, { keyDigest: string }>(`
             SELECT id, key_digest AS keyDigest,
                 tenant_id AS tenantId, scopes_json AS scopesJson,
                 created_at AS createdAt, revoked_at AS revokedAt
             FROM api_credentials
             WHERE key_digest = $keyDigest AND revoked_at IS NULL;
-        `).get({ keyDigest: digest(rawKey) });
+        `).get({ keyDigest });
         if (row === null) return null;
 
         // Keep a constant-time comparison even though the indexed digest already matched.
-        if (!timingSafeEqual(Buffer.from(row.keyDigest), Buffer.from(digest(rawKey)))) {
+        if (!timingSafeEqual(Buffer.from(row.keyDigest), Buffer.from(keyDigest))) {
             return null;
         }
         return Object.freeze({

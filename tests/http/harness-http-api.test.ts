@@ -363,7 +363,7 @@ test("LLM 网关入口走统一身份主干：无 key 401、作用域不足 403�
         app,
         { get: () => null },
         {
-            authenticate: (raw) => keyOk
+            authenticate: (_raw) => keyOk
                 ? { tenantId: "tenant-a", scopes }
                 : null,
             workspaceService: {} as never,

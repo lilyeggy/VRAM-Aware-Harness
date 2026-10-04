@@ -86,32 +86,44 @@ export class SandboxStore {
                 failure_reason AS failureReason
             FROM sandboxes WHERE id = $id;
         `).get({ id });
-        return row === null ? null : {
-            id: row.id,
-            runId: row.runId,
-            policySnapshotId: row.policySnapshotId,
-            provider: row.provider,
-            profile: row.profile,
-            runtime: row.runtime,
-            spec: JSON.parse(row.specJson) as SandboxSpec,
-            runtimeEvidence: JSON.parse(row.runtimeEvidenceJson) as SandboxRuntimeEvidence,
-            status: row.status,
-            workspacePath: row.workspacePath,
-            secretNames: Object.freeze(JSON.parse(row.secretNamesJson) as string[]),
-            createdAt: row.createdAt,
-            updatedAt: row.updatedAt,
-            failureReason: row.failureReason,
-        };
+        return row === null ? null : mapSandboxRow(row);
     }
 
     listUnsettled(): SandboxRecord[] {
-        const rows = this.db.query<{ id: string }, []>(`
-            SELECT id FROM sandboxes
+        // 单条查询直接取全列：旧实现先查 id 再逐个 get，每个 record
+        // 两次 SQL 往返，启动对账时是 N+1。
+        const rows = this.db.query<SandboxRow, []>(`
+            SELECT id, run_id AS runId,
+                policy_snapshot_id AS policySnapshotId, provider,
+                profile, runtime, spec_json AS specJson,
+                runtime_evidence_json AS runtimeEvidenceJson,
+                status, workspace_path AS workspacePath,
+                secret_names_json AS secretNamesJson,
+                created_at AS createdAt, updated_at AS updatedAt,
+                failure_reason AS failureReason
+            FROM sandboxes
             WHERE status IN ('PROVISIONING', 'ACTIVE')
             ORDER BY created_at ASC, id ASC;
         `).all();
-        return rows.map(({ id }) => this.get(id)).filter(
-            (record): record is SandboxRecord => record !== null,
-        );
+        return rows.map(mapSandboxRow);
     }
+}
+
+function mapSandboxRow(row: SandboxRow): SandboxRecord {
+    return {
+        id: row.id,
+        runId: row.runId,
+        policySnapshotId: row.policySnapshotId,
+        provider: row.provider,
+        profile: row.profile,
+        runtime: row.runtime,
+        spec: JSON.parse(row.specJson) as SandboxSpec,
+        runtimeEvidence: JSON.parse(row.runtimeEvidenceJson) as SandboxRuntimeEvidence,
+        status: row.status,
+        workspacePath: row.workspacePath,
+        secretNames: Object.freeze(JSON.parse(row.secretNamesJson) as string[]),
+        createdAt: row.createdAt,
+        updatedAt: row.updatedAt,
+        failureReason: row.failureReason,
+    };
 }

@@ -7,6 +7,7 @@
  */
 
 import { resolve } from "node:path";
+import { settlesWithin } from "./async-utils.ts";
 import type {
     AgentRuntime,
     RuntimeEventHandler,
@@ -537,20 +538,5 @@ export class WorkerProcessAgentRuntime implements AgentRuntime {
         } catch {
             // Stream closed
         }
-    }
-}
-
-async function settlesWithin(promise: Promise<unknown>, ms: number): Promise<boolean> {
-    let timer: ReturnType<typeof setTimeout>;
-    const timeout = new Promise<false>((resolve) => {
-        timer = setTimeout(() => resolve(false), ms);
-    });
-    try {
-        return await Promise.race([
-            promise.then(() => true, () => true),
-            timeout,
-        ]);
-    } finally {
-        clearTimeout(timer!);
     }
 }

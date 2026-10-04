@@ -14,6 +14,17 @@ export class HttpError extends Error {
     }
 }
 
+/**
+ * 解析 `Authorization: Bearer <token>`。鉴权（requirePrincipal）与
+ * 登出（auth/logout）共用同一份解析，避免两处各自 slice。
+ */
+export function bearerToken(request: Request): string | undefined {
+    const authorization = request.headers.get("authorization");
+    return authorization?.startsWith("Bearer ")
+        ? authorization.slice("Bearer ".length).trim()
+        : undefined;
+}
+
 export async function readJsonObject(
     request:Request,
 ):Promise<Record<string,unknown>> {

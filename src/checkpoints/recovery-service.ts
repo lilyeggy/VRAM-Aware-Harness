@@ -1,9 +1,9 @@
 import type { Checkpoint } from "./checkpoint.ts";
 import { CheckpointStore } from "./checkpoint-store.ts";
 import {
+    createSessionRefCheck,
     decideRecovery,
     type RecoveryDecision,
-    type SessionRefCheck,
 } from "./recovery-decision.ts";
 import type {
     AgentRun,
@@ -55,16 +55,10 @@ export class RecoveryService {
                 activeRun.id,
             );
         const checkpoint = this.getValidCheckpoint(activeRun);
-        const sessionRef: SessionRefCheck = {
-            runtimeSessionRef: checkpoint?.runtimeSessionRef ?? null,
-            ...(this.isSessionRefReachable === undefined
-                ? {}
-                : { isReachable: this.isSessionRefReachable }),
-        };
         const decision = decideRecovery(
             checkpoint?.id ?? null,
             preparedExecutions,
-            sessionRef,
+            createSessionRefCheck(checkpoint, this.isSessionRefReachable),
         );
 
         // N18：损坏的恢复点必须留下可诊断的痕迹，不能再静默降级。

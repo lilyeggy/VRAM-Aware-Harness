@@ -96,7 +96,6 @@ export function wrapPiToolWithGateway(
     effect: ToolEffect,
     gateway: ToolGatewayExecutor,
     runContext: PiGatewayRunContext,
-    sandboxExecutor?: SandboxCommandExecutor,
 ): AnyPiToolDefinition {
     return {
         ...definition,
@@ -137,7 +136,7 @@ export function wrapPiToolWithGateway(
                 ),
             );
 
-            return result as AgentToolResult<any>;
+            return result as AgentToolResult<unknown>;
         },
     };
 }

@@ -10,6 +10,19 @@ import type {
     LoadBalancingStrategy,
 } from "../llm-gateway/model-router.ts";
 
+/**
+ * Pi/容器默认值：master（loadHarnessConfig）与 worker（worker-main 的
+ * defaultWorkerConfig）共用同一份常量，避免两处各自硬编码漂移——
+ * 曾经 worker 改了镜像/tag 而 master 没改（或反之）就是线上事故。
+ */
+export const DEFAULT_PI_PROVIDER = "local-vllm";
+export const DEFAULT_PI_TOOLS = Object.freeze([
+    "read", "bash", "edit", "write", "grep", "find", "ls",
+]);
+export const DEFAULT_PI_MODELS_PATH = ".pi/spike/models.json";
+export const DEFAULT_CONTAINER_IMAGE = "alpine:3.20";
+export const DEFAULT_CONTAINER_USER_ID = 65532;
+
 export interface HarnessConfig {
     databasePath:string;
     httpHost:string;
@@ -198,19 +211,19 @@ export function loadHarnessConfig(
         sandboxProvider,
         sandboxProfile,
         sandboxRuntime,
-        containerImage:environment.HARNESS_CONTAINER_IMAGE ?? "alpine:3.20",
-        containerUserId:posInt("HARNESS_CONTAINER_USER_ID", 65532),
+        containerImage:environment.HARNESS_CONTAINER_IMAGE ?? DEFAULT_CONTAINER_IMAGE,
+        containerUserId:posInt("HARNESS_CONTAINER_USER_ID", DEFAULT_CONTAINER_USER_ID),
         containerPidsLimit:posInt("HARNESS_CONTAINER_PIDS_LIMIT", 128),
 
-        piProvider:environment.PI_PROVIDER ?? "local-vllm",
+        piProvider:environment.PI_PROVIDER ?? DEFAULT_PI_PROVIDER,
         piModelId,
         piTools:stringList(
             environment.PI_TOOLS,
-            ["read", "bash", "edit", "write", "grep", "find", "ls"],
+            [...DEFAULT_PI_TOOLS],
         ),
         piModelsPath:resolve(
             cwd,
-            environment.PI_MODELS_PATH ?? ".pi/spike/models.json",
+            environment.PI_MODELS_PATH ?? DEFAULT_PI_MODELS_PATH,
         ),
         piAuthPath:environment.PI_AUTH_PATH === undefined
             ? undefined

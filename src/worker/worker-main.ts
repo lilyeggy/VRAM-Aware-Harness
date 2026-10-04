@@ -24,6 +24,13 @@ import {
     type WorkerToMasterMessage,
 } from "./worker-protocol.ts";
 import { WorkerToolGateway } from "./worker-tool-gateway.ts";
+import {
+    DEFAULT_CONTAINER_IMAGE,
+    DEFAULT_CONTAINER_USER_ID,
+    DEFAULT_PI_MODELS_PATH,
+    DEFAULT_PI_PROVIDER,
+    DEFAULT_PI_TOOLS,
+} from "../app/harness-config.ts";
 
 // 1. Redirect standard logging to stderr to prevent corrupting IPC on stdout
 console.log = (...args: unknown[]) => console.error(...args);
@@ -182,15 +189,17 @@ type RunRequestMessage = Extract<MasterToWorkerMessage, { type: "START_RUN" | "R
 
 function defaultWorkerConfig(): WorkerRuntimeConfig {
     return {
-        piProvider: process.env.PI_PROVIDER ?? "local-vllm",
+        piProvider: process.env.PI_PROVIDER ?? DEFAULT_PI_PROVIDER,
+        // master 侧 VLLM_MODEL_ID 是必填项；worker 独立运行时保留
+        // mock-model 兜底，语义不同，不收敛。
         piModelId: process.env.VLLM_MODEL_ID ?? "mock-model",
-        piTools: ["read", "bash", "edit", "write", "grep", "find", "ls"],
-        piModelsPath: process.env.PI_MODELS_PATH ?? ".pi/spike/models.json",
+        piTools: [...DEFAULT_PI_TOOLS],
+        piModelsPath: process.env.PI_MODELS_PATH ?? DEFAULT_PI_MODELS_PATH,
         sandboxProvider: "container",
         sandboxProfile: "default",
         sandboxRuntime: "runsc",
-        containerImage: "alpine:3.20",
-        containerUserId: 65532,
+        containerImage: DEFAULT_CONTAINER_IMAGE,
+        containerUserId: DEFAULT_CONTAINER_USER_ID,
     };
 }
 

@@ -47,7 +47,7 @@ export class SandboxStartupReconciler {
             updatedAt: timestamp,
             failureReason: reason,
         }, record.status);
-        this.convergeControlPlane(record, timestamp, reason);
+        this.convergeControlPlane(record, timestamp);
     }
 
     private markCleanupFailure(record: SandboxRecord, reason: string): void {
@@ -60,13 +60,12 @@ export class SandboxStartupReconciler {
             updatedAt: timestamp,
             failureReason: reason,
         }, record.status);
-        this.convergeControlPlane(record, timestamp, reason);
+        this.convergeControlPlane(record, timestamp);
     }
 
     private convergeControlPlane(
         record: SandboxRecord,
         timestamp: string,
-        reason: string,
     ): void {
         const attempt = this.attempts.getBySandboxId(record.id);
         if (attempt?.status === "RUNNING") {

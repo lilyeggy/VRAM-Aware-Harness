@@ -3,6 +3,7 @@ import type { RequestPrincipal } from "../../auth/request-principal.ts";
 import type { HttpAccessControl } from "../http-contracts.ts";
 import {
     HttpError,
+    bearerToken,
     jsonResponse,
     readJsonObject,
     requiredString,
@@ -48,8 +49,7 @@ export async function handleAuthRoute(
             return jsonResponse(result);
         }
         if (request.method === "POST" && segments.join("/") === "auth/logout") {
-            const authorization = request.headers.get("authorization");
-            const token = authorization?.startsWith("Bearer ") ? authorization.slice(7).trim() : "";
+            const token = bearerToken(request) ?? "";
             // D7：无效/已撤销的 token 不再静默成功——撤销失败返回 401，
             // 让客户端能区分"已登出"与"本来就无效"。
             if (ctx.accessControl?.revokeSession === undefined) {

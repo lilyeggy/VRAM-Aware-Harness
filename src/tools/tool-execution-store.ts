@@ -21,6 +21,21 @@ interface ToolExecutionRow {
     finished_at: string | null;
 }
 
+/** tool_executions 全列清单：所有查询共用，避免四处手抄漂移。 */
+const TOOL_EXECUTION_COLUMNS = `
+    id,
+    run_id,
+    tool_call_id,
+    tool_name,
+    arguments_json,
+    effect,
+    status,
+    result_json,
+    error_message,
+    created_at,
+    finished_at
+`;
+
 /**
  * ToolExecutionStore 是 ToolGateway 与 SQLite 之间的持久化边界。
  *
@@ -96,18 +111,7 @@ export class ToolExecutionStore {
     getById(executionId: string): ToolExecution | null {
         const row = this.db
             .query<ToolExecutionRow, { executionId: string }>(`
-                SELECT
-                    id,
-                    run_id,
-                    tool_call_id,
-                    tool_name,
-                    arguments_json,
-                    effect,
-                    status,
-                    result_json,
-                    error_message,
-                    created_at,
-                    finished_at
+                SELECT ${TOOL_EXECUTION_COLUMNS}
                 FROM tool_executions
                 WHERE id = $executionId;
             `)
@@ -129,18 +133,7 @@ export class ToolExecutionStore {
                 ToolExecutionRow,
                 { runId: string; toolCallId: string }
             >(`
-                SELECT
-                    id,
-                    run_id,
-                    tool_call_id,
-                    tool_name,
-                    arguments_json,
-                    effect,
-                    status,
-                    result_json,
-                    error_message,
-                    created_at,
-                    finished_at
+                SELECT ${TOOL_EXECUTION_COLUMNS}
                 FROM tool_executions
                 WHERE run_id = $runId
                   AND tool_call_id = $toolCallId;
@@ -304,18 +297,7 @@ export class ToolExecutionStore {
     listPrepared(): ToolExecution[] {
         return this.db
             .query<ToolExecutionRow, []>(`
-                SELECT
-                    id,
-                    run_id,
-                    tool_call_id,
-                    tool_name,
-                    arguments_json,
-                    effect,
-                    status,
-                    result_json,
-                    error_message,
-                    created_at,
-                    finished_at
+                SELECT ${TOOL_EXECUTION_COLUMNS}
                 FROM tool_executions
                 WHERE status = 'PREPARED'
                 ORDER BY created_at ASC, rowid ASC;
@@ -331,18 +313,7 @@ export class ToolExecutionStore {
     listPreparedForRun(runId: string): ToolExecution[] {
         return this.db
             .query<ToolExecutionRow, { runId: string }>(`
-                SELECT
-                    id,
-                    run_id,
-                    tool_call_id,
-                    tool_name,
-                    arguments_json,
-                    effect,
-                    status,
-                    result_json,
-                    error_message,
-                    created_at,
-                    finished_at
+                SELECT ${TOOL_EXECUTION_COLUMNS}
                 FROM tool_executions
                 WHERE run_id = $runId
                   AND status = 'PREPARED'

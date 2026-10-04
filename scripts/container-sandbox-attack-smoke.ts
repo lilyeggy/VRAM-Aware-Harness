@@ -57,7 +57,7 @@ try {
         workspacePath: workspaceA,
         policy: policy("run-a", tenantA, workspaceA),
     });
-    const handleB = await provider.create({
+    await provider.create({
         id: sandboxB, runId: "run-b",
         workspacePath: workspaceB,
         policy: policy("run-b", tenantB, workspaceB),

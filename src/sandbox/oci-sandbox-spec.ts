@@ -1,5 +1,6 @@
 import { resolve, sep } from "node:path";
-import { isWithin, type EffectivePolicySnapshot } from "../policies/effective-policy.ts";
+import { isWithin } from "../utils/path-utils.ts";
+import type { EffectivePolicySnapshot } from "../policies/effective-policy.ts";
 import {
     freezeSandboxSpec,
     resolveSandboxProfile,

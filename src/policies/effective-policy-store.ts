@@ -27,6 +27,12 @@ export interface ToolPolicyDecision {
 }
 
 export class EffectivePolicyStore {
+    /**
+     * 快照落库后不可变，按 id 缓存可避免 ToolPolicyGuard 在每次工具
+     * 调用前重复 JSON.parse + 重算 + stringify 校验。
+     */
+    private readonly snapshotCache = new Map<string, EffectivePolicySnapshot>();
+
     constructor(private readonly db: Database) {}
 
     saveSnapshot(snapshot: EffectivePolicySnapshot): void {
@@ -51,6 +57,8 @@ export class EffectivePolicyStore {
     }
 
     getSnapshot(id: string): EffectivePolicySnapshot | null {
+        const cached = this.snapshotCache.get(id);
+        if (cached !== undefined) return cached;
         const row = this.db.query<SnapshotRow, { id: string }>(`
             SELECT id, run_id AS runId, tenant_id AS tenantId,
                 layers_json AS layersJson, effective_json AS effectiveJson,
@@ -58,6 +66,23 @@ export class EffectivePolicyStore {
             FROM effective_policy_snapshots WHERE id = $id;
         `).get({ id });
         if (row === null) return null;
+        return this.hydrate(row);
+    }
+
+    listSnapshotsForRun(runId: string): EffectivePolicySnapshot[] {
+        const rows = this.db.query<SnapshotRow, { runId: string }>(`
+            SELECT id, run_id AS runId, tenant_id AS tenantId,
+                layers_json AS layersJson, effective_json AS effectiveJson,
+                created_at AS createdAt
+            FROM effective_policy_snapshots
+            WHERE run_id = $runId ORDER BY created_at ASC, rowid ASC;
+        `).all({ runId });
+        return rows.map((row) => this.hydrate(row));
+    }
+
+    private hydrate(row: SnapshotRow): EffectivePolicySnapshot {
+        const cached = this.snapshotCache.get(row.id);
+        if (cached !== undefined) return cached;
         const rawLayers = JSON.parse(row.layersJson) as PolicyLayer[];
         const layers = rawLayers.map((layer) => createPolicyLayer(
             layer.id,
@@ -81,19 +106,10 @@ export class EffectivePolicyStore {
             sandboxProfile: persistedEffective.sandboxProfile ?? null,
         };
         if (JSON.stringify(constraintsOnly(snapshot)) !== JSON.stringify(normalizedPersisted)) {
-            throw new Error(`EffectivePolicySnapshot 内容不一致：${id}`);
+            throw new Error(`EffectivePolicySnapshot 内容不一致：${row.id}`);
         }
+        this.snapshotCache.set(row.id, snapshot);
         return snapshot;
-    }
-
-    listSnapshotsForRun(runId: string): EffectivePolicySnapshot[] {
-        const ids = this.db.query<{ id: string }, { runId: string }>(`
-            SELECT id FROM effective_policy_snapshots
-            WHERE run_id = $runId ORDER BY created_at ASC, rowid ASC;
-        `).all({ runId });
-        return ids.map(({ id }) => this.getSnapshot(id)).filter(
-            (snapshot): snapshot is EffectivePolicySnapshot => snapshot !== null,
-        );
     }
 
     recordToolDecision(decision: ToolPolicyDecision): void {

@@ -1,5 +1,9 @@
-import { resolve, sep } from "node:path";
+import { resolve } from "node:path";
 import type { SandboxProfile } from "../sandbox/sandbox-profile.ts";
+import { isWithin } from "../utils/path-utils.ts";
+
+// 兼容既有从本模块导入 isWithin 的调用方。
+export { isWithin } from "../utils/path-utils.ts";
 
 export type PolicyLayerKind =
     | "PLATFORM"
@@ -165,15 +169,7 @@ export function withSandboxProfile(
     });
 }
 
-export function isWithin(path: string, root: string): boolean {
-    const resolvedPath = resolve(path);
-    const resolvedRoot = resolve(root);
-    return resolvedPath === resolvedRoot
-        || resolvedPath.startsWith(`${resolvedRoot}${sep}`);
-}
-
-function intersectSandboxProfiles(
-    left: SandboxProfile | null,
+function intersectSandboxProfiles(    left: SandboxProfile | null,
     right: SandboxProfile | null,
 ): SandboxProfile | null {
     if (left === null) return right;

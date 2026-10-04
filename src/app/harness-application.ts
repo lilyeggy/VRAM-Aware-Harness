@@ -35,7 +35,6 @@ import type { Conversation } from "../sessions/harness-session.ts";
 import { createConversation } from "../sessions/harness-session.ts";
 import type { HarnessSessionStore } from "../sessions/harness-session-store.ts";
 import { summarizeToolDenials, type RunLimitation } from "../policies/run-limitations.ts";
-import type { PolicyConstraints, PolicyLayer } from "../policies/effective-policy.ts";
 import type { ToolExecution } from "../tools/tool-execution.ts";
 
 /**

@@ -9,7 +9,7 @@ import type {
     HarnessHttpApplication,
     HttpAccessControl,
 } from "./http-contracts.ts";
-import { HttpError, jsonResponse } from "./http-utils.ts";
+import { HttpError, bearerToken, jsonResponse } from "./http-utils.ts";
 import { handleAuthRoute } from "./routes/auth.ts";
 import { handleConversationsRoute } from "./routes/conversations.ts";
 import { handleGatewayRoute } from "./routes/gateway.ts";
@@ -31,14 +31,14 @@ export type {
  * 它只负责依赖注入、路由分发和共享 middleware；具体路由已经拆到
  * ./routes/*。调度、恢复、资源准入和持久化继续由 HarnessApplication 负责。
  */
-export class HarnessHttpApi {
+export class HarnessHttpApi implements HttpRouteContext {
     constructor(
-        private readonly application: HarnessHttpApplication,
-        private readonly checkpointLookup: CheckpointLookup,
-        private readonly accessControl?: HttpAccessControl,
-        private readonly llmGateway?: LlmGateway,
-        private readonly resourceMetrics?: ResourceMetricsSampler,
-        private readonly limits?: { maxUserInputChars: number },
+        readonly application: HarnessHttpApplication,
+        readonly checkpointLookup: CheckpointLookup,
+        readonly accessControl?: HttpAccessControl,
+        readonly llmGateway?: LlmGateway,
+        readonly resourceMetrics?: ResourceMetricsSampler,
+        readonly limits?: { maxUserInputChars: number },
     ) {}
 
     async fetch(request: Request): Promise<Response> {
@@ -63,7 +63,7 @@ export class HarnessHttpApi {
             .split("/")
             .filter(Boolean)
             .map((segment) => decodeURIComponent(segment));
-        const ctx = this as unknown as HttpRouteContext;
+        const ctx: HttpRouteContext = this;
 
         const authResponse = await handleAuthRoute(request, segments, ctx);
         if (authResponse !== null) return authResponse;
@@ -86,7 +86,7 @@ export class HarnessHttpApi {
         throw new HttpError(404, "找不到 HTTP 路由");
     }
 
-    private getRequiredRun(
+    getRequiredRun(
         runId: string,
         request?: Request,
         scope = "tasks:read",
@@ -106,15 +106,13 @@ export class HarnessHttpApi {
         return run;
     }
 
-    private requirePrincipal(request: Request, scope: string): RequestPrincipal {
+    requirePrincipal(request: Request, scope: string): RequestPrincipal {
         if (this.accessControl === undefined) {
             // Retained only for direct legacy unit tests; composition always injects auth.
             return { tenantId: "legacy", scopes: ["*"] };
         }
-        const authorization = request.headers.get("authorization");
-        const rawKey = authorization?.startsWith("Bearer ")
-            ? authorization.slice("Bearer ".length).trim()
-            : request.headers.get("x-api-key")?.trim();
+        const rawKey = bearerToken(request)
+            ?? request.headers.get("x-api-key")?.trim();
         if (rawKey === undefined || rawKey.length === 0) {
             this.audit("AUTHENTICATE", "DENY", null, "missing_api_key");
             throw new HttpError(401, "缺少 API Key");
@@ -136,7 +134,7 @@ export class HarnessHttpApi {
         return principal;
     }
 
-    private audit(
+    audit(
         action: string,
         outcome: "ALLOW" | "DENY",
         principal: RequestPrincipal | null,
@@ -157,7 +155,7 @@ export class HarnessHttpApi {
      * D4：资源级审计——interrupt/resume/提交等动作直接落在具体资源上，
      * 而不是只有 "HTTP_REQUEST + scope" 一层。
      */
-    private auditResource(
+    auditResource(
         resourceType: "RUN" | "SESSION",
         resourceId: string | null,
         action: string,

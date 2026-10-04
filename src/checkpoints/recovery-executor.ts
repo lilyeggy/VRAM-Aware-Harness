@@ -2,6 +2,7 @@ import type{AgentRun} from "../runs/agent-run.ts";
 import { buildRecoveryContinuationInput } from "../runs/run-service.ts";
 import type { RunScheduler } from "../scheduling/run-scheduler.ts";
 import {
+    createSessionRefCheck,
     decideRecovery,
     type RecoveryDecision,
 } from "./recovery-decision.ts";
@@ -59,13 +60,10 @@ export class RecoveryExecutor {
                 ? decideRecovery(
                     plan.checkpoint?.id ?? null,
                     plan.preparedExecutions,
-                    {
-                        runtimeSessionRef:
-                            plan.checkpoint?.runtimeSessionRef ?? null,
-                        ...(this.isSessionRefReachable === undefined
-                            ? {}
-                            : { isReachable: this.isSessionRefReachable }),
-                    },
+                    createSessionRefCheck(
+                        plan.checkpoint,
+                        this.isSessionRefReachable,
+                    ),
                 )
                 : plan.decision;
 

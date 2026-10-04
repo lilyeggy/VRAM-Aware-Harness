@@ -49,6 +49,21 @@ export interface SessionRefCheck {
     isReachable?:(runtimeSessionRef:string)=>boolean;
 }
 
+/**
+ * 由 Checkpoint + 注入的可达性判定构造 SessionRefCheck。
+ * RecoveryService（建计划）与 RecoveryExecutor（执行前复核）共用同一份
+ * 构造逻辑，避免两处各自拼装导致判定口径漂移。
+ */
+export function createSessionRefCheck(
+    checkpoint: { runtimeSessionRef?: string | null } | null,
+    isReachable?: (runtimeSessionRef: string) => boolean,
+): SessionRefCheck {
+    return {
+        runtimeSessionRef: checkpoint?.runtimeSessionRef ?? null,
+        ...(isReachable === undefined ? {} : { isReachable }),
+    };
+}
+
 export function decideRecovery (
     checkpointId:string|null,
     preparedExecution:readonly ToolExecution[],

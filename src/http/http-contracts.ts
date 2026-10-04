@@ -11,27 +11,21 @@ import type {
     AgentRun,
     RunEvent,
 } from "../runs/agent-run.ts";
-import {
-    buildRecoveryContinuationInput,
-    type ResumeRunInput,
-    type StartRunInput,
+import type {
+    ResumeRunInput,
+    StartRunInput,
 } from "../runs/run-service.ts";
 import type {
     QueueEntry,
 } from "../scheduling/tenant-run-scheduler.ts";
 import type { RequestPrincipal } from "../auth/request-principal.ts";
-import { digest } from "../auth/api-credential-store.ts";
-import { hasScope } from "../auth/request-principal.ts";
 import type { WorkspaceService } from "../workspaces/workspace-service.ts";
 import type { RunLimitation } from "../policies/run-limitations.ts";
 import type { RunOutputChunk } from "../runs/run-output-store.ts";
 import type { WorkspaceDiff } from "../workspaces/workspace-snapshot.ts";
 import type { RunArtifact } from "../workspaces/run-artifact-store.ts";
 import type { AccessAuditStore } from "../audit/access-audit-store.ts";
-import type { LlmGateway } from "../llm-gateway/llm-gateway.ts";
-import { userConsoleResponse } from "./harness-user-console.ts";
 import type { Conversation } from "../sessions/harness-session.ts";
-import type { PolicyConstraints, PolicyLayer, ResourceLimits } from "../policies/effective-policy.ts";
 import type { ToolExecution } from "../tools/tool-execution.ts";
 export type UnknownEffectResolution = "NO_EFFECT" | "EFFECT_OCCURRED";
 

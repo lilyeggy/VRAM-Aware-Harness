@@ -75,6 +75,12 @@ export class TenantRunScheduler {
     private readonly tenantOrder: string[] = [];
     private readonly activeTenantByRunId = new Map<string, string>();
     private readonly activeSessionByRunId = new Map<string, string>();
+    /** runId → QueuedRun 索引，避免 findQueuedRun 全队列线性扫描。 */
+    private readonly queuedRunByRunId = new Map<string, QueuedRun>();
+    /** tenantId → 活跃 Run 数，随 claim/release 增量维护。 */
+    private readonly activeCountByTenant = new Map<string, number>();
+    /** 当前有活跃 Run 的会话集合，随 claim/release 增量维护。 */
+    private readonly activeSessionIds = new Set<string>();
 
     constructor(private readonly config: TenantRunSchedulerConfig) {
         assertPositiveInteger(config.maxActiveRuns, "maxActiveRuns");
@@ -120,19 +126,27 @@ export class TenantRunScheduler {
             tenantQueue.push(queuedRun);
         }
 
+        this.queuedRunByRunId.set(queuedRun.runId, queuedRun);
+
         return queuedRun;
     }
 
     private findQueuedRun(runId: string): QueuedRun | null {
-        for (const queue of this.queuesByTenant.values()) {
-            const run = queue.find((item) => item.runId === runId);
+        return this.queuedRunByRunId.get(runId) ?? null;
+    }
 
-            if (run !== undefined) {
-                return run;
-            }
+    /** claim 成功后登记活跃 slot，并同步维护派生索引。 */
+    private activate(run: QueuedRun): void {
+        this.queuedRunByRunId.delete(run.runId);
+        this.activeTenantByRunId.set(run.runId, run.tenantId);
+        this.activeCountByTenant.set(
+            run.tenantId,
+            (this.activeCountByTenant.get(run.tenantId) ?? 0) + 1,
+        );
+        if (run.sessionId !== undefined) {
+            this.activeSessionByRunId.set(run.runId, run.sessionId);
+            this.activeSessionIds.add(run.sessionId);
         }
-
-        return null;
     }
 
     // 要从所有等待中的 Run 里公平地选择一个当前有资格启动的 Run，并立即为他保留一个逻辑并发 slot
@@ -207,14 +221,8 @@ export class TenantRunScheduler {
             }   else {
                 this.queuesByTenant.delete(tenantId);
             }
-            
-            this.activeTenantByRunId.set(
-                run.runId,
-                run.tenantId
-            );
-            if (run.sessionId !== undefined) {
-                this.activeSessionByRunId.set(run.runId, run.sessionId);
-            }
+
+            this.activate(run);
             return run;
         }
      
@@ -288,11 +296,7 @@ export class TenantRunScheduler {
             this.queuesByTenant.delete(bestTenantId);
         }
 
-        this.activeTenantByRunId.set(run.runId, run.tenantId);
-
-        if (run.sessionId !== undefined) {
-            this.activeSessionByRunId.set(run.runId, run.sessionId);
-        }
+        this.activate(run);
 
         return run;
     }
@@ -310,31 +314,36 @@ export class TenantRunScheduler {
     }
 
     private getActiveTenantRunCount(tenantId:string):number {
-        let count = 0;
-
-        for (
-            const activeTenantId of this.activeTenantByRunId.values()
-        ){
-            if (activeTenantId === tenantId){
-                count += 1;
-            }
-        }
-        return count;
+        return this.activeCountByTenant.get(tenantId) ?? 0;
     }
 
     private hasActiveSession(sessionId: string): boolean {
-        for (const activeSessionId of this.activeSessionByRunId.values()) {
-            if (activeSessionId === sessionId) return true;
-        }
-        return false;
+        return this.activeSessionIds.has(sessionId);
     }
 
 
     // 释放资源
     release(runId:string):boolean {
         // 释放指定 run 的 slot
-        this.activeSessionByRunId.delete(runId);
-        return this.activeTenantByRunId.delete(runId);
+        const sessionId = this.activeSessionByRunId.get(runId);
+        if (sessionId !== undefined) {
+            this.activeSessionByRunId.delete(runId);
+            this.activeSessionIds.delete(sessionId);
+        }
+
+        const tenantId = this.activeTenantByRunId.get(runId);
+        if (tenantId === undefined) {
+            return false;
+        }
+
+        this.activeTenantByRunId.delete(runId);
+        const remaining = (this.activeCountByTenant.get(tenantId) ?? 1) - 1;
+        if (remaining > 0) {
+            this.activeCountByTenant.set(tenantId, remaining);
+        } else {
+            this.activeCountByTenant.delete(tenantId);
+        }
+        return true;
     }
 
     // 获取最大并发上限
@@ -361,6 +370,7 @@ export class TenantRunScheduler {
                 return null;
             }
 
+            this.queuedRunByRunId.delete(runId);
             // 清理空的tenant
             if (tenantQueue.length === 0){
                 this.queuesByTenant.delete(tenantId);

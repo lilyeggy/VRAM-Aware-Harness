@@ -15,7 +15,6 @@ import type {
 import type {
     AgentRun,
 } from "../../src/runs/agent-run.ts";
-import { RunStore } from "../../src/runs/runstore.ts";
 import {
     FakeAgentRuntime,
 } from "../fakes/fake-agent-runtime.ts";

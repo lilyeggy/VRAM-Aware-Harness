@@ -1,4 +1,5 @@
-import { isWithin, type EffectivePolicySnapshot } from "../policies/effective-policy.ts";
+import { isWithin } from "../utils/path-utils.ts";
+import type { EffectivePolicySnapshot } from "../policies/effective-policy.ts";
 import type { SandboxStore } from "./sandbox-store.ts";
 import {
     freezeRuntimeEvidence,
