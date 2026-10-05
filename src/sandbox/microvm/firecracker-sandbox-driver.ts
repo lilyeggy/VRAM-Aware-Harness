@@ -4,9 +4,11 @@ import * as http from "node:http";
 import type {
     MicrovmCreateOptions,
     MicrovmDriver,
+    MicrovmExecuteOptions,
     MicrovmExecutionResult,
     MicrovmInstance,
 } from "./microvm-types.ts";
+import { FirecrackerSerialBridge } from "./firecracker-serial-bridge.ts";
 
 export interface FirecrackerDriverConfig {
     readonly binaryPath?: string;
@@ -23,6 +25,7 @@ export class FirecrackerSandboxDriver implements MicrovmDriver {
     private readonly kvmPath: string;
     private readonly processes = new Map<string, ChildProcess>();
     private readonly rootfsCopies = new Map<string, string>();
+    private readonly bridges = new Map<string, FirecrackerSerialBridge>();
 
     constructor(config: FirecrackerDriverConfig = {}) {
         this.binaryPath = config.binaryPath ?? process.env.FIRECRACKER_BINARY_PATH ?? "firecracker";
@@ -96,11 +99,15 @@ export class FirecrackerSandboxDriver implements MicrovmDriver {
         let proc: ChildProcess | undefined;
         try {
             proc = spawn(this.binaryPath, ["--api-sock", socketPath], {
-                stdio: ["ignore", "pipe", "pipe"],
+                stdio: ["pipe", "pipe", "pipe"],
                 detached: false,
             });
 
             this.processes.set(options.id, proc);
+            if (proc.stdin && proc.stdout) {
+                const bridge = new FirecrackerSerialBridge(proc.stdin, proc.stdout);
+                this.bridges.set(options.id, bridge);
+            }
 
             proc.on("error", (err) => {
                 console.error(`[Firecracker] Process error for sandbox ${options.id}:`, err);
@@ -137,6 +144,15 @@ export class FirecrackerSandboxDriver implements MicrovmDriver {
                 is_read_only: false,
             });
 
+            if (options.workspaceDiskPath && existsSync(options.workspaceDiskPath)) {
+                await this.putSocket(socketPath, "/drives/workspace", {
+                    drive_id: "workspace",
+                    path_on_host: options.workspaceDiskPath,
+                    is_root_device: false,
+                    is_read_only: false,
+                });
+            }
+
             await this.putSocket(socketPath, "/machine-config", {
                 vcpu_count: options.cpuCount ?? 2,
                 mem_size_mib: options.memoryMb ?? 256,
@@ -159,11 +175,16 @@ export class FirecrackerSandboxDriver implements MicrovmDriver {
     async execute(
         vmId: string,
         command: readonly string[],
-        _options?: { readonly workdir?: string },
+        options?: MicrovmExecuteOptions,
     ): Promise<MicrovmExecutionResult> {
         const proc = this.processes.get(vmId);
         if (!proc || proc.killed) {
             throw new Error(`Firecracker MicroVM 实例不存在或已终止：${vmId}`);
+        }
+
+        const bridge = this.bridges.get(vmId);
+        if (bridge) {
+            return await bridge.execute(command, options);
         }
 
         return {
@@ -174,6 +195,12 @@ export class FirecrackerSandboxDriver implements MicrovmDriver {
     }
 
     async terminate(vmId: string): Promise<void> {
+        const bridge = this.bridges.get(vmId);
+        if (bridge) {
+            bridge.close();
+            this.bridges.delete(vmId);
+        }
+
         const proc = this.processes.get(vmId);
         if (proc) {
             this.processes.delete(vmId);

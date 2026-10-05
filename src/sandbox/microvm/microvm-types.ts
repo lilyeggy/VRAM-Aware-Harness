@@ -13,10 +13,18 @@ export interface MicrovmCreateOptions {
     readonly id: string;
     readonly runId: string;
     readonly workspacePath: string;
+    readonly workspaceDiskPath?: string;
     readonly cpuCount?: number;
     readonly memoryMb?: number;
     readonly allowNetwork?: boolean;
     readonly environment?: Readonly<Record<string, string>>;
+}
+
+export interface MicrovmExecuteOptions {
+    readonly workdir?: string;
+    readonly timeoutMs?: number;
+    readonly onStdoutChunk?: (chunk: string) => void;
+    readonly onStderrChunk?: (chunk: string) => void;
 }
 
 export interface MicrovmExecutionResult {
@@ -31,7 +39,7 @@ export interface MicrovmDriver {
     execute(
         vmId: string,
         command: readonly string[],
-        options?: { readonly workdir?: string },
+        options?: MicrovmExecuteOptions,
     ): Promise<MicrovmExecutionResult>;
     terminate(vmId: string): Promise<void>;
     isAvailable(): Promise<boolean>;
