@@ -87,7 +87,7 @@ describe("工作区根目录必须与数据库同生命周期", () => {
             VLLM_MODEL_ID:"fake-model",
             HARNESS_DATABASE_PATH:":memory:",
             HARNESS_WORKSPACE_ROOT:"data/workspaces",
-        }, "/tmp/harness-project")).toThrow("必须也指向系统临时目录");
+        }, "/var/project/harness-project")).toThrow("必须也指向系统临时目录");
     });
 
     test("临时文件库的工作区根目录落在仓库内时同样拒绝启动", () => {
@@ -96,7 +96,7 @@ describe("工作区根目录必须与数据库同生命周期", () => {
         expect(() => loadHarnessConfig({
             VLLM_MODEL_ID:"fake-model",
             HARNESS_DATABASE_PATH:join(tmpdir(), "harness-probe", "harness.db"),
-        }, "/tmp/harness-project")).toThrow("必须也指向系统临时目录");
+        }, "/var/project/harness-project")).toThrow("必须也指向系统临时目录");
     });
 
     test("持久库配临时工作区根目录时也拒绝启动（反向不一致）", () => {

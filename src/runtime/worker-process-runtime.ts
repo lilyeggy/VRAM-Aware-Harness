@@ -6,7 +6,7 @@
  * Provides process-level blast radius isolation, crash detection watchdog, and orphan container cleanup.
  */
 
-import { resolve } from "node:path";
+import { resolve, dirname } from "node:path";
 import { settlesWithin } from "./async-utils.ts";
 import type {
     AgentRuntime,
@@ -192,7 +192,9 @@ export class WorkerProcessAgentRuntime implements AgentRuntime {
 
         const workerScript = this.options.workerScriptPath
             ?? resolve(this.options.cwd ?? process.cwd(), "src/worker/worker-main.ts");
-        const bunCmd = this.options.bunCommand ?? "bun";
+        const bunCmd = (this.options.bunCommand && this.options.bunCommand !== "bun")
+            ? this.options.bunCommand
+            : (process.execPath || "bun");
         const handshakeTimeoutMs = this.options.workerHandshakeTimeoutMs ?? 15_000;
 
         let resolvePromise!: () => void;
@@ -226,6 +228,12 @@ export class WorkerProcessAgentRuntime implements AgentRuntime {
 
         let child: ReturnType<typeof Bun.spawn>;
         try {
+            const bunBinDir = process.execPath ? dirname(process.execPath) : "";
+            const currentPath = process.env.PATH ?? "";
+            const mergedPath = bunBinDir && !currentPath.includes(bunBinDir)
+                ? `${bunBinDir}:${currentPath}`
+                : currentPath;
+
             child = Bun.spawn([bunCmd, "run", workerScript], {
                 cwd: this.options.cwd ?? process.cwd(),
                 stdin: "pipe",
@@ -233,6 +241,7 @@ export class WorkerProcessAgentRuntime implements AgentRuntime {
                 stderr: "pipe",
                 env: {
                     ...process.env,
+                    PATH: mergedPath,
                     ...this.options.extraEnv,
                     HARNESS_RUN_ID: runId,
                 },

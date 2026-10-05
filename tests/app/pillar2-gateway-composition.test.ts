@@ -53,7 +53,7 @@ test("支柱 2：组合根装配双卡网关、健康探测与缓存台账并放
         input: Parameters<typeof originalFetch>[0],
     ) => {
         const url = String(input);
-        if (url.endsWith("/health")) {
+        if (url.endsWith("/health") || url.endsWith("/models")) {
             return new Response("ok", { status: 200 });
         }
         if (url.endsWith("/chat/completions")) {
