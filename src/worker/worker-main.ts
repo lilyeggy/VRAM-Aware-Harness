@@ -132,7 +132,7 @@ async function setupRuntime(config: WorkerRuntimeConfig, sandboxId?: string, thi
             {
                 image: config.containerImage,
                 profile: config.sandboxProfile,
-                sandboxRuntime: config.sandboxRuntime,
+                sandboxRuntime: config.sandboxRuntime === "firecracker" ? "runsc" : config.sandboxRuntime,
                 userId: config.containerUserId,
                 dockerCommand: config.dockerCommand,
             },

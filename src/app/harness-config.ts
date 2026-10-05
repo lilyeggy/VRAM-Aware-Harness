@@ -31,9 +31,12 @@ export interface HarnessConfig {
     bootstrapApiKey:string | undefined;
     /** Pi/Worker 经 LLM 网关调用模型的专用凭证（仅 models:generate scope）。 */
     agentApiKey:string | undefined;
-    sandboxProvider:"managed-local" | "container";
+    sandboxProvider:"managed-local" | "container" | "microvm";
     sandboxProfile:SandboxProfile;
-    sandboxRuntime:"runsc" | "runc";
+    sandboxRuntime:"runsc" | "runc" | "firecracker";
+    microvmDriver?:"mock" | "e2b" | "firecracker";
+    e2bApiKey?:string;
+    firecrackerBinaryPath?:string;
     containerImage:string;
     containerUserId:number;
     /** N14：沙箱容器的 PID 上限（docker --pids-limit）。未配置时沿用 128。 */
@@ -160,16 +163,18 @@ export function loadHarnessConfig(
             "HARNESS_MAX_ACTIVE_RUNS_PER_TENANT 不能大于 HARNESS_MAX_ACTIVE_RUNS",
         );
     }
-    const sandboxProvider = environment.HARNESS_SANDBOX_PROVIDER === "container"
-        ? "container"
-        : "managed-local";
+    const sandboxProvider = environment.HARNESS_SANDBOX_PROVIDER === "microvm"
+        ? "microvm"
+        : environment.HARNESS_SANDBOX_PROVIDER === "container"
+            ? "container"
+            : "managed-local";
     const sandboxProfile = loadSandboxProfile(
         environment.HARNESS_SANDBOX_PROFILE,
-        sandboxProvider === "container" ? "default" : "development",
+        sandboxProvider === "microvm" ? "strict" : sandboxProvider === "container" ? "default" : "development",
     );
     const sandboxRuntime = loadSandboxRuntime(
         environment.HARNESS_SANDBOX_RUNTIME,
-        sandboxProvider === "container" ? "runsc" : "runc",
+        sandboxProvider === "microvm" ? "firecracker" : sandboxProvider === "container" ? "runsc" : "runc",
     );
     if (sandboxProvider === "managed-local" && sandboxProfile !== "development") {
         throw new Error("MANAGED_LOCAL 只能使用 development sandbox profile");
@@ -183,6 +188,13 @@ export function loadHarnessConfig(
     ) {
         throw new Error(`${sandboxProfile} sandbox profile 禁止回退到 ${sandboxRuntime}`);
     }
+    if (sandboxProfile === "strict" && sandboxRuntime !== "firecracker") {
+        throw new Error(`${sandboxProfile} sandbox profile 必须使用 firecracker runtime`);
+    }
+
+    const microvmDriver = environment.HARNESS_MICROVM_DRIVER as ("mock" | "e2b" | "firecracker" | undefined);
+    const e2bApiKey = environment.E2B_API_KEY;
+    const firecrackerBinaryPath = environment.FIRECRACKER_BINARY_PATH;
 
     const databasePath = environment.HARNESS_DATABASE_PATH
         ?? resolve(cwd, "data/harness.sqlite");
@@ -211,6 +223,9 @@ export function loadHarnessConfig(
         sandboxProvider,
         sandboxProfile,
         sandboxRuntime,
+        ...(microvmDriver !== undefined ? { microvmDriver } : {}),
+        ...(e2bApiKey !== undefined ? { e2bApiKey } : {}),
+        ...(firecrackerBinaryPath !== undefined ? { firecrackerBinaryPath } : {}),
         containerImage:environment.HARNESS_CONTAINER_IMAGE ?? DEFAULT_CONTAINER_IMAGE,
         containerUserId:posInt("HARNESS_CONTAINER_USER_ID", DEFAULT_CONTAINER_USER_ID),
         containerPidsLimit:posInt("HARNESS_CONTAINER_PIDS_LIMIT", 128),
@@ -441,10 +456,10 @@ function parseLlmBackends(raw:string | undefined):LlmBackend[] {    if (raw === 
 
 function loadSandboxRuntime(
     value:string | undefined,
-    defaultValue:"runsc" | "runc",
-):"runsc" | "runc" {
+    defaultValue:"runsc" | "runc" | "firecracker",
+):"runsc" | "runc" | "firecracker" {
     const runtime = value ?? defaultValue;
-    if (runtime !== "runsc" && runtime !== "runc") {
+    if (runtime !== "runsc" && runtime !== "runc" && runtime !== "firecracker") {
         throw new Error(`HARNESS_SANDBOX_RUNTIME 不支持：${runtime}`);
     }
     return runtime;

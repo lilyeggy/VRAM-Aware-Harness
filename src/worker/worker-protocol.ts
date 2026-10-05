@@ -58,9 +58,9 @@ export interface WorkerRuntimeConfig {
     readonly piTools: readonly string[];
     readonly piModelsPath: string;
     readonly piAuthPath?: string;
-    readonly sandboxProvider: "container" | "managed-local";
+    readonly sandboxProvider: "container" | "managed-local" | "microvm";
     readonly sandboxProfile: SandboxProfile;
-    readonly sandboxRuntime: "runsc" | "runc";
+    readonly sandboxRuntime: "runsc" | "runc" | "firecracker";
     readonly containerImage: string;
     readonly containerUserId: number;
     readonly dockerCommand?: string;

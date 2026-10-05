@@ -58,6 +58,13 @@ import {
     SandboxProviderRouter,
     UnavailableStrictSandboxProvider,
 } from "../sandbox/sandbox-provider-router.ts";
+import {
+    MicrovmSandboxProvider,
+    MockMicrovmDriver,
+    FirecrackerSandboxDriver,
+    E2bSandboxDriver,
+    type MicrovmDriver,
+} from "../sandbox/microvm/index.ts";
 import { SandboxStore } from "../sandbox/sandbox-store.ts";
 import { SandboxStartupReconciler } from "../sandbox/sandbox-startup-reconciler.ts";
 import {
@@ -210,7 +217,7 @@ export async function createHarnessApplication(
     const secretProvider = dependencies.secretProvider
         ?? new EnvironmentSecretProvider(process.env);
     const sandboxProvider = dependencies.sandboxProvider
-        ?? (config.sandboxProvider === "container"
+        ?? (config.sandboxProvider === "container" || config.sandboxProvider === "microvm"
             ? createContainerSandboxRouter(
                 sandboxStore,
                 secretProvider,
@@ -535,14 +542,28 @@ function createContainerSandboxRouter(
     secretProvider:SecretProvider,
     config:HarnessConfig,
 ):SandboxProvider {
-    const strict = new UnavailableStrictSandboxProvider();
-    if (config.sandboxProfile === "strict") {
+    const hasMicrovmConfig = config.sandboxProvider === "microvm" || config.microvmDriver !== undefined;
+    const createMicrovmDriver = (): MicrovmDriver => {
+        if (config.microvmDriver === "e2b") {
+            return new E2bSandboxDriver({ apiKey: config.e2bApiKey });
+        }
+        if (config.microvmDriver === "firecracker") {
+            return new FirecrackerSandboxDriver({ binaryPath: config.firecrackerBinaryPath });
+        }
+        return new MockMicrovmDriver();
+    };
+
+    const strict = hasMicrovmConfig
+        ? new MicrovmSandboxProvider(sandboxStore, secretProvider, { driver: createMicrovmDriver() })
+        : new UnavailableStrictSandboxProvider();
+
+    if (config.sandboxProfile === "strict" || config.sandboxProvider === "microvm") {
         return new SandboxProviderRouter({ strict }, "strict");
     }
     const container = new ContainerSandboxProvider(sandboxStore, secretProvider, {
         image: config.containerImage,
         profile: config.sandboxProfile,
-        sandboxRuntime: config.sandboxRuntime,
+        sandboxRuntime: config.sandboxRuntime === "firecracker" ? "runsc" : config.sandboxRuntime,
         userId: config.containerUserId,
         ...(config.containerPidsLimit === undefined
             ? {}
