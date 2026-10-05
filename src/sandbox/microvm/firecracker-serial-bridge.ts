@@ -42,6 +42,27 @@ export class FirecrackerSerialBridge {
     }
 
     /**
+     * Waits for guest shell prompt (/ #, #, login) to appear on the serial console.
+     */
+    async waitForReady(timeoutMs = 5000): Promise<void> {
+        const start = Date.now();
+        while (Date.now() - start < timeoutMs) {
+            if (
+                this.buffer.includes("/ #") ||
+                this.buffer.includes("# ") ||
+                this.buffer.includes("can't access tty") ||
+                this.buffer.includes("login:")
+            ) {
+                if (this.buffer.includes("login:") && !this.buffer.includes("# ")) {
+                    this.stdin.write("root\n");
+                }
+                return;
+            }
+            await new Promise((r) => setTimeout(r, 40));
+        }
+    }
+
+    /**
      * Executes a command inside the persistent guest shell session and waits for its exit code.
      */
     async execute(

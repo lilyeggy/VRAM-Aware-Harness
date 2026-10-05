@@ -134,7 +134,7 @@ export class FirecrackerSandboxDriver implements MicrovmDriver {
 
             await this.putSocket(socketPath, "/boot-source", {
                 kernel_image_path: this.kernelPath,
-                boot_args: "console=ttyS0 reboot=k panic=1 pci=off",
+                boot_args: "console=ttyS0 reboot=k panic=1 pci=off init=/bin/sh",
             });
 
             await this.putSocket(socketPath, "/drives/rootfs", {
@@ -161,6 +161,11 @@ export class FirecrackerSandboxDriver implements MicrovmDriver {
             await this.putSocket(socketPath, "/actions", {
                 action_type: "InstanceStart",
             });
+
+            const bridge = this.bridges.get(options.id);
+            if (bridge) {
+                await bridge.waitForReady(3000);
+            }
         }
 
         return {
