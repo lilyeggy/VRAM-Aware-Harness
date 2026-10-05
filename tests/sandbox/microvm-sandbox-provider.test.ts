@@ -10,7 +10,7 @@ import {
     E2bSandboxDriver,
 } from "../../src/sandbox/microvm/index.ts";
 
-class MemorySandboxStore implements SandboxStore {
+class MemorySandboxStore {
     readonly records = new Map<string, SandboxRecord>();
     create(record: SandboxRecord): void {
         this.records.set(record.id, record);
@@ -52,7 +52,7 @@ function strictPolicy(overrides: Partial<EffectivePolicySnapshot> = {}): Effecti
 test("strict profile 成功路由至 MicrovmSandboxProvider 并产出合规硬件级审计证据", async () => {
     const store = new MemorySandboxStore();
     const mockDriver = new MockMicrovmDriver();
-    const provider = new MicrovmSandboxProvider(store, mockSecrets, { driver: mockDriver });
+    const provider = new MicrovmSandboxProvider(store as unknown as SandboxStore, mockSecrets, { driver: mockDriver });
 
     const handle = await provider.create({
         id: "sbx-strict-1",
@@ -86,7 +86,7 @@ test("strict profile 成功路由至 MicrovmSandboxProvider 并产出合规硬�
 test("MicrovmSandboxProvider 执行多轮命令并返回确定的执行结果", async () => {
     const store = new MemorySandboxStore();
     const mockDriver = new MockMicrovmDriver();
-    const provider = new MicrovmSandboxProvider(store, mockSecrets, { driver: mockDriver });
+    const provider = new MicrovmSandboxProvider(store as unknown as SandboxStore, mockSecrets, { driver: mockDriver });
 
     await provider.create({
         id: "sbx-exec-1",
@@ -110,7 +110,7 @@ test("MicrovmSandboxProvider 在底层驱动不可用时 fail-closed 并标记 F
     const store = new MemorySandboxStore();
     const mockDriver = new MockMicrovmDriver();
     mockDriver.setAvailable(false);
-    const provider = new MicrovmSandboxProvider(store, mockSecrets, { driver: mockDriver });
+    const provider = new MicrovmSandboxProvider(store as unknown as SandboxStore, mockSecrets, { driver: mockDriver });
 
     await expect(provider.create({
         id: "sbx-fail-1",
@@ -126,7 +126,7 @@ test("MicrovmSandboxProvider 在底层驱动不可用时 fail-closed 并标记 F
 test("MicrovmSandboxProvider 正常终止沙箱并更新生命周期状态", async () => {
     const store = new MemorySandboxStore();
     const mockDriver = new MockMicrovmDriver();
-    const provider = new MicrovmSandboxProvider(store, mockSecrets, { driver: mockDriver });
+    const provider = new MicrovmSandboxProvider(store as unknown as SandboxStore, mockSecrets, { driver: mockDriver });
 
     await provider.create({
         id: "sbx-term-1",
@@ -147,7 +147,7 @@ test("MicrovmSandboxProvider 正常终止沙箱并更新生命周期状态", asy
 test("SandboxProviderRouter 配合 MicrovmSandboxProvider 时能正常分发 strict 策略", async () => {
     const store = new MemorySandboxStore();
     const mockDriver = new MockMicrovmDriver();
-    const microvmProvider = new MicrovmSandboxProvider(store, mockSecrets, { driver: mockDriver });
+    const microvmProvider = new MicrovmSandboxProvider(store as unknown as SandboxStore, mockSecrets, { driver: mockDriver });
 
     const router = new SandboxProviderRouter({
         strict: microvmProvider,

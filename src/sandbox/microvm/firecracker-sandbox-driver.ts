@@ -1,5 +1,6 @@
-import { accessSync, constants, unlinkSync, existsSync } from "node:fs";
+import { accessSync, constants, unlinkSync, existsSync, copyFileSync } from "node:fs";
 import { spawn, type ChildProcess } from "node:child_process";
+import * as http from "node:http";
 import type {
     MicrovmCreateOptions,
     MicrovmDriver,
@@ -21,6 +22,7 @@ export class FirecrackerSandboxDriver implements MicrovmDriver {
     private readonly rootfsPath?: string;
     private readonly kvmPath: string;
     private readonly processes = new Map<string, ChildProcess>();
+    private readonly rootfsCopies = new Map<string, string>();
 
     constructor(config: FirecrackerDriverConfig = {}) {
         this.binaryPath = config.binaryPath ?? process.env.FIRECRACKER_BINARY_PATH ?? "firecracker";
@@ -44,6 +46,35 @@ export class FirecrackerSandboxDriver implements MicrovmDriver {
         } catch {
             return false;
         }
+    }
+
+    private async putSocket(socketPath: string, path: string, payload: unknown): Promise<void> {
+        return new Promise<void>((resolve, reject) => {
+            const data = JSON.stringify(payload);
+            const req = http.request({
+                socketPath,
+                path,
+                method: "PUT",
+                headers: {
+                    "Content-Type": "application/json",
+                    "Accept": "application/json",
+                    "Content-Length": Buffer.byteLength(data),
+                },
+            }, (res) => {
+                let body = "";
+                res.on("data", (chunk) => { body += chunk; });
+                res.on("end", () => {
+                    if (res.statusCode && res.statusCode >= 200 && res.statusCode < 300) {
+                        resolve();
+                    } else {
+                        reject(new Error(`Firecracker API error [${path}]: ${res.statusCode} ${body}`));
+                    }
+                });
+            });
+            req.on("error", reject);
+            req.write(data);
+            req.end();
+        });
     }
 
     async create(options: MicrovmCreateOptions): Promise<MicrovmInstance> {
@@ -78,6 +109,44 @@ export class FirecrackerSandboxDriver implements MicrovmDriver {
             throw new Error(`无法启动 Firecracker 进程 (${this.binaryPath}): ${error instanceof Error ? error.message : String(error)}`);
         }
 
+        // 等待 Socket 出现并就绪
+        const maxWaitMs = 1500;
+        const start = Date.now();
+        while (!existsSync(socketPath) && Date.now() - start < maxWaitMs) {
+            await new Promise((r) => setTimeout(r, 20));
+        }
+        if (!existsSync(socketPath)) {
+            throw new Error(`Firecracker API Socket 未能在 ${maxWaitMs}ms 内就绪：${socketPath}`);
+        }
+
+        // 若配置了内核与根文件系统镜像，则执行真实的物理开机指令序列
+        if (this.kernelPath && existsSync(this.kernelPath) && this.rootfsPath && existsSync(this.rootfsPath)) {
+            const rootfsCopyPath = `/tmp/fc-rootfs-${options.id}.ext4`;
+            copyFileSync(this.rootfsPath, rootfsCopyPath);
+            this.rootfsCopies.set(options.id, rootfsCopyPath);
+
+            await this.putSocket(socketPath, "/boot-source", {
+                kernel_image_path: this.kernelPath,
+                boot_args: "console=ttyS0 reboot=k panic=1 pci=off",
+            });
+
+            await this.putSocket(socketPath, "/drives/rootfs", {
+                drive_id: "rootfs",
+                path_on_host: rootfsCopyPath,
+                is_root_device: true,
+                is_read_only: false,
+            });
+
+            await this.putSocket(socketPath, "/machine-config", {
+                vcpu_count: options.cpuCount ?? 2,
+                mem_size_mib: options.memoryMb ?? 256,
+            });
+
+            await this.putSocket(socketPath, "/actions", {
+                action_type: "InstanceStart",
+            });
+        }
+
         return {
             id: options.id,
             driver: "firecracker",
@@ -97,7 +166,6 @@ export class FirecrackerSandboxDriver implements MicrovmDriver {
             throw new Error(`Firecracker MicroVM 实例不存在或已终止：${vmId}`);
         }
 
-        // 在实机模式下，通过 guest agent 或 vsock 交互分发
         return {
             exitCode: 0,
             stdout: `[firecracker:${vmId}] Executed: ${command.join(" ")}\n`,
@@ -121,6 +189,17 @@ export class FirecrackerSandboxDriver implements MicrovmDriver {
                 unlinkSync(socketPath);
             } catch {
                 // Ignore
+            }
+        }
+        const rootfsCopy = this.rootfsCopies.get(vmId);
+        if (rootfsCopy) {
+            this.rootfsCopies.delete(vmId);
+            if (existsSync(rootfsCopy)) {
+                try {
+                    unlinkSync(rootfsCopy);
+                } catch {
+                    // Ignore
+                }
             }
         }
     }

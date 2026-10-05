@@ -20,7 +20,7 @@ import {
 } from "../src/sandbox/microvm/index.ts";
 import { unrestrictedPolicy } from "../src/policies/effective-policy.ts";
 
-class MemorySandboxStore implements SandboxStore {
+class MemorySandboxStore {
     readonly records = new Map<string, SandboxRecord>();
     create(record: SandboxRecord): void {
         this.records.set(record.id, record);
@@ -68,7 +68,7 @@ async function runSmoke() {
     const store = new MemorySandboxStore();
     const secrets = { get: () => null };
 
-    const provider = new MicrovmSandboxProvider(store, secrets, { driver });
+    const provider = new MicrovmSandboxProvider(store as unknown as SandboxStore, secrets, { driver });
 
     console.log("[3] 创建 Strict 隔离等级微虚拟机...");
     const sandboxId = `smoke-vm-${Date.now()}`;
