@@ -133,22 +133,72 @@ PUT /actions {"action_type":"InstancePause"}
 结论：快照/恢复在官方二进制上**完全可用**，实测恢复 3 ms（设计目标 ~10 ms 以内）。
 回归测试见 `tests/sandbox/microvm-snapshot-and-warm-pool.test.ts` 的「pause/resume 协议」用例，用真实 Unix socket 断言请求方法与路径，防止回退到已失效的 `InstancePause`。
 
-### 3.2 ⚠️ jailer 模式：需要 root，本轮未验
+### 3.2 ✅ jailer 模式：已真机验收通过（此前从未跑通过，含 3 个真实缺陷）
 
-`jailer` 需要 `euid=0`（降权 + chroot + cgroup）。当前账号 sudo 需要密码，本轮未验。
+拿到 root 后完成正向验收。**结论是：jailer 模式此前从未真正工作过**，暴露 3 个与真实 CLI 不匹配的缺陷。
 
-**联网已不再是前置条件**：产品决策删除联网链路后，jailer 只承担"Firecracker 进程被攻破后不得横向打到宿主"的纵深防御职责，不再需要 tap/netns 建网权限。已就绪条件：`~/microvm-test/bin/jailer117` 已部署。拿到 sudo 后可执行：
+#### 已修复的 3 个缺陷
+
+1. **`--node 0` 参数不存在**（致命，jailer 直接拒绝启动）
+   `jailer v1.17.0` 已移除 NUMA 绑定选项。传入会报
+   `ArgumentParsing(UnexpectedArgument("node"))` 并退出。已删除该参数。
+
+2. **jail 根目录名硬编码错误**（致命，所有路径计算落空）
+   jailer 按 **exec-file 的 basename** 命名 jail 目录，即
+   `<base>/<basename(binaryPath)>/<id>/root`。原代码硬编码 `firecracker`，
+   而真机二进制名为 `fc117`，实际生成的是 `fc117/` 目录 → 宿主按 `firecracker/`
+   去找 socket 必然找不到。已改为 `basename(this.binaryPath)`。
+
+3. **API socket 放在 `/run` 导致宿主完全无法访问**（致命）
+   jailer 会在独立 mount namespace 中把 chroot 的 `/run` 重挂为 tmpfs
+   （实测 `size=26371712k`，inode=1），放在其中的 socket 宿主**永远看不到**。
+   已改为放在 chroot 根目录（`/firecracker.socket`），该路径宿主可见。
+
+#### 真机实测结果（官方 jailer v1.17.0 + Firecracker v1.17.0，真实 KVM）
+
+```text
+jail 根: <base>/fc117/<id>/root
+降权:      uid=30000 gid=30000        (宿主用户为 1004，非 root)
+cgroup:    cpu.max   = 200000 100000   (cpu.max=2 核)
+           memory.max = 536870912      (512 MiB，与传入值一致)
+mount ns:  FC=mnt:[4026537548]  宿主=mnt:[4026531841]   (已隔离)
+chroot:    FC 可见根仅 8 项: dev fc117 fc117.pid firecracker.socket
+                              kernel.bin rootfs.ext4 run workspace.ext4
+           FC 读 /home -> 空（宿主目录完全不可见）
+API:       PUT /boot-source   -> 204
+           PUT /drives/rootfs -> 204
+           PUT /drives/workspace -> 204
+           PUT /machine-config -> 204
+           PUT /actions       -> 204
+           GET /              -> 200 {"state":"Running","vmm_version":"1.17.0"}
+           PATCH /vm Paused   -> 204
+           PATCH /vm Resumed  -> 204
+清理:      进程残留 0 / cgroup 残留 无 / jail 目录残留 无
+```
+
+#### 一个必须知道的部署约束
+
+jailer 模式下 **harness 自身必须以 root 运行**。原因：jailer 为 VMM 建立独立
+mount namespace，API socket 位于该 namespace 内，宿主侧非 root 进程连接会被
+内核拒绝（实测 `PermissionError: [Errno 13]`）。
+
+这与现有 `checkJailerPrereqs()` 要求 `euid === 0` 是一致的——该检查不是形式主义，
+而是 jailed 模式的硬前提。`HARNESS_USE_JAILER=true` 时必须以 root 启动服务。
+
+**联网已不再是前置条件**：产品决策删除联网链路后，jailer 只承担"Firecracker 进程被攻破后不得横向打到宿主"的纵深防御职责，不需要 tap/netns 建网权限。
+
+完整端到端仍可执行：
 
 ```bash
-cd ~/microvm-test/repo
+cd ~/agent-harness
 sudo -E env "PATH=$HOME/.bun/bin:$PATH" \
   USE_FIRECRACKER=1 \
   HARNESS_USE_JAILER=true \
   FIRECRACKER_BINARY_PATH=$HOME/microvm-test/bin/fc117 \
   FIRECRACKER_JAILER_PATH=$HOME/microvm-test/bin/jailer117 \
   FIRECRACKER_KERNEL_PATH=$HOME/microvm-test/bin/vmlinux \
-  FIRECRACKER_ROOTFS_PATH=$PWD/build/images/rootfs.ext4 \
-  FIRECRACKER_WORKSPACE_DISK_TEMPLATE_PATH=$PWD/build/images/workspace-template.ext4 \
+  FIRECRACKER_ROOTFS_PATH=$HOME/microvm-test/images/rootfs.ext4 \
+  FIRECRACKER_WORKSPACE_DISK_TEMPLATE_PATH=$HOME/microvm-test/images/rootfs.ext4 \
   ~/.bun/bin/bun scripts/microvm-live-audit.ts
 ```
 

@@ -1,5 +1,5 @@
 import { accessSync, constants, existsSync, mkdirSync } from "node:fs";
-import { resolve, dirname } from "node:path";
+import { resolve, dirname, basename } from "node:path";
 import { spawn, type ChildProcess } from "node:child_process";
 import * as http from "node:http";
 import type {
@@ -252,8 +252,15 @@ export class FirecrackerSandboxDriver implements MicrovmDriver {
 
             if (this.useJailer) {
                 // 3. jailer 目录架构
+                //
+                // 关键：jail 根由 jailer 按 **exec-file 的 basename** 命名，
+                // 即 `<base>/<basename(binaryPath)>/<id>/root`，而不是 `<base>/firecracker/<id>/root`。
+                // 之前硬编码 "firecracker" 会在二进制名为 fc117/jailer117 时
+                // 全部落空（真机实测：实际生成的是 `fc117/` 目录）。
                 const jailerBase = resolve(dir.root, "jailer");
-                const chrootRoot = resolve(jailerBase, "firecracker", options.id, "root");
+                const jailName = basename(this.binaryPath);
+                const jailDir = resolve(jailerBase, jailName, options.id);
+                const chrootRoot = resolve(jailDir, "root");
                 chrootRootForVm = chrootRoot;
                 mkdirSync(resolve(chrootRoot, "run"), { recursive: true, mode: 0o700 });
 
@@ -267,7 +274,7 @@ export class FirecrackerSandboxDriver implements MicrovmDriver {
                 const chownProc = Bun.spawn(["chown", "-R", `${uid}:${gid}`, chrootRoot]);
                 await chownProc.exited;
 
-                apiSocketOnHost = resolve(chrootRoot, "run/firecracker.socket");
+                apiSocketOnHost = resolve(chrootRoot, "firecracker.socket");
                 vsockUdsOnHost = resolve(chrootRoot, "run/vsock.sock");
                 workspaceDiskHostPath = resolve(chrootRoot, "workspace.ext4");
 
@@ -276,6 +283,11 @@ export class FirecrackerSandboxDriver implements MicrovmDriver {
                 workspacePathForApi = "/workspace.ext4";
 
                 // 5. 启动 jailer
+                //
+                // 注意：jailer v1.17.0 **没有** `--node` 选项（NUMA 绑定已被移除），
+                // 传入会直接报 ArgumentParsing 并拒绝启动（真机实测）。
+                // 另外 API socket 必须放在 chroot 根而非 /run：jailer 会把 /run
+                // 重挂为独立 tmpfs，放在其中的 socket 宿主完全无法访问。
                 const cpuCores = options.cpuCount ?? 2;
                 const memoryMb = options.memoryMb ?? 512;
                 const cgroupArgs = [
@@ -285,7 +297,6 @@ export class FirecrackerSandboxDriver implements MicrovmDriver {
 
                 proc = spawn(this.jailerPath, [
                     "--id", options.id,
-                    "--node", "0",
                     "--exec-file", this.binaryPath,
                     "--uid", String(uid),
                     "--gid", String(gid),
@@ -293,7 +304,7 @@ export class FirecrackerSandboxDriver implements MicrovmDriver {
                     "--cgroup-version", "2",
                     ...cgroupArgs,
                     "--",
-                    "--api-sock", "/run/firecracker.socket",
+                    "--api-sock", "/firecracker.socket",
                 ], {
                     stdio: ["ignore", "pipe", "pipe"],
                     detached: false,
