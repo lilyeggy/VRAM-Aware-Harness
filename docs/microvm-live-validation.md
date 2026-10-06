@@ -149,10 +149,24 @@ PUT /actions {"action_type":"InstancePause"}
    而真机二进制名为 `fc117`，实际生成的是 `fc117/` 目录 → 宿主按 `firecracker/`
    去找 socket 必然找不到。已改为 `basename(this.binaryPath)`。
 
-3. **API socket 放在 `/run` 导致宿主完全无法访问**（致命）
-   jailer 会在独立 mount namespace 中把 chroot 的 `/run` 重挂为 tmpfs
-   （实测 `size=26371712k`，inode=1），放在其中的 socket 宿主**永远看不到**。
-   已改为放在 chroot 根目录（`/firecracker.socket`），该路径宿主可见。
+3. **跨 jail 边界访问的路径一律不能放在 `/run`**（致命，波及面比 socket 更广）
+   jailer 会在 VMM 的独立 mount namespace 中把 chroot 的 `/run` 挂为 tmpfs
+   （`/proc/<pid>/mountinfo` 中可见 `/run <- rw,size=26371712k,mode=755,inode64`）。
+   可观测后果：**宿主侧在 `<jail>/root/run/` 下永远 `find` 不到任何 socket**
+   （实测 0 个），而放在 chroot 根目录的 socket 宿主 `ls` 可见。
+
+   这一条不只影响 API socket，还波及：
+   - `vsock.sock`：Firecracker 创建后宿主 vsock bridge 要连它 → 放 `/run` 则
+     **agent 执行通道彻底失效，无法执行任何命令**；
+   - `golden.snap` / `restore.snap`（及 `.mem`）：宿主复制进 jail 后要被降权的
+     Firecracker 读取 → 放 `/run` 则**快照在 jailer 模式下不可用**。
+
+   已统一改为 chroot 根目录：`/firecracker.socket`、`/vsock.sock`、
+   `/golden.snap`、`/golden.mem`、`/restore.snap`、`/restore.mem`。
+
+   注：排查时不要用 `cat /proc/<pid>/root/<path>` 验证 jail 内视图——该路径的
+   后续分量按**访问者**的 mount namespace 解析，会误判。可靠判据是宿主侧的
+   `ls` / `find`。
 
 #### 真机实测结果（官方 jailer v1.17.0 + Firecracker v1.17.0，真实 KVM）
 

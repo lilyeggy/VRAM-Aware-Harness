@@ -46,13 +46,22 @@ describe("Firecracker jailer 参数与路径规则", () => {
         expect(apiSockInJail.startsWith("/run/")).toBe(false);
     });
 
+    it("vsock 与快照路径同样不得放在 /run（会被同一 tmpfs 遮蔽）", () => {
+        // vsock: Firecracker 在 jail 内创建，宿主 bridge 要连它
+        // 快照: 宿主复制进 jail 后要被降权的 Firecracker 读取
+        // 两者一旦放 /run，jailer 的 tmpfs 会遮蔽，导致 agent 通道与快照全部失效
+        for (const p of ["/vsock.sock", "/golden.snap", "/golden.mem", "/restore.snap", "/restore.mem"]) {
+            expect(p.startsWith("/run/")).toBe(false);
+        }
+    });
+
     it("驱动源码中不再出现已移除的 --node 参数", async () => {
         const src = await Bun.file(
             new URL("../../src/sandbox/microvm/firecracker-sandbox-driver.ts", import.meta.url).pathname,
         ).text();
         // --node 曾导致 jailer 直接 ArgumentParsing 退出
         expect(src).not.toMatch(/"--node"/);
-        // 也不应再把 api-sock 指向 /run
-        expect(src).not.toMatch(/"\/run\/firecracker\.socket"/);
+        // 任何跨 jail 边界访问的路径都不得落在 /run 下
+        expect(src).not.toMatch(/"\/run\/[a-zA-Z.]+"/);
     });
 });

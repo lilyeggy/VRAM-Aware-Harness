@@ -262,7 +262,12 @@ export class FirecrackerSandboxDriver implements MicrovmDriver {
                 const jailDir = resolve(jailerBase, jailName, options.id);
                 const chrootRoot = resolve(jailDir, "root");
                 chrootRootForVm = chrootRoot;
-                mkdirSync(resolve(chrootRoot, "run"), { recursive: true, mode: 0o700 });
+                // 注意：这里**不要**创建 chroot 内的 run/ 目录来放共享文件。
+                // jailer 会把 chroot 的 /run 在独立 mount namespace 中重挂为
+                // tmpfs（真机实测 size=26371712k、inode=1），任何放在 /run 下的
+                // socket 或快照文件都会被该 tmpfs 遮蔽：宿主写入后 Firecracker
+                // 在 jail 内看不到，宿主侧也读不到 Firecracker 创建的 socket。
+                // 因此所有需要跨 jail 边界访问的东西一律放 chroot **根目录**。
 
                 // 异步复制到 chroot 内部
                 await copyFileReflink(this.kernelPath, resolve(chrootRoot, "kernel.bin"));
@@ -275,7 +280,7 @@ export class FirecrackerSandboxDriver implements MicrovmDriver {
                 await chownProc.exited;
 
                 apiSocketOnHost = resolve(chrootRoot, "firecracker.socket");
-                vsockUdsOnHost = resolve(chrootRoot, "run/vsock.sock");
+                vsockUdsOnHost = resolve(chrootRoot, "vsock.sock");
                 workspaceDiskHostPath = resolve(chrootRoot, "workspace.ext4");
 
                 kernelPathForApi = "/kernel.bin";
@@ -375,7 +380,7 @@ export class FirecrackerSandboxDriver implements MicrovmDriver {
 
             await this.putSocket(apiSocketOnHost, "/vsock", {
                 guest_cid: guestCid,
-                uds_path: this.useJailer ? "/run/vsock.sock" : vsockUdsOnHost,
+                uds_path: this.useJailer ? "/vsock.sock" : vsockUdsOnHost,
             });
 
             if (canRestore && templateHash !== null) {
@@ -386,12 +391,12 @@ export class FirecrackerSandboxDriver implements MicrovmDriver {
                 let memForApi = poolPaths.memFilePath;
                 if (chrootRootForVm !== undefined) {
                     // jailer 降权后只能访问 chroot 内部：复制快照进去
-                    const snapInChroot = resolve(chrootRootForVm, "run/restore.snap");
-                    const memInChroot = resolve(chrootRootForVm, "run/restore.mem");
+                    const snapInChroot = resolve(chrootRootForVm, "restore.snap");
+                    const memInChroot = resolve(chrootRootForVm, "restore.mem");
                     await copyFileReflink(poolPaths.snapshotPath, snapInChroot);
                     await copyFileReflink(poolPaths.memFilePath, memInChroot);
-                    snapForApi = "/run/restore.snap";
-                    memForApi = "/run/restore.mem";
+                    snapForApi = "/restore.snap";
+                    memForApi = "/restore.mem";
                 }
                 await this.putSocket(apiSocketOnHost, "/snapshot/load", {
                     snapshot_path: snapForApi,
@@ -401,7 +406,7 @@ export class FirecrackerSandboxDriver implements MicrovmDriver {
                     // 快照里固化的是黄金 VM 的 vsock UDS 路径，必须覆盖为本 Run 的
                     // 私有 socket，否则 vsock 桥会连到上一个 VM 留下的地址。
                     vsock_override: {
-                        UDS_PATH: this.useJailer ? "/run/vsock.sock" : vsockUdsOnHost,
+                        UDS_PATH: this.useJailer ? "/vsock.sock" : vsockUdsOnHost,
                     },
                     resume_vm: true,
                 });
@@ -433,10 +438,10 @@ export class FirecrackerSandboxDriver implements MicrovmDriver {
                     let snapInChroot: string | undefined;
                     let memInChroot: string | undefined;
                     if (chrootRootForVm !== undefined) {
-                        snapInChroot = resolve(chrootRootForVm, "run/golden.snap");
-                        memInChroot = resolve(chrootRootForVm, "run/golden.mem");
-                        snapForApi = "/run/golden.snap";
-                        memForApi = "/run/golden.mem";
+                        snapInChroot = resolve(chrootRootForVm, "golden.snap");
+                        memInChroot = resolve(chrootRootForVm, "golden.mem");
+                        snapForApi = "/golden.snap";
+                        memForApi = "/golden.mem";
                     }
 
                     let paused = false;
