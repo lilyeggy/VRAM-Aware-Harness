@@ -37,6 +37,28 @@ export interface HarnessConfig {
     microvmDriver?:"mock" | "e2b" | "firecracker";
     e2bApiKey?:string;
     firecrackerBinaryPath?:string;
+    /** Firecracker Guest 内核镜像（strict profile 必需，fail-closed）。 */
+    firecrackerKernelPath?:string;
+    /** Firecracker rootfs 模板镜像（strict profile 必需，fail-closed）。 */
+    firecrackerRootfsPath?:string;
+    /**
+     * 工作区磁盘模板（ext4）：每个 Run 复制一份挂进 VM 作为第二块盘。
+     * 硬件隔离驱动必需——没有它，VM 内文件操作不落用户工作区，
+     * 也没有跨 Run 工作区隔离。
+     */
+    firecrackerWorkspaceDiskTemplatePath?:string;
+    /** VM 私有运行根目录（默认 /var/lib/harness/vm）。 */
+    vmRuntimeRoot?: string;
+    /** Firecracker jailer 二进制路径（默认 jailer）。 */
+    firecrackerJailerPath?: string;
+    /** vsock 通信端口（默认 5000，范围 1024-65535）。 */
+    vsockPort?: number;
+    /** Phase 3：microVM 快照加速（snapshot/restore 快速路径）。 */
+    vmSnapshotsEnabled?:boolean;
+    /** 快照池目录（默认 /var/lib/harness/snapshots）。 */
+    vmSnapshotPoolDir?:string;
+    /** microVM 预热池容量（按档位各保留 N 台；默认 0 = 关闭）。 */
+    microvmWarmPoolSize?:number;
     containerImage:string;
     containerUserId:number;
     /** N14：沙箱容器的 PID 上限（docker --pids-limit）。未配置时沿用 128。 */
@@ -195,6 +217,10 @@ export function loadHarnessConfig(
     const microvmDriver = environment.HARNESS_MICROVM_DRIVER as ("mock" | "e2b" | "firecracker" | undefined);
     const e2bApiKey = environment.E2B_API_KEY;
     const firecrackerBinaryPath = environment.FIRECRACKER_BINARY_PATH;
+    const firecrackerKernelPath = environment.FIRECRACKER_KERNEL_PATH;
+    const firecrackerRootfsPath = environment.FIRECRACKER_ROOTFS_PATH;
+    const firecrackerWorkspaceDiskTemplatePath
+        = environment.FIRECRACKER_WORKSPACE_DISK_TEMPLATE_PATH;
 
     const databasePath = environment.HARNESS_DATABASE_PATH
         ?? resolve(cwd, "data/harness.sqlite");
@@ -226,6 +252,26 @@ export function loadHarnessConfig(
         ...(microvmDriver !== undefined ? { microvmDriver } : {}),
         ...(e2bApiKey !== undefined ? { e2bApiKey } : {}),
         ...(firecrackerBinaryPath !== undefined ? { firecrackerBinaryPath } : {}),
+        ...(firecrackerKernelPath !== undefined ? { firecrackerKernelPath } : {}),
+        ...(firecrackerRootfsPath !== undefined ? { firecrackerRootfsPath } : {}),
+        ...(firecrackerWorkspaceDiskTemplatePath !== undefined
+            ? { firecrackerWorkspaceDiskTemplatePath }
+            : {}),
+        vmRuntimeRoot: environment.HARNESS_VM_RUNTIME_ROOT ?? "/var/lib/harness/vm",
+        firecrackerJailerPath: environment.FIRECRACKER_JAILER_PATH ?? "jailer",
+        vsockPort: (() => {
+            const raw = environment.HARNESS_VSOCK_PORT;
+            const p = raw !== undefined ? posInt("HARNESS_VSOCK_PORT", 5000) : 5000;
+            if (p < 1024 || p > 65535) {
+                throw new Error(`HARNESS_VSOCK_PORT 必须在 1024-65535 之间，当前为 ${p}`);
+            }
+            return p;
+        })(),
+        vmSnapshotsEnabled: environment.HARNESS_VM_SNAPSHOTS_ENABLED === "true",
+        vmSnapshotPoolDir: environment.HARNESS_VM_SNAPSHOT_POOL_DIR ?? "/var/lib/harness/snapshots",
+        microvmWarmPoolSize: environment.HARNESS_MICROVM_WARM_POOL_SIZE === undefined
+            ? 0
+            : posInt("HARNESS_MICROVM_WARM_POOL_SIZE", 1),
         containerImage:environment.HARNESS_CONTAINER_IMAGE ?? DEFAULT_CONTAINER_IMAGE,
         containerUserId:posInt("HARNESS_CONTAINER_USER_ID", DEFAULT_CONTAINER_USER_ID),
         containerPidsLimit:posInt("HARNESS_CONTAINER_PIDS_LIMIT", 128),

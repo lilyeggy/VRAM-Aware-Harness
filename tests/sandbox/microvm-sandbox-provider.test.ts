@@ -62,10 +62,12 @@ test("strict profile 成功路由至 MicrovmSandboxProvider 并产出合规硬�
     });
 
     // 验证 Handle 返回的隔离与执行能力
+    // P0 修复：Mock 驱动不提供硬件隔离，enforcement 必须如实为 false，
+    // 而不是原先无条件硬编码的 true。
     expect(handle.id).toBe("sbx-strict-1");
     expect(handle.enforcement.toolExecutionBoundary).toBe("SANDBOX");
-    expect(handle.enforcement.processIsolation).toBe(true);
-    expect(handle.enforcement.filesystemIsolation).toBe(true);
+    expect(handle.enforcement.processIsolation).toBe(false);
+    expect(handle.enforcement.filesystemIsolation).toBe(false);
 
     // 验证 Secret 在 handle.withSecrets 中能被安全读取
     handle.withSecrets((env) => {
@@ -78,9 +80,33 @@ test("strict profile 成功路由至 MicrovmSandboxProvider 并产出合规硬�
     expect(record?.profile).toBe("strict");
     expect(record?.runtime).toBe("firecracker");
     expect(record?.runtimeEvidence.requestedRuntime).toBe("firecracker");
-    expect(record?.runtimeEvidence.verified).toBe(true);
+    // P0 修复：桩驱动不再被报告为"已验证的硬件隔离"。
+    expect(record?.runtimeEvidence.verified).toBe(false);
+    expect(record?.runtimeEvidence.verificationReason).toContain("桩");
     expect(record?.spec.userId).toBe(0); // 独立 Guest OS 内，root 安全隔离
     expect(record?.spec.secretNames).toEqual(["TEST_SECRET"]);
+    // P0 修复：未实现的磁盘/PID 限额必须如实声明为 false。
+    expect(handle.enforcement.diskLimitEnforced).toBe(false);
+    expect(handle.enforcement.pidLimitEnforced).toBe(false);
+    expect(handle.enforcement.workspaceScope).toBe("NONE");
+    // acquisition 指标必须实测，不再是硬编码的 45ms。
+    expect(handle.acquisition).toBeDefined();
+    expect(handle.acquisition!.durationMs).toBeGreaterThanOrEqual(0);
+});
+
+test("MicrovmSandboxProvider 拒绝 allowNetwork=true（受控出口未实现，fail-closed）", async () => {
+    const store = new MemorySandboxStore();
+    const mockDriver = new MockMicrovmDriver();
+    const provider = new MicrovmSandboxProvider(store as unknown as SandboxStore, mockSecrets, { driver: mockDriver });
+
+    await expect(provider.create({
+        id: "sbx-net-1",
+        runId: "run-net",
+        workspacePath: "/workspace",
+        policy: strictPolicy({ allowNetwork: true }),
+    })).rejects.toThrow("allowNetwork");
+
+    expect(store.get("sbx-net-1")).toBeNull();
 });
 
 test("MicrovmSandboxProvider 执行多轮命令并返回确定的执行结果", async () => {
@@ -168,26 +194,25 @@ test("SandboxProviderRouter 配合 MicrovmSandboxProvider 时能正常分发 str
     expect(store.get("routed-strict-1")?.status).toBe("TERMINATED");
 });
 
-test("E2bSandboxDriver 在缺失 API Key 时 fail-closed，配置 key 时可正常生成实例", async () => {
+test("E2bSandboxDriver 是 fail-closed 桩：即使配置了 API Key 也拒绝伪造实例与执行", async () => {
     const noKeyDriver = new E2bSandboxDriver({ apiKey: "" });
     expect(await noKeyDriver.isAvailable()).toBe(false);
     await expect(noKeyDriver.create({
         id: "e2b-1",
         runId: "run-1",
         workspacePath: "/workspace",
-    })).rejects.toThrow("缺少 E2B_API_KEY");
+    })).rejects.toThrow("尚未实现");
 
+    // P0 修复：原先配置 key 后 create/execute 返回伪造结果（exitCode 0 + echo），
+    // 上游还据此写入 verified:true 的硬件隔离证据。现在即使有 key 也必须拒绝。
     const withKeyDriver = new E2bSandboxDriver({ apiKey: "e2b_test_key_abc", template: "custom-template" });
-    expect(await withKeyDriver.isAvailable()).toBe(true);
-    const instance = await withKeyDriver.create({
+    expect(await withKeyDriver.isAvailable()).toBe(false);
+    await expect(withKeyDriver.create({
         id: "e2b-2",
         runId: "run-2",
         workspacePath: "/workspace",
-    });
-    expect(instance.driver).toBe("e2b");
-
-    const execRes = await withKeyDriver.execute("e2b-2", ["echo", "hello"]);
-    expect(execRes.stdout).toContain("[e2b:e2b-custom-template-e2b-2] echo hello");
+    })).rejects.toThrow("尚未实现");
+    await expect(withKeyDriver.execute("e2b-2", ["echo", "hello"])).rejects.toThrow("尚未实现");
 });
 
 test("FirecrackerSandboxDriver 缺少 KVM 设备时检测到不可用并安全拦截", async () => {
@@ -198,4 +223,88 @@ test("FirecrackerSandboxDriver 缺少 KVM 设备时检测到不可用并安全�
         runId: "run-fc",
         workspacePath: "/workspace",
     })).rejects.toThrow("KVM 设备不可访问");
+});
+
+test("FirecrackerSandboxDriver 缺少 kernel/rootfs 时 fail-closed，不再静默假执行", async () => {
+    // KVM 路径用真实路径以便通过第一道可用性检查（无 KVM 的环境跳过本用例）。
+    const { accessSync, constants } = await import("node:fs");
+    let kvmAvailable = true;
+    try {
+        accessSync("/dev/kvm", constants.R_OK | constants.W_OK);
+    } catch {
+        kvmAvailable = false;
+    }
+    if (!kvmAvailable) return;
+
+    const driver = new FirecrackerSandboxDriver({
+        // 故意不配置 kernelPath / rootfsPath
+        kvmDevicePath: "/dev/kvm",
+    });
+    await expect(driver.create({
+        id: "fc-no-kernel",
+        runId: "run-fc-2",
+        workspacePath: "/workspace",
+    })).rejects.toThrow("内核或 rootfs");
+});
+
+test("产品边界：Firecracker 驱动对 allowNetwork=true 直接拒绝（不挂载任何网卡）", async () => {
+    // 无需真实 KVM：联网拒绝发生在任何 spawn 之前，是纯策略门禁。
+    const driver = new FirecrackerSandboxDriver({
+        kernelPath: "/nonexistent/vmlinux",
+        rootfsPath: "/nonexistent/rootfs.ext4",
+        workspaceDiskTemplatePath: "/nonexistent/workspace.ext4",
+    });
+
+    // 报错必须是"无网卡服务"语义，而不是模板缺失 / KVM 不可用——
+    // 否则说明门禁顺序被放到了环境检查之后。
+    await expect(driver.create({
+        id: "fc-net-rejected",
+        runId: "run-net",
+        workspacePath: "/workspace",
+        allowNetwork: true,
+    })).rejects.toThrow(/不提供网卡服务/);
+});
+
+test("MicrovmSandboxProvider.execute 将 secret 值经 env 传给驱动（值不在 argv 里）", async () => {
+    const store = new MemorySandboxStore();
+    const mockDriver = new MockMicrovmDriver();
+    const provider = new MicrovmSandboxProvider(store as unknown as SandboxStore, mockSecrets, { driver: mockDriver });
+
+    await provider.create({
+        id: "sbx-secret-test",
+        runId: "run-secret",
+        workspacePath: "/workspace",
+        policy: strictPolicy({ allowedSecrets: ["TEST_SECRET"] }),
+    });
+
+    const command = ["bash", "-lc", "echo $TEST_SECRET"];
+    await provider.execute("sbx-secret-test", command);
+
+    expect(mockDriver.executionHistory.length).toBe(1);
+    const recorded = mockDriver.executionHistory[0]!;
+    // 值必须在 env 中
+    expect(recorded.env?.TEST_SECRET).toBe("secret-value-123");
+    // argv / command 中绝对不能包含 secret 值
+    expect(recorded.command.join(" ")).not.toContain("secret-value-123");
+});
+
+test("产品边界：allowNetwork=true 一律被拒绝（MicroVM 不提供网卡服务），且不产生任何 VM", async () => {
+    const store = new MemorySandboxStore();
+    const mockDriver = new MockMicrovmDriver();
+
+    const provider = new MicrovmSandboxProvider(store as unknown as SandboxStore, mockSecrets, {
+        driver: mockDriver,
+    });
+
+    await expect(provider.create({
+        id: "sbx-net-rejected",
+        runId: "run-net-rejected",
+        workspacePath: "/workspace",
+        policy: strictPolicy({ allowNetwork: true }),
+    })).rejects.toThrow(/不提供网卡服务/);
+
+    // fail-closed 必须发生在创建 VM 之前：不得留下任何实例或 ACTIVE 记录
+    expect(mockDriver.instances.size).toBe(0);
+    expect(store.get("sbx-net-rejected")).toBeNull();
+    expect(store.listActive()).toHaveLength(0);
 });

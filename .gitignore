@@ -72,3 +72,6 @@ docs/scenario-compliance-report.zh-CN.html
 data/
 scheduling-practice/
 interview-prep/
+
+# guest agent / microvm images (compiled artifacts)
+build/

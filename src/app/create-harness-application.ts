@@ -63,7 +63,9 @@ import {
     MockMicrovmDriver,
     FirecrackerSandboxDriver,
     E2bSandboxDriver,
+    MicrovmWarmPool,
     type MicrovmDriver,
+    VmRunDirectoryManager,
 } from "../sandbox/microvm/index.ts";
 import { SandboxStore } from "../sandbox/sandbox-store.ts";
 import { SandboxStartupReconciler } from "../sandbox/sandbox-startup-reconciler.ts";
@@ -409,11 +411,28 @@ export async function createHarnessApplication(
         },
         isSessionRefReachable,
     );
-    const sandboxReconciler = new SandboxStartupReconciler(
+    const rawSandboxReconciler = new SandboxStartupReconciler(
         sandboxStore,
         sandboxProvider,
         attemptStore,
     );
+    const vmRunDirManager = new VmRunDirectoryManager({ runtimeRoot: config.vmRuntimeRoot });
+    const sandboxReconciler = {
+        async reconcile() {
+            await rawSandboxReconciler.reconcile();
+            const orphanDirs = vmRunDirManager.listOrphans();
+            if (orphanDirs.length > 0) {
+                const activeRecords = new Set(
+                    sandboxStore.listUnsettled().map((r) => r.id),
+                );
+                for (const orphan of orphanDirs) {
+                    if (!activeRecords.has(orphan)) {
+                        void vmRunDirManager.dispose(orphan);
+                    }
+                }
+            }
+        },
+    };
     const startupRecovery = new RecoveryStartupCoordinator(
         recoveryService,
         recoveryExecutor,
@@ -545,16 +564,66 @@ function createContainerSandboxRouter(
     const hasMicrovmConfig = config.sandboxProvider === "microvm" || config.microvmDriver !== undefined;
     const createMicrovmDriver = (): MicrovmDriver => {
         if (config.microvmDriver === "e2b") {
+            // E2B 桩驱动已 fail-closed：真实 SDK 接入前 isAvailable() 恒为
+            // false，create()/execute() 直接抛错，杜绝伪造隔离证据。
             return new E2bSandboxDriver({ apiKey: config.e2bApiKey });
         }
         if (config.microvmDriver === "firecracker") {
-            return new FirecrackerSandboxDriver({ binaryPath: config.firecrackerBinaryPath });
+            return new FirecrackerSandboxDriver({
+                binaryPath: config.firecrackerBinaryPath,
+                jailerPath: config.firecrackerJailerPath,
+                kernelPath: config.firecrackerKernelPath,
+                rootfsPath: config.firecrackerRootfsPath,
+                workspaceDiskTemplatePath: config.firecrackerWorkspaceDiskTemplatePath,
+                vmRuntimeRoot: config.vmRuntimeRoot,
+                vsockPort: config.vsockPort,
+                ...(config.vmSnapshotsEnabled === undefined
+                    ? {}
+                    : { snapshotsEnabled: config.vmSnapshotsEnabled }),
+                ...(config.vmSnapshotPoolDir === undefined
+                    ? {}
+                    : { snapshotPoolDir: config.vmSnapshotPoolDir }),
+            });
         }
         return new MockMicrovmDriver();
     };
 
     const strict = hasMicrovmConfig
-        ? new MicrovmSandboxProvider(sandboxStore, secretProvider, { driver: createMicrovmDriver() })
+        ? ((): SandboxProvider => {
+            const driver = createMicrovmDriver();
+
+            // Phase 3：预热池仅对真 Firecracker 驱动启用（桩驱动预热无意义），
+            // 模板指纹缺失（镜像未配置）时自动禁用——fail-closed 先于加速。
+            let warmPool: MicrovmWarmPool | undefined;
+            let templateHash: string | null | undefined;
+            if (
+                (config.microvmWarmPoolSize ?? 0) > 0
+                && driver instanceof FirecrackerSandboxDriver
+            ) {
+                templateHash = driver.computeTemplateHash() ?? undefined;
+                if (templateHash !== undefined) {
+                    warmPool = new MicrovmWarmPool(driver, {
+                        maxPerTier: config.microvmWarmPoolSize,
+                    });
+                }
+            }
+
+            const provider = new MicrovmSandboxProvider(sandboxStore, secretProvider, {
+                driver,
+                vmRuntimeRoot: config.vmRuntimeRoot,
+                ...(config.firecrackerWorkspaceDiskTemplatePath === undefined
+                    ? {}
+                    : { workspaceDiskTemplatePath: config.firecrackerWorkspaceDiskTemplatePath }),
+                ...(warmPool ? { warmPool } : {}),
+                ...(templateHash !== undefined ? { templateHash } : {}),
+            });
+
+            // 启动期异步预热（best-effort，不阻塞服务就绪）
+            if (warmPool) {
+                void provider.prewarm(["M"]).catch(() => undefined);
+            }
+            return provider;
+        })()
         : new UnavailableStrictSandboxProvider();
 
     if (config.sandboxProfile === "strict" || config.sandboxProvider === "microvm") {

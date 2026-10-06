@@ -22,8 +22,9 @@ export type SandboxRuntime =
 /**
  * 工作区视野粒度，与隔离边界同属"该 Run 被承诺了什么"的一部分，
  * 因此进 spec 指纹；而具体的挂载路径（含租户/工作区 ID）只是实例局部值。
+ * NONE：该沙箱没有真实的工作区挂载（桩驱动），不得声称任何视野承诺。
  */
-export type SandboxWorkspaceScope = "RUN" | "TENANT";
+export type SandboxWorkspaceScope = "RUN" | "TENANT" | "NONE";
 
 export interface SandboxSpec {
     readonly profile: SandboxProfile;
@@ -51,6 +52,7 @@ export interface SandboxRuntimeEvidence {
     readonly verified: boolean;
     readonly verificationReason: string | null;
     readonly verifiedAt: string | null;
+    readonly egressProfile?: "none" | "controlled-egress" | null;
 }
 
 export function freezeSandboxSpec(spec: SandboxSpec): SandboxSpec {

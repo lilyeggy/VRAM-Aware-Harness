@@ -15,7 +15,10 @@
     "smoke:container": "bun run scripts/container-sandbox-smoke.ts",
     "smoke:container:attacks": "bun run scripts/container-sandbox-attack-smoke.ts",
     "smoke:microvm": "bun run scripts/server-microvm-smoke.ts",
-    "preflight:server": "bash scripts/server-preflight.sh"
+    "preflight:server": "bash scripts/server-preflight.sh",
+    "build:guest-agent": "bun build --compile --target=bun-linux-x64-musl guest/agent/main.ts --outfile build/guest-agent/harness-guest-agent",
+    "build:guest-rootfs": "bash scripts/microvm/build-guest-rootfs.sh build/guest-agent/harness-guest-agent build/images/rootfs.ext4 build/images/workspace-template.ext4",
+    "preflight:microvm": "bash scripts/microvm/preflight-microvm.sh"
   },
   "devDependencies": {
     "@types/bun": "latest",

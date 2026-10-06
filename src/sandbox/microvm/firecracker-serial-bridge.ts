@@ -43,8 +43,9 @@ export class FirecrackerSerialBridge {
 
     /**
      * Waits for guest shell prompt (/ #, #, login) to appear on the serial console.
+     * 返回是否在超时内就绪——调用方必须对 false fail-closed。
      */
-    async waitForReady(timeoutMs = 5000): Promise<void> {
+    async waitForReady(timeoutMs = 5000): Promise<boolean> {
         const start = Date.now();
         while (Date.now() - start < timeoutMs) {
             if (
@@ -56,10 +57,11 @@ export class FirecrackerSerialBridge {
                 if (this.buffer.includes("login:") && !this.buffer.includes("# ")) {
                     this.stdin.write("root\n");
                 }
-                return;
+                return true;
             }
             await new Promise((r) => setTimeout(r, 40));
         }
+        return false;
     }
 
     /**

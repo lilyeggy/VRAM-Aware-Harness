@@ -1,16 +1,19 @@
 import type {
     MicrovmCreateOptions,
     MicrovmDriver,
+    MicrovmExecuteOptions,
     MicrovmExecutionResult,
     MicrovmInstance,
 } from "./microvm-types.ts";
 
 export interface MockExecutionHandler {
-    (command: readonly string[], options?: { workdir?: string }): MicrovmExecutionResult | Promise<MicrovmExecutionResult>;
+    (command: readonly string[], options?: MicrovmExecuteOptions): MicrovmExecutionResult | Promise<MicrovmExecutionResult>;
 }
 
 export class MockMicrovmDriver implements MicrovmDriver {
     readonly name = "mock" as const;
+    /** 桩驱动：不提供真实硬件隔离，Provider 不得据此声称 verified。 */
+    readonly providesHardwareIsolation = false;
     readonly instances = new Map<string, MicrovmInstance & {
         environment: Record<string, string>;
         currentWorkdir: string;
@@ -19,6 +22,7 @@ export class MockMicrovmDriver implements MicrovmDriver {
         vmId: string;
         command: readonly string[];
         workdir?: string;
+        env?: Readonly<Record<string, string>>;
     }> = [];
 
     private customHandler?: MockExecutionHandler;
@@ -55,6 +59,7 @@ export class MockMicrovmDriver implements MicrovmDriver {
             id: instance.id,
             driver: instance.driver,
             vmPid: instance.vmPid,
+            guestCid: 3,
             ipAddress: instance.ipAddress,
             workspacePath: instance.workspacePath,
             createdAt: instance.createdAt,
@@ -64,13 +69,13 @@ export class MockMicrovmDriver implements MicrovmDriver {
     async execute(
         vmId: string,
         command: readonly string[],
-        options?: { readonly workdir?: string },
+        options?: MicrovmExecuteOptions,
     ): Promise<MicrovmExecutionResult> {
         const instance = this.instances.get(vmId);
         if (!instance) {
             throw new Error(`MicroVM 实例不存在或已销毁：${vmId}`);
         }
-        this.executionHistory.push({ vmId, command, workdir: options?.workdir });
+        this.executionHistory.push({ vmId, command, workdir: options?.workdir, env: options?.env });
 
         if (this.customHandler) {
             return this.customHandler(command, options);
@@ -102,6 +107,10 @@ export class MockMicrovmDriver implements MicrovmDriver {
             stdout: `mock-vm-stdout: ${cmdStr}\n`,
             stderr: "",
         };
+    }
+
+    async flushFilesystem(_vmId: string): Promise<void> {
+        // no-op for mock
     }
 
     async terminate(vmId: string): Promise<void> {

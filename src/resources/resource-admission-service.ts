@@ -103,6 +103,29 @@ implements ResourceAdmissionEvaluator {
             observation,
             classification,
             decision,
-        }
+        };
+    }
+
+    estimateSandboxMemoryMiB(
+        profile: "strict" | "default" | "restricted-egress" | "development",
+        memoryMb = 512,
+    ): number {
+        return estimateSandboxMemoryMiB(profile, memoryMb);
     }
 }
+
+/**
+ * Phase 2 租户准入扩展：预估沙箱内存占用。
+ * strict profile (microVM) 产生额外的 VMM (Firecracker) 内存底噪开销 (+64 MiB)。
+ * 容器 profile 返回现状值。
+ */
+export function estimateSandboxMemoryMiB(
+    profile: "strict" | "default" | "restricted-egress" | "development",
+    memoryMb = 512,
+): number {
+    if (profile === "strict") {
+        return memoryMb + 64;
+    }
+    return memoryMb;
+}
+

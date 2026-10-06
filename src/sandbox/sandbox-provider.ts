@@ -68,7 +68,7 @@ export interface SandboxEnforcementCapabilities {
      * TENANT：容器挂租户工作区根，同租户跨 Run 靠策略约束而非物理视野隔离，
      * 换来同租户全量复用。策略守卫据此判断文件系统隔离是否满足要求。
      */
-    readonly workspaceScope: "RUN" | "TENANT";
+    readonly workspaceScope: "RUN" | "TENANT" | "NONE";
 }
 
 export interface SandboxLifecycleEvent {

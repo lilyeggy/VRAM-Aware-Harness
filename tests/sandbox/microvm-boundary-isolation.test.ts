@@ -157,7 +157,9 @@ describe("MicroVM 架构与系统边界隔离测试 (Inside vs Outside Boundarie
                 allowedSkills: null,
                 allowedModels: null,
                 workspaceRoots: null,
-                allowNetwork: true,
+                // P0 修复：MicrovmSandboxProvider 现在拒绝 allowNetwork=true
+                //（受控出口未实现），桩驱动的测试同样必须禁网。
+                allowNetwork: false,
                 allowProcess: true,
                 allowedSecrets: ["ALLOWED_CLIENT_TOKEN"], // 仅显式允许一个业务 Secret
                 resourceLimits: { cpuCores: 2, memoryMiB: 512, diskMiB: 1024 },
