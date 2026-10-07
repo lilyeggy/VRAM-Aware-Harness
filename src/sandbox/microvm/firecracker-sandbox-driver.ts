@@ -357,35 +357,16 @@ export class FirecrackerSandboxDriver implements MicrovmDriver {
                 : null;
             const canRestore = templateHash !== null && this.snapshotManager.hasSnapshot(templateHash);
 
-            if (!canRestore) {
-                await this.putSocket(apiSocketOnHost, "/boot-source", {
-                    kernel_image_path: kernelPathForApi,
-                    boot_args: "console=ttyS0 reboot=k panic=1 pci=off init=/sbin/init",
-                });
-            }
-
-            await this.putSocket(apiSocketOnHost, "/drives/rootfs", {
-                drive_id: "rootfs",
-                path_on_host: rootfsPathForApi,
-                is_root_device: true,
-                is_read_only: false,
-            });
-
-            await this.putSocket(apiSocketOnHost, "/drives/workspace", {
-                drive_id: "workspace",
-                path_on_host: workspacePathForApi,
-                is_root_device: false,
-                is_read_only: false,
-            });
-
-            await this.putSocket(apiSocketOnHost, "/vsock", {
-                guest_cid: guestCid,
-                uds_path: this.useJailer ? "/vsock.sock" : vsockUdsOnHost,
-            });
-
             if (canRestore && templateHash !== null) {
-                // 快速路径：加载黄金快照并直接恢复（跳过 boot-source /
-                // machine-config / InstanceStart——配置来自快照本身）。
+                // 快速路径：加载黄金快照并直接恢复。
+                //
+                // 官方约束（swagger /snapshot/load: "Only accepted on a fresh
+                // Firecracker process (before configuring any resource other
+                // than the Logger and Metrics)"）：恢复前**不能**配置任何资源。
+                // 原实现先 PUT /drives/* 与 /vsock 再 load，真机报
+                // 400 "Loading a microVM snapshot not allowed after configuring
+                // boot-specific resources."。因此这里必须最先调用 load，
+                // 块设备与 vsock 配置全部来自快照本身。
                 const poolPaths = this.snapshotManager.getSnapshotPaths(templateHash);
                 let snapForApi = poolPaths.snapshotPath;
                 let memForApi = poolPaths.memFilePath;
@@ -405,12 +386,41 @@ export class FirecrackerSandboxDriver implements MicrovmDriver {
                     track_dirty_pages: false,
                     // 快照里固化的是黄金 VM 的 vsock UDS 路径，必须覆盖为本 Run 的
                     // 私有 socket，否则 vsock 桥会连到上一个 VM 留下的地址。
+                    //
+                    // 字段名是 `uds_path`（小写下划线），Firecracker 的 VsockOverride
+                    // 定义中它是 required。写成 `UDS_PATH` 会被 serde 拒绝：
+                    // 400 missing field `uds_path`（真机实测 v1.17.0）。
                     vsock_override: {
-                        UDS_PATH: this.useJailer ? "/vsock.sock" : vsockUdsOnHost,
+                        uds_path: this.useJailer ? "/vsock.sock" : vsockUdsOnHost,
                     },
                     resume_vm: true,
                 });
             } else {
+                // 冷启动路径：完整配置再开机。
+                await this.putSocket(apiSocketOnHost, "/boot-source", {
+                    kernel_image_path: kernelPathForApi,
+                    boot_args: "console=ttyS0 reboot=k panic=1 pci=off init=/sbin/init",
+                });
+
+                await this.putSocket(apiSocketOnHost, "/drives/rootfs", {
+                    drive_id: "rootfs",
+                    path_on_host: rootfsPathForApi,
+                    is_root_device: true,
+                    is_read_only: false,
+                });
+
+                await this.putSocket(apiSocketOnHost, "/drives/workspace", {
+                    drive_id: "workspace",
+                    path_on_host: workspacePathForApi,
+                    is_root_device: false,
+                    is_read_only: false,
+                });
+
+                await this.putSocket(apiSocketOnHost, "/vsock", {
+                    guest_cid: guestCid,
+                    uds_path: this.useJailer ? "/vsock.sock" : vsockUdsOnHost,
+                });
+
                 await this.putSocket(apiSocketOnHost, "/machine-config", {
                     vcpu_count: options.cpuCount ?? 2,
                     mem_size_mib: options.memoryMb ?? 256,
@@ -479,6 +489,20 @@ export class FirecrackerSandboxDriver implements MicrovmDriver {
                         + "后续 VM 将回退完整开机路径：",
                         snapshotErr,
                     );
+                }
+
+                // 快照制作会 PATCH /vm Paused 冻结 vCPU。guest 内的 socat 与
+                // agent 在此期间被冻结，宿主侧已建立的 vsock 连接会被对端关闭
+                // （真机实测：快照生成后 bridge 抛 "Vsock connection closed
+                // unexpectedly"）。恢复 vCPU 后必须重连，否则该 VM 永远不可用。
+                if (this.snapshotsEnabled && !canRestore) {
+                    await vsockBridge.reconnectAfterGuestResume(20000, 250)
+                        .catch((reconnectErr) => {
+                            throw new Error(
+                                `快照后 vsock agent 重连失败，该 VM 不可用：`
+                                + `${reconnectErr instanceof Error ? reconnectErr.message : String(reconnectErr)}`,
+                            );
+                        });
                 }
             }
 

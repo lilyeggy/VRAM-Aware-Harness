@@ -56,6 +56,22 @@ export class FirecrackerVsockBridge {
         );
     }
 
+    /**
+     * 快照 pause/resume 之后重连。
+     *
+     * 背景（真机实测）：`PATCH /vm {"state":"Paused"}` 会冻结 vCPU，guest 内的
+     * socat / agent 随之被冻结，宿主侧已建立的连接会被对端关闭。恢复 vCPU 后
+     * 必须重新走一遍 connect + 握手，否则该 VM 的执行通道永久不可用。
+     *
+     * 与 connectWithRetry 的区别：这里对"guest 刚恢复、socat 尚未回到监听态"
+     * 给了额外的稳定窗口，避免恢复瞬间的第一次连接直接判死。
+     */
+    async reconnectAfterGuestResume(overallTimeoutMs = 20000, intervalMs = 250): Promise<void> {
+        // 恢复 vCPU 后 guest 需要一点时间回到用户态、socat 重新 accept。
+        await new Promise((r) => setTimeout(r, 500));
+        await this.connectWithRetry(overallTimeoutMs, intervalMs);
+    }
+
     /** 连接 UDS、发 CONNECT <port>、等 OK，并进行 ping/pong 握手；失败抛错。支持 reconnect。 */
     async connect(handshakeTimeoutMs = 3000): Promise<void> {
         this.close();
