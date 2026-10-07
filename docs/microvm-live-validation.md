@@ -253,3 +253,116 @@ USE_FIRECRACKER=1 ... bun scripts/microvm-live-audit.ts     # 隔离边界
 ```
 
 环境变量（真机必需）：`USE_FIRECRACKER=1`、`FIRECRACKER_BINARY_PATH`、`FIRECRACKER_KERNEL_PATH`、`FIRECRACKER_ROOTFS_PATH`、`FIRECRACKER_WORKSPACE_DISK_TEMPLATE_PATH`；非 root 环境追加 `HARNESS_USE_JAILER=false`。
+
+---
+
+## 4. 端到端验收（agent 执行闭环）：20/20 通过
+
+真机跑通完整链路：`创建 VM → vsock agent 执行命令 → 注入 secret → 写工作区 →
+终止导出 → 销毁 → 查残留`。这是此前一直缺失的关键证据。
+
+```text
+=== microVM 真机深度审计（隔离边界 / 数据落地 / 快照恢复）===
+宿主内核: 6.8.0-136-generic  |  KVM: present
+创建耗时 1467ms，evidence.verified=true
+
+[2] 隔离边界
+  ✅ guest 内核版本 ≠ 宿主内核版本 — guest=4.14.174 host=6.8.0-136-generic
+  ✅ guest hostname 独立于宿主
+  ✅ guest 看不到宿主工作区目录（无共享挂载）
+  ✅ guest 内写入不落到宿主文件系统（rootfs 为独立副本）
+  ✅ guest cmdline 含我们的 boot args
+  ✅ guest 可见 rootfs + 工作区盘（vda + vdb）
+[3] 凭据注入
+  ✅ secret 通过 env 注入且值正确
+  ✅ env 中仅该 secret 存在（无宿主其他凭据）
+[4] 工作区数据落地
+  ✅ VM 存活期间宿主看不到工作区文件
+  ✅ 产物 report.txt 及子目录 out/deep.txt 已导出，内容正确
+  ✅ 符号链接未被导出（防逃逸）
+  ✅ 指向宿主外层的 evil-escape 未被导出
+  ✅ 导出后无临时目录残留
+[5] 生命周期残留
+  ✅ 沙箱状态 TERMINATED、私有运行目录已删除、/tmp 无残留、运行根为空
+[7] 宿主侧权限边界
+  ✅ 运行根目录 0700（其他宿主用户不可进入）
+
+=== 审计完成：20 项通过，0 项失败 ===
+```
+
+结论：**agent 执行通道、数据落地、防逃逸、生命周期清理全部有真机证据。**
+
+### 4.1 为此轮修复的 3 个快照缺陷
+
+快照路径此前从未真机跑通，本轮连续暴露 3 个缺陷（均已修复）：
+
+1. **`vsock_override` 字段名错误** —— 写成 `UDS_PATH`，官方 `VsockOverride`
+   定义中字段为 `uds_path`（required）。真机报 `400 missing field 'uds_path'`。
+2. **`/snapshot/load` 调用顺序违反官方约束** —— swagger 明确该接口"only
+   accepted on a fresh Firecracker process (before configuring any resource
+   other than the Logger and Metrics)"。原实现先 `PUT /drives/*` 与 `/vsock`
+   再 load，真机报 `400 Loading a microVM snapshot not allowed after
+   configuring boot-specific resources`。已把 load 提到最前。
+3. **快照制作暂停 vCPU 会切断 vsock** —— `PATCH /vm Paused` 冻结 vCPU，
+   guest 内 socat/agent 被冻结，宿主侧连接被对端关闭（真机报
+   `Vsock connection closed unexpectedly`）。`connectWithRetry` 只在建连时
+   重试，快照后无重连 → 该 VM 永久不可用。已新增
+   `reconnectAfterGuestResume()`，恢复后重连并重新握手。
+
+### 4.2 ⚠️ 遗留：快照恢复受"块设备路径固化"约束（架构级，非缺陷）
+
+`SnapshotLoadParams` 在 v1.17 与 1.18 **均无 `block_device` 覆盖字段**
+（只有 `network_overrides` 与 `vsock_override`）。这意味着**快照会固化块设备的
+绝对路径**，恢复时必须存在完全相同的路径。
+
+真机报错证实了这一点：
+
+```text
+Load snapshot error: Failed to restore devices: Block: Virtio backend error:
+Error manipulating the backing file: No such file or directory (os error 2)
+  .../audit-vm-runtime/audit-1791352615286/workspace.ext4
+```
+
+当前 `VmRunDirectoryManager` 的路径含 `sandboxId`（每个 Run 不同），与快照
+恢复要求的固定路径直接冲突。
+
+可选方案（需产品决策）：
+
+1. **固定磁盘路径 + 串行化**：所有 Run 复用同一组 `rootfs.ext4` /
+   `workspace.ext4` 路径，同一时刻只允许一个 VM 恢复快照。实现简单，但
+   牺牲并发。
+2. **改用预热池替代快照**：预热池是"提前把 VM 开机完成待命"，直接复用
+   已就绪的 VM 实例，不涉及路径固化，也不受上述约束。当前
+   `MicrovmWarmPool` 已实现且 `warmHit` 如实记录。
+3. **自建 Firecracker**：上游若有 `block_device` 覆盖能力则可彻底解决，
+   成本最高（需 Rust 工具链）。
+
+**建议先做 2**：预热池语义更契合"Run 级隔离 + 高并发"，且不引入路径固化的
+串行瓶颈。快照可作为"同一模板串行恢复"的补充手段，而非主要加速路径。
+
+### 4.3 ✅ jailer 模式端到端：同样 20/20 通过
+
+以 root 运行 `HARNESS_USE_JAILER=true` 跑同一套审计（jailer 前置检查未报失败，
+确认真正走了 jailer 路径）：
+
+```text
+创建耗时 1524ms，evidence.verified=true
+[2] 隔离边界  全部 ✅（guest 内核 4.14.174 ≠ 宿主 6.8.0-136 等）
+[3] 凭据注入  全部 ✅
+[4] 工作区数据落地  全部 ✅（含符号链接防逃逸）
+[5] 生命周期残留  全部 ✅
+[7] 宿主侧权限边界  ✅ 运行根 0700
+=== 审计完成：20 项通过，0 项失败 ===
+```
+
+这同时复验了上一轮把 vsock 从 `/run/vsock.sock` 改为 `/vsock.sock` 的修复
+—— 若路径仍被 jailer 的 `/run` tmpfs 遮蔽，agent 执行通道会立刻失败，
+第 [2] 步的 `uname -r` 就会报错。
+
+**至此两种模式（非 jailer / jailer）均已端到端跑通。**
+
+### 4.4 仍未验证的项
+
+- **并发与密度**：从未同时运行多个 VM，无容量/成本数据。
+- **预热池真机验证**：代码齐备但未在真机跑过。
+- **guest 内 LLM 访问通道**：按边界设计须走 vsock 转发，尚未实现。
