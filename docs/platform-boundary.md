@@ -124,7 +124,7 @@ HTTP API ──> Master (调度/审计/策略/LLM网关)
 | ✅ Phase 1 | vsock guest agent + jailer（含 /tmp→私有目录） | B1、B6、B7 | 已完成 |
 | ✅ Phase 2 | 工作区导出 + 磁盘限额 + microVM 接入租户准入 | B5、B6 | 已完成 |
 | ✅ Phase 3 | microVM 预热池 + 异步复制（去阻塞）+ CoW 盘 | B5（性能） | 已完成 |
-| ⚠️ Phase 3b | snapshot/restore 加速 | B5（性能） | **阻塞**：官方 Firecracker 二进制未编译 pause/resume，须自建（见验收报告 §3.1） |
+| ✅ Phase 3b | snapshot/restore 加速 | B5（性能） | 已完成（jailer 模式真机 23/23：恢复 368ms vs 冷启动 2519ms）。**无需自建 Firecracker**——此前"官方未编译 pause/resume"的结论基于错误探测信号（grep 了从不存在的 `InstancePause`），已推翻；官方 v1.17.0 二进制实测可用。详见验收报告 §3.1、§5 |
 | 🚫 Phase 4（作废） | ~~出口网关 + controlled-egress~~ | — | **产品决策取消**：VM 一律无网卡（B2），相关代码已删除 |
 
 每个 Phase 以"边界测试全绿"作为验收：隔离证据真实、逃逸面实测、生命周期无残留。
