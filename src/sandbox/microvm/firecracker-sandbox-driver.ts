@@ -15,6 +15,7 @@ import { VmUidAllocator } from "./vm-uid-allocator.ts";
 import { VmCidAllocator } from "./vm-cid-allocator.ts";
 import { checkJailerPrereqs } from "./jailer-prereq-check.ts";
 import { VmSnapshotManager } from "./vm-snapshot-manager.ts";
+import { KeyedSemaphore } from "./vm-concurrency-gate.ts";
 import {
     isFirecrackerProcess,
     killPid,
@@ -36,6 +37,13 @@ export interface FirecrackerDriverConfig {
     readonly useJailer?: boolean;
     /** /proc 根目录（测试可注入假 procfs） */
     readonly procRoot?: string;
+    /**
+     * 快照制作的单飞闸门并发上限（默认 1，即同一时刻只让一台 VM 制作快照）。
+     *
+     * 小于 1 会被钳到 1（完全串行）。**不可配置为 0**：那会让所有 VM 的快照
+     * 制作永久排队、创建流程卡死。生产建议保持 1。
+     */
+    readonly snapshotConcurrency?: number;
     /**
      * Phase 3：microVM 快照加速。开启后，首次完整开机并握手成功后
      * 制作"黄金快照"（pause → snapshot/create → resume）；
@@ -123,6 +131,21 @@ export class FirecrackerSandboxDriver implements MicrovmDriver {
     private readonly pids = new Map<string, number>();
     /** /proc 根目录（测试可注入假 procfs） */
     private readonly procRoot: string;
+    /**
+     * 快照制作的并发闸门（信号量）。
+     *
+     * ## 为什么必须有
+     *
+     * 多台 VM 若同时首次启动且 kernel/rootfs 相同，它们的 templateHash 也相同，
+     * 于是会**并发写同一个快照文件**，且各自 pause/resume 触发 vsock 断连重连。
+     * 真机 10 并发实测：两台不同租户（tenant-02 / tenant-04）稳定复现
+     * "vsock agent 20s 未就绪"；关闭快照后 10/10 通过 —— 确认是快照路径的
+     * 并发竞态，而非并发能力不足。
+     *
+     * 因此按 templateHash 串行化：**同一模板只让一台 VM 制作快照**，其余等待
+     * 后复用结果。不同模板仍可并行。
+     */
+    private readonly snapshotGate: KeyedSemaphore<string>;
 
     constructor(config: FirecrackerDriverConfig = {}) {
         this.binaryPath = config.binaryPath ?? process.env.FIRECRACKER_BINARY_PATH ?? "firecracker";
@@ -150,6 +173,10 @@ export class FirecrackerSandboxDriver implements MicrovmDriver {
 
         this.runDirManager = new VmRunDirectoryManager({ runtimeRoot: this.vmRuntimeRoot });
         this.procRoot = config.procRoot ?? "/proc";
+        // 同一 templateHash 的快照制作必须串行（默认并发上限 1）。
+        this.snapshotGate = new KeyedSemaphore<string>(
+            config.snapshotConcurrency ?? Number(process.env.HARNESS_VM_SNAPSHOT_CONCURRENCY ?? "1"),
+        );
     }
 
     getKernelPath(): string | undefined {
@@ -515,49 +542,67 @@ export class FirecrackerSandboxDriver implements MicrovmDriver {
             // 9. 首次完整开机后制作黄金快照（pause → create → resume），
             //    后续同模板 VM 走 snapshot/load 快速路径。best-effort：
             //    快照制作失败不影响本 VM 交付，但绝不伪造"已加速"。
+            //
+            //    【并发闸门】同一 templateHash 的快照制作必须串行。多台 VM 同时
+            //    首次启动会并发写同一个 vm.snap/mem.snap，并各自 pause/resume
+            //    触发 vsock 断连重连 —— 真机 10 并发下稳定复现"vsock agent 20s
+            //    未就绪"。这里用 KeyedSemaphore 按 templateHash 串行化：同一模板
+            //    只让一台真正制作，其余等待后直接复用成果（既避免竞态，也省掉
+            //    一次昂贵的 pause/resume + vsock 重连）。
             if (this.snapshotsEnabled && !canRestore && templateHash !== null) {
+                // madeByThisVm：本 VM 是否真的执行了 pause/create（决定要不要重连 vsock）
+                let madeByThisVm = false;
                 try {
-                    this.snapshotManager.ensureDir(templateHash);
-                    const poolPaths = this.snapshotManager.getSnapshotPaths(templateHash);
-                    let snapForApi = poolPaths.snapshotPath;
-                    let memForApi = poolPaths.memFilePath;
-                    let snapInChroot: string | undefined;
-                    let memInChroot: string | undefined;
-                    if (chrootRootForVm !== undefined) {
-                        snapInChroot = resolve(chrootRootForVm, "golden.snap");
-                        memInChroot = resolve(chrootRootForVm, "golden.mem");
-                        snapForApi = "/golden.snap";
-                        memForApi = "/golden.mem";
-                    }
+                    await this.snapshotGate.runExclusive(templateHash, async () => {
+                        // 等到闸门时，先复查：可能前一台已经把快照做出来了。
+                        // 此时直接复用，无需再 pause/resume（也就无需 vsock 重连）。
+                        if (this.snapshotManager.hasSnapshot(templateHash)) {
+                            return;
+                        }
 
-                    let paused = false;
-                    try {
-                        await this.setVmState(apiSocketOnHost, "Paused");
-                        paused = true;
-                        await this.putSocket(apiSocketOnHost, "/snapshot/create", {
-                            snapshot_type: "Full",
-                            snapshot_path: snapForApi,
-                            mem_file_path: memForApi,
-                        });
-                        if (snapInChroot !== undefined && memInChroot !== undefined) {
-                            await copyFileReflink(snapInChroot, poolPaths.snapshotPath);
-                            await copyFileReflink(memInChroot, poolPaths.memFilePath);
+                        this.snapshotManager.ensureDir(templateHash);
+                        const poolPaths = this.snapshotManager.getSnapshotPaths(templateHash);
+                        let snapForApi = poolPaths.snapshotPath;
+                        let memForApi = poolPaths.memFilePath;
+                        let snapInChroot: string | undefined;
+                        let memInChroot: string | undefined;
+                        if (chrootRootForVm !== undefined) {
+                            snapInChroot = resolve(chrootRootForVm, "golden.snap");
+                            memInChroot = resolve(chrootRootForVm, "golden.mem");
+                            snapForApi = "/golden.snap";
+                            memForApi = "/golden.mem";
                         }
-                    } finally {
-                        // 无论快照成功与否都必须恢复 vCPU，否则本 VM 会永久停在
-                        // Paused（guest 不再执行指令），表现为"任务卡死"而非报错。
-                        if (paused) {
-                            await this.setVmState(apiSocketOnHost, "Resumed")
-                                .catch((resumeErr) => {
-                                    console.error(
-                                        `[Firecracker] 快照后恢复 vCPU 失败（template=${templateHash}），`
-                                        + "该 VM 已被终止以避免交付卡死实例：",
-                                        resumeErr,
-                                    );
-                                    throw resumeErr;
-                                });
+
+                        let paused = false;
+                        try {
+                            await this.setVmState(apiSocketOnHost, "Paused");
+                            paused = true;
+                            await this.putSocket(apiSocketOnHost, "/snapshot/create", {
+                                snapshot_type: "Full",
+                                snapshot_path: snapForApi,
+                                mem_file_path: memForApi,
+                            });
+                            if (snapInChroot !== undefined && memInChroot !== undefined) {
+                                await copyFileReflink(snapInChroot, poolPaths.snapshotPath);
+                                await copyFileReflink(memInChroot, poolPaths.memFilePath);
+                            }
+                            madeByThisVm = true;
+                        } finally {
+                            // 无论快照成功与否都必须恢复 vCPU，否则本 VM 会永久停在
+                            // Paused（guest 不再执行指令），表现为"任务卡死"而非报错。
+                            if (paused) {
+                                await this.setVmState(apiSocketOnHost, "Resumed")
+                                    .catch((resumeErr) => {
+                                        console.error(
+                                            `[Firecracker] 快照后恢复 vCPU 失败（template=${templateHash}），`
+                                            + "该 VM 已被终止以避免交付卡死实例：",
+                                            resumeErr,
+                                        );
+                                        throw resumeErr;
+                                    });
+                            }
                         }
-                    }
+                    });
                 } catch (snapshotErr) {
                     console.error(
                         `[Firecracker] 黄金快照制作失败（template=${templateHash}），`
@@ -570,7 +615,10 @@ export class FirecrackerSandboxDriver implements MicrovmDriver {
                 // agent 在此期间被冻结，宿主侧已建立的 vsock 连接会被对端关闭
                 // （真机实测：快照生成后 bridge 抛 "Vsock connection closed
                 // unexpectedly"）。恢复 vCPU 后必须重连，否则该 VM 永远不可用。
-                if (this.snapshotsEnabled && !canRestore) {
+                //
+                // 只有**本 VM 真的做了 pause/create** 才需要重连；若只是等闸门后
+                // 复用了别人的快照，本 VM 的 guest 从未被冻结，连接依然有效。
+                if (madeByThisVm) {
                     await vsockBridge.reconnectAfterGuestResume(20000, 250)
                         .catch((reconnectErr) => {
                             throw new Error(
