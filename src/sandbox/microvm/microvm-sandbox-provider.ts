@@ -15,7 +15,7 @@ import type {
     SecretProvider,
 } from "../sandbox-provider.ts";
 import type { SandboxStore } from "../sandbox-store.ts";
-import type { MicrovmDriver, MicrovmExecuteOptions, MicrovmInstance } from "./microvm-types.ts";
+import type { MicrovmDriver, MicrovmExecuteOptions, MicrovmExecutionResult, MicrovmInstance } from "./microvm-types.ts";
 import { VmRunDirectoryManager } from "./vm-run-directory.ts";
 import { WorkspaceDiskExporter } from "./workspace-disk-exporter.ts";
 import {
@@ -334,9 +334,12 @@ export class MicrovmSandboxProvider implements SandboxProvider, SandboxCommandEx
         sandboxId: string,
         command: readonly string[],
         options?: MicrovmExecuteOptions,
-    ): Promise<{ exitCode: number; stdout: string; stderr: string }> {
+    ): Promise<MicrovmExecutionResult> {
         const env = this.secretValues.get(sandboxId) ?? {};
         const vmId = this.instanceIds.get(sandboxId) ?? sandboxId;
+        // 透传完整结果（含 timedOut / truncated）——不能只挑 exitCode/stdout/stderr，
+        // 否则"命令因超时被掐"与"命令自己失败"在调用方看来完全一样，超时信号被
+        // 静默抹掉，调用方无法据实判断发生了什么。
         return this.driver.execute(vmId, command, {
             ...options,
             env: options?.env ? { ...env, ...options.env } : env,

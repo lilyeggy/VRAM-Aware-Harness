@@ -1,11 +1,11 @@
 # microVM 真机验收报告（172.17.43.193）
 
-- 日期：2026-10-06 初验；2026-10-08 补验快照恢复路径（见 §5）
+- 日期：2026-10-06 初验；2026-10-08 补验快照恢复路径（见 §5）与攻击烟测（见 §6）
 - 宿主：Ubuntu 22.04 / 内核 6.8.0-136-generic / 192 vCPU / 251GB RAM / NVMe(ext4) / 用户 `cxr` 在 `kvm` 组，`/dev/kvm`、`/dev/vhost-vsock` 可用
 - Firecracker：v1.10.1 与 v1.17.0 官方二进制（`~/microvm-test/bin/`）
 - guest 内核：Firecracker 官方 quickstart `vmlinux.bin`（4.14.174，**≠ 宿主内核**）
-- 验收脚本：`scripts/server-microvm-smoke.ts`（全链路）、`scripts/microvm-live-audit.ts`（隔离边界深度审计，23 项）
-- 结论：**Phase 1 / Phase 2 / Phase 3b 在真实 KVM 上通过；Phase 4 已按产品决策作废（VM 一律无网卡）。快照恢复在 jailer 模式下真机实测 368ms（冷启动 2519ms，提速 6.9 倍），无需自建 Firecracker。**
+- 验收脚本：`scripts/server-microvm-smoke.ts`（全链路）、`scripts/microvm-live-audit.ts`（隔离边界深度审计，23 项）、`scripts/microvm-attack-smoke.ts`（攻击烟测，37 项）、`scripts/microvm-guest-facts-probe.ts` 与 `scripts/microvm-exhaust-probe.ts`（事实探针）
+- 结论：**Phase 1 / Phase 2 / Phase 3b 在真实 KVM 上通过；Phase 4 已按产品决策作废（VM 一律无网卡）。快照恢复在 jailer 模式下真机实测 368ms（冷启动 2519ms，提速 6.9 倍），无需自建 Firecracker。攻击烟测 37/37 通过，cgroup 限额确认生效。**
 
 ---
 
@@ -451,3 +451,119 @@ Inode: 399   Type: symlink    Mode:  0777        # 修复后为指向 busybox �
 - **不需要用预热池替代快照**：两条独立机制，快照恢复已在生产路径验证。
 - 启动延迟：冷启动 ~2.5s → 快照恢复 ~0.37s（jailer 模式）。
 - 非 jailer 模式不支持快照恢复（路径固化），仅影响开发/测试路径。
+
+---
+
+## 6. 2026-10-08 补验：攻击烟测 37/37 通过（jailer 模式）
+
+此前"microVM 比容器更安全"这句话**从未被证明**：
+`scripts/container-sandbox-attack-smoke.ts` 有 9 项攻击验证，但那是**容器**版本；
+`blast-radius-isolation.e2e.test.ts` 里 microVM 出现 0 次。攻击面从 runsc/kernel
+换成 KVM/virtio 边界后，攻击手法与逃逸面完全不同。
+
+本轮用 `scripts/microvm-attack-smoke.ts` 在真实 KVM 上发起等价攻击，并补充
+microVM 特有逃逸面（virtio 设备枚举、内核模块、/proc/sys、块设备层、cgroup 限额）。
+
+**结果：37/37 通过，连续两轮稳定复现。**
+
+### 6.1 先取事实、再写断言：3 条基于猜测的断言被真机推翻
+
+首轮运行卡在 `host_path：guest 无宿主 /home 与 /root/.ssh`。改用
+`scripts/microvm-guest-facts-probe.ts` 取 guest 内真实可见事实后，发现**三条
+断言的预期方向本身就是错的**：
+
+| 原断言                                          | 真机事实                                                | 修正后的断言                                                                 |
+| --------------------------------------------- | ---------------------------------------------------- | ------------------------------------------------------------------- |
+| `test ! -e /home && test ! -e /root/.ssh`     | guest 是 Alpine，**自带 `/home`（空）与 `/root`**（无 `.ssh`） | guest `/home` 不含宿主家目录条目（对照宿主 **110 项**）、看不到宿主 SSH 私钥（对照 **5 个文件名**） |
+| `test ! -w /proc/sys/kernel/core_pattern`     | guest 内 `/proc/sys` **可写**（rc=0 写入成功）              | guest 可写自己的内核参数，**但宿主 `core_pattern` 纹丝不动**（不外溢）         |
+| `cat /proc/sys/kernel/modules_disabled`       | 实测 `modules_disabled=0`（并未禁用），断言等于没验                | guest **无 `/lib/modules` 目录且 `/proc/modules` 为 0 行**（无可加载模块）         |
+
+**教训**：隔离断言不能靠"guest 应该没有 X"来猜。正确做法是先用探针取事实，
+再基于事实写断言。第三条尤其重要——原写法在任何情况下都会通过，是**假绿**。
+
+### 6.2 隔离证据：从"目录不存在"升级为"块设备层 + cgroup 层"
+
+新断言在设备层与资源层各拿到硬证据：
+
+```text
+✅ host_path：guest 无宿主块设备节点（nvme/sd 均不可见）
+✅ host_path：guest 根设备是 vda（宿主为 nvme0n1p2，非同一设备）
+✅ cgroup_isolated：firecracker 位于独立 cgroup（/fc117/attack-b）
+✅ cgroup_memory_max：内存限额=335544320（期望 335544320 = (256+64)MiB）
+✅ cgroup_cpu_max：CPU 限额=200000 100000（期望 2 核 = 200000/100000）
+```
+
+宿主根在 `/dev/nvme0n1p2`，guest 根在 `/dev/vda`（`/dev/root -> vda`）——
+**这是设备层证据，比"某路径没挂载"强得多**：guest 拿不到任何宿主块设备节点。
+
+cgroup 限额此前**从未被验证过**。实测 jailer 为每台 VM 建独立 cgroup
+`/fc117/<vmId>`，`memory.max = (256+64)MiB`、`cpu.max = 2 核`，与
+`buildJailerCgroupArgs` 完全一致。容量准入不超卖的物理基础由此得到确认。
+
+### 6.3 资源耗尽：损失止于 guest 边界，宿主零副作用
+
+`scripts/microvm-exhaust-probe.ts` 实测：
+
+| 攻击                | 结果                                                             | 宿主影响                                          |
+| ----------------- | -------------------------------------------------------------- | --------------------------------------------- |
+| 写满 `/workspace`（4GiB dd） | rc=1，`/dev/vdb` 100% 满（223.7M 用尽）                             | 无                                            |
+| guest 内存分配 800MB  | guest OOM 杀掉分配进程（stderr `Killed`），VM 存活                        | cgroup `memory.current` 触顶 319.9MiB/320MiB，宿主 available 无变化         |
+| fork 2000         | **成功**（283ms），VM 存活                                            | 无（guest `pid_max=32768`，2000 在预算内）            |
+| fork 20000        | 22.9s 后 vsock 断开，**VM 被打死**                                      | firecracker 进程消失、cgroup 归零、宿主 available 138552MB→138094MB |
+
+关键判据是**风暴前后对比**而非绝对值（此时 A、B 两台 VM 本就该各对应 1 个进程）：
+
+```text
+✅ fork_bomb_bounded：20000 进程风暴止于 guest 边界（VM 被资源预算打掉=true，宿主 firecracker 2→2）
+✅ resource_containment：宿主未被 fork 风暴吃掉（firecracker 2→2，available 138552MB→138094MB）
+```
+
+**已知的真实行为（非缺陷，需记录）**：guest 内 fork 风暴会拖垮**自己的** VM
+（vsock 断连、agent 失联），但损失严格止于 guest 边界——宿主不泄漏任何进程或内存。
+若产品需要"VM 被 guest 压垮后自动恢复"，需要额外的存活探测机制，当前尚未实现。
+
+### 6.4 探针自身的两个 bug（差点造成假阴性结论）
+
+写这轮验证时，探针本身犯了两个错，都会得出**错误的安全结论**，值得记录：
+
+1. **`pgrep -f firecracker` 匹配到调用方自己的命令行** → 读到 ssh 会话的
+   cgroup（`memory.max=max`），险些误判"cgroup 限额没生效"这个 P0。
+   正确做法：读 `/proc/<pid>/cmdline` 的**第一个 NUL 分隔字段**（`argv[0]`）
+   取 basename 比对。
+2. **guest 是 busybox，`head -c 600M` 报 `invalid number` 但 shell 吞掉错误返回
+   rc=0** → 内存耗尽项等于没测。必须用纯字节数。
+
+修正后 cgroup 限额确认生效（§6.2），`memory.current` 实测触顶 319.9MiB/320MiB。
+
+### 6.5 攻击面对照表（容器版 9 项 → microVM 版）
+
+| 容器版断言                       | microVM 版对应                                | 结果      |
+| --------------------------- | --------------------------------------- | ------- |
+| `runsc_runtime_evidence`   | `microvm_runtime_evidence`                | ✅       |
+| `cross_tenant_workspace`   | 路径级 + 内容级 grep 双查                        | ✅ 3/3   |
+| `host_path`                | 目录 + 文件名对照 + **块设备层**                   | ✅ 6/6   |
+| `path_traversal`           | `../` 穿越 + 合法路径未被误封                       | ✅ 2/2   |
+| `tenant_secret` / `unauthorized_secret` | 各租户只拿到自己的 secret        | ✅ 3/3   |
+| `network_none`            | 无 eth0、无云元数据地址                             | ✅ 2/2   |
+| `pid_limit`               | → fork 风暴止于 guest 边界                      | ✅       |
+| `tmpfs_limit`             | → 工作区磁盘熔断                                 | ✅       |
+| `sandbox_lost`            | → VMM 被 SIGKILL 后状态收敛 + 宿主无残留               | ✅ 2/2   |
+| （新增）                     | `virtio_pci_off` / `no_module_load` / `proc_sys_*` / `devices_only_vda_vdb` / `kernel_isolated` / `hostname_isolated` / `cgroup_*` / `resource_containment` | ✅ 11/11 |
+
+### 6.6 复现
+
+```bash
+# 需 root（jailer 硬性要求），jailer 与 firecracker 二进制版本必须匹配
+sudo -S env \
+  FIRECRACKER_BINARY_PATH=$BASE/bin/fc117 \
+  FIRECRACKER_JAILER_PATH=$BASE/bin/jailer117 \
+  FIRECRACKER_KERNEL_PATH=$BASE/bin/vmlinux \
+  FIRECRACKER_ROOTFS_PATH=$BASE/images/rootfs.ext4 \
+  FIRECRACKER_WORKSPACE_DISK_TEMPLATE_PATH=$BASE/images/rootfs.ext4 \
+  HARNESS_USE_JAILER=true HARNESS_VM_SNAPSHOTS_ENABLED=false \
+  bun scripts/microvm-attack-smoke.ts
+```
+
+> ⚠️ `jailer`（v1.10.1）与 `fc117`（v1.17.0）**版本不匹配**，jailer 会静默
+> 失败导致 API socket 永不出现（报 `Firecracker API Socket 未能在 1500ms 内就绪`）。
+> 必须用 `jailer117`。

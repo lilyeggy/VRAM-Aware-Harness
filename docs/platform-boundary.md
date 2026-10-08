@@ -133,11 +133,12 @@ HTTP API ──> Master (调度/审计/策略/LLM网关)
 
 ## 7. v1 成功标准
 
-1. 两租户并发跑任务，A 无法以任何手段读到 B 的文件/进程/网络（有攻击烟测脚本佐证，已有 `container-sandbox-attack-smoke.ts` 的 microVM 对应物）；
+1. 两租户并发跑任务，A 无法以任何手段读到 B 的文件/进程/网络（**已验证**：`scripts/microvm-attack-smoke.ts` 在 jailer 模式真机 37/37 通过，覆盖容器版 9 项等价攻击 + 11 项 microVM 特有逃逸面，见 `microvm-live-validation.md` §6）；
 2. 单租户 10 并发 Run，P95 启动延迟 < 3s（snapshot restore 后目标 < 500ms）；
 3. Run 结束 60s 内，宿主无该 Run 的进程、socket、磁盘、内存残留（启动协调器 + 巡检脚本验证）；
 4. 宿主进程崩溃重启后，平台自动收敛到一致状态，无需人工清理；
-5. 所有 sandboxes 表记录的 `runtimeEvidence` 可由巡检脚本独立复验为真。
+5. 所有 sandboxes 表记录的 `runtimeEvidence` 可由巡检脚本独立复验为真；
+6. **（2026-10-08 新增）每台 VM 位于独立 cgroup 且限额真实生效**（实测 `memory.max=(256+64)MiB`、`cpu.max=2 核`）——容量准入不超卖的物理基础，不得仅凭配置代码断言。
 
 ---
 

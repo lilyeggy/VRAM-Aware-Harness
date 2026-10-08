@@ -111,7 +111,12 @@ describe("并发分配：UID/GID 唯一性（保 jailer 隔离）", () => {
 
         // 一边释放一边新分配
         await withConcurrency(
-            Array.from({ length: 20 }, (_, i) => ({ release: first[i], alloc: `new-${i}` })),
+            Array.from({ length: 20 }, (_, i) => ({
+                // noUncheckedIndexedAccess 下 first[i] 是 string | undefined，
+                // 这里数组长度与 i 严格对应，非空可证，故断言收窄。
+                release: first[i] as string,
+                alloc: `new-${i}`,
+            })),
             async ({ release, alloc: id }) => {
                 await new Promise((r) => setTimeout(r, Math.random() * 3));
                 alloc.release(release);
@@ -120,10 +125,14 @@ describe("并发分配：UID/GID 唯一性（保 jailer 隔离）", () => {
             },
         );
 
+        // get() 返回 VmUidGid（{uid, gid}）而不是裸 number，
+        // 因此唯一性要分别对 uid 和 gid 断言。
         const activeUids = [...Array(20).keys()]
             .map((i) => alloc.get(`new-${i}`))
-            .filter((u): u is number => u !== undefined);
-        expect(new Set(activeUids).size).toBe(activeUids.length);
+            .filter((u): u is NonNullable<typeof u> => u !== undefined);
+        expect(activeUids).toHaveLength(20);
+        expect(new Set(activeUids.map((u) => u.uid)).size).toBe(20);
+        expect(new Set(activeUids.map((u) => u.gid)).size).toBe(20);
     });
 
     it("UID 池耗尽时抛错而非静默重复分配", () => {
