@@ -62,7 +62,10 @@ describe("MicrovmWarmPool", () => {
         expect(mapResourceToTier(2, 512)).toBe("M");
         expect(mapResourceToTier(1, 512)).toBe("M");
         expect(mapResourceToTier(4, 2048)).toBe("L");
-        expect(mapResourceToTier(8, 4096)).toBe("L");
+        // 超出 L 档必须返回 null：不得把超限需求映射到更小的档位
+        // （那会让预热 VM 的实际资源低于策略声明的限额）。
+        expect(mapResourceToTier(8, 4096)).toBeNull();
+        expect(mapResourceToTier(4, 4097)).toBeNull();
     });
 
     it("预热入池、出池与 TTL 自动回收", async () => {

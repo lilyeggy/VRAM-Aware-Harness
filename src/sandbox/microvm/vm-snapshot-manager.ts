@@ -21,8 +21,15 @@ export class VmSnapshotManager {
             ?? "/var/lib/harness/snapshots";
     }
 
-    /** 计算模板哈希: sha256(kernelStat + rootfsStat + agentVersion) */
-    computeTemplateHash(kernelPath: string, rootfsPath: string, agentVersion = "1.0.0"): string {
+    /**
+     * 计算模板哈希: sha256(kernelStat + rootfsStat + agentVersion)。
+     *
+     * agentVersion 必须**显式传入**。此前它是一个会被静默使用的默认参数，
+     * 结果是改动 guest agent 却忘记同步版本号时，模板指纹不变、静默复用
+     * 含旧 agent 的黄金快照（guest 里跑的是旧代码）。删掉默认值让每个
+     * 调用点都必须表明自己的 agent 版本。
+     */
+    computeTemplateHash(kernelPath: string, rootfsPath: string, agentVersion: string): string {
         const hash = createHash("sha256");
         try {
             if (existsSync(kernelPath)) {

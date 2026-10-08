@@ -88,7 +88,11 @@ export class FirecrackerVsockBridge {
                 if (!resolved) {
                     resolved = true;
                     this.close();
-                    reject(new Error(`Timeout connecting to Firecracker vsock UDS at "${this.udsPath}" (3000ms)`));
+                    // 报错必须用真实生效的超时值：此前硬编码 "(3000ms)"，
+                    // 而冷启动路径实际用的是 1s，误导了真机排查。
+                    reject(new Error(
+                        `Timeout connecting to Firecracker vsock UDS at "${this.udsPath}" (${handshakeTimeoutMs}ms)`,
+                    ));
                 }
             }, handshakeTimeoutMs);
 
