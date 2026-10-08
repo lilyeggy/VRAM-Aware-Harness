@@ -201,15 +201,19 @@ export class MicrovmSandboxProvider implements SandboxProvider, SandboxCommandEx
         try {
             const cpuCores = input.policy.resourceLimits.cpuCores ?? 2;
             const memoryMb = input.policy.resourceLimits.memoryMiB ?? 256;
+            // 需求超出最高档位（L）时返回 null：绝不能映射到更小档位——
+            // 那会让预热 VM 的实际资源低于策略声明的限额。此时跳过预热池，
+            // 退回按策略精确创建的冷启动路径。
             const tier = mapResourceToTier(cpuCores, memoryMb);
 
-            // Phase 3：预热池只在"有模板指纹 + 硬件隔离"时命中
+            // Phase 3：预热池只在"有模板指纹 + 硬件隔离 + 需求可被档位覆盖"时命中
             //（预热 VM 无租户 secret，与请求语义必须严格一致）。
             let instance = null as MicrovmInstance | null;
             if (
                 this.warmPool
                 && this.templateHash
                 && hardwareIsolated
+                && tier !== null
             ) {
                 const warmed = this.warmPool.take(this.templateHash, tier);
                 if (warmed) {
@@ -247,7 +251,7 @@ export class MicrovmSandboxProvider implements SandboxProvider, SandboxCommandEx
             this.activeSandboxes.add(input.id);
 
             // 命中预热后后台补一台同档位 VM（best-effort，不阻塞本 Run）
-            if (warmHit) {
+            if (warmHit && tier !== null) {
                 void this.refillWarmPool(tier).catch(() => undefined);
             }
         } catch (error) {
@@ -307,7 +311,9 @@ export class MicrovmSandboxProvider implements SandboxProvider, SandboxCommandEx
         if (!this.warmPool || !this.templateHash) {
             return;
         }
-        if (this.warmPool.has(this.templateHash, tier)) {
+        // 按真实容量判断：池已满则不再补货。
+        //（此前用 has() 判断，等价于把容量硬编码为 1，配置的 maxPerTier 被忽略。）
+        if (this.warmPool.count(this.templateHash, tier) >= this.warmPool.maxPerTier) {
             return;
         }
         const spec = MICROVM_TIERS[tier];
@@ -354,31 +360,42 @@ export class MicrovmSandboxProvider implements SandboxProvider, SandboxCommandEx
             await this.driver.stopVm(vmId).catch(() => undefined);
         }
 
-        // 3. 导出工作区磁盘内容到宿主工作区目录
+        // 3. 导出工作区磁盘内容到宿主工作区目录。
+        //    导出失败**不在这里抛出**：一旦抛出就会跳过第 4 步，
+        //    导致 chroot 磁盘副本、运行目录与 UID/CID 全部永久泄漏。
         const targetWorkspace = this.workspacePaths.get(sandboxId);
         const diskPath = this.workspaceDisks.get(sandboxId);
+        let exportError: Error | null = null;
         if (targetWorkspace && diskPath && existsSync(diskPath)) {
             try {
                 await this.diskExporter.exportToHost(diskPath, targetWorkspace);
             } catch (exportErr: any) {
-                const record = this.store.get(sandboxId);
-                if (record && record.status === "ACTIVE") {
-                    this.store.update({
-                        ...record,
-                        status: "FAILED",
-                        failureReason: `工作区导出失败: ${exportErr?.message || exportErr}`,
-                        updatedAt: new Date().toISOString(),
-                    }, "ACTIVE");
-                }
-                throw exportErr;
+                exportError = exportErr instanceof Error ? exportErr : new Error(String(exportErr));
             }
         }
 
-        // 4. 销毁 VM 与释放私有目录（terminate 在 stopVm 之后幂等）
-        await this.driver.terminate(vmId);
-        await this.runDirManager.dispose(sandboxId);
-        this.workspacePaths.delete(sandboxId);
-        this.workspaceDisks.delete(sandboxId);
+        // 4. 销毁 VM 与释放私有目录（terminate 在 stopVm 之后幂等）。
+        //    无论导出成功与否都必须执行——清理不得被导出失败短路。
+        try {
+            await this.driver.terminate(vmId);
+        } finally {
+            await this.runDirManager.dispose(sandboxId);
+            this.workspacePaths.delete(sandboxId);
+            this.workspaceDisks.delete(sandboxId);
+        }
+
+        if (exportError !== null) {
+            const failed = this.store.get(sandboxId);
+            if (failed && failed.status === "ACTIVE") {
+                this.store.update({
+                    ...failed,
+                    status: "FAILED",
+                    failureReason: `工作区导出失败: ${exportError.message}`,
+                    updatedAt: new Date().toISOString(),
+                }, "ACTIVE");
+            }
+            throw exportError;
+        }
 
         const record = this.store.get(sandboxId);
         if (record && record.status === "ACTIVE") {
@@ -390,21 +407,40 @@ export class MicrovmSandboxProvider implements SandboxProvider, SandboxCommandEx
         }
     }
 
-    /** 启动期预热：按档位各补一台（默认 M 档，对应默认策略 2C/512MiB）。best-effort。 */
+    /**
+     * 启动期预热：把每个给定档位补到池容量上限（默认只预热 M 档，
+     * 对应默认策略 2C/512MiB；每档容量由 HARNESS_MICROVM_WARM_POOL_SIZE 决定）。
+     * best-effort，不阻塞服务就绪。
+     */
     async prewarm(tiers: readonly MicrovmResourceTier[] = ["M"]): Promise<void> {
         if (!this.warmPool || !this.templateHash) {
             return;
         }
         for (const tier of tiers) {
-            await this.refillWarmPool(tier).catch((err) => {
-                console.error(`[MicroVM] 预热 ${tier} 档失败（下次 Run 将冷启动）：`, err);
-            });
+            while (this.warmPool.count(this.templateHash, tier) < this.warmPool.maxPerTier) {
+                const before = this.warmPool.count(this.templateHash, tier);
+                await this.refillWarmPool(tier).catch((err) => {
+                    console.error(`[MicroVM] 预热 ${tier} 档失败（下次 Run 将冷启动）：`, err);
+                });
+                // 补货失败时不能无限重试。
+                if (this.warmPool.count(this.templateHash, tier) <= before) {
+                    break;
+                }
+            }
         }
     }
 
     async cleanupStale(record: SandboxRecord): Promise<void> {
-        await this.runDirManager.dispose(record.id);
+        // 顺序至关重要：**先 terminate（停进程），再删运行目录**。
+        //
+        // 原实现反过来了——先 dispose 目录再 terminate。目录一旦删除，
+        // 就失去了 pidfile 与 socket 这些可寻址凭据，那个 Firecracker 进程
+        // 再也杀不掉：没有 pidfile、没有 /proc 扫描、没有周期巡检。它会继续
+        // 占用宿主内存，而容量准入完全看不见这些 VM → 超卖 → 别人的 VM 被 OOM。
+        //
+        // 驱动.terminate() 内部也会删目录，但那时进程已被确认停止。
         await this.terminate(record.id);
+        await this.runDirManager.dispose(record.id);
     }
 
     subscribe(handler: (event: SandboxLifecycleEvent) => void): () => void {

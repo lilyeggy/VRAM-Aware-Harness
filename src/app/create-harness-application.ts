@@ -1,6 +1,7 @@
 import type { Database } from "bun:sqlite";
 import { mkdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
+import { reapOrphans as reapOrphansAsync } from "../sandbox/microvm/vm-orphan-reaper.ts";
 
 import {
     ModelRuntime,
@@ -218,6 +219,15 @@ export async function createHarnessApplication(
     }
     const secretProvider = dependencies.secretProvider
         ?? new EnvironmentSecretProvider(process.env);
+    // P0：启动即回收孤儿 VM 进程。必须早于任何 VM 创建——
+    // 否则 Harness 崩溃/被 kill 后遗留的 Firecracker 会继续占用宿主内存，
+    // 而容量准入看不见它们 → 超卖 → 别人的 VM 被 OOM。
+    //
+    // 依赖注入的 provider（测试 fake）不参与此逻辑：回收只针对真实宿主进程，
+    // 且必须在创建任何新 VM 之前完成，否则可能误杀自己刚起的 VM。
+    if (dependencies.sandboxProvider === undefined && config.sandboxProvider === "microvm") {
+        await reapOrphanMicrovmsFromEnv();
+    }
     const sandboxProvider = dependencies.sandboxProvider
         ?? (config.sandboxProvider === "container" || config.sandboxProvider === "microvm"
             ? createContainerSandboxRouter(
@@ -554,6 +564,50 @@ export async function createHarnessApplication(
             closed = true;
         },
     };
+}
+
+/**
+ * P0：启动时回收孤儿 Firecracker 进程。
+ *
+ * 背景：`FirecrackerSandboxDriver.processes` 是进程内 Map，Harness 崩溃或被
+ * kill 后即为空，`stopVm()` 查不到句柄就静默返回——那个 Firecracker 进程会
+ * 一直占着宿主内存，而容量准入完全看不见它 → 超卖 → 别人的 VM 被 OOM。
+ *
+ * 这里在**创建任何新 VM 之前**扫描运行目录，用 pidfile + `/proc` 验活把遗留
+ * 进程杀掉。只杀经 cmdline 确认确为 Firecracker 的 pid，避免误杀被系统复用的
+ * 空闲 pid。回收失败会显式告警而非静默。
+ */
+async function reapOrphanMicrovmsFromEnv():Promise<void> {
+    const runtimeRoot = process.env.HARNESS_VM_RUNTIME_ROOT ?? "/var/lib/harness/vm";
+    const binaryPath = process.env.FIRECRACKER_BINARY_PATH ?? "firecracker";
+    // 驱动内部用 basename(binaryPath) 匹配 cmdline（jailer 二进制名同理），
+    // 这里必须保持一致，否则会把真实 VM 误判为"非 Firecracker"而不杀。
+    const binaryName = binaryPath.split("/").pop() ?? binaryPath;
+    try {
+        const report = await reapOrphansAsync(runtimeRoot, { binaryName });
+        if (report.scanned === 0) {
+            return;
+        }
+        for (const line of report.details) {
+            console.warn(`[microVM] 孤儿回收：${line}`);
+        }
+        console.error(
+            `[microVM] 启动回收：扫描 ${report.scanned} 个残留 VM 运行目录，`
+            + `回收 ${report.reaped} 个孤儿进程。`,
+        );
+        if (report.reaped < report.scanned) {
+            console.error(
+                "[microVM] 存在回收失败的孤儿进程，宿主内存可能被持续占用，"
+                + "容量准入无法感知这些 VM。请立即人工检查（详见上方明细）。",
+            );
+        }
+    } catch (error) {
+        // 回收本身失败不得阻断平台启动，但必须显式暴露——静默会让内存泄漏无感知。
+        console.error(
+            "[microVM] 启动回收孤儿进程时出错，宿主可能残留上一进程的 VM：",
+            error,
+        );
+    }
 }
 
 function createContainerSandboxRouter(

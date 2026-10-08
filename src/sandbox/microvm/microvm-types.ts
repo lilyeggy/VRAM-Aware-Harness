@@ -1,5 +1,18 @@
 export type MicrovmDriverName = "mock" | "e2b" | "firecracker";
 
+/**
+ * 启动期孤儿回收的报告。驱动把明细交回调用方，由装配层决定如何告警，
+ * 避免"回收失败"被静默吞掉（静默 = 宿主内存泄漏无感知）。
+ */
+export interface ReapOrphansReportLike {
+    /** 成功回收（杀掉进程或确认进程已死并清理目录）的数量 */
+    readonly reaped: number;
+    /** 逐条明细，供日志与测试断言 */
+    readonly details: readonly string[];
+    /** 扫描到的 pidfile 总数 */
+    readonly scanned: number;
+}
+
 export interface MicrovmInstance {
     readonly id: string;
     readonly driver: MicrovmDriverName;
@@ -73,5 +86,17 @@ export interface MicrovmDriver {
      */
     stopVm?(vmId: string): Promise<void>;
     flushFilesystem?(vmId: string): Promise<void>;
+    /**
+     * P0 修复：回收孤儿 VM 进程。
+     *
+     * Harness 崩溃/被 kill 后，上一进程留下的 Firecracker 会继续占用宿主内存，
+     * 而容量准入看不见它们 → 超卖 → 别人的 VM 被 OOM。驱动应利用 pidfile 与
+     * `/proc` 验活，在启动阶段把这些进程杀掉。
+     *
+     * **必须在创建任何新 VM 之前调用**，否则新旧 VM 可能互相误杀。
+     * 实现应做到：只杀"经 `/proc/<pid>/cmdline` 确认确为 Firecracker"的进程，
+     * 绝不盲杀 pid（pid 可能已被系统复用）。
+     */
+    reapOrphanVms?(options?: { readonly dryRun?: boolean }): Promise<ReapOrphansReportLike> | ReapOrphansReportLike;
     isAvailable(): Promise<boolean>;
 }

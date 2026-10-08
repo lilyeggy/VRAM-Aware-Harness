@@ -15,6 +15,14 @@ import { VmUidAllocator } from "./vm-uid-allocator.ts";
 import { VmCidAllocator } from "./vm-cid-allocator.ts";
 import { checkJailerPrereqs } from "./jailer-prereq-check.ts";
 import { VmSnapshotManager } from "./vm-snapshot-manager.ts";
+import {
+    isFirecrackerProcess,
+    killPid,
+    reapOrphans,
+    waitForExitAsync,
+    writePidFile,
+    type ReapOrphansReport,
+} from "./vm-orphan-reaper.ts";
 
 export interface FirecrackerDriverConfig {
     readonly binaryPath?: string;
@@ -26,6 +34,8 @@ export interface FirecrackerDriverConfig {
     readonly vmRuntimeRoot?: string;
     readonly vsockPort?: number;
     readonly useJailer?: boolean;
+    /** /proc 根目录（测试可注入假 procfs） */
+    readonly procRoot?: string;
     /**
      * Phase 3：microVM 快照加速。开启后，首次完整开机并握手成功后
      * 制作"黄金快照"（pause → snapshot/create → resume）；
@@ -34,6 +44,12 @@ export interface FirecrackerDriverConfig {
     readonly snapshotsEnabled?: boolean;
     /** 快照池目录（默认 /var/lib/harness/snapshots）。 */
     readonly snapshotPoolDir?: string;
+    /**
+     * guest agent 版本，参与快照模板指纹。
+     * 【必须】改动 guest/agent 后同步更新（或设 HARNESS_GUEST_AGENT_VERSION），
+     * 否则模板指纹不变，会静默复用含旧 agent 的黄金快照。
+     */
+    readonly guestAgentVersion?: string;
 }
 
 async function copyFileReflink(src: string, dst: string): Promise<void> {
@@ -47,6 +63,34 @@ async function copyFileReflink(src: string, dst: string): Promise<void> {
         const errText = await new Response(proc.stderr).text();
         throw new Error(`Failed to copy ${src} to ${dst}: ${errText}`);
     }
+}
+
+/**
+ * Firecracker VMM 自身的内存底噪（MiB），与准入估算
+ * `estimateSandboxMemoryMiB()` 的 strict 档 +64 MiB 保持同一模型。
+ * jailer cgroup 的 memory.max 必须覆盖 "guest 内存 + VMM 自身"，
+ * 否则 Firecracker 会被自己的 cgroup OOM 掉。
+ */
+const VMM_MEMORY_OVERHEAD_MIB = 64;
+
+/** 未显式指定资源时的默认值；单一事实来源，cgroup 与 /machine-config 共用。 */
+const DEFAULT_VCPU_COUNT = 2;
+const DEFAULT_MEMORY_MIB = 512;
+
+/**
+ * jailer 的 cgroup 限额参数。
+ *
+ * - `cpu.max` = 核数配额（period 固定 100000µs，即 1 核 = 100000/100000）。
+ * - `memory.max` = guest 内存 + VMM 底噪：必须严格大于 guest 内存，
+ *   否则 Firecracker 会被自己的 cgroup OOM 掉。
+ *
+ * 抽成纯函数以便不依赖 root/KVM 即可断言具体数值。
+ */
+export function buildJailerCgroupArgs(vcpuCount: number, memoryMb: number): string[] {
+    return [
+        "--cgroup", `cpu.max=${vcpuCount * 100000} 100000`,
+        "--cgroup", `memory.max=${(memoryMb + VMM_MEMORY_OVERHEAD_MIB) * 1024 * 1024}`,
+    ];
 }
 
 export class FirecrackerSandboxDriver implements MicrovmDriver {
@@ -63,6 +107,7 @@ export class FirecrackerSandboxDriver implements MicrovmDriver {
     private readonly vsockPort: number;
     private readonly useJailer: boolean;
     private readonly snapshotsEnabled: boolean;
+    private readonly guestAgentVersion: string;
     private readonly snapshotManager: VmSnapshotManager;
     private readonly runDirManager: VmRunDirectoryManager;
     private readonly uidAllocator = new VmUidAllocator();
@@ -71,6 +116,13 @@ export class FirecrackerSandboxDriver implements MicrovmDriver {
     private readonly processes = new Map<string, ChildProcess>();
     private readonly vsockBridges = new Map<string, FirecrackerVsockBridge>();
     private readonly runDirectories = new Map<string, VmRunDirectory>();
+    /**
+     * vmId -> 宿主 pid。进程重启后 `processes` 为空，靠这张表 + pidfile 兜底回收
+     * 孤儿 Firecracker 进程（否则它们会静默吃满宿主内存而准入看不见）。
+     */
+    private readonly pids = new Map<string, number>();
+    /** /proc 根目录（测试可注入假 procfs） */
+    private readonly procRoot: string;
 
     constructor(config: FirecrackerDriverConfig = {}) {
         this.binaryPath = config.binaryPath ?? process.env.FIRECRACKER_BINARY_PATH ?? "firecracker";
@@ -87,6 +139,9 @@ export class FirecrackerSandboxDriver implements MicrovmDriver {
         this.useJailer = config.useJailer ?? (process.env.HARNESS_USE_JAILER !== "false");
         this.snapshotsEnabled = config.snapshotsEnabled
             ?? (process.env.HARNESS_VM_SNAPSHOTS_ENABLED === "true");
+        this.guestAgentVersion = config.guestAgentVersion
+            ?? process.env.HARNESS_GUEST_AGENT_VERSION
+            ?? "1.0.0";
         this.snapshotManager = new VmSnapshotManager({
             ...(config.snapshotPoolDir !== undefined || process.env.HARNESS_VM_SNAPSHOT_POOL_DIR !== undefined
                 ? { snapshotPoolDir: config.snapshotPoolDir ?? process.env.HARNESS_VM_SNAPSHOT_POOL_DIR }
@@ -94,6 +149,7 @@ export class FirecrackerSandboxDriver implements MicrovmDriver {
         });
 
         this.runDirManager = new VmRunDirectoryManager({ runtimeRoot: this.vmRuntimeRoot });
+        this.procRoot = config.procRoot ?? "/proc";
     }
 
     getKernelPath(): string | undefined {
@@ -113,7 +169,11 @@ export class FirecrackerSandboxDriver implements MicrovmDriver {
         if (!this.kernelPath || !this.rootfsPath) {
             return null;
         }
-        return this.snapshotManager.computeTemplateHash(this.kernelPath, this.rootfsPath);
+        return this.snapshotManager.computeTemplateHash(
+            this.kernelPath,
+            this.rootfsPath,
+            this.guestAgentVersion,
+        );
     }
 
     async isAvailable(): Promise<boolean> {
@@ -226,6 +286,12 @@ export class FirecrackerSandboxDriver implements MicrovmDriver {
 
         const guestCid = this.cidAllocator.allocate(options.id);
 
+        // 单一事实来源：cgroup（jailer）与 /machine-config（guest）必须用同一组资源值。
+        // 此前两处各自兜底（cgroup 512MiB / guest 256MiB），未显式传值时会产生
+        // "cgroup 限额与 guest 实际内存不一致"的错位。
+        const vcpuCount = options.cpuCount ?? DEFAULT_VCPU_COUNT;
+        const memoryMb = options.memoryMb ?? DEFAULT_MEMORY_MIB;
+
         let proc: ChildProcess | undefined;
         try {
             let apiSocketOnHost: string;
@@ -293,12 +359,7 @@ export class FirecrackerSandboxDriver implements MicrovmDriver {
                 // 传入会直接报 ArgumentParsing 并拒绝启动（真机实测）。
                 // 另外 API socket 必须放在 chroot 根而非 /run：jailer 会把 /run
                 // 重挂为独立 tmpfs，放在其中的 socket 宿主完全无法访问。
-                const cpuCores = options.cpuCount ?? 2;
-                const memoryMb = options.memoryMb ?? 512;
-                const cgroupArgs = [
-                    "--cgroup", `cpu.max=${cpuCores * 100000} 100000`,
-                    "--cgroup", `memory.max=${memoryMb * 1024 * 1024}`,
-                ];
+                const cgroupArgs = buildJailerCgroupArgs(vcpuCount, memoryMb);
 
                 proc = spawn(this.jailerPath, [
                     "--id", options.id,
@@ -338,6 +399,17 @@ export class FirecrackerSandboxDriver implements MicrovmDriver {
                 console.error(`[Firecracker] Process error for sandbox ${options.id}:`, err);
             });
 
+            // 进程一启动就落盘 pid 并写 pidfile。
+            //
+            // 这是**跨重启回收孤儿 VM 的唯一凭据**：Harness 崩溃或被 kill 后，
+            // 内存里的 processes Map 会随之消失，但 pidfile 还在。下次启动时
+            // reapOrphanVms() 靠它找到并杀掉遗留的 Firecracker 进程，避免这些
+            // 进程静默吃满宿主内存而容量准入完全看不见（→ 超卖 → 别人的 VM 被 OOM）。
+            if (proc.pid !== undefined) {
+                this.pids.set(options.id, proc.pid);
+                writePidFile(dir.root, proc.pid, basename(this.binaryPath), options.id);
+            }
+
             // 6. 等待 API Socket 出现
             const maxWaitMs = 1500;
             const start = Date.now();
@@ -353,7 +425,11 @@ export class FirecrackerSandboxDriver implements MicrovmDriver {
             // 必须一致（rootfs/工作区盘均为同一模板的逐份复制，内容相同，
             // 满足 Firecracker 对非 diff 快照的这一约束）。
             const templateHash = this.snapshotsEnabled
-                ? this.snapshotManager.computeTemplateHash(this.kernelPath, this.rootfsPath)
+                ? this.snapshotManager.computeTemplateHash(
+                    this.kernelPath,
+                    this.rootfsPath,
+                    this.guestAgentVersion,
+                )
                 : null;
             const canRestore = templateHash !== null && this.snapshotManager.hasSnapshot(templateHash);
 
@@ -422,8 +498,8 @@ export class FirecrackerSandboxDriver implements MicrovmDriver {
                 });
 
                 await this.putSocket(apiSocketOnHost, "/machine-config", {
-                    vcpu_count: options.cpuCount ?? 2,
-                    mem_size_mib: options.memoryMb ?? 256,
+                    vcpu_count: vcpuCount,
+                    mem_size_mib: memoryMb,
                 });
 
                 await this.putSocket(apiSocketOnHost, "/actions", {
@@ -441,7 +517,7 @@ export class FirecrackerSandboxDriver implements MicrovmDriver {
             //    快照制作失败不影响本 VM 交付，但绝不伪造"已加速"。
             if (this.snapshotsEnabled && !canRestore && templateHash !== null) {
                 try {
-                    const poolDir = this.snapshotManager.ensureDir(templateHash);
+                    this.snapshotManager.ensureDir(templateHash);
                     const poolPaths = this.snapshotManager.getSnapshotPaths(templateHash);
                     let snapForApi = poolPaths.snapshotPath;
                     let memForApi = poolPaths.memFilePath;
@@ -482,7 +558,6 @@ export class FirecrackerSandboxDriver implements MicrovmDriver {
                                 });
                         }
                     }
-                    void poolDir;
                 } catch (snapshotErr) {
                     console.error(
                         `[Firecracker] 黄金快照制作失败（template=${templateHash}），`
@@ -556,6 +631,13 @@ export class FirecrackerSandboxDriver implements MicrovmDriver {
     /**
      * 停止 VM（关 vsock、SIGKILL guest）但保留运行目录与工作区磁盘，
      * 供调用方在 guest 完全静止后安全导出磁盘；随后必须调 terminate() 完整清理。
+     *
+     * ## 为什么要 pid 兜底
+     *
+     * `this.processes` 是进程内 Map，Harness 重启后为空。仅靠 Map 查句柄会在
+     * 重启后杀不掉任何进程，VM 变成吃内存的孤儿。因此这里额外维护一份
+     * `vmPid -> runDir` 映射，并落盘 pidfile（见 vm-orphan-reaper.ts），
+     * 使进程重启后仍可寻址并回收。
      */
     async stopVm(vmId: string): Promise<void> {
         const bridge = this.vsockBridges.get(vmId);
@@ -572,22 +654,66 @@ export class FirecrackerSandboxDriver implements MicrovmDriver {
             } catch {
                 // Already killed
             }
+        } else {
+            // 内存 Map 查不到（典型场景：Harness 重启后回收上一个进程的遗留 VM）。
+            // 改用 pid 兜底，否则这里会静默返回，VM 继续吃宿主内存。
+            const pid = this.pids.get(vmId);
+            if (pid !== undefined) {
+                this.pids.delete(vmId);
+                const binary = basename(this.binaryPath);
+                // 只杀"经 /proc 验活确为我们的 Firecracker"的 pid。
+                // 进程已不存在或 pid 已被系统复用为别的程序时，绝不能盲杀。
+                if (isFirecrackerProcess(pid, binary, this.procRoot)) {
+                    const signalled = killPid(pid);
+                    // 发出 SIGKILL ≠ 进程已死。必须 await 确认退出，否则 terminate
+                    // 会接着删目录，制造出一个不可寻址的孤儿 —— 正是要消灭的那类泄漏。
+                    const exited = signalled && await waitForExitAsync(pid);
+                    if (!exited) {
+                        throw new Error(
+                            `无法终止 Firecracker 进程 pid=${pid}（vmId=${vmId}）：`
+                            + "SIGKILL 后进程仍存活。拒绝在进程存活时继续，"
+                            + "避免删除运行目录后该进程变成不可寻址的孤儿、"
+                            + "持续占用宿主内存且容量准入不可见。",
+                        );
+                    }
+                }
+            }
         }
 
         // 等待 100ms 确保 guest 写盘完全停止
         await new Promise((r) => setTimeout(r, 100));
     }
 
+    /**
+     * 启动时回收孤儿 VM 进程。必须在创建任何新 VM 之前调用。
+     *
+     * 没有这一步的话，上一进程崩溃/被杀后留下的 Firecracker 会一直占着内存，
+     * 而容量准入看不见它们 → 超卖 → 别人的 VM 被 OOM。
+     */
+    reapOrphanVms(options: { readonly dryRun?: boolean } = {}): Promise<ReapOrphansReport> {
+        return reapOrphans(this.vmRuntimeRoot, {
+            binaryName: basename(this.binaryPath),
+            procRoot: this.procRoot,
+            ...(options.dryRun !== undefined ? { dryRun: options.dryRun } : {}),
+        });
+    }
+
     async terminate(vmId: string): Promise<void> {
-        // 幂等：若 stopVm 已执行，这里取不到 bridge/proc 会直接跳过
+        // 顺序至关重要：**先停进程，再删目录**。
+        // 反过来（先删目录）会让进程失去可寻址凭据，变成杀不掉的孤儿。
+        //
+        // stopVm() 抛错意味着进程仍存活（pid 兜底 kill 失败）。此时**必须中断**，
+        // 绝不能继续删目录——那正好制造出我们要消灭的那种不可寻址孤儿。
         await this.stopVm(vmId);
 
-        // 清理私有运行目录
+        // 进程已确认停止（或本就不存在），现在才安全清理目录。
+        // pidfile 位于运行目录内，dir.dispose() 会一并删除。
         const dir = this.runDirectories.get(vmId);
         if (dir) {
             await dir.dispose();
             this.runDirectories.delete(vmId);
         }
+        this.pids.delete(vmId);
         await this.runDirManager.dispose(vmId);
 
         // 释放 UID 与 CID
