@@ -133,6 +133,18 @@ PUT /actions {"action_type":"InstancePause"}
 结论：快照/恢复在官方二进制上**完全可用**，实测恢复 3 ms（设计目标 ~10 ms 以内）。  
 回归测试见 `tests/sandbox/microvm-snapshot-and-warm-pool.test.ts` 的「pause/resume 协议」用例，用真实 Unix socket 断言请求方法与路径，防止回退到已失效的 `InstancePause`。
 
+### 3.1.1 ⚠️ 多租户约束：快照加速必须搭配 jailer（2026-10-09 真机补充）
+
+非 jailer 模式下，`vm.snap` 会把黄金 VM 的宿主绝对块设备路径固化进快照。此前驱动
+只复制每 Run 的 `workspace.ext4`，但 `/snapshot/load` 并不会用该副本；10 台恢复 VM
+实际共用黄金 VM 的工作区磁盘，表现为跨租户串写、terminate 导出 0/10。
+
+jailer 模式下每个 VM 有独立 chroot 与 mount namespace，快照内固化的是
+`/workspace.ext4` 这类 chroot 内路径，因此每台 VM 仍能各自独立。
+
+驱动现在对“非 jailer + HARNESS_VM_SNAPSHOTS_ENABLED=true”直接 fail-closed，
+回归见 `tests/sandbox/microvm-snapshot-mode-guard.test.ts`。
+
 ### 3.2 ✅ jailer 模式：已真机验收通过（此前从未跑通过，含 3 个真实缺陷）
 
 拿到 root 后完成正向验收。**结论是：jailer 模式此前从未真正工作过**，暴露 3 个与真实 CLI 不匹配的缺陷。

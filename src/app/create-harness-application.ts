@@ -639,6 +639,13 @@ function createContainerSandboxRouter(
                     : { snapshotPoolDir: config.vmSnapshotPoolDir }),
             });
         }
+        if (config.sandboxProvider === "microvm") {
+            throw new Error(
+                "HARNESS_SANDBOX_PROVIDER=microvm 必须显式设置 "
+                + "HARNESS_MICROVM_DRIVER=firecracker；拒绝静默回退 MockMicrovmDriver"
+                + "（Mock 不提供硬件隔离，工具执行会被策略拒绝）。",
+            );
+        }
         return new MockMicrovmDriver();
     };
 

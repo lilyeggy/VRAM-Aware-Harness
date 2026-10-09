@@ -80,3 +80,17 @@ test("createHarnessApplication 用 Fake 外部依赖组装完整真实应用链"
 
     expect(composition.application.isStarted()).toBe(false);
 });
+
+
+test("HARNESS_SANDBOX_PROVIDER=microvm 未显式设置 driver 时必须 fail-closed", async () => {
+    const config = loadHarnessConfig({
+        VLLM_MODEL_ID:"fake-model",
+        ...tempWorkspaceEnv(),
+        HARNESS_DATABASE_PATH:":memory:",
+        HARNESS_PUMP_INTERVAL_MS:"60000",
+        HARNESS_SANDBOX_PROVIDER:"microvm",
+    });
+    await expect(createHarnessApplication(config)).rejects.toThrow(
+        /HARNESS_MICROVM_DRIVER=firecracker/,
+    );
+});

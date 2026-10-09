@@ -1,5 +1,7 @@
-import { accessSync, constants, existsSync, mkdirSync } from "node:fs";
-import { resolve, dirname, basename } from "node:path";
+import { accessSync, constants, existsSync, mkdirSync, rmSync } from "node:fs";
+import { resolve, dirname, basename, join } from "node:path";
+import { tmpdir } from "node:os";
+import { createHash } from "node:crypto";
 import { spawn, type ChildProcess } from "node:child_process";
 import * as http from "node:http";
 import type {
@@ -33,6 +35,8 @@ export interface FirecrackerDriverConfig {
     readonly workspaceDiskTemplatePath?: string;
     readonly kvmDevicePath?: string;
     readonly vmRuntimeRoot?: string;
+    /** 非 jailer 模式下 API/vsock Unix socket 的短路径根目录（SUN_LEN 限制）。 */
+    readonly socketRoot?: string;
     readonly vsockPort?: number;
     readonly useJailer?: boolean;
     /** /proc 根目录（测试可注入假 procfs） */
@@ -112,6 +116,7 @@ export class FirecrackerSandboxDriver implements MicrovmDriver {
     private readonly workspaceDiskTemplatePath?: string;
     private readonly kvmPath: string;
     private readonly vmRuntimeRoot: string;
+    private readonly socketRoot: string;
     private readonly vsockPort: number;
     private readonly useJailer: boolean;
     private readonly snapshotsEnabled: boolean;
@@ -158,6 +163,9 @@ export class FirecrackerSandboxDriver implements MicrovmDriver {
         this.vmRuntimeRoot = config.vmRuntimeRoot
             ?? process.env.HARNESS_VM_RUNTIME_ROOT
             ?? "/var/lib/harness/vm";
+        this.socketRoot = config.socketRoot
+            ?? process.env.HARNESS_VM_SOCKET_ROOT
+            ?? join(tmpdir(), "harness-vm-sockets");
         this.vsockPort = config.vsockPort ?? 5000;
         this.useJailer = config.useJailer ?? (process.env.HARNESS_USE_JAILER !== "false");
         this.snapshotsEnabled = config.snapshotsEnabled
@@ -177,6 +185,20 @@ export class FirecrackerSandboxDriver implements MicrovmDriver {
         this.snapshotGate = new KeyedSemaphore<string>(
             config.snapshotConcurrency ?? Number(process.env.HARNESS_VM_SNAPSHOT_CONCURRENCY ?? "1"),
         );
+
+        // 非 jailer 模式禁止启用快照：Firecracker 快照会把 block device 的
+        // path_on_host 原样固化进 vm.snap。非 jailer 下该路径是宿主上的
+        // 每 Run 绝对路径，后续恢复的 VM 无法各自替换成自己的运行目录，
+        // 最终会共用黄金 VM 的工作区磁盘，造成跨租户串写且 terminate 导出为空。
+        // jailer 模式下每个 VM 有独立 chroot/mount namespace，固化路径是
+        // /rootfs.ext4、/workspace.ext4，因此每台 VM 仍各自独立。
+        if (this.snapshotsEnabled && this.useJailer === false) {
+            throw new Error(
+                "非 jailer 模式不允许启用 microVM 快照加速：快照会固化宿主绝对磁盘路径，"
+                + "多台恢复 VM 将共享同一工作区磁盘（跨租户串写、产物无法导出）。"
+                + "请设置 HARNESS_USE_JAILER=true，或关闭 HARNESS_VM_SNAPSHOTS_ENABLED。",
+            );
+        }
     }
 
     getKernelPath(): string | undefined {
@@ -189,6 +211,50 @@ export class FirecrackerSandboxDriver implements MicrovmDriver {
 
     getWorkspaceDiskTemplatePath(): string | undefined {
         return this.workspaceDiskTemplatePath;
+    }
+
+    /**
+     * 非 jailer 模式下分配短路径 Unix socket。
+     *
+     * Unix domain socket 的 sun_path 只有 108 字节（含 NUL）。运行目录
+     * <vmRuntimeRoot>/<sandboxId>/ 在生产部署里很容易超过这个长度，导致
+     * Firecracker 启动即失败：Failed to bind and run the HTTP server:
+     * IO error: path must be shorter than SUN_LEN。这里把 socket 放到独立短根
+     * 目录，并用 sandboxId 的 SHA-256 前 16 位做子目录，既短又稳定。
+     */
+    private socketDirFor(sandboxId: string): string {
+        const short = createHash("sha256").update(sandboxId).digest("hex").slice(0, 16);
+        return resolve(this.socketRoot, short);
+    }
+
+    private allocateSocketPaths(sandboxId: string): {
+        readonly apiSocketPath: string;
+        readonly vsockUdsPath: string;
+    } {
+        const dir = this.socketDirFor(sandboxId);
+        mkdirSync(dir, { recursive: true, mode: 0o700 });
+        const apiSocketPath = join(dir, "firecracker.socket");
+        const vsockUdsPath = join(dir, "vsock.sock");
+        const maxBytes = 107;
+        const candidates = [["API socket", apiSocketPath], ["vsock UDS", vsockUdsPath]] as const;
+        for (const entry of candidates) {
+            const bytes = Buffer.byteLength(entry[1], "utf8");
+            if (bytes > maxBytes) {
+                throw new Error(
+                    "Firecracker " + entry[0] + " 路径过长（" + bytes + " 字节 > " + maxBytes + "）：" + entry[1]
+                    + "。Unix domain socket 受 SUN_LEN 限制；请将 HARNESS_VM_SOCKET_ROOT 设为更短的目录（例如 /tmp/harness-vm-sockets）。",
+                );
+            }
+        }
+        return { apiSocketPath, vsockUdsPath };
+    }
+
+    private removeSocketDir(sandboxId: string): void {
+        try {
+            rmSync(this.socketDirFor(sandboxId), { recursive: true, force: true });
+        } catch {
+            // best-effort：socket 清理失败不得掩盖 terminate 主流程。
+        }
     }
 
     /** 预热池/快照共用的模板指纹；镜像未配置时返回 null（调用方据此禁用加速）。 */
@@ -320,6 +386,7 @@ export class FirecrackerSandboxDriver implements MicrovmDriver {
         const memoryMb = options.memoryMb ?? DEFAULT_MEMORY_MIB;
 
         let proc: ChildProcess | undefined;
+        let childStderr = "";
         try {
             let apiSocketOnHost: string;
             let vsockUdsOnHost: string;
@@ -407,8 +474,9 @@ export class FirecrackerSandboxDriver implements MicrovmDriver {
                 await copyFileReflink(this.rootfsPath, dir.rootfsPath());
                 await copyFileReflink(workspaceTemplate, dir.workspaceDiskPath());
 
-                apiSocketOnHost = dir.socketPath();
-                vsockUdsOnHost = dir.vsockUdsPath();
+                const sockets = this.allocateSocketPaths(options.id);
+                apiSocketOnHost = sockets.apiSocketPath;
+                vsockUdsOnHost = sockets.vsockUdsPath;
                 workspaceDiskHostPath = dir.workspaceDiskPath();
 
                 kernelPathForApi = this.kernelPath;
@@ -422,6 +490,9 @@ export class FirecrackerSandboxDriver implements MicrovmDriver {
             }
 
             this.processes.set(options.id, proc);
+            proc.stderr?.on("data", (chunk: Buffer | string) => {
+                if (childStderr.length < 8192) childStderr += chunk.toString();
+            });
             proc.on("error", (err) => {
                 console.error(`[Firecracker] Process error for sandbox ${options.id}:`, err);
             });
@@ -441,10 +512,21 @@ export class FirecrackerSandboxDriver implements MicrovmDriver {
             const maxWaitMs = 1500;
             const start = Date.now();
             while (!existsSync(apiSocketOnHost) && Date.now() - start < maxWaitMs) {
+                if (proc.exitCode !== null || proc.signalCode !== null) break;
                 await new Promise((r) => setTimeout(r, 20));
             }
             if (!existsSync(apiSocketOnHost)) {
-                throw new Error(`Firecracker API Socket 未能在 ${maxWaitMs}ms 内就绪：${apiSocketOnHost}`);
+                const exited = proc.exitCode !== null || proc.signalCode !== null;
+                const status = exited
+                    ? "（进程已退出：code=" + String(proc.exitCode) + ", signal=" + String(proc.signalCode) + "）"
+                    : "（进程仍在运行，但未创建 socket）";
+                const stderrDetail = childStderr.trim().length > 0
+                    ? "；stderr: " + childStderr.trim()
+                    : "；stderr 为空";
+                throw new Error(
+                    "Firecracker API Socket 未能在 " + maxWaitMs + "ms 内就绪：" + apiSocketOnHost
+                    + status + stderrDetail,
+                );
             }
 
             // 7. Firecracker API 配置
@@ -763,6 +845,7 @@ export class FirecrackerSandboxDriver implements MicrovmDriver {
         }
         this.pids.delete(vmId);
         await this.runDirManager.dispose(vmId);
+        this.removeSocketDir(vmId);
 
         // 释放 UID 与 CID
         this.uidAllocator.release(vmId);

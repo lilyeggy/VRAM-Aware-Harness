@@ -249,6 +249,17 @@ async function main(): Promise<void> {
         );
     }
 
+    // ---- [6.5] 网络隔离：guest 内无网卡 ----
+    console.log("\n[6.5] 网络隔离：guest 内只有 loopback");
+    {
+        const net = await tenants[0]!.provider.execute(
+            tenants[0]!.sandboxId,
+            ["sh", "-c", "grep -c ':' /proc/net/dev"],
+        );
+        const count = net.stdout.trim();
+        check("guest 内只有 loopback 网络设备（无网卡）", count === "1", "设备数=" + count);
+    }
+
     // ---- [7] 反向隔离：VM 内存产物宿主不可见 ----
     console.log(`\n[6] VM 存活期宿主看不到 VM 内产物`);
     for (const t of tenants.slice(0, 3)) {
