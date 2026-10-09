@@ -30,6 +30,12 @@ export interface SandboxBrokerServerOptions {
 export class SandboxBrokerServer {
     private readonly server: Server;
     private readonly sockets = new Set<Socket>();
+    /**
+     * sandboxId -> 归属租户。create 时从 policy.tenantId 记录；execute/terminate
+     * 必须携带同一 tenantId，否则拒绝。它把“同一 Broker 服务多租户”从约定
+     * 变成协议级校验，防止一个租户的 Worker 拿 sandboxId 操作另一个租户的 VM。
+     */
+    private readonly tenantBySandbox = new Map<string, string>();
     private started = false;
 
     constructor(private readonly options: SandboxBrokerServerOptions) {
@@ -153,6 +159,7 @@ export class SandboxBrokerServer {
                 if (record === null) {
                     throw new Error("Broker created sandbox but record is missing: " + handle.id);
                 }
+                this.tenantBySandbox.set(handle.id, request.input.policy.tenantId);
                 const result: BrokerCreateResult = {
                     record,
                     handle: toPayload(handle),
@@ -160,14 +167,30 @@ export class SandboxBrokerServer {
                 return result;
             }
             case "execute":
+                this.assertTenant(request.sandboxId, request.tenantId);
                 return await this.options.provider.execute(
                     request.sandboxId,
                     request.command,
                     request.options,
                 );
             case "terminate":
+                this.assertTenant(request.sandboxId, request.tenantId);
                 await this.options.provider.terminate(request.sandboxId);
+                this.tenantBySandbox.delete(request.sandboxId);
                 return {};
+        }
+    }
+
+    private assertTenant(sandboxId: string, tenantId: string): void {
+        const owner = this.tenantBySandbox.get(sandboxId);
+        if (owner === undefined) {
+            throw new Error("Broker 不认识 sandbox：" + sandboxId);
+        }
+        if (owner !== tenantId) {
+            throw new Error(
+                "Broker 拒绝跨租户操作：sandbox " + sandboxId
+                + " 属于租户 " + owner + "，请求租户 " + tenantId,
+            );
         }
     }
 

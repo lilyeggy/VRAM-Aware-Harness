@@ -71,7 +71,9 @@ async function withBroker(
     fn: (context: {
         readonly client: BrokerSandboxProvider;
         readonly terminated: string[];
+        readonly makeClient: (tenantId: string) => BrokerSandboxProvider;
     }) => Promise<void>,
+    options: { readonly tenantId?: string } = {},
 ): Promise<void> {
     const dir = mkdtempSync(join(tmpdir(), "broker-test-"));
     const socketPath = join(dir, "broker.sock");
@@ -82,9 +84,14 @@ async function withBroker(
         readRecord: (sandboxId) => fake.records.get(sandboxId) ?? null,
     });
     await server.start();
-    const client = new BrokerSandboxProvider({ socketPath, requestTimeoutMs: 5000 });
+    const makeClient = (tenantId: string): BrokerSandboxProvider => new BrokerSandboxProvider({
+        socketPath,
+        requestTimeoutMs: 5000,
+        tenantId,
+    });
+    const client = makeClient(options.tenantId ?? "tenant-1");
     try {
-        await fn({ client, terminated: fake.terminated });
+        await fn({ client, terminated: fake.terminated, makeClient });
     } finally {
         await server.close();
         rmSync(dir, { recursive: true, force: true });
@@ -97,7 +104,7 @@ test("Broker 服务器只暴露 create/execute/terminate，客户端可完成一
             id: "sandbox-1",
             runId: "run-1",
             workspacePath: "/tmp/workspace-1",
-            policy: {} as never,
+            policy: { tenantId: "tenant-1" } as never,
         });
         expect(handle.id).toBe("sandbox-1");
         expect(handle.workspacePath).toBe("/tmp/workspace-1");
@@ -116,7 +123,26 @@ test("Broker 服务器只暴露 create/execute/terminate，客户端可完成一
 test("Broker 客户端把 Broker 错误转成 reject", async () => {
     await withBroker(async ({ client }) => {
         await expect(client.execute("missing-sandbox", ["echo", "hi"])).rejects.toThrow(
-            "unknown sandbox: missing-sandbox",
+            "Broker 不认识 sandbox：missing-sandbox",
+        );
+    });
+});
+
+test("Broker 拒绝跨租户 execute/terminate", async () => {
+    await withBroker(async ({ client, makeClient }) => {
+        await client.create({
+            id: "sandbox-cross",
+            runId: "run-cross",
+            workspacePath: "/tmp/workspace-cross",
+            policy: { tenantId: "tenant-1" } as never,
+        });
+
+        const otherTenant = makeClient("tenant-2");
+        await expect(otherTenant.execute("sandbox-cross", ["echo", "hi"])).rejects.toThrow(
+            "Broker 拒绝跨租户操作",
+        );
+        await expect(otherTenant.terminate("sandbox-cross")).rejects.toThrow(
+            "Broker 拒绝跨租户操作",
         );
     });
 });

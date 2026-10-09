@@ -42,6 +42,9 @@ import {
 import {
     CoalescingResourceObserver,
 } from "../resources/coalescing-resource-observer.ts";
+import {
+    ExternalModelServiceResourceObserver,
+} from "../resources/external-model-service-observer.ts";
 import type {
     AgentRuntime,
 } from "../runtime/agent-runtime.ts";
@@ -238,6 +241,15 @@ export async function createHarnessApplication(
             ? new BrokerSandboxProvider({
                 socketPath: config.sandboxBrokerSocketPath,
                 store: sandboxStore,
+                // Master 可能同时服务多个租户；terminate 时从 sandbox -> run
+                // 反查归属，Broker 再用它做跨租户校验。
+                resolveTenantId: (sandboxId) => {
+                    const record = sandboxStore.get(sandboxId);
+                    if (record === null) {
+                        return null;
+                    }
+                    return runStore.get(record.runId)?.tenantId ?? null;
+                },
             })
             : config.sandboxProvider === "container" || config.sandboxProvider === "microvm"
                 ? createContainerSandboxRouter(
@@ -334,15 +346,20 @@ export async function createHarnessApplication(
         config.sandboxProfile,
     );
     const resourceObserver = dependencies.resourceObserver
-        // 真实 vLLM 观测外包一层合并器：drain 扇出的 N 个并行准入评估共享
-        // 一次抓取，避免 N 倍 nvidia-smi/vLLM 探测，也保护 token 速率
-        // 计数器的采样间隔不被打散。注入式 observer（测试 fake）不包装，
-        // 保持每次 observe 都直达 fake 的旧语义。
-        ?? new CoalescingResourceObserver(new VllmResourceObserver({
-            metricsUrl:config.vllmMetricsUrl,
-            timeoutMs:config.resourceObservationTimeoutMs,
-            gpuIds:config.gpuIds,
-        }));
+        // 模型服务外置时，平台不再观测推理侧 GPU/KV cache：固定 NORMAL，
+        // 让 Run 准入不被本地 vLLM/nvidia-smi 阻塞。租户并发上限仍由
+        // TenantRunScheduler 独立执行。
+        ?? (config.modelServiceMode === "external"
+            ? new ExternalModelServiceResourceObserver()
+            // 真实 vLLM 观测外包一层合并器：drain 扇出的 N 个并行准入评估共享
+            // 一次抓取，避免 N 倍 nvidia-smi/vLLM 探测，也保护 token 速率
+            // 计数器的采样间隔不被打散。注入式 observer（测试 fake）不包装，
+            // 保持每次 observe 都直达 fake 的旧语义。
+            : new CoalescingResourceObserver(new VllmResourceObserver({
+                metricsUrl:config.vllmMetricsUrl,
+                timeoutMs:config.resourceObservationTimeoutMs,
+                gpuIds:config.gpuIds,
+            })));
     const runService = new RunService(
         runStore, runtime, undefined, runOutputStore,
         workspaceResultCoordinator,
@@ -479,11 +496,17 @@ export async function createHarnessApplication(
         toolExecutionStore,
     );
     // Separate observer instance: token-rate counters must not race admission probes.
-    const resourceMetrics = new ResourceMetricsSampler(dependencies.resourceObserver ?? new VllmResourceObserver({
-        metricsUrl: config.vllmMetricsUrl,
-        timeoutMs: config.resourceObservationTimeoutMs,
-        gpuIds: config.gpuIds,
-    }), { intervalMs: config.resourceMetricsIntervalMs });
+    const resourceMetrics = new ResourceMetricsSampler(
+        dependencies.resourceObserver
+            ?? (config.modelServiceMode === "external"
+                ? new ExternalModelServiceResourceObserver()
+                : new VllmResourceObserver({
+                    metricsUrl: config.vllmMetricsUrl,
+                    timeoutMs: config.resourceObservationTimeoutMs,
+                    gpuIds: config.gpuIds,
+                })),
+        { intervalMs: config.resourceMetricsIntervalMs },
+    );
     // 支柱 2：LLM 网关（仅当配置了后端时启用）。
     // - 双卡负载均衡：策略来自 config.llmGatewayStrategy（默认 round-robin）；
     // - 健康探测：周期回填 ModelRouter 健康状态；

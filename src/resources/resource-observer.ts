@@ -7,7 +7,8 @@
 export type ResourceObservationSource = 
     | "VLLM_METRICS"
     | "NVIDIA_SMI"
-    | "FAKE";
+    | "FAKE"
+    | "EXTERNAL_MODEL_SERVICE";
 
 // 当前资源情况
 export interface ResourceSnapshot {

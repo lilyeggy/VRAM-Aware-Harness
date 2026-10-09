@@ -630,3 +630,61 @@ bun run scripts/day7-http-smoke.ts
 > 这些 live-*.sh 是运维脚本，未纳入仓库；生产请按 `.env.example` 的
 > `HARNESS_SANDBOX_BROKER_SOCKET` 配置。
 
+
+
+## 8. 2026-10-09 补验：Broker 租户隔离 + 外部模型服务模式（非 jailer，broker 模式）
+
+### 8.1 目标
+
+- 修复方案 B 的两个 P0/P1 缺口：Broker 无租户归属校验、平台强依赖同机
+  vLLM `/metrics` 做资源准入。
+- 约束：不引入 root 依赖；Agent 仍无网络；模型服务仍在平台外。
+
+### 8.2 改动
+
+- **Broker 租户隔离**：`execute` / `terminate` 请求新增必填 `tenantId`；
+  Broker 在 `create` 时按 `input.policy.tenantId` 记录 sandbox 归属，后续
+  操作校验 owner，不匹配返回 `Broker 拒绝跨租户操作`，未知 sandbox 返回
+  `Broker 不认识 sandbox`。Worker 侧用当前 Run 的 `tenantId` 固定租户；
+  Master 侧在 `terminate` 时通过 `sandbox -> run` 反查租户。
+- **外部模型服务模式**：新增 `HARNESS_MODEL_SERVICE_MODE=external` 与
+  `ExternalModelServiceResourceObserver`，资源快照 `sources` 为
+  `["EXTERNAL_MODEL_SERVICE"]`，GPU/KV 字段为 `null`，并发计数为 0，
+  压力固定 `NORMAL`；平台不再要求同机 vLLM `/metrics` 或 `nvidia-smi`。
+  `local` 为默认值，行为不变。
+
+### 8.3 真机结果（172.17.43.193，非 jailer，broker 模式，external 模型服务）
+
+- 配置：`HARNESS_SANDBOX_PROVIDER=microvm`、
+  `HARNESS_SANDBOX_BROKER_SOCKET=/tmp/harness-sandbox-broker.sock`、
+  `HARNESS_WORKER_ISOLATION=process`、`HARNESS_MICROVM_DRIVER=firecracker`、
+  `HARNESS_USE_JAILER=false`、`HARNESS_VM_SNAPSHOTS_ENABLED=false`、
+  `HARNESS_MODEL_SERVICE_MODE=external`、`PI_PROVIDER=opencode-go`、
+  `VLLM_MODEL_ID=deepseek-v4.1-flash`。
+- Run `aaae57ad-3fc1-4ecd-b88e-46aa35db1850`：COMPLETED；
+  resource snapshot `sources=["EXTERNAL_MODEL_SERVICE"]`、压力 `NORMAL`；
+  policy decision `START / RESOURCE_NORMAL`；sandbox `TERMINATED`；
+  TOOL `bash uname -r` → `4.14.174`（guest 内核，宿主 6.8.0-136-generic）；
+  结束后无 Firecracker/worker 残留，vm-runtime 目录为空。
+- 结论：Broker 租户校验在真实 worker → Broker → microVM 链路上生效；
+  external 模式不再依赖同机推理侧指标，且没有给 Agent 增加网络权限。
+
+### 8.4 本地验证
+
+- `bun test ./tests`：480 pass / 7 skip / 0 fail。
+- `bun run typecheck`：仅既有 9 条基线错误，无新增。
+- 新增测试：`tests/sandbox/sandbox-broker.test.ts`（含跨租户拒绝）、
+  `tests/resources/external-model-service-observer.test.ts`、
+  `tests/app/harness-config.test.ts` 的 external 模式用例。
+
+### 8.5 复现
+
+```bash
+# broker（同 §7.4）
+bash scripts/live-broker.sh
+# master 使用 external 模型服务模式；live-master-external.sh 为运维脚本，未纳入仓库
+bash scripts/live-master-external.sh
+HARNESS_BASE_URL=http://127.0.0.1:3100 HARNESS_API_KEY=... \
+HARNESS_SMOKE_USER_INPUT="请使用 bash 工具执行 uname -r，并只回答输出。" \
+bun run scripts/day7-http-smoke.ts
+```

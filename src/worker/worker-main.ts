@@ -118,7 +118,12 @@ process.on("SIGTERM", () => void handleSignal("SIGTERM"));
 process.on("SIGINT", () => void handleSignal("SIGINT"));
 
 // 4. Runtime Setup Helper
-async function setupRuntime(config: WorkerRuntimeConfig, sandboxId?: string, thinkingLevel?: "off" | "minimal" | "low" | "medium" | "high") {
+async function setupRuntime(
+    config: WorkerRuntimeConfig,
+    sandboxId?: string,
+    thinkingLevel?: "off" | "minimal" | "low" | "medium" | "high",
+    tenantId?: string,
+) {
     let containerProvider: ContainerSandboxProvider | undefined;
     let brokerProvider: BrokerSandboxProvider | undefined;
 
@@ -150,6 +155,7 @@ async function setupRuntime(config: WorkerRuntimeConfig, sandboxId?: string, thi
     if (config.sandboxBrokerSocketPath !== undefined) {
         brokerProvider = new BrokerSandboxProvider({
             socketPath: config.sandboxBrokerSocketPath,
+            ...(tenantId === undefined ? {} : { tenantId }),
         });
     }
 
@@ -244,6 +250,7 @@ async function executeRunMessage(msg: RunRequestMessage): Promise<void> {
             config,
             msg.request.execution?.sandboxId,
             msg.request.run.thinkingLevel,
+            msg.request.run.tenantId,
         );
 
         // Gate 2: Check if interrupted during asynchronous setupRuntime.

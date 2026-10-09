@@ -21,6 +21,17 @@ export interface BrokerSandboxProviderOptions {
     /** Master 侧注入 SQLite store 以保留审计记录；Worker 侧不需要。 */
     readonly store?: SandboxStore;
     readonly requestTimeoutMs?: number;
+    /**
+     * 固定租户（Worker 侧）：每个 Run 的 Worker 只服务一个租户，直接把它作为
+     * execute/terminate 的请求租户。
+     */
+    readonly tenantId?: string;
+    /**
+     * 动态解析租户（Master 侧）：Master 可能为多个租户创建 sandbox，需要在
+     * terminate 时从持久化记录反查归属。返回 null 表示无法确定，调用方应拒绝
+     * 而不是猜测。
+     */
+    readonly resolveTenantId?: (sandboxId: string) => string | null;
 }
 
 /**
@@ -30,6 +41,9 @@ export interface BrokerSandboxProviderOptions {
  * create/execute/terminate 全部转发给特权 Broker。
  */
 export class BrokerSandboxProvider implements SandboxProvider, SandboxCommandExecutor {
+    /** sandboxId -> create 时已知的租户，避免每次 terminate 都回查 store。 */
+    private readonly tenantBySandbox = new Map<string, string>();
+
     constructor(private readonly options: BrokerSandboxProviderOptions) {}
 
     async create(input: {
@@ -43,16 +57,25 @@ export class BrokerSandboxProvider implements SandboxProvider, SandboxCommandExe
             op: "create",
             input,
         });
+        this.tenantBySandbox.set(result.record.id, input.policy.tenantId);
         this.options.store?.create(result.record);
         return toHandle(result.handle);
     }
 
     async terminate(sandboxId: string): Promise<void> {
+        const tenantId = this.resolveTenant(sandboxId);
+        if (tenantId === null) {
+            throw new Error(
+                "无法确定 sandbox " + sandboxId + " 的租户，拒绝 terminate（防止跨租户终止）",
+            );
+        }
         await this.request<Record<string, never>>({
             id: crypto.randomUUID(),
             op: "terminate",
             sandboxId,
+            tenantId,
         });
+        this.tenantBySandbox.delete(sandboxId);
         const store = this.options.store;
         if (store === undefined) {
             return;
@@ -72,10 +95,17 @@ export class BrokerSandboxProvider implements SandboxProvider, SandboxCommandExe
         command: readonly string[],
         options?: { readonly workdir?: string },
     ): Promise<{ exitCode: number; stdout: string; stderr: string }> {
+        const tenantId = this.resolveTenant(sandboxId);
+        if (tenantId === null) {
+            throw new Error(
+                "无法确定 sandbox " + sandboxId + " 的租户，拒绝 execute（防止跨租户执行）",
+            );
+        }
         const result = await this.request<{ exitCode: number; stdout: string; stderr: string }>({
             id: crypto.randomUUID(),
             op: "execute",
             sandboxId,
+            tenantId,
             command: [...command],
             ...(options === undefined ? {} : { options }),
         });
@@ -96,6 +126,13 @@ export class BrokerSandboxProvider implements SandboxProvider, SandboxCommandExe
 
     async close(): Promise<void> {
         // 每次请求独立连接，无需关闭长连接。
+    }
+
+    private resolveTenant(sandboxId: string): string | null {
+        return this.tenantBySandbox.get(sandboxId)
+            ?? this.options.tenantId
+            ?? this.options.resolveTenantId?.(sandboxId)
+            ?? null;
     }
 
     private async request<T>(request: BrokerRequest): Promise<T> {

@@ -85,6 +85,12 @@ export interface HarnessConfig {
     resourceMetricsIntervalMs:number;
     gpuIds:string[];
     resourceThresholds:ResourceThresholds;
+    /**
+     * 模型服务部署位置。local（默认）：模型服务与本平台共机，资源准入读取
+     * vLLM /metrics 与 nvidia-smi；external：模型服务由外部独立部署/运维，
+     * 平台不再观测推理侧 GPU/KV cache，资源压力固定为 NORMAL。
+     */
+    modelServiceMode:"local" | "external";
 
     maxActiveRuns:number;
     maxActiveRunsPerTenant:number;
@@ -344,6 +350,10 @@ export function loadHarnessConfig(
             busyWaitingRequests:nonNeg("HARNESS_BUSY_WAITING_REQUESTS", 1),
             criticalWaitingRequests:nonNeg("HARNESS_CRITICAL_WAITING_REQUESTS", 4),
         },
+        // 模型服务边界：external 时资源压力固定 NORMAL，不再依赖本地 GPU/KV cache。
+        modelServiceMode:environment.HARNESS_MODEL_SERVICE_MODE === "external"
+            ? "external"
+            : "local",
 
         maxActiveRuns,
         maxActiveRunsPerTenant,

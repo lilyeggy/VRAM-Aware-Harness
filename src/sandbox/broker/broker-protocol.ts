@@ -46,10 +46,18 @@ export type BrokerRequest =
         readonly id: string;
         readonly op: "execute";
         readonly sandboxId: string;
+        /** 请求方租户；Broker 用它做 sandbox 归属校验，防止跨租户执行。 */
+        readonly tenantId: string;
         readonly command: readonly string[];
         readonly options?: BrokerExecuteOptions;
     }
-    | { readonly id: string; readonly op: "terminate"; readonly sandboxId: string };
+    | {
+        readonly id: string;
+        readonly op: "terminate";
+        readonly sandboxId: string;
+        /** 请求方租户；Broker 用它做 sandbox 归属校验，防止跨租户终止。 */
+        readonly tenantId: string;
+    };
 
 export type BrokerResponse =
     | { readonly id: string; readonly ok: true; readonly result: unknown }
@@ -59,14 +67,14 @@ export function isBrokerRequest(value: unknown): value is BrokerRequest {
     if (typeof value !== "object" || value === null) {
         return false;
     }
-    const candidate = value as { id?: unknown; op?: unknown };
+    const candidate = value as { id?: unknown; op?: unknown; tenantId?: unknown };
     if (typeof candidate.id !== "string") {
         return false;
     }
-    return candidate.op === "ping"
-        || candidate.op === "create"
-        || candidate.op === "execute"
-        || candidate.op === "terminate";
+    if (candidate.op === "execute" || candidate.op === "terminate") {
+        return typeof candidate.tenantId === "string" && candidate.tenantId.length > 0;
+    }
+    return candidate.op === "ping" || candidate.op === "create";
 }
 
 export function isBrokerResponse(value: unknown): value is BrokerResponse {
