@@ -75,6 +75,7 @@ import {
     ManagedLocalSandboxProvider,
 } from "../sandbox/managed-local-sandbox.ts";
 import { ContainerSandboxProvider } from "../sandbox/container-sandbox-provider.ts";
+import { BrokerSandboxProvider } from "../sandbox/broker/broker-sandbox-provider.ts";
 import { deriveWarmPoolOwner } from "../sandbox/container-warm-pool.ts";
 import { RunService } from "../runs/run-service.ts";
 import { RunStore } from "../runs/runstore.ts";
@@ -225,19 +226,28 @@ export async function createHarnessApplication(
     //
     // 依赖注入的 provider（测试 fake）不参与此逻辑：回收只针对真实宿主进程，
     // 且必须在创建任何新 VM 之前完成，否则可能误杀自己刚起的 VM。
-    if (dependencies.sandboxProvider === undefined && config.sandboxProvider === "microvm") {
+    if (
+        dependencies.sandboxProvider === undefined
+        && config.sandboxProvider === "microvm"
+        && config.sandboxBrokerSocketPath === undefined
+    ) {
         await reapOrphanMicrovmsFromEnv();
     }
     const sandboxProvider = dependencies.sandboxProvider
-        ?? (config.sandboxProvider === "container" || config.sandboxProvider === "microvm"
-            ? createContainerSandboxRouter(
-                sandboxStore,
-                secretProvider,
-                config,
-            )
-            : new ManagedLocalSandboxProvider(sandboxStore, secretProvider, {
-                profile: config.sandboxProfile,
-            }));
+        ?? (config.sandboxBrokerSocketPath !== undefined
+            ? new BrokerSandboxProvider({
+                socketPath: config.sandboxBrokerSocketPath,
+                store: sandboxStore,
+            })
+            : config.sandboxProvider === "container" || config.sandboxProvider === "microvm"
+                ? createContainerSandboxRouter(
+                    sandboxStore,
+                    secretProvider,
+                    config,
+                )
+                : new ManagedLocalSandboxProvider(sandboxStore, secretProvider, {
+                    profile: config.sandboxProfile,
+                }));
     const toolGateway = new ToolGateway(
         toolExecutionStore,
         new PersistentToolPolicyGuard(effectivePolicyStore),
@@ -264,6 +274,7 @@ export async function createHarnessApplication(
                 workerScriptPath: config.workerScriptPath,
                 bunCommand: "bun",
                 cwd: process.cwd(),
+                inheritEnv: config.sandboxBrokerSocketPath === undefined,
                 interruptGraceMs: config.interruptGraceMs ?? 10_000,
                 workerHandshakeTimeoutMs: config.workerHandshakeTimeoutMs ?? 15_000,
                 workerConfig: {
@@ -275,6 +286,9 @@ export async function createHarnessApplication(
                     sandboxProvider: config.sandboxProvider,
                     sandboxProfile: config.sandboxProfile,
                     sandboxRuntime: config.sandboxRuntime,
+                    ...(config.sandboxBrokerSocketPath === undefined
+                        ? {}
+                        : { sandboxBrokerSocketPath: config.sandboxBrokerSocketPath }),
                     containerImage: config.containerImage,
                     containerUserId: config.containerUserId,
                     piCompaction: piCompactionConfig(config),

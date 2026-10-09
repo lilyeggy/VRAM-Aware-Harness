@@ -61,6 +61,8 @@ export interface WorkerRuntimeConfig {
     readonly sandboxProvider: "container" | "managed-local" | "microvm";
     readonly sandboxProfile: SandboxProfile;
     readonly sandboxRuntime: "runsc" | "runc" | "firecracker";
+    /** 方案 B：Worker 通过该 Unix socket 调用 Sandbox Broker 执行工具命令（而非自己持有 Firecracker）。 */
+    readonly sandboxBrokerSocketPath?: string;
     readonly containerImage: string;
     readonly containerUserId: number;
     readonly dockerCommand?: string;

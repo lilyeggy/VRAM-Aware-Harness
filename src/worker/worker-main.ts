@@ -9,6 +9,7 @@
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { PiAdapter } from "../runtime/pi-adapter.ts";
 import { ContainerSandboxProvider } from "../sandbox/container-sandbox-provider.ts";
+import { BrokerSandboxProvider } from "../sandbox/broker/broker-sandbox-provider.ts";
 import type { SandboxStore } from "../sandbox/sandbox-store.ts";
 import type { SandboxRecord, SecretProvider } from "../sandbox/sandbox-provider.ts";
 import {
@@ -119,6 +120,7 @@ process.on("SIGINT", () => void handleSignal("SIGINT"));
 // 4. Runtime Setup Helper
 async function setupRuntime(config: WorkerRuntimeConfig, sandboxId?: string, thinkingLevel?: "off" | "minimal" | "low" | "medium" | "high") {
     let containerProvider: ContainerSandboxProvider | undefined;
+    let brokerProvider: BrokerSandboxProvider | undefined;
 
     if (config.sandboxProvider === "container") {
         const sandboxStore = new EphemeralSandboxStore();
@@ -145,6 +147,12 @@ async function setupRuntime(config: WorkerRuntimeConfig, sandboxId?: string, thi
         }
     }
 
+    if (config.sandboxBrokerSocketPath !== undefined) {
+        brokerProvider = new BrokerSandboxProvider({
+            socketPath: config.sandboxBrokerSocketPath,
+        });
+    }
+
     const modelRuntime = await ModelRuntime.create({
         modelsPath: config.piModelsPath,
         ...(config.piAuthPath ? { authPath: config.piAuthPath } : {}),
@@ -165,10 +173,11 @@ async function setupRuntime(config: WorkerRuntimeConfig, sandboxId?: string, thi
             gateway: toolGateway,
             getLastEventSequence: (runId: string) => toolGateway.getLastEventSequence(runId),
             ...(containerProvider ? { sandboxExecutor: containerProvider } : {}),
+            ...(brokerProvider ? { sandboxExecutor: brokerProvider } : {}),
         },
     );
 
-    return { piAdapter, containerProvider };
+    return { piAdapter, containerProvider, brokerProvider };
 }
 
 // 5. IPC Message Handler
@@ -198,6 +207,9 @@ function defaultWorkerConfig(): WorkerRuntimeConfig {
         sandboxProvider: "container",
         sandboxProfile: "default",
         sandboxRuntime: "runsc",
+        ...(process.env.HARNESS_SANDBOX_BROKER_SOCKET === undefined
+            ? {}
+            : { sandboxBrokerSocketPath: process.env.HARNESS_SANDBOX_BROKER_SOCKET }),
         containerImage: DEFAULT_CONTAINER_IMAGE,
         containerUserId: DEFAULT_CONTAINER_USER_ID,
     };

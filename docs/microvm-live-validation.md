@@ -579,3 +579,54 @@ sudo -S env \
 > ⚠️ `jailer`（v1.10.1）与 `fc117`（v1.17.0）**版本不匹配**，jailer 会静默
 > 失败导致 API socket 永不出现（报 `Firecracker API Socket 未能在 1500ms 内就绪`）。
 > 必须用 `jailer117`。
+
+## 7. 2026-10-09 补验：方案 B Sandbox Broker 真机全链路（非 jailer，无快照）
+
+### 7.1 目标与边界
+
+- Agent 明确无网络：VM 内无网卡（`grep -c ':' /proc/net/dev` = 1，仅 loopback）。
+- 控制面与执行面分域：非特权 Master（调度/DB/策略/审计/LLM 网关）不再直接持有
+  Firecracker；特权最小 Broker 只暴露 create/execute/terminate；每个 Run 由独立
+  worker 进程经 Broker 调用 microVM。
+- 个人项目范围：模型服务外置为 opencode-go（Pi ModelRuntime 自动加
+  `x-opencode-session` / `x-opencode-client`），平台不内置模型路由；VRAM 感知
+  调度暂不进入方案 B 关键路径。
+
+### 7.2 架构
+
+Master（非特权） --Unix socket NDJSON--> Sandbox Broker（可访问 /dev/kvm +
+Firecracker） --jailer/非 jailer--> microVM
+
+Master 内 WorkerProcessAgentRuntime --spawn--> 每 Run Worker（env 白名单、只读
+rootfs、无 secrets） --BrokerSandboxProvider--> Broker
+
+### 7.3 真机结果（172.17.43.193，非 jailer，快照关闭）
+
+- 配置：`HARNESS_SANDBOX_PROVIDER=microvm`、
+  `HARNESS_SANDBOX_BROKER_SOCKET=/tmp/harness-sandbox-broker.sock`、
+  `HARNESS_WORKER_ISOLATION=process`、`HARNESS_MICROVM_DRIVER=firecracker`、
+  `HARNESS_USE_JAILER=false`、`HARNESS_VM_SNAPSHOTS_ENABLED=false`、
+  `PI_PROVIDER=opencode-go`、`VLLM_MODEL_ID=deepseek-v4.1-flash`。
+- Run `1956529a-3ca0-4347-9d62-5ff35f1f85f2`：COMPLETED，5543ms；
+  SANDBOX_ACQUIRED 1518ms；模型 opencode-go/deepseek-v4.1-flash；
+  TOOL_STARTED bash `uname -r` → TOOL_COMPLETED text `4.14.174\n`；
+  finalText `4.14.174`（guest 内核，宿主 6.8.0-136-generic）。
+- 结论：非特权 master 不直接持有 Firecracker；Broker 负责 create/execute/
+  terminate；worker 经 Broker 执行 bash；命令确实在 microVM 内执行。
+
+### 7.4 复现
+
+```bash
+# 启动 broker（需 fc117/vmlinux/rootfs/workspace-template）
+bash scripts/live-broker.sh
+# 启动 master（HARNESS_SANDBOX_BROKER_SOCKET 指向 broker）
+bash scripts/live-master.sh
+# smoke
+HARNESS_BASE_URL=http://127.0.0.1:3100 HARNESS_API_KEY=... \
+HARNESS_SMOKE_USER_INPUT="请使用 bash 工具执行 uname -r，并只回答输出。" \
+bun run scripts/day7-http-smoke.ts
+```
+
+> 这些 live-*.sh 是运维脚本，未纳入仓库；生产请按 `.env.example` 的
+> `HARNESS_SANDBOX_BROKER_SOCKET` 配置。
+

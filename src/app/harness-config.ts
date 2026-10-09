@@ -34,6 +34,8 @@ export interface HarnessConfig {
     sandboxProvider:"managed-local" | "container" | "microvm";
     sandboxProfile:SandboxProfile;
     sandboxRuntime:"runsc" | "runc" | "firecracker";
+    /** 方案 B：Sandbox Broker Unix socket 路径。设置后 Master/Worker 不直接持有 Firecracker，只经窄接口调用 Broker。 */
+    sandboxBrokerSocketPath?: string;
     microvmDriver?:"mock" | "e2b" | "firecracker";
     e2bApiKey?:string;
     firecrackerBinaryPath?:string;
@@ -249,6 +251,9 @@ export function loadHarnessConfig(
         sandboxProvider,
         sandboxProfile,
         sandboxRuntime,
+        ...(environment.HARNESS_SANDBOX_BROKER_SOCKET === undefined
+            ? {}
+            : { sandboxBrokerSocketPath: environment.HARNESS_SANDBOX_BROKER_SOCKET }),
         ...(microvmDriver !== undefined ? { microvmDriver } : {}),
         ...(e2bApiKey !== undefined ? { e2bApiKey } : {}),
         ...(firecrackerBinaryPath !== undefined ? { firecrackerBinaryPath } : {}),

@@ -52,6 +52,12 @@ export interface WorkerProcessRuntimeOptions {
     readonly bunCommand?: string;
     readonly cwd?: string;
     readonly extraEnv?: Record<string, string>;
+    /**
+     * 方案 B：是否继承宿主全量环境。默认 true（历史行为）；
+     * broker 模式下必须为 false——worker 只拿到 PATH/HOME/TMPDIR 等白名单，
+     * 杜绝 HARNESS_BOOTSTRAP_API_KEY 等宿主 secret 进入半可信 worker。
+     */
+    readonly inheritEnv?: boolean;
     readonly interruptGraceMs?: number;
     readonly workerHandshakeTimeoutMs?: number;
     readonly workerConfig?: WorkerRuntimeConfig;
@@ -70,6 +76,51 @@ export interface WorkerProcessRuntimeOptions {
         phase: "STARTED" | "ENDED",
         info: { toolName: string; toolCallId: string },
     ) => void;
+}
+
+const WORKER_ENV_ALLOWLIST = [
+    "HOME",
+    "TMPDIR",
+    "TMP",
+    "LANG",
+    "LC_ALL",
+    "LC_CTYPE",
+    "TZ",
+] as const;
+
+export function buildWorkerEnvironment(
+    runId: string,
+    options: {
+        readonly inheritEnv?: boolean;
+        readonly extraEnv?: Record<string, string>;
+        readonly path?: string;
+    },
+): Record<string, string> {
+    const environment: Record<string, string> = {};
+    if (options.inheritEnv === false) {
+        for (const key of WORKER_ENV_ALLOWLIST) {
+            const value = process.env[key];
+            if (value !== undefined) {
+                environment[key] = value;
+            }
+        }
+    } else {
+        for (const [key, value] of Object.entries(process.env)) {
+            if (value !== undefined) {
+                environment[key] = value;
+            }
+        }
+    }
+    if (options.path !== undefined) {
+        environment.PATH = options.path;
+    }
+    if (options.extraEnv !== undefined) {
+        for (const [key, value] of Object.entries(options.extraEnv)) {
+            environment[key] = value;
+        }
+    }
+    environment.HARNESS_RUN_ID = runId;
+    return environment;
 }
 
 interface ActiveWorker {
@@ -239,12 +290,11 @@ export class WorkerProcessAgentRuntime implements AgentRuntime {
                 stdin: "pipe",
                 stdout: "pipe",
                 stderr: "pipe",
-                env: {
-                    ...process.env,
-                    PATH: mergedPath,
-                    ...this.options.extraEnv,
-                    HARNESS_RUN_ID: runId,
-                },
+                env: buildWorkerEnvironment(runId, {
+                    inheritEnv: this.options.inheritEnv,
+                    extraEnv: this.options.extraEnv,
+                    path: mergedPath,
+                }),
             });
         } catch (spawnErr) {
             void triggerSandboxCleanup();
