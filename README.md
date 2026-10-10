@@ -103,4 +103,4 @@ src/
 bun test ./tests
 ```
 
-当前测试基线：`477 pass / 7 skip / 0 fail`。
+当前测试基线：`481 pass / 7 skip / 0 fail`。

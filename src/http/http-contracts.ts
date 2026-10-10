@@ -25,6 +25,7 @@ import type { RunOutputChunk } from "../runs/run-output-store.ts";
 import type { WorkspaceDiff } from "../workspaces/workspace-snapshot.ts";
 import type { RunArtifact } from "../workspaces/run-artifact-store.ts";
 import type { AccessAuditStore } from "../audit/access-audit-store.ts";
+import type { TenantBillingStore } from "../billing/tenant-billing.ts";
 import type { Conversation } from "../sessions/harness-session.ts";
 import type { ToolExecution } from "../tools/tool-execution.ts";
 export type UnknownEffectResolution = "NO_EFFECT" | "EFFECT_OCCURRED";
@@ -76,4 +77,6 @@ export interface HttpAccessControl {
     sessionOwner?(token: string): string | null;
     workspaceService: WorkspaceService;
     auditStore?: AccessAuditStore;
+    /** §9.7 v1.3 第 5 项：租户成本账单；未装配时 GET /billing 返回 501。 */
+    billingStore?: TenantBillingStore;
 }

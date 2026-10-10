@@ -10,6 +10,7 @@ import {
 import { HarnessHttpApi } from "../http/harness-http-api.ts";
 import { ApiCredentialStore } from "../auth/api-credential-store.ts";
 import { AccessAuditStore } from "../audit/access-audit-store.ts";
+import { TenantBillingStore } from "../billing/tenant-billing.ts";
 import { WorkspaceStore } from "../workspaces/workspace-store.ts";
 import { WorkspaceService } from "../workspaces/workspace-service.ts";
 import { RunWorkspaceResultCoordinator } from "../workspaces/run-workspace-result.ts";
@@ -131,6 +132,7 @@ export interface HarnessComposition {
     workspaceStore:WorkspaceStore;
     workspaceService:WorkspaceService;
     accessAuditStore:AccessAuditStore;
+    tenantBillingStore:TenantBillingStore;
     scheduler:TenantRunScheduler;
     queuePump:RunScheduler;
     runtime:AgentRuntime;
@@ -169,6 +171,7 @@ export async function createHarnessApplication(
     const sandboxStore = new SandboxStore(database);
     const credentialStore = new ApiCredentialStore(database);
     const accessAuditStore = new AccessAuditStore(database);
+    const tenantBillingStore = new TenantBillingStore(database);
     const workspaceStore = new WorkspaceStore(database);
     const workspaceService = new WorkspaceService(
         config.workspaceRoot,
@@ -522,6 +525,7 @@ export async function createHarnessApplication(
             revokeAllSessions: (userId) => credentialStore.revokeAllSessions(userId),
             workspaceService,
             auditStore: accessAuditStore,
+            billingStore: tenantBillingStore,
         },
         llmGateway,
         resourceMetrics,
@@ -555,6 +559,7 @@ export async function createHarnessApplication(
         workspaceStore,
         workspaceService,
         accessAuditStore,
+        tenantBillingStore,
         scheduler,
         queuePump,
         runtime,

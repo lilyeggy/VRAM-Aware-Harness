@@ -62,6 +62,15 @@ export async function handleSystemRoute(
                     }),
                 });
             }
+            case "billing": {
+                const principal = ctx.requirePrincipal(request, "billing:read");
+                if (ctx.accessControl?.billingStore === undefined) {
+                    throw new HttpError(501, "未配置租户账单服务");
+                }
+                return jsonResponse({
+                    billing: ctx.accessControl.billingStore.summarize(principal.tenantId),
+                });
+            }
         }
     }
 

@@ -3,6 +3,7 @@ import { HarnessHttpApi, type HarnessHttpApplication } from "../../src/http/harn
 import type { AgentRun } from "../../src/runs/agent-run.ts";
 import { openHarnessDatabase } from "../../src/storage/database.ts";
 import { AccessAuditStore } from "../../src/audit/access-audit-store.ts";
+import { TenantBillingStore } from "../../src/billing/tenant-billing.ts";
 
 const run: AgentRun = {
     id: "run-tenant-a", tenantId: "tenant-a", harnessSessionId: "session",
@@ -95,6 +96,57 @@ test("审计 API 按 Principal Tenant 收口，并要求 audits:read", async () 
         const body = await response.json() as { events: Array<{ tenantId: string }> };
         expect(body.events.some((event) => event.tenantId === "tenant-a")).toBe(true);
         expect(body.events.every((event) => event.tenantId === "tenant-a")).toBe(true);
+    } finally {
+        db.close();
+    }
+});
+
+
+test("账单 API 按 Principal Tenant 收口，并要求 billing:read", async () => {
+    const db = openHarnessDatabase(":memory:");
+    try {
+        db.query(`INSERT INTO agent_runs (
+            id, tenant_id, harness_session_id, status, user_input, workspace_path,
+            created_at, updated_at, started_at, finished_at, checkpoint_id,
+            failure_reason, run_policy_json, thinking_level
+        ) VALUES ('run-bill-a', 'tenant-a', 's', 'COMPLETED', 't', '/w', 'now', 'now', 'now', 'now', NULL, NULL, NULL, 'off')`).run();
+        db.query(`INSERT INTO agent_runs (
+            id, tenant_id, harness_session_id, status, user_input, workspace_path,
+            created_at, updated_at, started_at, finished_at, checkpoint_id,
+            failure_reason, run_policy_json, thinking_level
+        ) VALUES ('run-bill-b', 'tenant-b', 's', 'COMPLETED', 't', '/w', 'now', 'now', 'now', 'now', NULL, NULL, NULL, 'off')`).run();
+        const payloadA = JSON.stringify({
+            usage: { inputTokens: 1000, outputTokens: 0, totalTokens: 1000, cost: { total: 0.5 } },
+        });
+        const payloadB = JSON.stringify({
+            usage: { inputTokens: 100, outputTokens: 0, totalTokens: 100, cost: { total: 9.9 } },
+        });
+        db.query(`INSERT INTO run_events (event_id, run_id, sequence, type, timestamp, payload_version, payload_json, dedupe_key) VALUES ('event-bill-a', 'run-bill-a', 1, 'MODEL_COMPLETED', 'now', 1, $payload, 'd-bill-a')`).run({ payload: payloadA });
+        db.query(`INSERT INTO run_events (event_id, run_id, sequence, type, timestamp, payload_version, payload_json, dedupe_key) VALUES ('event-bill-b', 'run-bill-b', 1, 'MODEL_COMPLETED', 'now', 1, $payload, 'd-bill-b')`).run({ payload: payloadB });
+
+        const billingStore = new TenantBillingStore(db);
+        const application: HarnessHttpApplication = {
+            isStarted: () => true, submitRun: () => run, getRun: () => run, getRunsForTenant: () => [],
+            getRunEvents: () => [], getRunOutput: () => ({ chunks: [], finalText: "" }), getRunWorkspaceDiff: () => null,
+            getRunArtifacts: () => [], getRunArtifact: async () => null, getRunDecisions: () => [], getQueue: () => [],
+            observeResources: async () => ({ ok: false, observedAt: "now", attemptedSources: [], reason: "UNAVAILABLE", message: "x" }),
+            interruptRun: async () => run, resumeRun: () => run,
+        };
+        const api = new HarnessHttpApi(application, { get: () => null }, {
+            authenticate: () => ({ tenantId: "tenant-a", scopes: ["billing:read"] }),
+            workspaceService: {} as never, billingStore,
+        });
+        const response = await api.fetch(new Request("http://h/billing", { headers: { authorization: "Bearer key-a" } }));
+        expect(response.status).toBe(200);
+        const body = await response.json() as { billing: { tenantId: string; totals: { amount: number } } };
+        expect(body.billing.tenantId).toBe("tenant-a");
+        expect(body.billing.totals.amount).toBe(0.5);
+
+        const forbiddenApi = new HarnessHttpApi(application, { get: () => null }, {
+            authenticate: () => ({ tenantId: "tenant-a", scopes: [] }),
+            workspaceService: {} as never, billingStore,
+        });
+        expect((await forbiddenApi.fetch(new Request("http://h/billing", { headers: { authorization: "Bearer key-a" } }))).status).toBe(403);
     } finally {
         db.close();
     }

@@ -211,8 +211,8 @@ HTTP API ──> Master (调度/审计/策略/LLM网关)
 
 暂缓的增强（不在当前边界内）：
 
-- 已在 §9.7 v1.3 解冻并实现：Broker SO_PEERCRED、worker seccomp/Landlock/只读 rootfs、控制面 egress ACL、不可变审计存储；
-- 仍暂缓：租户成本账单（§9.7 v1.3 第 5 项）。
+- 已在 §9.7 v1.3 解冻并实现：Broker SO_PEERCRED、worker seccomp/Landlock/只读 rootfs、控制面 egress ACL、不可变审计存储、租户成本账单；
+- 五项均已实现（真机证据见 §9.7）。
 
 ### 9.6 边界冻结与变更流程
 
@@ -242,4 +242,5 @@ HTTP API ──> Master (调度/审计/策略/LLM网关)
   - 真机 172.17.43.193 验证：`scripts/p0-e2e-smoke.ts` 通过 `P0_E2E_SMOKE_OK label=59e3ed52`（serial maxActive=1、concurrent maxActive=2 overlap=true、跨租户 404）；Worker 单元 `systemctl show` 显示 `IPAddressDeny=::/0 0.0.0.0/0`、`IPAddressAllow=172.64.0.0/13 127.0.0.0/8`、`RestrictAddressFamilies=AF_INET AF_UNIX`、UID/GID=998；同 ACL 的探针单元连接 `opencode.ai:443` 成功，连接 `1.1.1.1:443` 超时（被 ACL 丢弃）。
   - 4) 不可变审计存储：已实现。`src/storage/migrations.ts` 新增 v2 `immutable_audit_chain`：给 `access_audit_events` 增加 `prev_hash`/`hash` 列，并创建 `BEFORE UPDATE`/`BEFORE DELETE` 触发器（`RAISE(ABORT, 'access_audit_events 是只追加审计存储，禁止 UPDATE/DELETE')`）。`src/audit/access-audit-store.ts` 写入时计算 SHA-256 hash 链（`prev_hash` 取上一行 `hash`，链首为 `GENESIS_HASH = "0".repeat(64)`），新增 `verifyChain()` 返回 `{ok,checked,legacy,brokenAt?,reason?}`；旧库中 hash 为 NULL 的历史行作为 pre-chain legacy 跳过，链开始后出现 NULL 或 `prev_hash`/`hash` 不匹配即失败。`tests/audit/access-audit-store.test.ts` 新增 3 用例覆盖只追加、内容篡改检测、删除中间行检测；`scripts/audit-chain-smoke.ts` 支持内存自检与 `--database <path>` 校验真实库。
   - 真机 172.17.43.193 验证：master 重启后 migration v2 生效；`scripts/p0-e2e-smoke.ts` 通过 `P0_E2E_SMOKE_OK label=f6a94cd4`（serial maxActive=1、concurrent maxActive=2 overlap=true、跨租户 404）。`bun run scripts/audit-chain-smoke.ts` 输出 `AUDIT_CHAIN_SMOKE_OK`（updateRejected=true、deleteRejected=true、tamperDetected=true）；对 live `data/live-full-flow/harness.sqlite` 运行 `bun run scripts/audit-chain-smoke.ts --database data/live-full-flow/harness.sqlite` 输出 `{"ok":true,"checked":95,"legacy":1591}` 与 `AUDIT_CHAIN_VERIFY_OK`。直连 live 库探针确认触发器 `access_audit_events_no_update`/`access_audit_events_no_delete` 存在，`UPDATE`/`DELETE` 分别被拒绝为 `access_audit_events 是只追加审计存储，禁止 UPDATE` / `...禁止 DELETE`。
-  - 5) 租户成本账单：待实施。
+  - 5) 租户成本账单：已实现。新增 `src/billing/tenant-billing.ts`：`TenantBillingStore.summarize(tenantId)` 只读聚合 `run_events`（`MODEL_COMPLETED` 的 `usage.inputTokens`/`outputTokens`/`totalTokens`/`cost.total`）、`sandboxes`（`TERMINATED`/`LOST`/`FAILED` 的 `julianday` 时长）与 `tool_executions`（`SUCCEEDED`/`FAILED` 计数），默认金额等于 Provider 上报成本，不凭空定价；平台可用 `HARNESS_BILLING_CURRENCY`、`HARNESS_BILLING_MODEL_INPUT_PER_MTOK`、`HARNESS_BILLING_MODEL_OUTPUT_PER_MTOK`、`HARNESS_BILLING_SANDBOX_SECOND`、`HARNESS_BILLING_TOOL_CALL` 叠加 token/沙箱秒/工具调用费用。`GET /billing` 要求 `billing:read`，按 Principal Tenant 收口，未装配时返回 501。`tests/billing/tenant-billing.test.ts` 覆盖租户隔离、金额、token 单价、空租户与非法环境变量；`tests/http/tenant-boundary.test.ts` 覆盖 `GET /billing` 的租户收口与 scope 拒绝；`scripts/tenant-billing-smoke.ts` 支持内存自检与 `--database <path> [--tenant <id>]` 校验真实库。
+  - 真机 172.17.43.193 验证：master 重启 pid 2202461；`bun run scripts/tenant-billing-smoke.ts` 输出 `TENANT_BILLING_SMOKE_OK`；`bun run scripts/tenant-billing-smoke.ts --database data/live-full-flow/harness.sqlite` 输出前 5 个租户账单（providerCost 0.00036~0.00068、sandboxSeconds 8.635~287.65、toolCalls 2）与 `TENANT_BILLING_VERIFY_OK`；`curl -H "Authorization: Bearer live-flow-key-2026" http://127.0.0.1:3100/billing` 返回 200 与 `tenantId=bootstrap` 账单；`scripts/p0-e2e-smoke.ts` 通过 `P0_E2E_SMOKE_OK label=00453468`（serial maxActive=1、concurrent maxActive=2 overlap=true、跨租户 404）。
