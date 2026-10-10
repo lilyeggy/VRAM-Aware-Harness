@@ -39,6 +39,37 @@ test("loadHarnessConfig 提供本地安全默认值并派生 metrics URL", () =>
     ]);
 });
 
+test("loadHarnessConfig 优先使用 PI_MODEL_ID，未设置时回退 VLLM_MODEL_ID", () => {
+    const preferred = loadHarnessConfig({
+        PI_MODEL_ID:"external-model",
+        VLLM_MODEL_ID:"legacy-model",
+    }, "/tmp/harness-project");
+    expect(preferred.piModelId).toBe("external-model");
+
+    const legacy = loadHarnessConfig({
+        VLLM_MODEL_ID:"legacy-model",
+    }, "/tmp/harness-project");
+    expect(legacy.piModelId).toBe("legacy-model");
+});
+
+test("HARNESS_ENV=production 强制 jailer + microvm + broker", () => {
+    expect(() => loadHarnessConfig({
+        PI_MODEL_ID:"m",
+        HARNESS_ENV:"production",
+    })).toThrow("必须设置 HARNESS_USE_JAILER=true");
+    expect(() => loadHarnessConfig({
+        PI_MODEL_ID:"m",
+        HARNESS_ENV:"production",
+        HARNESS_USE_JAILER:"true",
+    })).toThrow("必须使用 HARNESS_SANDBOX_PROVIDER=microvm");
+    expect(() => loadHarnessConfig({
+        PI_MODEL_ID:"m",
+        HARNESS_ENV:"production",
+        HARNESS_USE_JAILER:"true",
+        HARNESS_SANDBOX_PROVIDER:"microvm",
+    })).toThrow("必须设置 HARNESS_SANDBOX_BROKER_SOCKET");
+});
+
 test("loadHarnessConfig 解析显式环境变量", () => {
     const config = loadHarnessConfig({
         VLLM_MODEL_ID:"qwen3.5-9b",

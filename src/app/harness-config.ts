@@ -170,10 +170,7 @@ export function loadHarnessConfig(
     environment:HarnessEnvironment = process.env,
     cwd = process.cwd(),
 ):HarnessConfig {
-    const piModelId = requiredString(
-        environment,
-        "VLLM_MODEL_ID",
-    );
+    const piModelId = environment.PI_MODEL_ID?.trim() || requiredString(environment, "VLLM_MODEL_ID");
     const posInt = (name: string, fallback: number): number =>
         positiveInteger(environment, name, fallback);
     const nonNeg = (name: string, fallback: number): number =>
@@ -220,6 +217,18 @@ export function loadHarnessConfig(
     }
     if (sandboxProfile === "strict" && sandboxRuntime !== "firecracker") {
         throw new Error(`${sandboxProfile} sandbox profile 必须使用 firecracker runtime`);
+    }
+
+    if (environment.HARNESS_ENV === "production") {
+        if (environment.HARNESS_USE_JAILER !== "true") {
+            throw new Error("生产环境必须设置 HARNESS_USE_JAILER=true，microVM 才能启用 jailer 隔离");
+        }
+        if (sandboxProvider !== "microvm") {
+            throw new Error("生产环境必须使用 HARNESS_SANDBOX_PROVIDER=microvm");
+        }
+        if (environment.HARNESS_SANDBOX_BROKER_SOCKET === undefined) {
+            throw new Error("生产环境必须设置 HARNESS_SANDBOX_BROKER_SOCKET，通过 Sandbox Broker 执行");
+        }
     }
 
     const microvmDriver = environment.HARNESS_MICROVM_DRIVER as ("mock" | "e2b" | "firecracker" | undefined);
