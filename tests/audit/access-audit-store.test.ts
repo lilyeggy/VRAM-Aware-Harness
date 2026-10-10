@@ -78,3 +78,78 @@ test("D4：审计查询支持 limit/offset 分页", () => {
         db.close();
     }
 });
+
+test("§9.7 v1.3：审计存储只追加，UPDATE/DELETE 被触发器拒绝", () => {
+    const db = openHarnessDatabase(":memory:");
+    try {
+        const store = new AccessAuditStore(db);
+        store.record({
+            action: "tasks:read", outcome: "ALLOW",
+            tenantId: "tenant-immutable", resourceType: "HTTP_REQUEST",
+            resourceId: null, reason: "scope_granted",
+        });
+
+        expect(() => db.exec(
+            `UPDATE access_audit_events SET reason = 'tampered'`,
+        )).toThrow(/只追加审计存储/);
+        expect(() => db.exec(
+            `DELETE FROM access_audit_events`,
+        )).toThrow(/只追加审计存储/);
+        expect(store.verifyChain()).toEqual({ ok: true, checked: 1, legacy: 0 });
+    } finally {
+        db.close();
+    }
+});
+
+test("§9.7 v1.3：hash 链可检测绕过触发器的内容篡改", () => {
+    const db = openHarnessDatabase(":memory:");
+    try {
+        const store = new AccessAuditStore(db);
+        store.record({
+            action: "tasks:read", outcome: "ALLOW",
+            tenantId: "tenant-chain", resourceType: "HTTP_REQUEST",
+            resourceId: null, reason: "scope_granted",
+        });
+        store.record({
+            action: "tasks:write", outcome: "DENY",
+            tenantId: "tenant-chain", resourceType: "HTTP_REQUEST",
+            resourceId: null, reason: "missing_scope",
+        });
+        expect(store.verifyChain().ok).toBe(true);
+
+        // 攻击者绕过触发器直接改库：hash 链仍应发现内容被篡改。
+        db.exec(`DROP TRIGGER access_audit_events_no_update`);
+        db.exec(`UPDATE access_audit_events SET reason = 'tampered' WHERE rowid = 1`);
+
+        const result = store.verifyChain();
+        expect(result.ok).toBe(false);
+        expect(result.brokenAt).toBeDefined();
+        expect(result.reason).toBe("hash 不匹配");
+    } finally {
+        db.close();
+    }
+});
+
+test("§9.7 v1.3：hash 链可检测删除中间审计行", () => {
+    const db = openHarnessDatabase(":memory:");
+    try {
+        const store = new AccessAuditStore(db);
+        for (let i = 0; i < 3; i += 1) {
+            store.record({
+                action: `action-${i}`, outcome: "ALLOW",
+                tenantId: "tenant-delete", resourceType: "HTTP_REQUEST",
+                resourceId: null, reason: "scope_granted",
+            });
+        }
+        expect(store.verifyChain().ok).toBe(true);
+
+        db.exec(`DROP TRIGGER access_audit_events_no_delete`);
+        db.exec(`DELETE FROM access_audit_events WHERE rowid = 2`);
+
+        const result = store.verifyChain();
+        expect(result.ok).toBe(false);
+        expect(result.reason).toContain("prev_hash 不匹配");
+    } finally {
+        db.close();
+    }
+});

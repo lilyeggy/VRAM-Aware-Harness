@@ -222,6 +222,13 @@ WantedBy=multi-user.target
 - Worker 还启用 seccomp 白名单与 Landlock：`SystemCallFilter=@system-service` 并显式放行 `landlock_create_ruleset` / `landlock_add_rule` / `landlock_restrict_self`，`SystemCallErrorNumber=EPERM`；Worker 进程内以 `HARNESS_WORKER_LANDLOCK=required` 应用 Landlock，失败即退出 78（fail-closed）。
 - Worker 只读宿主、只写 `/var/lib/harness-worker`、`/tmp`、`/run/harness`（Broker socket）与 `/dev/null` 等设备文件；模型凭据只存在于 `/var/lib/harness-worker`。
 - 控制面 egress ACL（§9.7 v1.3 第 3 项）：Broker 单元 `IPAddressDeny=any`；Master 单元 `IPAddressDeny=any` + `IPAddressAllow=127.0.0.0/8`；Worker 默认只允许 loopback，访问外部模型服务时通过 `WORKER_EGRESS_ALLOW` 放行模型服务 CIDR（如 opencode.ai 的 Cloudflare 段 `172.64.0.0/13`）。Worker 的 `RestrictAddressFamilies=AF_UNIX AF_INET`，不创建 IPv6 套接字；未配置 `WORKER_EGRESS_ALLOW` 时 Worker 无法访问外部模型服务，属 fail-closed。
+- 不可变审计存储（§9.7 v1.3 第 4 项）：`access_audit_events` 采用只追加 + SHA-256 hash 链；migration v2 增加 `prev_hash`/`hash` 列与 `BEFORE UPDATE`/`BEFORE DELETE` 触发器，正常路径无法改写或删除审计事实；`AccessAuditStore.verifyChain()` 能检测绕过触发器的内容篡改或中间行删除。验证命令：
+  ```bash
+  cd /srv/VRAM-Aware-Harness
+  bun run scripts/audit-chain-smoke.ts
+  bun run scripts/audit-chain-smoke.ts --database /srv/VRAM-Aware-Harness/data/live-full-flow/harness.sqlite
+  ```
+  期望 `AUDIT_CHAIN_SMOKE_OK` 与 `AUDIT_CHAIN_VERIFY_OK`。
 - 验证：Run 执行期间 `systemctl show 'harness-worker-<runId>.service' -p SystemCallFilter -p ProtectSystem -p ReadWritePaths -p IPAddressDeny -p IPAddressAllow` 应看到上述属性；Worker stderr 会打印 `[worker] landlock=on abi=<n>`。
 
 ## 7. 启动与验收
@@ -263,5 +270,5 @@ systemctl show harness-master -p IPAddressDeny -p IPAddressAllow
 - Broker 只暴露 `create/execute/terminate`；control token 只存在于 root 可读文件与 Master 进程，Worker 只拿自己 sandbox 的 capability token；`HARNESS_SANDBOX_BROKER_MASTER_UID` / `HARNESS_SANDBOX_BROKER_WORKER_UID` 再把操作绑定到进程 UID。
 - Master 应只监听内网/本机，前置反向代理时自行加 TLS 与访问控制；平台只做 API Key/租户级授权。
 - 快照池、VM runtime、workspaces 都属于 Broker/Master 的本地数据目录；不要手工修改正在使用的磁盘。
-- 已实现：Broker SO_PEERCRED（v1.3 第 1 项）、Worker seccomp/Landlock/只读 rootfs（v1.3 第 2 项）与控制面 egress ACL（v1.3 第 3 项，见 `docs/platform-boundary.md §9.7`）。
-- 当前明确暂缓：不可变审计存储、租户成本账单（v1.3 第 4-5 项）。
+- 已实现：Broker SO_PEERCRED（v1.3 第 1 项）、Worker seccomp/Landlock/只读 rootfs（v1.3 第 2 项）、控制面 egress ACL（v1.3 第 3 项）与不可变审计存储（v1.3 第 4 项，见 `docs/platform-boundary.md §9.7`）。
+- 当前明确暂缓：租户成本账单（v1.3 第 5 项）。
