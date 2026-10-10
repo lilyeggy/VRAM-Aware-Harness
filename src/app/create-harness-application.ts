@@ -241,6 +241,9 @@ export async function createHarnessApplication(
             ? new BrokerSandboxProvider({
                 socketPath: config.sandboxBrokerSocketPath,
                 store: sandboxStore,
+                ...(config.sandboxBrokerControlToken === undefined
+                    ? {}
+                    : { controlToken: config.sandboxBrokerControlToken }),
                 // Master 可能同时服务多个租户；terminate 时从 sandbox -> run
                 // 反查归属，Broker 再用它做跨租户校验。
                 resolveTenantId: (sandboxId) => {
@@ -281,20 +284,23 @@ export async function createHarnessApplication(
     };
 
     const baseRuntime = dependencies.runtime
-        ?? (config.workerIsolation === "process"
+        ?? (config.workerIsolation !== "in-process"
             ? new WorkerProcessAgentRuntime({
                 workerScriptPath: config.workerScriptPath,
                 bunCommand: "bun",
                 cwd: process.cwd(),
-                inheritEnv: config.sandboxBrokerSocketPath === undefined,
+                inheritEnv: config.workerIsolation !== "systemd" && config.sandboxBrokerSocketPath === undefined,
                 interruptGraceMs: config.interruptGraceMs ?? 10_000,
                 workerHandshakeTimeoutMs: config.workerHandshakeTimeoutMs ?? 15_000,
+                launch: config.workerIsolation === "systemd" ? "systemd" : "spawn",
+                ...(config.workerSystemdLauncherPath === undefined ? {} : { systemdLauncherPath: config.workerSystemdLauncherPath }),
+                ...(config.workerSystemdSudoPath === undefined ? {} : { systemdSudoPath: config.workerSystemdSudoPath }),
                 workerConfig: {
                     piProvider: config.piProvider,
                     piModelId: config.piModelId,
                     piTools: config.piTools,
-                    piModelsPath: config.piModelsPath,
-                    piAuthPath: config.piAuthPath,
+                    piModelsPath: config.workerPiModelsPath ?? config.piModelsPath,
+                    piAuthPath: config.workerPiAuthPath ?? config.piAuthPath,
                     sandboxProvider: config.sandboxProvider,
                     sandboxProfile: config.sandboxProfile,
                     sandboxRuntime: config.sandboxRuntime,

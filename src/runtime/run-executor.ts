@@ -209,6 +209,9 @@ export class RunExecutor implements AgentRuntime {
                 attemptId: attempt.id,
                 policySnapshotId: snapshot.id,
                 sandboxId: handle.id,
+                ...(handle.capabilityToken === undefined
+                    ? {}
+                    : { sandboxToken: handle.capabilityToken }),
                 sandboxEnforcement: handle.enforcement,
                 sandboxMountRoot: handle.mountRoot,
                 sandboxWorkdir: handle.containerWorkdir,

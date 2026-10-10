@@ -66,6 +66,11 @@ export interface RuntimeExecutionContext {
     readonly attemptId: string;
     readonly policySnapshotId: string;
     readonly sandboxId: string;
+    /**
+     * 方案 B capability token：Worker 用它向 Broker 证明自己有权操作该 sandbox。
+     * 只读、仅本 Run 有效；Master 侧不把它持久化到事件/日志。
+     */
+    readonly sandboxToken?: string;
     readonly sandboxEnforcement: SandboxEnforcementCapabilities;
     /**
      * 容器内 /workspace 对应的宿主目录。工具定义必须以它为前缀把宿主路径

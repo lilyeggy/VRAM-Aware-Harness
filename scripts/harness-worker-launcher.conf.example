@@ -1,0 +1,14 @@
+# /etc/harness/worker-launcher.conf
+# root:root 0644；由 /usr/local/sbin/harness-worker-run 读取。
+WORKER_USER=harness-worker
+WORKER_GROUP=harness-worker
+WORKER_CWD=/home/cxr/agent-harness-mt
+WORKER_BUN=/usr/local/bin/bun
+WORKER_SCRIPT=/home/cxr/agent-harness-mt/src/worker/worker-main.ts
+WORKER_PATH=/usr/local/bin:/usr/bin:/bin
+WORKER_HOME=/var/lib/harness-worker
+WORKER_MEMORY_MAX=2G
+WORKER_CPU_QUOTA=200%
+WORKER_TASKS_MAX=256
+WORKER_RW_PATHS=/var/lib/harness-worker
+UNIT_PREFIX=harness-worker

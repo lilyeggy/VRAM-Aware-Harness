@@ -38,6 +38,7 @@ console.log = (...args: unknown[]) => console.error(...args);
 console.info = (...args: unknown[]) => console.error(...args);
 console.debug = (...args: unknown[]) => console.error(...args);
 console.warn = (...args: unknown[]) => console.error(...args);
+console.error(`[worker] uid=${process.getuid?.() ?? -1} gid=${process.getgid?.() ?? -1} pid=${process.pid}`);
 
 function sendToMaster(msg: WorkerToMasterMessage): Promise<void> {
     return new Promise<void>((resolve) => {
@@ -123,6 +124,7 @@ async function setupRuntime(
     sandboxId?: string,
     thinkingLevel?: "off" | "minimal" | "low" | "medium" | "high",
     tenantId?: string,
+    capabilityToken?: string,
 ) {
     let containerProvider: ContainerSandboxProvider | undefined;
     let brokerProvider: BrokerSandboxProvider | undefined;
@@ -156,6 +158,7 @@ async function setupRuntime(
         brokerProvider = new BrokerSandboxProvider({
             socketPath: config.sandboxBrokerSocketPath,
             ...(tenantId === undefined ? {} : { tenantId }),
+            ...(capabilityToken === undefined ? {} : { capabilityToken }),
         });
     }
 
@@ -251,6 +254,7 @@ async function executeRunMessage(msg: RunRequestMessage): Promise<void> {
             msg.request.execution?.sandboxId,
             msg.request.run.thinkingLevel,
             msg.request.run.tenantId,
+            msg.request.execution?.sandboxToken,
         );
 
         // Gate 2: Check if interrupted during asynchronous setupRuntime.

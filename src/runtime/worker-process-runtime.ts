@@ -60,6 +60,11 @@ export interface WorkerProcessRuntimeOptions {
     readonly inheritEnv?: boolean;
     readonly interruptGraceMs?: number;
     readonly workerHandshakeTimeoutMs?: number;
+    /** 进程启动方式：spawn 直接子进程；systemd 经特权窄 helper 起专用 UID/cgroup。 */
+    readonly launch?: "spawn" | "systemd";
+    readonly systemdLauncherPath?: string;
+    readonly systemdSudoPath?: string;
+    readonly systemdUnitPrefix?: string;
     readonly workerConfig?: WorkerRuntimeConfig;
     readonly dockerCommand?: string;
     readonly orphanSandboxCleaner?: (sandboxId: string) => Promise<void>;
@@ -126,6 +131,7 @@ export function buildWorkerEnvironment(
 interface ActiveWorker {
     readonly runId: string;
     readonly sandboxId?: string;
+    readonly systemdUnit?: string;
     readonly child: ReturnType<typeof Bun.spawn>;
     readonly completionPromise: Promise<void>;
     send(msg: MasterToWorkerMessage): void;
@@ -204,6 +210,9 @@ export class WorkerProcessAgentRuntime implements AgentRuntime {
                 try {
                     active.child.kill("SIGKILL");
                 } catch {}
+                if (active.systemdUnit !== undefined) {
+                    this.stopSystemdUnit(active.systemdUnit);
+                }
             }
         }
     }
@@ -224,6 +233,9 @@ export class WorkerProcessAgentRuntime implements AgentRuntime {
             active.child.kill("SIGKILL");
         } catch (err) {
             console.warn(`[WorkerProcessRuntime] SIGKILL failed for run ${runId}:`, err);
+        }
+        if (active.systemdUnit !== undefined) {
+            this.stopSystemdUnit(active.systemdUnit);
         }
 
         await settlesWithin(
@@ -277,6 +289,10 @@ export class WorkerProcessAgentRuntime implements AgentRuntime {
             return cleanupPromise;
         };
 
+        const systemdUnit = this.options.launch === "systemd"
+            ? `${this.options.systemdUnitPrefix ?? "harness-worker"}-${runId}`
+            : null;
+
         let child: ReturnType<typeof Bun.spawn>;
         try {
             const bunBinDir = process.execPath ? dirname(process.execPath) : "";
@@ -285,17 +301,37 @@ export class WorkerProcessAgentRuntime implements AgentRuntime {
                 ? `${bunBinDir}:${currentPath}`
                 : currentPath;
 
-            child = Bun.spawn([bunCmd, "run", workerScript], {
-                cwd: this.options.cwd ?? process.cwd(),
-                stdin: "pipe",
-                stdout: "pipe",
-                stderr: "pipe",
-                env: buildWorkerEnvironment(runId, {
-                    inheritEnv: this.options.inheritEnv,
-                    extraEnv: this.options.extraEnv,
-                    path: mergedPath,
-                }),
-            });
+            child = systemdUnit === null
+                ? Bun.spawn([bunCmd, "run", workerScript], {
+                    cwd: this.options.cwd ?? process.cwd(),
+                    stdin: "pipe",
+                    stdout: "pipe",
+                    stderr: "pipe",
+                    env: buildWorkerEnvironment(runId, {
+                        inheritEnv: this.options.inheritEnv,
+                        extraEnv: this.options.extraEnv,
+                        path: mergedPath,
+                    }),
+                })
+                : Bun.spawn([
+                    this.options.systemdSudoPath ?? "sudo",
+                    "-n",
+                    this.options.systemdLauncherPath ?? "/usr/local/sbin/harness-worker-run",
+                    "--run-id",
+                    runId,
+                    "--unit-name",
+                    systemdUnit,
+                ], {
+                    cwd: this.options.cwd ?? process.cwd(),
+                    stdin: "pipe",
+                    stdout: "pipe",
+                    stderr: "pipe",
+                    env: {
+                        PATH: "/usr/local/bin:/usr/bin:/bin",
+                        HOME: process.env.HOME ?? "/tmp",
+                        LANG: process.env.LANG ?? "C.UTF-8",
+                    },
+                });
         } catch (spawnErr) {
             void triggerSandboxCleanup();
             throw spawnErr;
@@ -319,6 +355,7 @@ export class WorkerProcessAgentRuntime implements AgentRuntime {
         this.activeWorkers.set(runId, {
             runId,
             sandboxId,
+            systemdUnit: systemdUnit ?? undefined,
             child,
             completionPromise,
             send,
@@ -330,6 +367,9 @@ export class WorkerProcessAgentRuntime implements AgentRuntime {
                 try {
                     child.kill("SIGKILL");
                 } catch {}
+                if (systemdUnit !== null) {
+                    this.stopSystemdUnit(systemdUnit);
+                }
                 const stderrTail = stderrLines.join("\n").slice(-1000);
                 const reason = `Worker failed to become ready within ${handshakeTimeoutMs}ms${stderrTail ? `\nStderr: ${stderrTail}` : ""}`;
                 this.emit({
@@ -411,6 +451,9 @@ export class WorkerProcessAgentRuntime implements AgentRuntime {
             clearTimeout(handshakeTimer);
             this.activeWorkers.delete(runId);
             this.interruptedRuns.delete(runId);
+            if (systemdUnit !== null) {
+                this.stopSystemdUnit(systemdUnit);
+            }
             // Worker 之死不撤销已落库的 PREPARED 记账：它正是 fail-closed 恢复的证据。
             for (const [executionId, pending] of this.pendingToolPrepares) {
                 if (pending.runId === runId) {
@@ -443,6 +486,21 @@ export class WorkerProcessAgentRuntime implements AgentRuntime {
         });
 
         return completionPromise;
+    }
+
+    private stopSystemdUnit(unit: string): void {
+        const sudoCmd = this.options.systemdSudoPath ?? "sudo";
+        const launcher = this.options.systemdLauncherPath ?? "/usr/local/sbin/harness-worker-run";
+        try {
+            const proc = Bun.spawn([sudoCmd, "-n", launcher, "--stop", "--unit-name", unit], {
+                stdin: "ignore",
+                stdout: "ignore",
+                stderr: "ignore",
+            });
+            void proc.exited;
+        } catch (err) {
+            console.warn(`[WorkerProcessRuntime] Failed to stop systemd unit ${unit}:`, err);
+        }
     }
 
     private emit(event: RuntimeEvent): void {

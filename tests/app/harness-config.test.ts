@@ -323,3 +323,20 @@ test("loadHarnessConfig 默认本地模型服务，可显式切换 external", ()
     }, "/tmp/harness-project");
     expect(unknown.modelServiceMode).toBe("local");
 });
+
+test("HARNESS_WORKER_ISOLATION=systemd 解析专用 UID/cgroup 与 worker 凭据路径", () => {
+    const config = loadHarnessConfig({
+        VLLM_MODEL_ID:"m",
+        HARNESS_WORKER_ISOLATION:"systemd",
+        HARNESS_WORKER_SYSTEMD_LAUNCHER_PATH:"/usr/local/sbin/harness-worker-run",
+        HARNESS_WORKER_SYSTEMD_SUDO_PATH:"/usr/bin/sudo",
+        HARNESS_WORKER_PI_AUTH_PATH:"/var/lib/harness-worker/auth.json",
+        HARNESS_WORKER_PI_MODELS_PATH:"/var/lib/harness-worker/models-store.json",
+    }, "/tmp/harness-project");
+
+    expect(config.workerIsolation).toBe("systemd");
+    expect(config.workerSystemdLauncherPath).toBe("/usr/local/sbin/harness-worker-run");
+    expect(config.workerSystemdSudoPath).toBe("/usr/bin/sudo");
+    expect(config.workerPiAuthPath).toBe("/var/lib/harness-worker/auth.json");
+    expect(config.workerPiModelsPath).toBe("/var/lib/harness-worker/models-store.json");
+});

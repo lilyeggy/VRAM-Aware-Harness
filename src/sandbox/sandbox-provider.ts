@@ -47,6 +47,11 @@ export interface SandboxHandle {
      * HOST 边界下没有容器路径语义，等于 workspacePath。
      */
     readonly containerWorkdir: string;
+    /**
+     * 方案 B：Broker 签发的 per-sandbox capability token。仅 BrokerSandboxProvider
+     * 会产生；Worker 用它执行工具命令，不进入审计事件或日志。
+     */
+    readonly capabilityToken?: string;
     withSecrets<T>(callback: (environment: Readonly<Record<string, string>>) => T): T;
     readonly acquisition?: {
         readonly durationMs: number;

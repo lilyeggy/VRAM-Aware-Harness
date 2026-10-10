@@ -38,6 +38,12 @@ const workspaceDiskTemplatePath = process.env.FIRECRACKER_WORKSPACE_DISK_TEMPLAT
 const runtimeRoot = process.env.HARNESS_VM_RUNTIME_ROOT ?? "/var/lib/harness/vm";
 const useJailer = process.env.HARNESS_USE_JAILER === "true";
 const snapshotsEnabled = process.env.HARNESS_VM_SNAPSHOTS_ENABLED === "true";
+const controlToken = process.env.HARNESS_SANDBOX_BROKER_CONTROL_TOKEN;
+if (controlToken === undefined || controlToken.length === 0) {
+    throw new Error(
+        "Sandbox Broker 必须设置非空 HARNESS_SANDBOX_BROKER_CONTROL_TOKEN；否则拒绝启动。",
+    );
+}
 
 if (kernelPath === undefined || rootfsPath === undefined) {
     throw new Error("Firecracker 需要 FIRECRACKER_KERNEL_PATH 与 FIRECRACKER_ROOTFS_PATH");
@@ -93,11 +99,12 @@ const provider = new MicrovmSandboxProvider(
     },
 );
 
-mkdirSync(dirname(socketPath), { recursive: true, mode: 0o700 });
+mkdirSync(dirname(socketPath), { recursive: true, mode: 0o755 });
 const server = new SandboxBrokerServer({
     socketPath,
     provider,
     readRecord: (sandboxId) => store.get(sandboxId),
+    controlToken,
     onError: (error) => {
         console.error("[sandbox-broker] error", error);
     },

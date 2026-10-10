@@ -36,6 +36,8 @@ export interface HarnessConfig {
     sandboxRuntime:"runsc" | "runc" | "firecracker";
     /** 方案 B：Sandbox Broker Unix socket 路径。设置后 Master/Worker 不直接持有 Firecracker，只经窄接口调用 Broker。 */
     sandboxBrokerSocketPath?: string;
+    /** Master -> Broker 的静态共享 secret；Broker create 必须携带且匹配。 */
+    sandboxBrokerControlToken?: string;
     microvmDriver?:"mock" | "e2b" | "firecracker";
     e2bApiKey?:string;
     firecrackerBinaryPath?:string;
@@ -109,9 +111,15 @@ export interface HarnessConfig {
     executionTimeoutMs?:number;
     interruptGraceMs?:number;
     /** Master-Worker 进程隔离模式："process" 为独立子进程隔离，"in-process" 为主进程内运行 */
-    workerIsolation: "process" | "in-process";
+    workerIsolation: "process" | "in-process" | "systemd";
     workerScriptPath?: string;
     workerHandshakeTimeoutMs?: number;
+    /** systemd 隔离模式：特权窄 helper 路径（sudoers 只允许该命令）。 */
+    workerSystemdLauncherPath?: string;
+    workerSystemdSudoPath?: string;
+    /** systemd worker 使用的 Pi 凭据/模型缓存路径（通常属专用 UID）。 */
+    workerPiAuthPath?: string;
+    workerPiModelsPath?: string;
     /** 方向 C：LLM 网关后端列表（空数组=网关未启用）。 */
     llmBackends:LlmBackend[];
     /**
@@ -229,6 +237,11 @@ export function loadHarnessConfig(
         if (environment.HARNESS_SANDBOX_BROKER_SOCKET === undefined) {
             throw new Error("生产环境必须设置 HARNESS_SANDBOX_BROKER_SOCKET，通过 Sandbox Broker 执行");
         }
+        if (environment.HARNESS_SANDBOX_BROKER_CONTROL_TOKEN === undefined) {
+            throw new Error(
+                "生产环境必须设置 HARNESS_SANDBOX_BROKER_CONTROL_TOKEN，Broker 才能拒绝非 Master 的 create",
+            );
+        }
     }
 
     const microvmDriver = environment.HARNESS_MICROVM_DRIVER as ("mock" | "e2b" | "firecracker" | undefined);
@@ -269,6 +282,9 @@ export function loadHarnessConfig(
         ...(environment.HARNESS_SANDBOX_BROKER_SOCKET === undefined
             ? {}
             : { sandboxBrokerSocketPath: environment.HARNESS_SANDBOX_BROKER_SOCKET }),
+        ...(environment.HARNESS_SANDBOX_BROKER_CONTROL_TOKEN === undefined
+            ? {}
+            : { sandboxBrokerControlToken: environment.HARNESS_SANDBOX_BROKER_CONTROL_TOKEN }),
         ...(microvmDriver !== undefined ? { microvmDriver } : {}),
         ...(e2bApiKey !== undefined ? { e2bApiKey } : {}),
         ...(firecrackerBinaryPath !== undefined ? { firecrackerBinaryPath } : {}),
@@ -373,13 +389,19 @@ export function loadHarnessConfig(
         interruptGraceMs:posInt("HARNESS_INTERRUPT_GRACE_MS", 10_000),
         workerIsolation: environment.HARNESS_WORKER_ISOLATION === "in-process"
             ? "in-process"
-            : "process",
+            : environment.HARNESS_WORKER_ISOLATION === "systemd"
+                ? "systemd"
+                : "process",
         workerScriptPath: environment.HARNESS_WORKER_SCRIPT_PATH !== undefined
             ? resolve(cwd, environment.HARNESS_WORKER_SCRIPT_PATH)
             : resolve(cwd, "src/worker/worker-main.ts"),
         workerHandshakeTimeoutMs: environment.HARNESS_WORKER_HANDSHAKE_TIMEOUT_MS !== undefined
             ? posInt("HARNESS_WORKER_HANDSHAKE_TIMEOUT_MS", 15_000)
             : 15_000,
+        workerSystemdLauncherPath: environment.HARNESS_WORKER_SYSTEMD_LAUNCHER_PATH?.trim() || undefined,
+        workerSystemdSudoPath: environment.HARNESS_WORKER_SYSTEMD_SUDO_PATH?.trim() || undefined,
+        workerPiAuthPath: environment.HARNESS_WORKER_PI_AUTH_PATH?.trim() || undefined,
+        workerPiModelsPath: environment.HARNESS_WORKER_PI_MODELS_PATH?.trim() || undefined,
     };
 }
 

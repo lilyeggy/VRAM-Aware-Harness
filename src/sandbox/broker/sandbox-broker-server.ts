@@ -21,6 +21,12 @@ export interface SandboxBrokerServerOptions {
     /** Broker 侧记录查询：create 后据此回传完整 SandboxRecord。 */
     readonly readRecord: (sandboxId: string) => SandboxRecord | null;
     readonly onError?: (error: unknown) => void;
+    /**
+     * Master -> Broker 的静态共享 secret。Broker 强制要求 create 携带且匹配；
+     * 它让 Broker 能区分“可信 Master”与“可能被污染的 Worker”，从而把 create
+     * 限制在控制面。
+     */
+    readonly controlToken: string;
 }
 
 /**
@@ -36,9 +42,16 @@ export class SandboxBrokerServer {
      * 变成协议级校验，防止一个租户的 Worker 拿 sandboxId 操作另一个租户的 VM。
      */
     private readonly tenantBySandbox = new Map<string, string>();
+    /** sandboxId -> capability token；execute/terminate 必须携带匹配 token。 */
+    private readonly tokenBySandbox = new Map<string, string>();
+    /** capability token -> sandboxId；用于拒绝重复 token。 */
+    private readonly sandboxByToken = new Map<string, string>();
     private started = false;
 
     constructor(private readonly options: SandboxBrokerServerOptions) {
+        if (options.controlToken.length === 0) {
+            throw new Error("SandboxBrokerServer 必须配置非空 controlToken");
+        }
         this.server = createServer((socket) => this.handleConnection(socket));
     }
 
@@ -154,12 +167,18 @@ export class SandboxBrokerServer {
             case "ping":
                 return { pid: process.pid };
             case "create": {
+                this.assertControlToken(request.input.controlToken);
+                if (this.sandboxByToken.has(request.input.token)) {
+                    throw new Error("Broker 拒绝 create：capability token 已被使用");
+                }
                 const handle = await this.options.provider.create(request.input);
                 const record = this.options.readRecord(handle.id);
                 if (record === null) {
                     throw new Error("Broker created sandbox but record is missing: " + handle.id);
                 }
                 this.tenantBySandbox.set(handle.id, request.input.policy.tenantId);
+                this.tokenBySandbox.set(handle.id, request.input.token);
+                this.sandboxByToken.set(request.input.token, handle.id);
                 const result: BrokerCreateResult = {
                     record,
                     handle: toPayload(handle),
@@ -167,16 +186,23 @@ export class SandboxBrokerServer {
                 return result;
             }
             case "execute":
-                this.assertTenant(request.sandboxId, request.tenantId);
+                this.assertCapability(request.sandboxId, request.tenantId, request.token, false);
                 return await this.options.provider.execute(
                     request.sandboxId,
                     request.command,
                     request.options,
                 );
             case "terminate":
-                this.assertTenant(request.sandboxId, request.tenantId);
+                this.assertCapability(request.sandboxId, request.tenantId, request.token, true);
                 await this.options.provider.terminate(request.sandboxId);
                 this.tenantBySandbox.delete(request.sandboxId);
+                {
+                    const token = this.tokenBySandbox.get(request.sandboxId);
+                    if (token !== undefined) {
+                        this.tokenBySandbox.delete(request.sandboxId);
+                        this.sandboxByToken.delete(token);
+                    }
+                }
                 return {};
         }
     }
@@ -192,6 +218,36 @@ export class SandboxBrokerServer {
                 + " 属于租户 " + owner + "，请求租户 " + tenantId,
             );
         }
+    }
+
+    private assertControlToken(token: string): void {
+        if (token !== this.options.controlToken) {
+            throw new Error("Broker 拒绝 create：control token 不匹配");
+        }
+    }
+
+    /**
+     * 校验 sandbox 归属与 capability token。allowControlToken=true 时额外接受
+     * Broker 的 control token，仅用于 Master 侧 terminate（例如 Master 重启后
+     * 已丢失 per-sandbox token，但仍需回收自己创建的孤儿 VM）。
+     */
+    private assertCapability(
+        sandboxId: string,
+        tenantId: string,
+        token: string,
+        allowControlToken: boolean,
+    ): void {
+        this.assertTenant(sandboxId, tenantId);
+        const expected = this.tokenBySandbox.get(sandboxId);
+        if (expected !== undefined && token === expected) {
+            return;
+        }
+        if (allowControlToken && token === this.options.controlToken) {
+            return;
+        }
+        throw new Error(
+            "Broker 拒绝：sandbox " + sandboxId + " 的 capability token 不匹配",
+        );
     }
 
     private writeResponse(socket: Socket, response: BrokerResponse): void {
