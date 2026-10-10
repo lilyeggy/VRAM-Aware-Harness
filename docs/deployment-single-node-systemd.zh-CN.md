@@ -210,8 +210,10 @@ WantedBy=multi-user.target
 
 说明：
 - Master 只依赖 Broker socket，不需要 Firecracker 资产路径，也不应加入 `kvm` 组。
-- `HARNESS_WORKER_ISOLATION=systemd` 时，每次 Run 由 launcher 创建 `harness-worker-<runId>` 瞬时单元，Worker 使用 `harness-worker` UID、`MemoryMax`、`CPUQuota`、`TasksMax`、`NoNewPrivileges`、`ProtectSystem=strict`、`ProtectHome=read-only`。
-- Worker 只读宿主、只写 `/var/lib/harness-worker` 与自己的 `TMPDIR`；模型凭据只存在于 `/var/lib/harness-worker`。
+- `HARNESS_WORKER_ISOLATION=systemd` 时，每次 Run 由 launcher 创建 `harness-worker-<runId>` 瞬时单元，Worker 使用 `harness-worker` UID、`MemoryMax`、`CPUQuota`、`TasksMax`、`NoNewPrivileges`、`PrivateDevices`、`ProtectSystem=strict`、`ProtectHome=read-only`、`ProtectKernelTunables/Modules/ControlGroups/Clock/Hostname`、`ProtectProc=invisible`、`ProcSubset=pid`、`RestrictRealtime`、`RestrictSUIDSGID`、`RemoveIPC`、`LockPersonality`。
+- Worker 还启用 seccomp 白名单与 Landlock：`SystemCallFilter=@system-service` 并显式放行 `landlock_create_ruleset` / `landlock_add_rule` / `landlock_restrict_self`，`SystemCallErrorNumber=EPERM`；Worker 进程内以 `HARNESS_WORKER_LANDLOCK=required` 应用 Landlock，失败即退出 78（fail-closed）。
+- Worker 只读宿主、只写 `/var/lib/harness-worker`、`/tmp`、`/run/harness`（Broker socket）与 `/dev/null` 等设备文件；模型凭据只存在于 `/var/lib/harness-worker`。
+- 验证：Run 执行期间 `systemctl show 'harness-worker-<runId>.service' -p SystemCallFilter -p ProtectSystem -p ReadWritePaths` 应看到上述属性；Worker stderr 会打印 `[worker] landlock=on abi=<n>`。
 
 ## 7. 启动与验收
 
@@ -248,4 +250,5 @@ systemctl show 'harness-worker-<runId>.service' -p UID -p GID -p MemoryMax -p CP
 - Broker 只暴露 `create/execute/terminate`；control token 只存在于 root 可读文件与 Master 进程，Worker 只拿自己 sandbox 的 capability token；`HARNESS_SANDBOX_BROKER_MASTER_UID` / `HARNESS_SANDBOX_BROKER_WORKER_UID` 再把操作绑定到进程 UID。
 - Master 应只监听内网/本机，前置反向代理时自行加 TLS 与访问控制；平台只做 API Key/租户级授权。
 - 快照池、VM runtime、workspaces 都属于 Broker/Master 的本地数据目录；不要手工修改正在使用的磁盘。
-- 当前明确暂缓：Worker seccomp/Landlock、控制面 egress ACL；Broker SO_PEERCRED 已在 v1.3 解冻并实现（见 `docs/platform-boundary.md §9.7`）。
+- 已实现：Broker SO_PEERCRED（v1.3 第 1 项）与 Worker seccomp/Landlock/只读 rootfs（v1.3 第 2 项，见 `docs/platform-boundary.md §9.7`）。
+- 当前明确暂缓：控制面 egress ACL、不可变审计存储、租户成本账单（v1.3 第 3-5 项）。

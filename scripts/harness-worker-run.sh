@@ -60,10 +60,26 @@ exec /usr/bin/systemd-run \
   --property=PrivateTmp=yes \
   --property=ProtectSystem=strict \
   --property=ProtectHome=read-only \
+  --property=PrivateDevices=yes \
+  --property=ProtectKernelTunables=yes \
+  --property=ProtectKernelModules=yes \
+  --property=ProtectControlGroups=yes \
+  --property=ProtectClock=yes \
+  --property=ProtectHostname=yes \
+  --property=ProtectProc=invisible \
+  --property=ProcSubset=pid \
+  --property=RestrictRealtime=yes \
+  --property=RestrictSUIDSGID=yes \
+  --property=RemoveIPC=yes \
+  --property=LockPersonality=yes \
+  --property="SystemCallFilter=@system-service landlock_create_ruleset landlock_add_rule landlock_restrict_self" \
+  --property=SystemCallErrorNumber=EPERM \
   --property="ReadWritePaths=$WORKER_RW_PATHS" \
   --property="RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6" \
   --setenv="PATH=$WORKER_PATH" \
   --setenv="HOME=$WORKER_HOME" \
   --setenv=TMPDIR=/tmp \
   --setenv="HARNESS_RUN_ID=$RUN_ID" \
+  --setenv=HARNESS_WORKER_LANDLOCK=required \
+  --setenv="HARNESS_WORKER_LANDLOCK_WRITABLE_PATHS=$WORKER_RW_PATHS" \
   "$WORKER_BUN" run "$WORKER_SCRIPT"

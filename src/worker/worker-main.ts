@@ -32,12 +32,24 @@ import {
     DEFAULT_PI_PROVIDER,
     DEFAULT_PI_TOOLS,
 } from "../app/harness-config.ts";
+import { applyWorkerLandlock, resolveWorkerLandlockMode } from "./worker-landlock.ts";
 
 // 1. Redirect standard logging to stderr to prevent corrupting IPC on stdout
 console.log = (...args: unknown[]) => console.error(...args);
 console.info = (...args: unknown[]) => console.error(...args);
 console.debug = (...args: unknown[]) => console.error(...args);
 console.warn = (...args: unknown[]) => console.error(...args);
+const workerLandlockMode = resolveWorkerLandlockMode();
+if (workerLandlockMode !== "off") {
+    const landlockResult = applyWorkerLandlock({ mode: workerLandlockMode });
+    console.error(
+        `[worker] landlock=${landlockResult.applied ? `on abi=${landlockResult.abi}` : `off reason=${landlockResult.reason}`}`,
+    );
+    if (workerLandlockMode === "required" && !landlockResult.applied) {
+        console.error(`[worker] HARNESS_WORKER_LANDLOCK=required 但 Landlock 未生效：${landlockResult.reason}`);
+        process.exit(78);
+    }
+}
 console.error(`[worker] uid=${process.getuid?.() ?? -1} gid=${process.getgid?.() ?? -1} pid=${process.pid}`);
 
 function sendToMaster(msg: WorkerToMasterMessage): Promise<void> {
