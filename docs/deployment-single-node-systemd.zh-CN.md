@@ -307,3 +307,18 @@ systemctl show harness-master -p IPAddressDeny -p IPAddressAllow
 - 快照池、VM runtime、workspaces 都属于 Broker/Master 的本地数据目录；不要手工修改正在使用的磁盘。生产建议用 systemd timer 定时执行 `harness-ops.ts backup` 与 `cleanup`（cleanup 先 dry-run 观察）。
 - 注册收口：`HARNESS_REGISTRATION_MODE` 默认 `open`；交给实验室/他人使用前应设为 `invite`（配 `HARNESS_REGISTRATION_INVITE_CODE`）或 `closed`，避免服务可达即可自助注册。
 - 已实现：Broker SO_PEERCRED（v1.3 第 1 项）、Worker seccomp/Landlock/只读 rootfs（v1.3 第 2 项）、控制面 egress ACL（v1.3 第 3 项）、不可变审计存储（v1.3 第 4 项）与租户成本账单（v1.3 第 5 项，见 `docs/platform-boundary.md §9.7`）。
+
+## 9. TLS / 反向代理
+
+Master 只监听 loopback（`HARNESS_HOST` 默认 `127.0.0.1`，unit 里 `IPAddressAllow=127.0.0.0/8`）。需要从实验室机器访问时，用 Caddy/Nginx 终止 TLS 并反代到 `127.0.0.1:3100`，不要直接暴露 3100。
+
+- Caddy 示例：`deploy/harness-caddy.example`
+- Nginx 示例：`deploy/harness-nginx.example`
+- 完整说明（证书选择、防火墙、验收、日志轮转）：`docs/tls-reverse-proxy.zh-CN.md`
+
+## 10. 升级与回滚
+
+迁移是向前执行的；回滚代码前必须备份并恢复数据库。完整步骤：
+
+- `docs/upgrade-rollback-runbook.zh-CN.md`
+- 日志文件轮转示例：`deploy/harness-logrotate.example`

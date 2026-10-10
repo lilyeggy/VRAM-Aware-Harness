@@ -1,0 +1,11 @@
+# 单机部署示例：如果 Master 不是交给 journald，而是重定向到文件，用 logrotate 轮转。
+# 放到 /etc/logrotate.d/harness，并确保 master 的日志路径一致。
+/var/log/harness/master.log {
+    daily
+    rotate 14
+    compress
+    delaycompress
+    missingok
+    notifempty
+    copytruncate
+}

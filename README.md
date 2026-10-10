@@ -103,7 +103,7 @@ src/
 bun test ./tests
 ```
 
-当前测试基线：`493 pass / 7 skip / 0 fail`。
+当前测试基线：`499 pass / 7 skip / 0 fail`。
 
 实验室/他人接入前的最小运维：
 
@@ -118,4 +118,17 @@ bun run scripts/harness-ops.ts backup --database data/harness.sqlite --backup-di
 bun run scripts/harness-ops.ts cleanup --vm-runtime /var/lib/harness/vm --snapshot-pool /var/lib/harness/snapshots --max-age-hours 24 --max-snapshots 8 --apply
 ```
 
-详见 `docs/deployment-single-node-systemd.zh-CN.md` 与 `docs/platform-boundary.md` §9.5。
+从实验室外访问时用 Caddy/Nginx 终止 TLS，Master 只监听 loopback：
+
+```bash
+# deploy/harness-caddy.example / deploy/harness-nginx.example
+# 只放行 443（可选 80），不要放行 3100
+```
+
+升级/回滚必须先备份数据库（迁移向前执行，无 down migration）：
+
+```bash
+bun run scripts/harness-ops.ts backup --database data/harness.sqlite --backup-dir data/backups --keep 7
+```
+
+详见 `docs/deployment-single-node-systemd.zh-CN.md`、`docs/tls-reverse-proxy.zh-CN.md`、`docs/upgrade-rollback-runbook.zh-CN.md` 与 `docs/platform-boundary.md` §9.5。

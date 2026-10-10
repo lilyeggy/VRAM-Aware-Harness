@@ -1,0 +1,22 @@
+# 单机部署示例：Caddy 终止 TLS，反向代理到只监听 loopback 的 Master。
+# 完整说明见 docs/tls-reverse-proxy.zh-CN.md。
+#
+# 有内网域名时推荐用 Caddy 自动管理证书；没有 DNS 时用 tls internal 自签。
+
+harness.lab.internal {
+    encode zstd gzip
+    reverse_proxy 127.0.0.1:3100
+
+    header {
+        Strict-Transport-Security "max-age=31536000; includeSubDomains"
+        X-Content-Type-Options "nosniff"
+        Referrer-Policy "no-referrer"
+        -Server
+    }
+}
+
+# 纯内网/无域名时，把上面的站点改为：
+# harness.lab.internal {
+#     tls internal
+#     reverse_proxy 127.0.0.1:3100
+# }
