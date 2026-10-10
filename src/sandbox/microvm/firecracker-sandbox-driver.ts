@@ -257,7 +257,7 @@ export class FirecrackerSandboxDriver implements MicrovmDriver {
         }
     }
 
-    /** 预热池/快照共用的模板指纹；镜像未配置时返回 null（调用方据此禁用加速）。 */
+    /** 快照共用的模板指纹；镜像未配置时返回 null（调用方据此禁用加速）。 */
     computeTemplateHash(): string | null {
         if (!this.kernelPath || !this.rootfsPath) {
             return null;

@@ -61,9 +61,6 @@ if (useJailer) {
         );
     }
 }
-if (process.env.HARNESS_MICROVM_WARM_POOL_SIZE !== undefined) {
-    console.error("[sandbox-broker] 警告：Broker MVP 暂不支持预热池，HARNESS_MICROVM_WARM_POOL_SIZE 被忽略。");
-}
 
 const binaryName = (useJailer ? (jailerPath ?? binaryPath) : binaryPath).split("/").pop() ?? binaryPath;
 const reapReport = await reapOrphans(runtimeRoot, { binaryName });

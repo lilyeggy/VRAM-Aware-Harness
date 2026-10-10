@@ -60,7 +60,7 @@ if [ "${HARNESS_VM_SNAPSHOTS_ENABLED:-false}" = "true" ]; then
     else
         echo "[FAIL] 当前 Firecracker 二进制缺少 pause/resume 符号（VcpuResponse::Paused）。"
         echo "       快照加速需要 PATCH /vm {\"state\":\"Paused\"} 支持。"
-        echo "       可改用预热池（HARNESS_MICROVM_WARM_POOL_SIZE）实现启动加速。"
+        echo "       可改用快照加速（HARNESS_VM_SNAPSHOTS_ENABLED=true，且必须使用 jailer）。"
         ERRORS=$((ERRORS + 1))
     fi
 fi

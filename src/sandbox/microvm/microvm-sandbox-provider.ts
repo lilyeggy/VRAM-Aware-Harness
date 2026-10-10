@@ -15,15 +15,9 @@ import type {
     SecretProvider,
 } from "../sandbox-provider.ts";
 import type { SandboxStore } from "../sandbox-store.ts";
-import type { MicrovmDriver, MicrovmExecuteOptions, MicrovmExecutionResult, MicrovmInstance } from "./microvm-types.ts";
+import type { MicrovmDriver, MicrovmExecuteOptions, MicrovmExecutionResult } from "./microvm-types.ts";
 import { VmRunDirectoryManager } from "./vm-run-directory.ts";
 import { WorkspaceDiskExporter } from "./workspace-disk-exporter.ts";
-import {
-    mapResourceToTier,
-    MICROVM_TIERS,
-    MicrovmWarmPool,
-    type MicrovmResourceTier,
-} from "./microvm-warm-pool.ts";
 
 export interface MicrovmSandboxProviderConfig {
     readonly driver: MicrovmDriver;
@@ -34,15 +28,6 @@ export interface MicrovmSandboxProviderConfig {
      */
     readonly workspaceDiskTemplatePath?: string;
     readonly vmRuntimeRoot?: string;
-    /**
-     * Phase 3：microVM 预热池。命中时跳过完整开机（driver.create），
-     * acquisition.warmHit 如实为 true；未配置时每个 Run 冷启动。
-     * 预热 VM 在入网前创建（无网络、无租户 secret），因此
-     * allowNetwork=true 的请求永不命中预热池。
-     */
-    readonly warmPool?: MicrovmWarmPool;
-    /** 预热池 key 的模板指纹（通常由驱动 computeTemplateHash() 提供）。 */
-    readonly templateHash?: string | null;
 }
 
 export class MicrovmSandboxProvider implements SandboxProvider, SandboxCommandExecutor {
@@ -55,8 +40,6 @@ export class MicrovmSandboxProvider implements SandboxProvider, SandboxCommandEx
     private readonly diskExporter = new WorkspaceDiskExporter();
     private readonly workspacePaths = new Map<string, string>();
     private readonly workspaceDisks = new Map<string, string>();
-    private readonly warmPool?: MicrovmWarmPool;
-    private readonly templateHash?: string | null;
     /** sandboxId → 驱动层 vmId（预热命中时两者不同：vmId 为预热分配） */
     private readonly instanceIds = new Map<string, string>();
 
@@ -68,8 +51,6 @@ export class MicrovmSandboxProvider implements SandboxProvider, SandboxCommandEx
         this.driver = config.driver;
         this.workspaceDiskTemplatePath = config.workspaceDiskTemplatePath;
         this.runDirManager = new VmRunDirectoryManager({ runtimeRoot: config.vmRuntimeRoot });
-        this.warmPool = config.warmPool;
-        this.templateHash = config.templateHash;
     }
 
     async create(input: {
@@ -197,42 +178,18 @@ export class MicrovmSandboxProvider implements SandboxProvider, SandboxCommandEx
 
         this.workspacePaths.set(input.id, input.workspacePath);
 
-        let warmHit = false;
         try {
             const cpuCores = input.policy.resourceLimits.cpuCores ?? 2;
             const memoryMb = input.policy.resourceLimits.memoryMiB ?? 256;
-            // 需求超出最高档位（L）时返回 null：绝不能映射到更小档位——
-            // 那会让预热 VM 的实际资源低于策略声明的限额。此时跳过预热池，
-            // 退回按策略精确创建的冷启动路径。
-            const tier = mapResourceToTier(cpuCores, memoryMb);
-
-            // Phase 3：预热池只在"有模板指纹 + 硬件隔离 + 需求可被档位覆盖"时命中
-            //（预热 VM 无租户 secret，与请求语义必须严格一致）。
-            let instance = null as MicrovmInstance | null;
-            if (
-                this.warmPool
-                && this.templateHash
-                && hardwareIsolated
-                && tier !== null
-            ) {
-                const warmed = this.warmPool.take(this.templateHash, tier);
-                if (warmed) {
-                    instance = warmed.instance;
-                    warmHit = true;
-                }
-            }
-
-            if (instance === null) {
-                instance = await this.driver.create({
-                    id: input.id,
-                    runId: input.runId,
-                    workspacePath: input.workspacePath,
-                    cpuCount: cpuCores,
-                    memoryMb,
-                    allowNetwork: input.policy.allowNetwork,
-                    environment: resolvedSecrets,
-                });
-            }
+            const instance = await this.driver.create({
+                id: input.id,
+                runId: input.runId,
+                workspacePath: input.workspacePath,
+                cpuCount: cpuCores,
+                memoryMb,
+                allowNetwork: input.policy.allowNetwork,
+                environment: resolvedSecrets,
+            });
             this.instanceIds.set(input.id, instance.id);
 
             // P1 修复：以驱动回传的真实磁盘路径登记导出源；
@@ -250,10 +207,6 @@ export class MicrovmSandboxProvider implements SandboxProvider, SandboxCommandEx
 
             this.activeSandboxes.add(input.id);
 
-            // 命中预热后后台补一台同档位 VM（best-effort，不阻塞本 Run）
-            if (warmHit && tier !== null) {
-                void this.refillWarmPool(tier).catch(() => undefined);
-            }
         } catch (error) {
             const reason = error instanceof Error ? error.message : String(error);
             // 驱动 create 内部失败时会自清理；但 create 成功后的校验失败
@@ -298,37 +251,11 @@ export class MicrovmSandboxProvider implements SandboxProvider, SandboxCommandEx
             },
             acquisition: {
                 durationMs: Math.round(performance.now() - acquisitionStartedAt),
-                warmHit,
+                warmHit: false,
             },
         };
     }
 
-    /**
-     * Phase 3：预热池补货。预热 VM 以 warm-<rand> 为 vmId 冷启动（无网络、
-     * 无 secret），加入池中等待取用。best-effort：失败仅意味着下次冷启动。
-     */
-    private async refillWarmPool(tier: MicrovmResourceTier): Promise<void> {
-        if (!this.warmPool || !this.templateHash) {
-            return;
-        }
-        // 按真实容量判断：池已满则不再补货。
-        //（此前用 has() 判断，等价于把容量硬编码为 1，配置的 maxPerTier 被忽略。）
-        if (this.warmPool.count(this.templateHash, tier) >= this.warmPool.maxPerTier) {
-            return;
-        }
-        const spec = MICROVM_TIERS[tier];
-        const warmId = `warm-${Date.now().toString(36)}-${Math.floor(Math.random() * 1e6).toString(36)}`;
-        const instance = await this.driver.create({
-            id: warmId,
-            runId: "warm-pool",
-            workspacePath: "/workspace",
-            cpuCount: spec.cpu,
-            memoryMb: spec.memoryMb,
-            allowNetwork: false,
-            environment: {},
-        });
-        this.warmPool.put(this.templateHash, tier, instance);
-    }
 
     async execute(
         sandboxId: string,
@@ -410,28 +337,6 @@ export class MicrovmSandboxProvider implements SandboxProvider, SandboxCommandEx
         }
     }
 
-    /**
-     * 启动期预热：把每个给定档位补到池容量上限（默认只预热 M 档，
-     * 对应默认策略 2C/512MiB；每档容量由 HARNESS_MICROVM_WARM_POOL_SIZE 决定）。
-     * best-effort，不阻塞服务就绪。
-     */
-    async prewarm(tiers: readonly MicrovmResourceTier[] = ["M"]): Promise<void> {
-        if (!this.warmPool || !this.templateHash) {
-            return;
-        }
-        for (const tier of tiers) {
-            while (this.warmPool.count(this.templateHash, tier) < this.warmPool.maxPerTier) {
-                const before = this.warmPool.count(this.templateHash, tier);
-                await this.refillWarmPool(tier).catch((err) => {
-                    console.error(`[MicroVM] 预热 ${tier} 档失败（下次 Run 将冷启动）：`, err);
-                });
-                // 补货失败时不能无限重试。
-                if (this.warmPool.count(this.templateHash, tier) <= before) {
-                    break;
-                }
-            }
-        }
-    }
 
     async cleanupStale(record: SandboxRecord): Promise<void> {
         // 顺序至关重要：**先 terminate（停进程），再删运行目录**。
@@ -455,7 +360,6 @@ export class MicrovmSandboxProvider implements SandboxProvider, SandboxCommandEx
         for (const id of Array.from(this.activeSandboxes)) {
             await this.terminate(id).catch(() => undefined);
         }
-        await this.warmPool?.close().catch(() => undefined);
         this.handlers.clear();
         this.secretValues.clear();
     }

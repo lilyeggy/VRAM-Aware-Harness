@@ -19,8 +19,6 @@ test("loadHarnessConfig 提供本地安全默认值并派生 metrics URL", () =>
         piProvider:"local-vllm",
         piModelId:"qwen3.5-4b",
         piModelsPath:"/tmp/harness-project/.pi/spike/models.json",
-        vllmMetricsUrl:"http://127.0.0.1:8000/metrics",
-        gpuIds:["0"],
         maxActiveRuns:30,
         maxActiveRunsPerTenant:10,
         llmGatewayStrategy:"round-robin",
@@ -81,7 +79,6 @@ test("loadHarnessConfig 解析显式环境变量", () => {
         HARNESS_MAX_ACTIVE_RUNS:"4",
         HARNESS_MAX_ACTIVE_RUNS_PER_TENANT:"2",
         HARNESS_PUMP_INTERVAL_MS:"250",
-        HARNESS_GPU_IDS:"0, 1",
         PI_TOOLS:"read,grep",
         PI_MODELS_PATH:"config/models.json",
     }, "/tmp/harness-project");
@@ -93,10 +90,8 @@ test("loadHarnessConfig 解析显式环境变量", () => {
         maxActiveRuns:4,
         maxActiveRunsPerTenant:2,
         pumpIntervalMs:250,
-        gpuIds:["0", "1"],
         piTools:["read", "grep"],
         piModelsPath:"/tmp/harness-project/config/models.json",
-        vllmMetricsUrl:"http://vllm.internal:9000/metrics",
     });
 });
 
@@ -305,23 +300,6 @@ test("loadHarnessConfig 允许覆盖 N5/N10/N14 三个新开关", () => {
     expect(config.resourceThresholds.gpuMemoryBaselinePercent).toBe(0);
     expect(config.schedulerAgingMs).toBe(0);
     expect(config.containerPidsLimit).toBe(64);
-});
-
-test("loadHarnessConfig 默认本地模型服务，可显式切换 external", () => {
-    const local = loadHarnessConfig({ VLLM_MODEL_ID: "qwen" }, "/tmp/harness-project");
-    expect(local.modelServiceMode).toBe("local");
-
-    const external = loadHarnessConfig({
-        VLLM_MODEL_ID: "qwen",
-        HARNESS_MODEL_SERVICE_MODE: "external",
-    }, "/tmp/harness-project");
-    expect(external.modelServiceMode).toBe("external");
-
-    const unknown = loadHarnessConfig({
-        VLLM_MODEL_ID: "qwen",
-        HARNESS_MODEL_SERVICE_MODE: "something-else",
-    }, "/tmp/harness-project");
-    expect(unknown.modelServiceMode).toBe("local");
 });
 
 test("HARNESS_WORKER_ISOLATION=systemd 解析专用 UID/cgroup 与 worker 凭据路径", () => {

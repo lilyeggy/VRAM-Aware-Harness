@@ -66,8 +66,8 @@ svg{display:block;width:100%;height:auto}
 <text x="456" y="2720" font-size="12" fill="#eaf2ff" font-weight="normal" text-anchor="start" font-family="Inter, PingFang SC, Microsoft YaHei, sans-serif">外部 opencode-go → 正式外置 provider；VLLM_MODEL_ID 语义收口</text>
 <text x="456" y="2752" font-size="13" fill="#ffb86b" font-weight="700" text-anchor="start" font-family="Consolas, monospace">P1</text>
 <rect x="800" y="2664" width="340" height="120" rx="12" fill="#1a130d" stroke="#ffb86b" stroke-width="1.5"/>
-<text x="816" y="2694" font-size="16" fill="#ffb86b" font-weight="700" text-anchor="start" font-family="Inter, PingFang SC, Microsoft YaHei, sans-serif">显存感知调度</text>
-<text x="816" y="2720" font-size="12" fill="#eaf2ff" font-weight="normal" text-anchor="start" font-family="Inter, PingFang SC, Microsoft YaHei, sans-serif">代码仍在但未用 → 删除/禁用，只留最小资源决策</text>
+<text x="816" y="2694" font-size="16" fill="#ffb86b" font-weight="700" text-anchor="start" font-family="Inter, PingFang SC, Microsoft YaHei, sans-serif">VRAM 调度已删除</text>
+<text x="816" y="2720" font-size="12" fill="#eaf2ff" font-weight="normal" text-anchor="start" font-family="Inter, PingFang SC, Microsoft YaHei, sans-serif">已删除：VLLM/GPU 观测与预热池；准入固定 NORMAL</text>
 <text x="816" y="2752" font-size="13" fill="#ffb86b" font-weight="700" text-anchor="start" font-family="Consolas, monospace">P1</text>
 <rect x="1160" y="2664" width="340" height="120" rx="12" fill="#1a130d" stroke="#ffb86b" stroke-width="1.5"/>
 <text x="1176" y="2694" font-size="16" fill="#ffb86b" font-weight="700" text-anchor="start" font-family="Inter, PingFang SC, Microsoft YaHei, sans-serif">控制面 egress</text>
@@ -82,8 +82,8 @@ svg{display:block;width:100%;height:auto}
 <text x="456" y="2864" font-size="12" fill="#eaf2ff" font-weight="normal" text-anchor="start" font-family="Inter, PingFang SC, Microsoft YaHei, sans-serif">RunStore + events → 租户级配额、成本、不可变审计</text>
 <text x="456" y="2896" font-size="13" fill="#63e6ff" font-weight="700" text-anchor="start" font-family="Consolas, monospace">P2</text>
 <rect x="800" y="2808" width="340" height="120" rx="12" fill="#0d1a24" stroke="#63e6ff" stroke-width="1.5"/>
-<text x="816" y="2838" font-size="16" fill="#63e6ff" font-weight="700" text-anchor="start" font-family="Inter, PingFang SC, Microsoft YaHei, sans-serif">快照预热池</text>
-<text x="816" y="2864" font-size="12" fill="#eaf2ff" font-weight="normal" text-anchor="start" font-family="Inter, PingFang SC, Microsoft YaHei, sans-serif">关闭 → jailer-only 快照池</text>
+<text x="816" y="2838" font-size="16" fill="#63e6ff" font-weight="700" text-anchor="start" font-family="Inter, PingFang SC, Microsoft YaHei, sans-serif">快照池（jailer）</text>
+<text x="816" y="2864" font-size="12" fill="#eaf2ff" font-weight="normal" text-anchor="start" font-family="Inter, PingFang SC, Microsoft YaHei, sans-serif">已落地：jailer-only 快照池；预热池已删除</text>
 <text x="816" y="2896" font-size="13" fill="#63e6ff" font-weight="700" text-anchor="start" font-family="Consolas, monospace">P2</text>
 </svg>
 </body>

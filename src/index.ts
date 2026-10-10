@@ -25,8 +25,6 @@ export * from "./resources/policy-decision-store.ts";
 export * from "./resources/resource-admission-service.ts";
 export * from "./resources/resource-classifier.ts";
 export type * from "./resources/resource-observer.ts";
-export * from "./resources/vllm-resource-observer.ts";
-export * from "./resources/coalescing-resource-observer.ts";
 export * from "./resources/resource-metrics-sampler.ts";
 
 // Policies & Tool Governance
@@ -62,7 +60,6 @@ export * from "./sandbox/sandbox-provider-router.ts";
 export * from "./sandbox/sandbox-startup-reconciler.ts";
 export * from "./sandbox/container-sandbox-provider.ts";
 export * from "./sandbox/container-runtime-adapter.ts";
-export * from "./sandbox/container-warm-pool.ts";
 export * from "./sandbox/managed-local-sandbox.ts";
 export * from "./sandbox/oci-sandbox-spec.ts";
 export * from "./sandbox/redact.ts";

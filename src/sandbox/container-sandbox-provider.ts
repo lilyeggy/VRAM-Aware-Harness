@@ -1,7 +1,6 @@
 import { relative, sep } from "node:path";
 import type { EffectivePolicySnapshot } from "../policies/effective-policy.ts";
 import { redact } from "./redact.ts";
-import { ContainerWarmPool } from './container-warm-pool.ts';
 import {
     DockerRuncRuntimeAdapter,
     DockerRunscRuntimeAdapter,
@@ -13,7 +12,7 @@ import {
     resolveSandboxProfile,
     type SandboxProfile,
 } from "./sandbox-profile.ts";
-import { OciSandboxSpecCompiler, stripResourceLimitArgs } from "./oci-sandbox-spec.ts";
+import { OciSandboxSpecCompiler } from "./oci-sandbox-spec.ts";
 import type { SandboxStore } from "./sandbox-store.ts";
 import type {
     SandboxCommandExecutor,
@@ -27,10 +26,6 @@ import type {
 export type { ContainerCommandRuntime } from "./container-runtime-adapter.ts";
 
 export interface ContainerSandboxConfig {
-    readonly warmPoolSize?: number;
-    readonly warmPoolOwner?: string;
-    /** 预热容器存活时长；默认 5 分钟。过短会让补充出来的容器白白过期。 */
-    readonly warmPoolTtlMs?: number;
     readonly image: string;
     /**
      * `runtime` accepted a Docker executable path in the pre-P0.5 contract;
@@ -44,7 +39,6 @@ export interface ContainerSandboxConfig {
     readonly userId?: number;
     /**
      * `tenant` 让容器挂租户工作区根：同租户所有 Run 共用一个挂载点，
-     * 因此预热池可以跨工作区复用（命中率大幅提升）。
      * 代价是同租户跨 Run 的文件隔离由物理视野降为策略约束。
      * 默认 `run`：容器只挂本 Run 的工作区。
      */
@@ -69,8 +63,6 @@ export class ContainerSandboxProvider implements SandboxProvider, SandboxCommand
     private readonly runtime: "runsc" | "runc";
     private readonly adapter: ContainerRuntimeAdapter;
     private readonly compiler: OciSandboxSpecCompiler;
-    private readonly warmPool: ContainerWarmPool | undefined;
-    private readonly replenishments = new Map<string, { key: string; args: readonly string[] }>();
 
     constructor(
         private readonly store: SandboxStore,
@@ -120,23 +112,6 @@ export class ContainerSandboxProvider implements SandboxProvider, SandboxCommand
                 ? {}
                 : { tenantWorkspaceRoot: config.tenantWorkspaceRoot }),
         });
-        if (config.warmPoolSize) {
-            this.warmPool = new ContainerWarmPool(
-                commands,
-                this.docker,
-                config.warmPoolSize,
-                config.warmPoolTtlMs ?? 300_000,
-                config.warmPoolOwner,
-            );
-            // N29：清场必须在池**首次被使用之前**确定性地发生，不能只靠 take()/warm()
-            // 惰性触发——否则一个配了池但长期没有可复用 Run 的实例，会一直不清场。
-            // 预热容器不含密钥、也不属于任何 Run，清不掉只影响资源占用（内存/PID 额度），
-            // 不影响正确性，因此这里失败只记录、不阻断 Provider 构造。
-            // initialize() 自身幂等：后续 take()/warm() 复用同一个 promise，不会重复清场。
-            void this.warmPool.initialize().catch((error) => {
-                console.error('Warm pool startup reconciliation failed', error);
-            });
-        }
     }
 
     async create(input: {
@@ -188,35 +163,8 @@ export class ContainerSandboxProvider implements SandboxProvider, SandboxCommand
         // N13：创建参数里不再有 Secret 明文（也没有占位符），明文只保留在
         // Provider 内存中，执行期经客户端环境注入。
         const args = [...this.adapter.augmentCreateArgs(compiled.createArgs)];
-        // 池化规格：剥离 CPU/内存限额。这两项随模板与 Run 经常变，放进匹配键
-        // 会让"同工作区、仅限额不同"的 Run 也复用不上；它们改由租用时
-        // docker update 落实（见 applyResourceLimits）。
-        const poolArgs = stripResourceLimitArgs(args);
-        const keyArgs = [...poolArgs];
-        keyArgs[keyArgs.indexOf('--name') + 1] = '<resource>';
-        const poolKey = JSON.stringify([input.policy.tenantId, keyArgs]);
-
-
-        // 从这里开始分叉，就是判断是否命中预热池
-        const eligible = this.warmPool !== undefined && Object.keys(environment).length === 0;
         const acquisitionStartedAt = performance.now();
-        let warmed = false;
-        if (eligible) {
-            warmed = await this.warmPool!.take(poolKey, `agent-harness-${input.id}`);
-            if (warmed && !await this.applyResourceLimits(input.id, input.policy)) {
-                // 限额落实不了，这个容器就不能代表本次策略，删掉重走真实创建。
-                await this.commands.run([this.docker, 'rm', '--force', `agent-harness-${input.id}`]);
-                warmed = false;
-            }
-            if (warmed) {
-                // 命中即补货：让池子始终保有存货。等 Run 结束才补的话，
-                // 补充速度受限于结束速度，连续使用场景只能做到隔次命中。
-                void this.warmPool!.warm(poolKey, poolArgs)
-                    .catch(error => console.error('Sandbox warm replenishment failed', error));
-            }
-        }
-        const result = warmed ? { exitCode: 0, stdout: '', stderr: '' }
-            : await this.commands.run([this.docker, ...args]);
+        const result = await this.commands.run([this.docker, ...args]);
         if (result.exitCode !== 0) {
             const failed = {
                 ...record, status: "FAILED" as const, updatedAt: new Date().toISOString(),
@@ -248,7 +196,6 @@ export class ContainerSandboxProvider implements SandboxProvider, SandboxCommand
         }
 
         this.containerBySandboxId.set(input.id, `agent-harness-${input.id}`);
-        if (eligible) this.replenishments.set(input.id, { key: poolKey, args: poolArgs });
         this.secretValues.set(input.id, Object.freeze(environment));
         this.store.update({
             ...record,
@@ -264,7 +211,7 @@ export class ContainerSandboxProvider implements SandboxProvider, SandboxCommand
                 : "/workspace",
             acquisition: Object.freeze({
                 durationMs: Math.round(performance.now() - acquisitionStartedAt),
-                warmHit: Boolean(warmed),
+                warmHit: false,
             }),
             enforcement: Object.freeze({
                 toolExecutionBoundary: "SANDBOX" as const,
@@ -280,44 +227,6 @@ export class ContainerSandboxProvider implements SandboxProvider, SandboxCommand
             withSecrets: <T>(callback: (values: Readonly<Record<string, string>>) => T) =>
                 callback(this.secretValues.get(input.id) ?? Object.freeze({})),
         });
-    }
-
-    /**
-     * 预热容器按"池化规格"裸建（不含 CPU/内存限额），所以租用后必须把本次
-     * 策略的限额补上，否则等于悄悄放大了资源上限。
-     * 返回 false 表示限额落实失败，调用方必须放弃这个容器而不是将就用它。
-     *
-     * 真机验证（A6000 / docker 28.1.1 / runsc release-20260817.0）：
-     *  - `docker update --cpus N` 可直接生效，无需附加参数；
-     *  - `docker update --memory N` **必须同时下发 `--memory-swap N`**，否则
-     *    daemon 直接拒绝："Memory limit should be smaller than already set
-     *    memoryswap limit"——裸建容器的 MemorySwap 默认为 0，而 docker 要求
-     *    Memory < MemorySwap。写入同值等价于禁用 swap，符合硬限制语义。
-     *  - 限额确实落地为 cgroup 约束（stats 分母随之变化，超限进程被终结）；
-     *    但注意 gVisor 下"内存触顶"的爆炸半径是**整个沙箱**而非单个进程：
-     *    沙箱会被终结，下一次 `docker exec` 报 No such container 并收敛为 LOST。
-     */
-    private async applyResourceLimits(
-        sandboxId: string,
-        policy: EffectivePolicySnapshot,
-    ): Promise<boolean> {
-        const args: string[] = [];
-        if (policy.resourceLimits.cpuCores !== null) {
-            args.push('--cpus', String(policy.resourceLimits.cpuCores));
-        }
-        if (policy.resourceLimits.memoryMiB !== null) {
-            args.push('--memory', `${policy.resourceLimits.memoryMiB}m`);
-            args.push('--memory-swap', `${policy.resourceLimits.memoryMiB}m`);
-        }
-        if (args.length === 0) return true;
-        const result = await this.commands.run([
-            this.docker, 'update', ...args, `agent-harness-${sandboxId}`,
-        ]);
-        if (result.exitCode !== 0) {
-            console.error('Warm container resource update failed', redact(result.stderr || result.stdout));
-            return false;
-        }
-        return true;
     }
 
     async execute(
@@ -356,13 +265,9 @@ export class ContainerSandboxProvider implements SandboxProvider, SandboxCommand
         if (current !== null && current.status === "ACTIVE") {
             this.store.update({ ...current, status: "TERMINATED", updatedAt: new Date().toISOString() }, "ACTIVE");
         }
-        const replenish = this.replenishments.get(sandboxId);
-        this.replenishments.delete(sandboxId);
-        if (replenish) void this.warmPool!.warm(replenish.key, replenish.args)
-            .catch(error => console.error('Sandbox warm replenishment failed', error));
     }
 
-    async close(): Promise<void> { await this.warmPool?.close(); }
+    async close(): Promise<void> {}
 
     async cleanupStale(record: SandboxRecord): Promise<void> {
         const name = `agent-harness-${record.id}`;

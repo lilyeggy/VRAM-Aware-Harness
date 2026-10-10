@@ -19,7 +19,6 @@ export HARNESS_WORKER_PI_AUTH_PATH=/var/lib/harness-worker/auth.json
 export HARNESS_WORKER_PI_MODELS_PATH=/var/lib/harness-worker/models.json
 export HARNESS_SANDBOX_BROKER_CONTROL_TOKEN="${HARNESS_SANDBOX_BROKER_CONTROL_TOKEN:-live-flow-control-2026}"
 export HARNESS_MICROVM_DRIVER=firecracker
-export HARNESS_MODEL_SERVICE_MODE=external
 export FIRECRACKER_BINARY_PATH=/home/cxr/microvm-test/bin/fc117
 export FIRECRACKER_KERNEL_PATH=/home/cxr/microvm-test/bin/vmlinux
 export FIRECRACKER_ROOTFS_PATH=/home/cxr/microvm-test/images/rootfs.ext4

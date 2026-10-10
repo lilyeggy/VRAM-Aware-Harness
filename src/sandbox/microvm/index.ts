@@ -11,4 +11,3 @@ export * from "./vm-cid-allocator.ts";
 export * from "./jailer-prereq-check.ts";
 export * from "./workspace-disk-exporter.ts";
 export * from "./vm-snapshot-manager.ts";
-export * from "./microvm-warm-pool.ts";

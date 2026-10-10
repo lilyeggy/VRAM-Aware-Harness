@@ -1,6 +1,6 @@
-# VRAM-Aware Harness 任务放行与调度策略技术白皮书
+# VRAM-Aware Harness 任务放行与调度策略技术白皮书（历史；M4 后 VRAM/GPU 观测与预热池已删除）
 
-> **文档定位**：本文档详细解构 `VRAM-Aware-Harness` 的任务放行（Admission）、资源感知（Observation）与调度编排（Scheduling）核心策略，完整呈现系统如何在单机、多租户、有限显存条件下做出严密的 `START`（放行）与 `QUEUE`（排队）决策。
+> **文档定位（历史设计）**：本文档记录早期 VRAM-Aware 版本的放行/观测/调度策略；M4 已删除 vLLM/GPU 观测与预热池，模型服务位于平台外，资源压力固定 NORMAL，准入只由全局/租户并发上限、会话串行与 Queue TTL 决定。
 
 ---
 
@@ -113,7 +113,7 @@
 | **`BUSY`** | `< maxActiveRuns` | `> 0`（该租户已有任务在跑） | **`QUEUE`** | `RESOURCE_BUSY_TENANT_LIMIT` | **降级防霸占**：系统繁忙时，每个租户最多只允许 1 个任务并发！ |
 | **`BUSY`** | `< maxActiveRuns` | `= 0`（该租户当前无任务） | **`START`** | `RESOURCE_BUSY_TENANT_AVAILABLE` | 繁忙时依然保障每个租户享有保底 1 个执行槽位。 |
 | **`NORMAL`** | `>= maxActiveRuns` | 任意 | **`QUEUE`** | `GLOBAL_CONCURRENCY_LIMIT` | 资源健康，但达到系统配置的全局并发上限。 |
-| **`NORMAL`** | `< maxActiveRuns` | 满足租户配额 | **`START`** | `RESOURCE_NORMAL` | **完全健康**：绿灯放行，立即从预热池取沙箱启动任务。 |
+| **`NORMAL`** | `< maxActiveRuns` | 满足租户配额 | **`START`** | `RESOURCE_NORMAL` | **完全健康**：绿灯放行，立即创建/恢复沙箱启动任务。 |
 
 ---
 

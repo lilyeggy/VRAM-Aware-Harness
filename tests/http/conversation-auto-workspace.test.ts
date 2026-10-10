@@ -10,7 +10,7 @@ const timestamp = "2026-09-15T12:00:00.000Z";
 
 /**
  * 内存版工作区服务。记录每一个被创建的工作区，用于断言"自动建了几个、
- * 根目录是什么"——这正是预热池能否命中的前提。
+ * 根目录是什么"。
  */
 function memoryWorkspaceService() {
     const created: {
@@ -138,7 +138,7 @@ test("同一会话的多条消息共用同一个工作区路径", async () => {
         expect(response.status).toBe(202);
     }
 
-    // 三次 Run 的 workspacePath 必须完全一致：这正是预热池能反复命中的前提
+    // 三次 Run 的 workspacePath 必须完全一致：会话内文件视野连续。
     expect(runs).toHaveLength(3);
     const paths = new Set(runs.map((run) => run.workspacePath));
     expect(paths.size).toBe(1);

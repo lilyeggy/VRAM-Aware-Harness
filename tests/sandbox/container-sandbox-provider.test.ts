@@ -19,37 +19,20 @@ class FakeDocker {
         this.calls.push([...args]);
         this.environments.push(environment);
         if (args[1] === "inspect") {
-            // 预热池探活用 State.Running；runtime 举证用 HostConfig.Runtime。
+            // docker inspect 同时用于探活与 runtime 举证。
             return {
                 exitCode: 0,
                 stdout: args.includes("{{.State.Running}}") ? "true\n" : "runsc\n",
                 stderr: "",
             };
         }
-        // 预热池初始化会按 label 列遗留容器；返回空表示没有遗留。
+        // 启动对账会按 label 列遗留容器；返回空表示没有遗留。
         if (args[1] === "ps") return { exitCode: 0, stdout: "", stderr: "" };
         if (args[1] === "exec" && this.nextExecResult !== null) return this.nextExecResult;
         return { exitCode: 0, stdout: "container-id", stderr: "" };
     }
 }
 
-/** 统计真正创建出来的预热容器数量（区别于租用后的正式名字）。 */
-function warmContainers(docker: FakeDocker): number {
-    return docker.calls.filter((call) => {
-        if (call[1] !== "run") return false;
-        const nameIndex = call.indexOf("--name");
-        return nameIndex >= 0
-            && String(call[nameIndex + 1]).startsWith("agent-harness-warm-");
-    }).length;
-}
-
-async function waitUntil(predicate: () => boolean, timeoutMs = 2_000): Promise<void> {
-    const deadline = Date.now() + timeoutMs;
-    while (!predicate()) {
-        if (Date.now() > deadline) throw new Error("等待条件超时");
-        await new Promise((resolve) => setTimeout(resolve, 5));
-    }
-}
 
 function policy(overrides: Partial<EffectivePolicySnapshot> = {}): EffectivePolicySnapshot {
     return {
@@ -214,72 +197,6 @@ test("无法强制 bind mount 磁盘配额或越出 Workspace 根时拒绝执行
     })).rejects.toThrow("超出策略范围");
 });
 
-test("预热容器命中后补上本次策略的资源限额，并立即补货", async () => {
-    const docker = new FakeDocker();
-    const store = new MemorySandboxStore();
-    const provider = new ContainerSandboxProvider(
-        store as unknown as SandboxStore,
-        { get: () => null },
-        { image: "agent-sandbox:test", warmPoolSize: 2, warmPoolOwner: "test" },
-        docker,
-    );
-    const input = (id: string) => ({
-        id, runId: "run",
-        workspacePath: "/srv/workspaces/tenant/workspace", policy: policy(),
-    });
-
-    const first = await provider.create(input("sandbox-warm-1"));
-    expect(first.acquisition?.warmHit).toBe(false);
-    // 冷启动的 Run 结束后才补货（低频负载下这一步由止损兜底）。
-    await provider.terminate(first.id);
-    await waitUntil(() => warmContainers(docker) === 1);
-
-    const second = await provider.create(input("sandbox-warm-2"));
-    expect(second.acquisition?.warmHit).toBe(true);
-    // 池化容器是裸规格（不含限额）创建的，租用后必须补上本次策略的限额，
-    // 否则等于悄悄放大了资源上限。
-    const update = docker.calls.find((call) => call[1] === "update");
-    expect(update).toBeDefined();
-    expect(update).toContain("--cpus");
-    expect(update).toContain("1.5");
-    // 真机验证（A6000 / runsc）：只下发 --memory 会被 daemon 拒绝——
-    // "Memory limit should be smaller than already set memoryswap limit"，
-    // 必须同时把 --memory-swap 写成同值（等价禁用 swap）。
-    expect(update).toContain("--memory");
-    expect(update).toContain("--memory-swap");
-    expect(update!.filter((argument) => argument === "512m")).toHaveLength(2);
-    expect(update).toContain("agent-harness-sandbox-warm-2");
-    // 命中即补货：池里立刻又有一个，不必等这次 Run 结束。
-    await waitUntil(() => warmContainers(docker) === 2);
-    await provider.terminate(second.id);
-});
-
-test("命中后仍会走过 runtime 举证，复用不等于免检", async () => {
-    const docker = new FakeDocker();
-    const provider = new ContainerSandboxProvider(
-        new MemorySandboxStore() as unknown as SandboxStore,
-        { get: () => null },
-        { image: "agent-sandbox:test", warmPoolSize: 2, warmPoolOwner: "test" },
-        docker,
-    );
-    const input = (id: string) => ({
-        id, runId: "run",
-        workspacePath: "/srv/workspaces/tenant/workspace", policy: policy(),
-    });
-    const first = await provider.create(input("sandbox-proof-1"));
-    await provider.terminate(first.id);
-    await waitUntil(() => warmContainers(docker) === 1);
-
-    const before = docker.calls.length;
-    const second = await provider.create(input("sandbox-proof-2"));
-    expect(second.acquisition?.warmHit).toBe(true);
-    const verifications = docker.calls.slice(before).filter(
-        (call) => call[1] === "inspect" && call.includes("{{.HostConfig.Runtime}}"),
-    );
-    expect(verifications).toHaveLength(1);
-    await provider.terminate(second.id);
-});
-
 test("TENANT 视野：容器挂租户根，工具工作目录落到本 Run 的工作区子目录", async () => {
     const docker = new FakeDocker();
     const store = new MemorySandboxStore();
@@ -315,31 +232,3 @@ test("TENANT 视野：容器挂租户根，工具工作目录落到本 Run 的�
     await provider.terminate(handle.id);
 });
 
-test("TENANT 视野下同租户不同工作区命中同一个预热容器", async () => {
-    const docker = new FakeDocker();
-    const provider = new ContainerSandboxProvider(
-        new MemorySandboxStore() as unknown as SandboxStore,
-        { get: () => null },
-        {
-            image: "agent-sandbox:test", warmPoolSize: 2, warmPoolOwner: "test",
-            workspaceScope: "tenant", tenantWorkspaceRoot: "/srv/workspaces",
-        },
-        docker,
-    );
-    const input = (id: string, workspace: string) => ({
-        id, runId: "run",
-        workspacePath: workspace,
-        policy: policy({ workspaceRoots: ["/srv/workspaces/tenant"] }),
-    });
-
-    const a = await provider.create(input("sandbox-multi-a", "/srv/workspaces/tenant/ws-a"));
-    expect(a.acquisition?.warmHit).toBe(false);
-    await provider.terminate(a.id);
-    await waitUntil(() => warmContainers(docker) === 1);
-
-    // 换了工作区、但同租户：RUN 视野下必然落空，TENANT 视野下应当命中。
-    const b = await provider.create(input("sandbox-multi-b", "/srv/workspaces/tenant/ws-b"));
-    expect(b.acquisition?.warmHit).toBe(true);
-    expect(b.containerWorkdir).toBe("/workspace/ws-b");
-    await provider.terminate(b.id);
-});

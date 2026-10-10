@@ -183,15 +183,6 @@ function resolveTenantRoot(
     return tenantRoot;
 }
 
-/**
- * 剥离资源限额参数，得到"池化规格"（poolArgs）。
- *
- * CPU/内存限制在租用之后可用 `docker update` 落实，所以它们不该参与预热池的
- * 匹配键——否则两个仅限额不同的同工作区 Run 也复用不上，白白丢掉命中。
- *
- * `--pids-limit` 刻意保留在匹配键里：它与 N14 那条 gVisor 内部上限的耦合
- * 需要真机重新验证，不值得为了一点命中率去动它。
- */
 export function stripResourceLimitArgs(args: readonly string[]): string[] {
     const stripped: string[] = [];
     for (let index = 0; index < args.length; index += 1) {

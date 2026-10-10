@@ -7,8 +7,6 @@ import { unrestrictedPolicy, type EffectivePolicySnapshot } from "../../src/poli
 import type { SandboxRecord, SecretProvider } from "../../src/sandbox/sandbox-provider.ts";
 import type { SandboxStore } from "../../src/sandbox/sandbox-store.ts";
 import { MicrovmSandboxProvider } from "../../src/sandbox/microvm/microvm-sandbox-provider.ts";
-import { MicrovmWarmPool, mapResourceToTier } from "../../src/sandbox/microvm/microvm-warm-pool.ts";
-import { MockMicrovmDriver } from "../../src/sandbox/microvm/mock-microvm-driver.ts";
 import {
     FirecrackerSandboxDriver,
     buildJailerCgroupArgs,
@@ -166,125 +164,6 @@ test("回归 #1: 导出失败仍必须销毁 VM 并回收运行目录", async ()
         rmSync(root, { recursive: true, force: true });
     }
 });
-
-/**
- * 回归 #2：预热池必须真正按 maxPerTier 保持多台，而不是"同名 key 直接替换"。
- * 修复前 `maxPerTier` 从未被读取，配置的容量被彻底忽略。
- */
-test("回归 #2: 预热池按 maxPerTier 控制容量，超出时回收最旧的一台", async () => {
-    const driver = new MockMicrovmDriver();
-    const pool = new MicrovmWarmPool(driver, { ttlMs: 60_000, maxPerTier: 2 });
-    const mk = async (id: string) =>
-        await driver.create({ id, runId: "run-warm", workspacePath: "/workspace" });
-
-    pool.put("tmpl", "M", await mk("w1"));
-    pool.put("tmpl", "M", await mk("w2"));
-    expect(pool.count("tmpl", "M")).toBe(2);
-    expect(pool.size()).toBe(2);
-
-    // 第三台入池 → 最旧的 w1 被回收，容量仍为 2
-    pool.put("tmpl", "M", await mk("w3"));
-    expect(pool.count("tmpl", "M")).toBe(2);
-    expect(driver.instances.has("w1")).toBe(false);
-
-    // FIFO：先入池的先被取走
-    expect(pool.take("tmpl", "M")?.instance.id).toBe("w2");
-    expect(pool.take("tmpl", "M")?.instance.id).toBe("w3");
-    expect(pool.take("tmpl", "M")).toBeNull();
-    await pool.close();
-});
-
-test("回归 #2: 非法 maxPerTier 直接拒绝，不得静默退化为 1", () => {
-    expect(() => new MicrovmWarmPool(new MockMicrovmDriver(), { maxPerTier: 0 })).toThrow(/maxPerTier/);
-    expect(() => new MicrovmWarmPool(new MockMicrovmDriver(), { maxPerTier: 1.5 })).toThrow(/maxPerTier/);
-});
-
-/**
- * 回归 #3：需求超出 L 档时必须返回 null。
- * 修复前任何超过 2c/512MiB 的需求都被映射到 L，于是 8c/8GiB 的策略会拿到
- * 4c/2GiB 的预热 VM —— 实际资源低于策略声明的限额。
- */
-test("回归 #3: 超出 L 档的资源需求不得映射到更小档位", () => {
-    expect(mapResourceToTier(1, 256)).toBe("S");
-    expect(mapResourceToTier(2, 512)).toBe("M");
-    expect(mapResourceToTier(4, 2048)).toBe("L");
-    // 超限即 null（调用方必须回退到按策略精确创建的冷启动路径）
-    expect(mapResourceToTier(8, 4096)).toBeNull();
-    expect(mapResourceToTier(4, 4097)).toBeNull();
-    expect(mapResourceToTier(5, 512)).toBeNull();
-});
-
-test("回归 #3: 超限请求跳过预热池，且不消耗已预热的 VM", async () => {
-    const driver = new FakeHardwareDriver();
-    const root = mkdtempSync(join(tmpdir(), "regress-tier-"));
-    try {
-        const templatePath = join(root, "template.ext4");
-        writeFileSync(templatePath, "fake-ext4");
-        const workspacePath = join(root, "workspace");
-        mkdirSync(workspacePath, { recursive: true });
-
-        const store = new MemorySandboxStore();
-        const warmPool = new MicrovmWarmPool(driver, { ttlMs: 60_000 });
-        const provider = new MicrovmSandboxProvider(store as unknown as SandboxStore, mockSecrets, {
-            driver,
-            workspaceDiskTemplatePath: templatePath,
-            warmPool,
-            templateHash: "tmpl-hash",
-        });
-
-        await provider.prewarm(["M"]);
-        expect(warmPool.count("tmpl-hash", "M")).toBe(1);
-
-        const handle = await provider.create({
-            id: "sbx-big",
-            runId: "run-big",
-            workspacePath,
-            policy: strictPolicy({
-                resourceLimits: { ...unrestrictedPolicy.resourceLimits, cpuCores: 8, memoryMiB: 4096 },
-            }),
-        });
-
-        // 不得命中预热（否则会欠配），必须为本 Run 冷启动
-        expect(handle.acquisition?.warmHit).toBe(false);
-        expect(driver.createdIds).toContain("sbx-big");
-        // 已预热的 M 档 VM 必须原样留在池中
-        expect(warmPool.count("tmpl-hash", "M")).toBe(1);
-
-        await provider.terminate("sbx-big");
-        await provider.close();
-    } finally {
-        driver.cleanup();
-        rmSync(root, { recursive: true, force: true });
-    }
-});
-
-test("回归 #2: prewarm 把档位补到 maxPerTier 而不是只补一台", async () => {
-    const driver = new FakeHardwareDriver();
-    const root = mkdtempSync(join(tmpdir(), "regress-prewarm-"));
-    try {
-        const templatePath = join(root, "template.ext4");
-        writeFileSync(templatePath, "fake-ext4");
-        const store = new MemorySandboxStore();
-        const warmPool = new MicrovmWarmPool(driver, { ttlMs: 60_000, maxPerTier: 2 });
-        const provider = new MicrovmSandboxProvider(store as unknown as SandboxStore, mockSecrets, {
-            driver,
-            workspaceDiskTemplatePath: templatePath,
-            warmPool,
-            templateHash: "tmpl-hash",
-        });
-
-        await provider.prewarm(["M"]);
-        expect(warmPool.count("tmpl-hash", "M")).toBe(2);
-        expect(driver.createdIds.length).toBe(2);
-
-        await provider.close();
-        expect(warmPool.size()).toBe(0);
-    } finally {
-        driver.cleanup();
-        rmSync(root, { recursive: true, force: true });
-    }
-});
-
 /**
  * 回归 #6：vsock 连接超时的报错必须使用真实生效的超时值。
  * 修复前固定写 "(3000ms)"，而冷启动路径实际用 1s，误导了真机排查。

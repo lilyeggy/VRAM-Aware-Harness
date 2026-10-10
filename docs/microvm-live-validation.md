@@ -375,7 +375,7 @@ VM 看到的路径**始终是 `/workspace.ext4`**，且该文件在其 chroot �
 ### 4.4 仍未验证的项
 
 - **并发与密度**：从未同时运行多个 VM，无容量/成本数据。
-- **预热池真机验证**：代码齐备但未在真机跑过（快照恢复已可用且不与之冲突）。
+- **预热池真机验证（历史）**：M4 已删除 MicrovmWarmPool/ContainerWarmPool；快照恢复保留且不依赖预热池。
 - **guest 内 LLM 访问通道**：按边界设计须走 vsock 转发，尚未实现。
 
 ---
@@ -460,7 +460,7 @@ Inode: 399   Type: symlink    Mode:  0777        # 修复后为指向 busybox �
 ### 5.4 至此的最终状态
 
 - **不需要自建 Firecracker**：官方 v1.17.0 二进制实测满足全部需求。
-- **不需要用预热池替代快照**：两条独立机制，快照恢复已在生产路径验证。
+- **不需要用预热池替代快照（历史结论仍成立）**：M4 已直接删除预热池代码，快照恢复继续在生产路径验证。
 - 启动延迟：冷启动 ~2.5s → 快照恢复 ~0.37s（jailer 模式）。
 - 非 jailer 模式不支持快照恢复（路径固化），仅影响开发/测试路径。
 
@@ -632,7 +632,7 @@ bun run scripts/day7-http-smoke.ts
 
 
 
-## 8. 2026-10-09 补验：Broker 租户隔离 + 外部模型服务模式（非 jailer，broker 模式）
+## 8. 2026-10-09 补验：Broker 租户隔离 + 外部模型服务模式（历史；M4 后外部观察器为唯一默认）
 
 ### 8.1 目标
 
@@ -647,11 +647,10 @@ bun run scripts/day7-http-smoke.ts
   操作校验 owner，不匹配返回 `Broker 拒绝跨租户操作`，未知 sandbox 返回
   `Broker 不认识 sandbox`。Worker 侧用当前 Run 的 `tenantId` 固定租户；
   Master 侧在 `terminate` 时通过 `sandbox -> run` 反查租户。
-- **外部模型服务模式**：新增 `HARNESS_MODEL_SERVICE_MODE=external` 与
-  `ExternalModelServiceResourceObserver`，资源快照 `sources` 为
-  `["EXTERNAL_MODEL_SERVICE"]`，GPU/KV 字段为 `null`，并发计数为 0，
-  压力固定 `NORMAL`；平台不再要求同机 vLLM `/metrics` 或 `nvidia-smi`。
-  `local` 为默认值，行为不变。
+- **外部模型服务模式（历史；M4 后为唯一默认）**：曾新增 `HARNESS_MODEL_SERVICE_MODE=external` 与
+  `ExternalModelServiceResourceObserver`；资源快照 `sources` 为 `["EXTERNAL_MODEL_SERVICE"]`、
+  GPU/KV 字段为 `null`、并发计数为 0、压力固定 `NORMAL`；平台不要求同机 vLLM `/metrics` 或 `nvidia-smi`。
+  M4 已删除该 env、local 分支与 VRAM/GPU 观测；外部观察器成为唯一默认实现，Agent 仍无网络。
 
 ### 8.3 真机结果（172.17.43.193，非 jailer，broker 模式，external 模型服务）
 
@@ -659,7 +658,7 @@ bun run scripts/day7-http-smoke.ts
   `HARNESS_SANDBOX_BROKER_SOCKET=/tmp/harness-sandbox-broker.sock`、
   `HARNESS_WORKER_ISOLATION=process`、`HARNESS_MICROVM_DRIVER=firecracker`、
   `HARNESS_USE_JAILER=false`、`HARNESS_VM_SNAPSHOTS_ENABLED=false`、
-  `HARNESS_MODEL_SERVICE_MODE=external`、`PI_PROVIDER=opencode-go`、
+  `PI_PROVIDER=opencode-go`、
   `VLLM_MODEL_ID=deepseek-v4.1-flash`。
 - Run `aaae57ad-3fc1-4ecd-b88e-46aa35db1850`：COMPLETED；
   resource snapshot `sources=["EXTERNAL_MODEL_SERVICE"]`、压力 `NORMAL`；
@@ -675,14 +674,14 @@ bun run scripts/day7-http-smoke.ts
 - `bun run typecheck`：仅既有 9 条基线错误，无新增。
 - 新增测试：`tests/sandbox/sandbox-broker.test.ts`（含跨租户拒绝）、
   `tests/resources/external-model-service-observer.test.ts`、
-  `tests/app/harness-config.test.ts` 的 external 模式用例。
+  `tests/app/harness-config.test.ts`（默认外部观察器 + production 防线）。
 
 ### 8.5 复现
 
 ```bash
 # broker（同 §7.4）
 bash scripts/live-broker.sh
-# master 使用 external 模型服务模式；live-master-external.sh 为运维脚本，未纳入仓库
+# master 使用外部模型服务观察器（M4 后为默认）；live-master-external.sh 为运维脚本，未纳入仓库
 bash scripts/live-master-external.sh
 HARNESS_BASE_URL=http://127.0.0.1:3100 HARNESS_API_KEY=... \
 HARNESS_SMOKE_USER_INPUT="请使用 bash 工具执行 uname -r，并只回答输出。" \

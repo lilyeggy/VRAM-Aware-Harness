@@ -1,14 +1,14 @@
 # VRAM-Aware Harness
 
-面向团队共享本地大模型的多租户 Agent 任务服务。
+面向多租户的 Agent 任务服务：隔离执行、公平调度、可审计。
 
 核心目标只有三件事：
 
-1. **任务生命周期与调度**：多租户提交任务，按租户轮转、并发上限和 vLLM/GPU 资源压力公平调度。
+1. **任务生命周期与调度**：多租户提交任务，按租户轮转、全局/单租户并发上限、会话串行与 Queue TTL 公平调度。
 2. **副作用与恢复**：工具调用先记账后执行，崩溃/中断后只自动重放安全操作。
-3. **隔离与身份边界**：API Key 派生 Tenant，工具与文件操作限制在 runsc Sandbox 内。
+3. **隔离与身份边界**：API Key 派生 Tenant，工具与文件操作限制在 jailer + Firecracker microVM（生产）或 runsc Sandbox（开发）内。
 
-技术栈：Bun + TypeScript + SQLite；沙箱使用 Docker/runsc；模型后端为 OpenAI 兼容 vLLM。
+技术栈：Bun + TypeScript + SQLite；沙箱使用 jailer + Firecracker microVM（生产）或 Docker/runsc（开发）；模型后端为外部 OpenAI 兼容服务（本地 vLLM 或 opencode-go 等），平台不观测推理侧 GPU/KV cache。
 
 ## 核心能力
 
@@ -18,11 +18,11 @@
 - Run 状态机 + 追加式 RunEvent 时间线
 - 最终回答、Workspace Diff、Artifact 交付
 
-### 调度与资源准入
+### 调度与并发准入
 - Tenant 内 FIFO、Tenant 间轮转
 - 全局 / 单租户并发上限
 - 会话串行与 Queue TTL
-- vLLM/GPU 资源观测 → `START / QUEUE` 准入
+- 平台不观测推理侧 GPU/KV cache；准入由全局/租户并发、会话串行与 Queue TTL 决定
 - 资源恢复后自动推进队列
 
 ### 工具治理与恢复
@@ -78,10 +78,10 @@ src/
 ├── auth/        API Key / 用户账号
 ├── runs/        Run、Attempt、RunStore、RunService
 ├── scheduling/  RunScheduler 与租户公平队列
-├── resources/   vLLM/GPU 观测、分类与准入
+├── resources/   资源快照与准入决策（外部模型服务固定 NORMAL）
 ├── runtime/     PiAdapter、Worker 执行器、运行事件
 ├── worker/      Worker 进程与 IPC
-├── sandbox/     runsc / managed-local Sandbox
+├── sandbox/     jailer + Firecracker microVM（生产）/ runsc（开发）Sandbox
 ├── tools/       工具执行账本与 ToolGateway
 ├── policies/    有效策略与工具守卫
 ├── checkpoints/ Checkpoint 与恢复

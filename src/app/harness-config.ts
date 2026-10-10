@@ -61,18 +61,15 @@ export interface HarnessConfig {
     vmSnapshotsEnabled?:boolean;
     /** 快照池目录（默认 /var/lib/harness/snapshots）。 */
     vmSnapshotPoolDir?:string;
-    /** microVM 预热池容量（按档位各保留 N 台；默认 0 = 关闭）。 */
-    microvmWarmPoolSize?:number;
     containerImage:string;
     containerUserId:number;
     /** N14：沙箱容器的 PID 上限（docker --pids-limit）。未配置时沿用 128。 */
     containerPidsLimit?:number;
-    sandboxWarmPoolSize?:number;
     /**
      * 容器工作区视野粒度。
      * `run`（默认）：容器只挂本 Run 的工作区，同租户跨 Run 物理不可见。
-     * `tenant`：容器挂租户工作区根，同租户所有 Run 共用挂载点，预热池因此
-     * 可以跨工作区复用；代价是同租户跨 Run 的文件隔离由物理视野降为策略约束。
+     * `tenant`：容器挂租户工作区根，同租户所有 Run 共用挂载点；
+     * 代价是同租户跨 Run 的文件隔离由物理视野降为策略约束。
      */
     sandboxWorkspaceScope?: "run" | "tenant";
 
@@ -82,17 +79,8 @@ export interface HarnessConfig {
     piModelsPath:string;
     piAuthPath:string | undefined;
 
-    vllmMetricsUrl:string;
-    resourceObservationTimeoutMs:number;
     resourceMetricsIntervalMs:number;
-    gpuIds:string[];
     resourceThresholds:ResourceThresholds;
-    /**
-     * 模型服务部署位置。local（默认）：模型服务与本平台共机，资源准入读取
-     * vLLM /metrics 与 nvidia-smi；external：模型服务由外部独立部署/运维，
-     * 平台不再观测推理侧 GPU/KV cache，资源压力固定为 NORMAL。
-     */
-    modelServiceMode:"local" | "external";
 
     maxActiveRuns:number;
     maxActiveRunsPerTenant:number;
@@ -185,8 +173,6 @@ export function loadHarnessConfig(
         nonNegativeInteger(environment, name, fallback);
     const num = (name: string, fallback: number): number =>
         numberValue(environment, name, fallback);
-    const vllmBaseUrl = environment.VLLM_BASE_URL
-        ?? "http://127.0.0.1:8000/v1";
     // 支柱 2：工具执行与模型等待期间 GPU 不应空转——默认并发上限放开到
     // 20~30 档位，工具与文件 I/O 在沙箱内并发执行，不独占 GPU 槽位。
     // 每租户并发仍然可配（HARNESS_MAX_ACTIVE_RUNS_PER_TENANT）。
@@ -263,9 +249,6 @@ export function loadHarnessConfig(
     assertWorkspaceRootMatchesDatabaseLifetime(databasePath, workspaceRoot);
 
     return {
-        ...(environment.HARNESS_SANDBOX_WARM_POOL_SIZE === undefined ? {} : {
-            sandboxWarmPoolSize: posInt('HARNESS_SANDBOX_WARM_POOL_SIZE', 2),
-        }),
         // 只有显式声明 tenant 才放宽视野；默认（含拼错的值）保持 Run 级隔离。
         ...(environment.HARNESS_SANDBOX_WORKSPACE_SCOPE === "tenant"
             ? { sandboxWorkspaceScope: "tenant" as const }
@@ -305,9 +288,6 @@ export function loadHarnessConfig(
         })(),
         vmSnapshotsEnabled: environment.HARNESS_VM_SNAPSHOTS_ENABLED === "true",
         vmSnapshotPoolDir: environment.HARNESS_VM_SNAPSHOT_POOL_DIR ?? "/var/lib/harness/snapshots",
-        microvmWarmPoolSize: environment.HARNESS_MICROVM_WARM_POOL_SIZE === undefined
-            ? 0
-            : posInt("HARNESS_MICROVM_WARM_POOL_SIZE", 1),
         containerImage:environment.HARNESS_CONTAINER_IMAGE ?? DEFAULT_CONTAINER_IMAGE,
         containerUserId:posInt("HARNESS_CONTAINER_USER_ID", DEFAULT_CONTAINER_USER_ID),
         containerPidsLimit:posInt("HARNESS_CONTAINER_PIDS_LIMIT", 128),
@@ -357,11 +337,7 @@ export function loadHarnessConfig(
         piCompactionReserveTokens:posInt("PI_COMPACTION_RESERVE_TOKENS", 12_288),
         piCompactionKeepRecentTokens:posInt("PI_COMPACTION_KEEP_RECENT_TOKENS", 8_192),
 
-        vllmMetricsUrl:environment.VLLM_METRICS_URL
-            ?? metricsUrlFromBaseUrl(vllmBaseUrl),
-        resourceObservationTimeoutMs:posInt("HARNESS_RESOURCE_TIMEOUT_MS", 3_000),
         resourceMetricsIntervalMs:posInt("HARNESS_RESOURCE_METRICS_INTERVAL_MS", 1_000),
-        gpuIds:stringList(environment.HARNESS_GPU_IDS, ["0"]),
         resourceThresholds:{
             busyGpuMemoryPercent:num("HARNESS_BUSY_GPU_MEMORY_PERCENT", 70),
             criticalGpuMemoryPercent:num("HARNESS_CRITICAL_GPU_MEMORY_PERCENT", 90),
@@ -375,10 +351,6 @@ export function loadHarnessConfig(
             busyWaitingRequests:nonNeg("HARNESS_BUSY_WAITING_REQUESTS", 1),
             criticalWaitingRequests:nonNeg("HARNESS_CRITICAL_WAITING_REQUESTS", 4),
         },
-        // 模型服务边界：external 时资源压力固定 NORMAL，不再依赖本地 GPU/KV cache。
-        modelServiceMode:environment.HARNESS_MODEL_SERVICE_MODE === "external"
-            ? "external"
-            : "local",
 
         maxActiveRuns,
         maxActiveRunsPerTenant,
@@ -604,14 +576,6 @@ function loadLlmBackends(
         model:piModelId,
         logicalModel:piModelId,
     }));
-}
-
-function metricsUrlFromBaseUrl(baseUrl:string):string {
-    const url = new URL(baseUrl);
-    url.pathname = url.pathname.replace(/\/?v1\/?$/, "/metrics");
-    url.search = "";
-    url.hash = "";
-    return url.toString().replace(/\/$/, "");
 }
 
 /**

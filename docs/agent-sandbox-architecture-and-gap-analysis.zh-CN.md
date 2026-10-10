@@ -1,8 +1,8 @@
 # Agent 时代专属隔离环境架构规范与 VRAM-Aware Harness 客观测绘
 
-> **文档定位**：本文档旨在系统性总结以 Meta Muse、xAI Grok Bot、Manus、Cue 为代表的“实体级云端 Agent”对专属隔离环境（Agent Sandboxes）的核心诉求与架构标准；并结合 `VRAM-Aware-Harness` 现有代码实现进行客观盘点，剖析当前已落地的生产级设计与未来演进方向的真实差距。
+> **文档定位**：本文档总结以 Meta Muse、xAI Grok Bot、Manus、Cue 为代表的“实体级云端 Agent”对专属隔离环境的核心诉求与架构标准，并结合 `VRAM-Aware-Harness` 代码实现客观盘点。**M4 变更（2026-10-10）**：预热池（ContainerWarmPool/MicrovmWarmPool）与 vLLM/GPU 观测已删除，模型服务位于平台外，资源准入固定 NORMAL；下文关于预热池/显存准入的描述为历史盘点。
 >
-> **状态声明**：本项目当前阶段已完成既定研发目标，**后续不再进行代码扩充**。本文档作为项目架构深度沉淀、技术归档与面试沟通的高级参考基准。
+> **状态声明**：项目按里程碑维护；M4 已完成 VRAM/GPU 观测与预热池删除。本文档作为项目架构沉淀、技术归档与面试沟通的参考基准。
 
 ---
 

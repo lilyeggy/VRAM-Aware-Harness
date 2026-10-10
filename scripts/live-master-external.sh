@@ -23,7 +23,6 @@ export VLLM_MODEL_ID=deepseek-v4.1-flash
 export PI_MODELS_PATH=/home/cxr/.pi/agent/models.json
 export PI_AUTH_PATH="$DATA/pi-auth.json"
 export HARNESS_MICROVM_DRIVER=firecracker
-export HARNESS_MODEL_SERVICE_MODE=external
 if [ -f "$DATA/server.pid" ]; then kill "$(cat "$DATA/server.pid")" 2>/dev/null || true; fi
 rm -f "$DATA/server.log"
 setsid /home/cxr/.bun/bin/bun run src/main.ts > "$DATA/server.log" 2>&1 < /dev/null &

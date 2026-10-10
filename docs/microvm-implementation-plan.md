@@ -1,4 +1,4 @@
-# microVM 平台详尽实施方案（Phase 1–4）
+# microVM 平台详尽实施方案（Phase 1–4，历史；Phase 3 最终采用快照加速池，预热池已由 M4 删除）
 
 > **读者**：负责写代码的 AI 实现者。
 > **前置阅读**：`docs/platform-boundary.md`（八条边界，不可违背）、`docs/microvm-migration-explainer.md`（概念背景）。

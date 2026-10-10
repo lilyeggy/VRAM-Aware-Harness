@@ -2,8 +2,6 @@ import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { rmSync, mkdirSync, writeFileSync } from "node:fs";
 import { resolve, join } from "node:path";
 import { VmSnapshotManager } from "../../src/sandbox/microvm/vm-snapshot-manager";
-import { MicrovmWarmPool, mapResourceToTier } from "../../src/sandbox/microvm/microvm-warm-pool";
-import { MockMicrovmDriver } from "../../src/sandbox/microvm/mock-microvm-driver";
 
 describe("VmSnapshotManager", () => {
     const testPoolDir = resolve(process.cwd(), "data/test-snapshots");
@@ -56,58 +54,6 @@ describe("VmSnapshotManager", () => {
     });
 });
 
-describe("MicrovmWarmPool", () => {
-    it("mapResourceToTier 分档映射准确 (S/M/L)", () => {
-        expect(mapResourceToTier(1, 256)).toBe("S");
-        expect(mapResourceToTier(2, 512)).toBe("M");
-        expect(mapResourceToTier(1, 512)).toBe("M");
-        expect(mapResourceToTier(4, 2048)).toBe("L");
-        // 超出 L 档必须返回 null：不得把超限需求映射到更小的档位
-        // （那会让预热 VM 的实际资源低于策略声明的限额）。
-        expect(mapResourceToTier(8, 4096)).toBeNull();
-        expect(mapResourceToTier(4, 4097)).toBeNull();
-    });
-
-    it("预热入池、出池与 TTL 自动回收", async () => {
-        const driver = new MockMicrovmDriver();
-        const pool = new MicrovmWarmPool(driver, { ttlMs: 50 }); // 短 TTL 用于测试
-
-        const inst1 = await driver.create({
-            id: "vm-warm-1",
-            runId: "run-w1",
-            workspacePath: "/workspace",
-        });
-
-        pool.put("tmpl-hash-a", "S", inst1);
-        expect(pool.has("tmpl-hash-a", "S")).toBe(true);
-        expect(pool.size()).toBe(1);
-
-        // 命中取出
-        const taken = pool.take("tmpl-hash-a", "S");
-        expect(taken).not.toBeNull();
-        expect(taken?.instance.id).toBe("vm-warm-1");
-        expect(pool.size()).toBe(0);
-
-        // 再次取出应为空
-        expect(pool.take("tmpl-hash-a", "S")).toBeNull();
-
-        // 验证 TTL 回收
-        const inst2 = await driver.create({
-            id: "vm-warm-2",
-            runId: "run-w2",
-            workspacePath: "/workspace",
-        });
-        pool.put("tmpl-hash-b", "M", inst2);
-        expect(pool.has("tmpl-hash-b", "M")).toBe(true);
-
-        // 等待 TTL 触发
-        await new Promise((r) => setTimeout(r, 70));
-        expect(pool.has("tmpl-hash-b", "M")).toBe(false);
-        expect(driver.instances.has("vm-warm-2")).toBe(false);
-
-        await pool.close();
-    });
-});
 
 /**
  * 协议级回归：pause/resume 必须走官方 `PATCH /vm {"state":...}`。

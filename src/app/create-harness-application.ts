@@ -37,12 +37,6 @@ import type {
     ResourceObserver,
 } from "../resources/resource-observer.ts";
 import {
-    VllmResourceObserver,
-} from "../resources/vllm-resource-observer.ts";
-import {
-    CoalescingResourceObserver,
-} from "../resources/coalescing-resource-observer.ts";
-import {
     ExternalModelServiceResourceObserver,
 } from "../resources/external-model-service-observer.ts";
 import type {
@@ -67,7 +61,6 @@ import {
     MockMicrovmDriver,
     FirecrackerSandboxDriver,
     E2bSandboxDriver,
-    MicrovmWarmPool,
     type MicrovmDriver,
     VmRunDirectoryManager,
 } from "../sandbox/microvm/index.ts";
@@ -79,7 +72,6 @@ import {
 } from "../sandbox/managed-local-sandbox.ts";
 import { ContainerSandboxProvider } from "../sandbox/container-sandbox-provider.ts";
 import { BrokerSandboxProvider } from "../sandbox/broker/broker-sandbox-provider.ts";
-import { deriveWarmPoolOwner } from "../sandbox/container-warm-pool.ts";
 import { RunService } from "../runs/run-service.ts";
 import { RunStore } from "../runs/runstore.ts";
 import { RunAttemptStore } from "../runs/run-attempt-store.ts";
@@ -352,20 +344,7 @@ export async function createHarnessApplication(
         config.sandboxProfile,
     );
     const resourceObserver = dependencies.resourceObserver
-        // 模型服务外置时，平台不再观测推理侧 GPU/KV cache：固定 NORMAL，
-        // 让 Run 准入不被本地 vLLM/nvidia-smi 阻塞。租户并发上限仍由
-        // TenantRunScheduler 独立执行。
-        ?? (config.modelServiceMode === "external"
-            ? new ExternalModelServiceResourceObserver()
-            // 真实 vLLM 观测外包一层合并器：drain 扇出的 N 个并行准入评估共享
-            // 一次抓取，避免 N 倍 nvidia-smi/vLLM 探测，也保护 token 速率
-            // 计数器的采样间隔不被打散。注入式 observer（测试 fake）不包装，
-            // 保持每次 observe 都直达 fake 的旧语义。
-            : new CoalescingResourceObserver(new VllmResourceObserver({
-                metricsUrl:config.vllmMetricsUrl,
-                timeoutMs:config.resourceObservationTimeoutMs,
-                gpuIds:config.gpuIds,
-            })));
+        ?? new ExternalModelServiceResourceObserver();
     const runService = new RunService(
         runStore, runtime, undefined, runOutputStore,
         workspaceResultCoordinator,
@@ -503,14 +482,7 @@ export async function createHarnessApplication(
     );
     // Separate observer instance: token-rate counters must not race admission probes.
     const resourceMetrics = new ResourceMetricsSampler(
-        dependencies.resourceObserver
-            ?? (config.modelServiceMode === "external"
-                ? new ExternalModelServiceResourceObserver()
-                : new VllmResourceObserver({
-                    metricsUrl: config.vllmMetricsUrl,
-                    timeoutMs: config.resourceObservationTimeoutMs,
-                    gpuIds: config.gpuIds,
-                })),
+        dependencies.resourceObserver ?? new ExternalModelServiceResourceObserver(),
         { intervalMs: config.resourceMetricsIntervalMs },
     );
     // 支柱 2：LLM 网关（仅当配置了后端时启用）。
@@ -696,36 +668,13 @@ function createContainerSandboxRouter(
         ? ((): SandboxProvider => {
             const driver = createMicrovmDriver();
 
-            // Phase 3：预热池仅对真 Firecracker 驱动启用（桩驱动预热无意义），
-            // 模板指纹缺失（镜像未配置）时自动禁用——fail-closed 先于加速。
-            let warmPool: MicrovmWarmPool | undefined;
-            let templateHash: string | null | undefined;
-            if (
-                (config.microvmWarmPoolSize ?? 0) > 0
-                && driver instanceof FirecrackerSandboxDriver
-            ) {
-                templateHash = driver.computeTemplateHash() ?? undefined;
-                if (templateHash !== undefined) {
-                    warmPool = new MicrovmWarmPool(driver, {
-                        maxPerTier: config.microvmWarmPoolSize,
-                    });
-                }
-            }
-
             const provider = new MicrovmSandboxProvider(sandboxStore, secretProvider, {
                 driver,
                 vmRuntimeRoot: config.vmRuntimeRoot,
                 ...(config.firecrackerWorkspaceDiskTemplatePath === undefined
                     ? {}
                     : { workspaceDiskTemplatePath: config.firecrackerWorkspaceDiskTemplatePath }),
-                ...(warmPool ? { warmPool } : {}),
-                ...(templateHash !== undefined ? { templateHash } : {}),
             });
-
-            // 启动期异步预热（best-effort，不阻塞服务就绪）
-            if (warmPool) {
-                void provider.prewarm(["M"]).catch(() => undefined);
-            }
             return provider;
         })()
         : new UnavailableStrictSandboxProvider();
@@ -741,13 +690,7 @@ function createContainerSandboxRouter(
         ...(config.containerPidsLimit === undefined
             ? {}
             : { pidsLimit: config.containerPidsLimit }),
-        warmPoolSize: config.sandboxWarmPoolSize,
-        // N29：owner 必须跨进程重启稳定。原先传 `port-<HTTP 端口>`，改端口重启后
-        // 上一个进程的遗留预热容器永远匹配不上、清不掉（它们不写 sandboxes 表，
-        // 启动对账屏障也扫不到）。改用数据库路径作为部署身份：它满足"同库不共存
-        // 两实例"，既能稳定标识本部署，又不会误删同机其它实例的预热容器。
-        warmPoolOwner: deriveWarmPoolOwner(config.databasePath),
-        // TENANT 视野：容器挂租户工作区根，同租户全量复用预热容器。
+        // TENANT 视野：容器挂租户工作区根。
         ...(config.sandboxWorkspaceScope === "tenant"
             ? { workspaceScope: "tenant" as const, tenantWorkspaceRoot: config.workspaceRoot }
             : {}),

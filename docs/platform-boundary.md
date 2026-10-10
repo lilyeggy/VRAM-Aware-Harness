@@ -1,4 +1,4 @@
-# 云端 Agent 平台：定位与系统边界（v1.0）
+# 云端 Agent 平台：定位与系统边界（v1.1；M4 已删除 VRAM/GPU 观测与预热池）
 
 > 本文档是项目的**唯一权威边界定义**。实现、评审、测试以此为对齐基准；
 > 与本文件冲突的代码视为缺陷。实现完成后更新 README 指向本文。
@@ -6,7 +6,7 @@
 > 对齐结论（2026-10-06 讨论确定）：
 > - 产品形态：类 Manus 的云端 Agent 平台——**每任务一台 ephemeral microVM**；
 > - 部署形态：内部团队 / 私有部署（不做公开 SaaS 计量计费）；
-> - 模型推理：自有 GPU + vLLM（OpenAI 兼容 HTTP API），经 LLM 网关统一入口；
+> - 模型推理：外部 OpenAI 兼容服务（自建 vLLM 或 opencode-go 等），经 LLM 网关统一入口；平台不内置模型路由与显存调度；
 > - Agent 运行时：沿用 Pi；平台本身才是产品，Agent 能力定位不收敛。
 
 ---
@@ -44,7 +44,7 @@
 
 ### B2 网络边界：VM 一律无网卡（2026-10-06 定档）
 - **MicroVM 不提供网卡服务**：guest 内不存在任何网络设备（不挂 `network-interfaces`、不建 netns/tap）。
-- `allowNetwork=true` 的请求在 Provider 与驱动两层都被 **fail-closed 拒绝**，且拒绝发生在创建 VM 之前（不留下实例、记录或预热池消耗）。
+- `allowNetwork=true` 的请求在 Provider 与驱动两层都被 **fail-closed 拒绝**，且拒绝发生在创建 VM 之前（不留下实例、记录）。
 - 因此不存在"内网可达 / 元数据可达 / DNS 重绑定 / 白名单绕过"这类攻击面——它们随网卡一起不存在。
 - **代价与补偿**：VM 内的 agent 无法自主访问任何网络服务（含 LLM 网关）。宿主能力必须经 **vsock 受控通道**或本地套接字转发提供（该通道为后续设计项，尚未实现）。
 - 容器链路（runsc）的 `restricted-egress` 能力不受本边界约束，仅约束 microVM strict 档。
@@ -123,7 +123,7 @@ HTTP API ──> Master (调度/审计/策略/LLM网关)
 | ✅ Phase 0 | 封死假执行/假证据，fail-closed | B1 | 已完成 |
 | ✅ Phase 1 | vsock guest agent + jailer（含 /tmp→私有目录） | B1、B6、B7 | 已完成 |
 | ✅ Phase 2 | 工作区导出 + 磁盘限额 + microVM 接入租户准入 | B5、B6 | 已完成 |
-| ✅ Phase 3 | microVM 预热池 + 异步复制（去阻塞）+ CoW 盘 | B5（性能） | 已完成 |
+| ✅ Phase 3 | microVM 快照加速池（jailer）+ 异步复制（去阻塞）+ CoW 盘；预热池已由 M4 删除 | B5（性能） | 已完成 |
 | ✅ Phase 3b | snapshot/restore 加速 | B5（性能） | 已完成（jailer 模式真机 23/23：恢复 368ms vs 冷启动 2519ms）。**无需自建 Firecracker**——此前"官方未编译 pause/resume"的结论基于错误探测信号（grep 了从不存在的 `InstancePause`），已推翻；官方 v1.17.0 二进制实测可用。详见验收报告 §3.1、§5 |
 | 🚫 Phase 4（作废） | ~~出口网关 + controlled-egress~~ | — | **产品决策取消**：VM 一律无网卡（B2），相关代码已删除 |
 
