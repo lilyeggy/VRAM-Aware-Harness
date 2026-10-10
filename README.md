@@ -1,6 +1,6 @@
 # VRAM-Aware Harness
 
-面向多租户的 Agent 任务服务：隔离执行、公平调度、可审计。
+面向多租户的 Agent 任务服务：隔离执行、公平调度、可审计。项目定位是个人 / 小私有部署的裁剪版，不是 Grok/Manus 式完整平台；权威边界见 docs/platform-boundary.md §9。
 
 核心目标只有三件事：
 

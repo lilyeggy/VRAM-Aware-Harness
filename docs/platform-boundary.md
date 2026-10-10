@@ -1,21 +1,21 @@
-# 云端 Agent 平台：定位与系统边界（v1.1；M4 已删除 VRAM/GPU 观测与预热池）
+# 个人版多租户 Agent 任务服务：定位与系统边界（v1.2；个人项目裁剪定档）
 
-> 本文档是项目的**唯一权威边界定义**。实现、评审、测试以此为对齐基准；
+> 本文档是项目的**唯一权威边界定义**；个人项目裁剪边界见 §9。实现、评审、测试以此为对齐基准；
 > 与本文件冲突的代码视为缺陷。实现完成后更新 README 指向本文。
 >
-> 对齐结论（2026-10-06 讨论确定）：
-> - 产品形态：类 Manus 的云端 Agent 平台——**每任务一台 ephemeral microVM**；
-> - 部署形态：内部团队 / 私有部署（不做公开 SaaS 计量计费）；
-> - 模型推理：外部 OpenAI 兼容服务（自建 vLLM 或 opencode-go 等），经 LLM 网关统一入口；平台不内置模型路由与显存调度；
-> - Agent 运行时：沿用 Pi；平台本身才是产品，Agent 能力定位不收敛。
+> 定档结论（2026-10-10 个人项目裁剪；详见 §9）：
+> - 产品形态：**个人版多租户 Agent 任务服务**——每任务一台 ephemeral microVM，不做 Grok/Manus 式完整平台；
+> - 部署形态：单台 Linux + KVM，systemd 管理，SQLite 本地持久化；不做多节点、高可用、公网 SaaS 与计费结算；
+> - 模型推理：外部 OpenAI 兼容服务（opencode-go / 自建 vLLM 等）；平台不承载模型、不做路由、不做显存调度；
+> - Agent 运行时：沿用 Pi；Agent 无网络权限，工具执行进 jailer + Firecracker microVM。
 
 ---
 
 ## 1. 产品一句话
 
-为团队提供一个多租户云端 Agent 平台：每个任务（Run）获得一台**临时的、硬件隔离的虚拟机**作为执行环境，Agent（Pi）在其中跑代码、装软件、操作文件，产出文件与结果，任务结束虚拟机即销毁。
+为个人 / 小团队提供一个多租户 Agent 任务服务：每个任务（Run）获得一台**临时的、硬件隔离的虚拟机**作为执行环境，Agent（Pi）在其中跑代码、操作文件，产出文件与结果，任务结束虚拟机即销毁。
 
-对标参考：Manus（ephemeral 任务沙箱）、Grok/Devin（云桌面）。我们取 Manus 形态，不取常驻云桌面。
+对标参考：Manus 的 ephemeral 任务沙箱形态；不追求 Grok/Devin 式完整云桌面。
 
 ---
 
@@ -146,3 +146,63 @@ HTTP API ──> Master (调度/审计/策略/LLM网关)
 
 1. **vsock 协议 v1 对伪造 exec_result 的防护**：当前机制为"先到者生效"（guest 是信任域内，防护目标是宿主编排正确性，不是 guest 内攻击者）；guest 内威胁由 KVM 硬件虚拟化边界兜底。
 2. **工作区盘形态**：因 dm-crypt 需要宿主额外特权，v1 以 `0700` 私有运行目录隔离 + 任务终止物理销毁替代，加密盘列为 v2 候选。
+---
+
+## 9. 个人项目裁剪边界（v1.2，2026-10-10 定档）
+
+> 本节是项目范围的最终裁决：新增需求先对照本节，不在范围内的默认不做。
+
+### 9.1 产品定位
+
+个人 / 小私有部署的多租户 Agent 任务服务：用户通过 HTTP API（可选最小控制台）提交任务；平台负责租户身份、排队与配额、Run 生命周期、工具治理、jailer + Firecracker microVM 隔离执行、结果与产物导出、事件审计。模型推理由外部 OpenAI 兼容服务提供；平台不承载模型、不做路由、不做显存调度。
+
+不是：Grok / Manus 式完整平台，不是公网 SaaS，不是多节点集群，不是模型训练/推理平台。
+
+### 9.2 范围内（In scope）
+
+1. 多租户身份与隔离：API Key 派生 Tenant；Run/Workspace/Sandbox 归属校验；跨租户操作 fail-closed。
+2. 任务生命周期：提交、排队、Run/Attempt、状态与事件查询、中断/恢复、输出与产物导出。
+3. 调度与配额：全局/每租户并发上限、Queue TTL、会话串行、执行超时强杀。
+4. 执行隔离：jailer + Firecracker microVM，无网卡，工作区盘独立，Broker 只暴露 create/execute/terminate。
+5. 工具治理：bash/file 等工具、路径围栏、副作用账本、崩溃/中断后安全重放。
+6. 外部模型接入：OpenAI 兼容 endpoint（opencode-go / 自建 vLLM 等）经 Pi runtime；平台只调用。
+7. 可审计：Run events、策略决策、工具执行记录写入本地 SQLite。
+8. 部署形态：单台 Linux + KVM，systemd 管理 Master/Broker/Worker，SQLite 本地持久化。
+
+### 9.3 范围外（Out of scope，明确不做）
+
+- 不做 Grok / Manus 完整产品：浏览器自动化、多智能体市场、公网 SaaS、计费结算。
+- 不做模型训练 / 微调 / 推理托管；不做 GPU/VRAM 观测、模型路由、显存感知调度。
+- 不做多节点集群、跨区域、高可用、分布式数据库。
+- 不做 Agent 网络访问：microVM 无网卡；allowNetwork=true 一律拒绝。
+- 不做企业身份（SSO/SCIM）、合规认证、复杂 RBAC 后台。
+- 不做完整插件生态、GUI 工作流编排、成本结算系统。
+
+### 9.4 验收标准（裁剪版）
+
+1. 两个租户并发提交任务：无法读/写/终止对方 sandbox/workspace，跨租户操作被 Broker 拒绝。
+2. 一条真实 Run 走通 HTTP -> 调度 -> Worker -> Broker -> jailer microVM -> 外部模型 -> 工具执行 -> 输出/产物导出，事件完整。
+3. Agent 内无网络；allowNetwork 请求 fail-closed。
+4. 中断/超时/崩溃后无 sandbox 残留，Run 进入终态；安全操作可恢复。
+5. 单机重启后队列与 RunStore 可从 SQLite 恢复。
+6. 每租户并发上限与 Queue TTL 生效；不依赖预热池或 GPU 观测。
+
+### 9.5 当前状态与剩余 P0
+
+已完成：
+
+- 多租户 microVM 隔离与 jailer + 快照并发真机验证；
+- Broker 租户隔离 + capability token；systemd worker 专用 UID/cgroup；
+- 外部模型服务 observer；M4 删除 VRAM/GPU 观测与预热池（提交 7684287）。
+
+剩余 P0（达到个人可用 Demo）：
+
+- 把 M4 同步到 172.17.43.193 并复跑测试；
+- 补单机 systemd 部署/启动文档；
+- 补 3 条端到端 smoke：串行、并发、跨租户拒绝；
+- 确保 README 与本文档一致。
+
+暂缓的增强（不在当前边界内）：
+
+- Broker SO_PEERCRED 密码学校验、worker seccomp/Landlock/只读 rootfs；
+- 控制面 egress ACL、租户成本账单、不可变审计存储。
