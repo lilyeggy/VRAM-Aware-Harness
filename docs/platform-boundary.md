@@ -233,3 +233,7 @@ HTTP API ──> Master (调度/审计/策略/LLM网关)
 - 边界影响：上述条目不再按 §9.3 默认拒绝；§9.3 其余条目仍默认不做。
 - 验收要求：每一项必须有单元/集成测试，并在 172.17.43.193 真机留下验证记录；未完成前该项仍视为暂缓。
 - 代码引用：涉及代码/文档变更必须在提交信息或注释中引用“§9.7 v1.3”。
+- 实施进度（2026-10-10）：
+  - 1) Broker SO_PEERCRED：已实现。`src/sandbox/broker/peer-credentials.ts` 用 `bun:ffi` 读 Linux `SO_PEERCRED`；`SandboxBrokerServer` 新增 `allowedPeerUids` / `masterPeerUid` / `workerPeerUid`，create/terminate 只认 Master UID、execute 只认 Worker UID，白名单外或读不到凭据一律 fail-closed；`broker-main.ts` 读取 `HARNESS_SANDBOX_BROKER_PEER_UIDS` / `MASTER_UID` / `WORKER_UID`，生产环境至少配置一项。
+  - 真机 172.17.43.193 验证（broker root pid 2170523，master cxr pid 2170704）：`scripts/p0-e2e-smoke.ts` 通过 `P0_E2E_SMOKE_OK label=0d6ae207`（serial maxActive=1；concurrent maxActive=2 overlap=true；跨租户 404）；直接探针：uid=1004 发 execute 被拒“要求 uid=998”，uid=0 发 create/ping 被拒“不在 SO_PEERCRED 白名单内”。
+  - 2) Worker seccomp/Landlock/只读 rootfs；3) 控制面 egress ACL；4) 不可变审计存储；5) 租户成本账单：待实施。

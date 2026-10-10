@@ -17,7 +17,7 @@ systemd
 ```
 
 关键点：
-- Master 不持有 Firecracker 驱动，只通过 socket 调 Broker；Broker 的 control token 不对 Worker 暴露。
+- Master 不持有 Firecracker 驱动，只通过 socket 调 Broker；Broker 的 control token 不对 Worker 暴露，并用 SO_PEERCRED 校验调用方 UID（create/terminate 只认 Master UID，execute 只认 Worker UID）。
 - Worker 不使用 Master 的环境变量与凭据；Pi 的模型认证文件由 Worker 专用 UID 读取。
 - microVM 无网卡；Agent 的网络请求在平台侧 fail-closed。
 
@@ -103,6 +103,10 @@ HARNESS_SANDBOX_BROKER_SOCKET=/run/harness/sandbox-broker.sock
 HARNESS_SANDBOX_BROKER_CONTROL_TOKEN=replace-with-random-token
 HARNESS_SANDBOX_BROKER_SOCKET_UID=1000          # id -u harness
 HARNESS_SANDBOX_BROKER_SOCKET_GID=998           # getent group harness-worker | cut -d: -f3
+# SO_PEERCRED：Broker 用对端 UID 区分 Master 与 Worker；生产必须至少配置一项。
+HARNESS_SANDBOX_BROKER_PEER_UIDS=1000,998       # 允许连接的 UID 白名单
+HARNESS_SANDBOX_BROKER_MASTER_UID=1000          # id -u harness
+HARNESS_SANDBOX_BROKER_WORKER_UID=998           # id -u harness-worker
 HARNESS_MICROVM_DRIVER=firecracker
 HARNESS_USE_JAILER=true
 HARNESS_VM_SNAPSHOTS_ENABLED=true
@@ -241,7 +245,7 @@ systemctl show 'harness-worker-<runId>.service' -p UID -p GID -p MemoryMax -p CP
 ## 8. 安全与运维边界
 
 - Agent 无网络：microVM 无网卡；`allowNetwork=true` 在平台侧被拒绝；不要给 Broker/Worker 添加 NAT/代理。
-- Broker 只暴露 `create/execute/terminate`；control token 只存在于 root 可读文件与 Master 进程，Worker 只拿自己 sandbox 的 capability token。
+- Broker 只暴露 `create/execute/terminate`；control token 只存在于 root 可读文件与 Master 进程，Worker 只拿自己 sandbox 的 capability token；`HARNESS_SANDBOX_BROKER_MASTER_UID` / `HARNESS_SANDBOX_BROKER_WORKER_UID` 再把操作绑定到进程 UID。
 - Master 应只监听内网/本机，前置反向代理时自行加 TLS 与访问控制；平台只做 API Key/租户级授权。
 - 快照池、VM runtime、workspaces 都属于 Broker/Master 的本地数据目录；不要手工修改正在使用的磁盘。
-- 当前明确暂缓：Broker SO_PEERCRED、Worker seccomp/Landlock、控制面 egress ACL；不在个人项目裁剪边界内（见 `docs/platform-boundary.md §9.3`）。
+- 当前明确暂缓：Worker seccomp/Landlock、控制面 egress ACL；Broker SO_PEERCRED 已在 v1.3 解冻并实现（见 `docs/platform-boundary.md §9.7`）。

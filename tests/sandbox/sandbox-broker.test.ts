@@ -7,7 +7,10 @@ import {
     BrokerSandboxProvider,
     type BrokerSandboxProviderOptions,
 } from "../../src/sandbox/broker/broker-sandbox-provider.ts";
-import { SandboxBrokerServer } from "../../src/sandbox/broker/sandbox-broker-server.ts";
+import {
+    SandboxBrokerServer,
+    type SandboxBrokerServerOptions,
+} from "../../src/sandbox/broker/sandbox-broker-server.ts";
 import type {
     SandboxCommandExecutor,
     SandboxProvider,
@@ -82,6 +85,7 @@ async function withBroker(
         ) => BrokerSandboxProvider;
     }) => Promise<void>,
     options: { readonly tenantId?: string } = {},
+    serverOptions: Partial<SandboxBrokerServerOptions> = {},
 ): Promise<void> {
     const dir = mkdtempSync(join(tmpdir(), "broker-test-"));
     const socketPath = join(dir, "broker.sock");
@@ -91,6 +95,7 @@ async function withBroker(
         provider: fake.provider,
         readRecord: (sandboxId) => fake.records.get(sandboxId) ?? null,
         controlToken: CONTROL_TOKEN,
+        ...serverOptions,
     });
     await server.start();
     const makeClient = (
@@ -231,5 +236,77 @@ test("control token 不能替代 per-sandbox token 执行命令", async () => {
         const recoveredMaster = makeClient("tenant-1", { controlToken: CONTROL_TOKEN });
         await expect(recoveredMaster.execute("sandbox-exec-control", ["echo", "hi"]))
             .rejects.toThrow("capability token");
+    });
+});
+
+test("Broker 用 SO_PEERCRED 把 create/terminate 绑定到 Master UID、execute 绑定到 Worker UID", async () => {
+    const peer = { pid: 1, uid: 1004, gid: 1004 };
+    await withBroker(async ({ client, terminated, makeClient }) => {
+        const handle = await client.create({
+            id: "sandbox-peer",
+            runId: "run-peer",
+            workspacePath: "/tmp/workspace-peer",
+            policy: { tenantId: "tenant-1" } as never,
+        });
+
+        // 同一连接/UID 1004 是 Master：execute 要求 Worker UID 998，拒绝。
+        await expect(client.execute("sandbox-peer", ["echo", "hi"])).rejects.toThrow(
+            "Broker 拒绝 execute：对端 uid=1004，要求 uid=998",
+        );
+
+        // 切到 Worker UID 998：execute 通过，create 被拒绝。
+        peer.uid = 998;
+        peer.gid = 998;
+        const worker = makeClient("tenant-1", {
+            capabilityToken: handle.capabilityToken,
+            controlToken: CONTROL_TOKEN,
+        });
+        const result = await worker.execute("sandbox-peer", ["echo", "hi"]);
+        expect(result.exitCode).toBe(0);
+        await expect(worker.create({
+            id: "sandbox-peer-worker-create",
+            runId: "run-peer-worker-create",
+            workspacePath: "/tmp/workspace-peer-worker-create",
+            policy: { tenantId: "tenant-1" } as never,
+        })).rejects.toThrow("Broker 拒绝 create：对端 uid=998，要求 uid=1004");
+
+        // 切回 Master UID 1004：terminate 通过。
+        peer.uid = 1004;
+        peer.gid = 1004;
+        const master = makeClient("tenant-1", { controlToken: CONTROL_TOKEN });
+        await master.terminate("sandbox-peer");
+        expect(terminated).toEqual(["sandbox-peer"]);
+    }, {}, {
+        readPeerCredentials: () => ({ ...peer }),
+        masterPeerUid: 1004,
+        workerPeerUid: 998,
+    });
+});
+
+test("Broker 在配置 peer UID 但读不到 SO_PEERCRED 时 fail-closed", async () => {
+    await withBroker(async ({ client }) => {
+        await expect(client.create({
+            id: "sandbox-peer-null",
+            runId: "run-peer-null",
+            workspacePath: "/tmp/workspace-peer-null",
+            policy: { tenantId: "tenant-1" } as never,
+        })).rejects.toThrow("无法读取对端 SO_PEERCRED 凭据");
+    }, {}, {
+        readPeerCredentials: () => null,
+        masterPeerUid: 1004,
+    });
+});
+
+test("Broker 连接白名单拒绝非授权 UID", async () => {
+    await withBroker(async ({ client }) => {
+        await expect(client.create({
+            id: "sandbox-peer-denied",
+            runId: "run-peer-denied",
+            workspacePath: "/tmp/workspace-peer-denied",
+            policy: { tenantId: "tenant-1" } as never,
+        })).rejects.toThrow();
+    }, {}, {
+        readPeerCredentials: () => ({ pid: 1, uid: 998, gid: 998 }),
+        allowedPeerUids: new Set([1004]),
     });
 });

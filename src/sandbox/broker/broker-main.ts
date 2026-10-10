@@ -45,6 +45,54 @@ if (controlToken === undefined || controlToken.length === 0) {
     );
 }
 
+function parseUid(raw: string | undefined, name: string): number | undefined {
+    if (raw === undefined || raw.trim().length === 0) {
+        return undefined;
+    }
+    const value = Number(raw.trim());
+    if (Number.isInteger(value) === false || value < 0) {
+        throw new Error(name + " 必须是非负整数；当前值: " + raw);
+    }
+    return value;
+}
+
+function parseUidList(raw: string | undefined): ReadonlySet<number> | undefined {
+    if (raw === undefined || raw.trim().length === 0) {
+        return undefined;
+    }
+    const items = raw.split(",").map((item) => item.trim()).filter((item) => item.length > 0);
+    if (items.length === 0) {
+        return undefined;
+    }
+    const uids = items.map((item) => {
+        const value = Number(item);
+        if (Number.isInteger(value) === false || value < 0) {
+            throw new Error("HARNESS_SANDBOX_BROKER_PEER_UIDS 含非法 UID: " + item);
+        }
+        return value;
+    });
+    return new Set(uids);
+}
+
+const allowedPeerUids = parseUidList(process.env.HARNESS_SANDBOX_BROKER_PEER_UIDS);
+const masterPeerUid = parseUid(
+    process.env.HARNESS_SANDBOX_BROKER_MASTER_UID,
+    "HARNESS_SANDBOX_BROKER_MASTER_UID",
+);
+const workerPeerUid = parseUid(
+    process.env.HARNESS_SANDBOX_BROKER_WORKER_UID,
+    "HARNESS_SANDBOX_BROKER_WORKER_UID",
+);
+if (process.env.HARNESS_ENV === "production"
+    && allowedPeerUids === undefined
+    && masterPeerUid === undefined
+    && workerPeerUid === undefined) {
+    throw new Error(
+        "生产环境 Broker 必须配置 SO_PEERCRED 校验：设置 HARNESS_SANDBOX_BROKER_PEER_UIDS，"
+        + "或至少 HARNESS_SANDBOX_BROKER_MASTER_UID / HARNESS_SANDBOX_BROKER_WORKER_UID。",
+    );
+}
+
 if (kernelPath === undefined || rootfsPath === undefined) {
     throw new Error("Firecracker 需要 FIRECRACKER_KERNEL_PATH 与 FIRECRACKER_ROOTFS_PATH");
 }
@@ -102,6 +150,9 @@ const server = new SandboxBrokerServer({
     provider,
     readRecord: (sandboxId) => store.get(sandboxId),
     controlToken,
+    allowedPeerUids,
+    masterPeerUid,
+    workerPeerUid,
     onError: (error) => {
         console.error("[sandbox-broker] error", error);
     },
@@ -121,6 +172,9 @@ console.log("[sandbox-broker] listening", {
     runtimeRoot,
     useJailer,
     snapshotsEnabled,
+    allowedPeerUids: allowedPeerUids === undefined ? null : [...allowedPeerUids],
+    masterPeerUid: masterPeerUid ?? null,
+    workerPeerUid: workerPeerUid ?? null,
 });
 
 let shuttingDown = false;

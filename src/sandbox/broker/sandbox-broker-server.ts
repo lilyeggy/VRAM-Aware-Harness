@@ -14,6 +14,11 @@ import {
     type BrokerResponse,
     type BrokerSandboxHandlePayload,
 } from "./broker-protocol.ts";
+import {
+    createPeerCredentialsReader,
+    type PeerCredentials,
+    type PeerCredentialsReader,
+} from "./peer-credentials.ts";
 
 export interface SandboxBrokerServerOptions {
     readonly socketPath: string;
@@ -27,6 +32,17 @@ export interface SandboxBrokerServerOptions {
      * 限制在控制面。
      */
     readonly controlToken: string;
+    /**
+     * 允许连接 Broker 的 peer UID 白名单（SO_PEERCRED）。设置后，不在白名单内的
+     * 连接在握手前被拒绝；读取不到 peer 凭据时 fail-closed。
+     */
+    readonly allowedPeerUids?: ReadonlySet<number>;
+    /** 若设置，create/terminate 只接受该 UID（Master 控制面）。 */
+    readonly masterPeerUid?: number;
+    /** 若设置，execute 只接受该 UID（Worker 执行面）。 */
+    readonly workerPeerUid?: number;
+    /** 测试注入用；默认使用 Linux SO_PEERCRED。 */
+    readonly readPeerCredentials?: PeerCredentialsReader;
 }
 
 /**
@@ -46,12 +62,16 @@ export class SandboxBrokerServer {
     private readonly tokenBySandbox = new Map<string, string>();
     /** capability token -> sandboxId；用于拒绝重复 token。 */
     private readonly sandboxByToken = new Map<string, string>();
+    /** 每个连接的 SO_PEERCRED 快照；null 表示读取失败（fail-closed）。 */
+    private readonly peerBySocket = new WeakMap<Socket, PeerCredentials | null>();
+    private readonly readPeerCredentials: PeerCredentialsReader;
     private started = false;
 
     constructor(private readonly options: SandboxBrokerServerOptions) {
         if (options.controlToken.length === 0) {
             throw new Error("SandboxBrokerServer 必须配置非空 controlToken");
         }
+        this.readPeerCredentials = options.readPeerCredentials ?? createPeerCredentialsReader();
         this.server = createServer((socket) => this.handleConnection(socket));
     }
 
@@ -105,6 +125,8 @@ export class SandboxBrokerServer {
 
     private handleConnection(socket: Socket): void {
         this.sockets.add(socket);
+        const peer = this.readPeerCredentials(socket);
+        this.peerBySocket.set(socket, peer);
         socket.setEncoding("utf8");
         let buffer = "";
         let chain: Promise<void> = Promise.resolve();
@@ -151,6 +173,7 @@ export class SandboxBrokerServer {
         }
 
         try {
+            this.assertPeerOperation(socket, request);
             const result = await this.dispatch(request);
             this.writeResponse(socket, { id: request.id, ok: true, result });
         } catch (error) {
@@ -204,6 +227,41 @@ export class SandboxBrokerServer {
                     }
                 }
                 return {};
+        }
+    }
+
+    /**
+     * 用 SO_PEERCRED 把操作绑定到进程 UID：create/terminate 属于 Master，
+     * execute 属于 Worker。未配置对应 UID 时不额外限制；配置了但读不到凭据
+     * 或 UID 不匹配时 fail-closed。
+     */
+    private assertPeerOperation(socket: Socket, request: BrokerRequest): void {
+        const allowed = this.options.allowedPeerUids;
+        const required = request.op === "execute"
+            ? this.options.workerPeerUid
+            : request.op === "create" || request.op === "terminate"
+                ? this.options.masterPeerUid
+                : undefined;
+        if ((allowed === undefined || allowed.size === 0) && required === undefined) {
+            return;
+        }
+        const peer = this.peerBySocket.get(socket) ?? null;
+        if (peer === null) {
+            throw new Error(
+                "Broker 拒绝 " + request.op + "：无法读取对端 SO_PEERCRED 凭据",
+            );
+        }
+        if (allowed !== undefined && allowed.size > 0 && allowed.has(peer.uid) === false) {
+            throw new Error(
+                "Broker 拒绝 " + request.op + "：对端 uid=" + peer.uid
+                + " 不在 SO_PEERCRED 白名单内",
+            );
+        }
+        if (required !== undefined && peer.uid !== required) {
+            throw new Error(
+                "Broker 拒绝 " + request.op + "：对端 uid=" + peer.uid
+                + "，要求 uid=" + required,
+            );
         }
     }
 
