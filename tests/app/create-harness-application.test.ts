@@ -10,6 +10,8 @@ import type {
     ResourceSnapshot,
 } from "../../src/resources/resource-observer.ts";
 import { FakeAgentRuntime } from "../fakes/fake-agent-runtime.ts";
+import type { SandboxProvider } from "../../src/sandbox/sandbox-provider.ts";
+import { unrestrictedPolicy } from "../../src/policies/effective-policy.ts";
 import {
     FakeResourceObserver,
 } from "../fakes/fake-resource-observer.ts";
@@ -93,4 +95,62 @@ test("HARNESS_SANDBOX_PROVIDER=microvm 未显式设置 driver 时必须 fail-clo
     await expect(createHarnessApplication(config)).rejects.toThrow(
         /HARNESS_MICROVM_DRIVER=firecracker/,
     );
+});
+
+
+test("B2：runPolicy.allowNetwork=true 在 strict 平台策略下 fail-closed，且不创建 sandbox", async () => {
+    const runtime = new FakeAgentRuntime();
+    const resourceObserver = new FakeResourceObserver({
+        ok:true,
+        snapshot:normalSnapshot,
+    });
+    const config = loadHarnessConfig({
+        VLLM_MODEL_ID:"fake-model",
+        ...tempWorkspaceEnv(),
+        HARNESS_DATABASE_PATH:":memory:",
+        HARNESS_PUMP_INTERVAL_MS:"60000",
+        HARNESS_SANDBOX_PROVIDER:"container",
+        HARNESS_SANDBOX_PROFILE:"default",
+        HARNESS_SANDBOX_RUNTIME:"runsc",
+    });
+    let createCalls = 0;
+    const sandboxProvider: SandboxProvider = {
+        async create() {
+            createCalls += 1;
+            throw new Error("联网请求不应创建 sandbox");
+        },
+        async terminate() {},
+        subscribe() {
+            return () => {};
+        },
+    };
+    const composition = await createHarnessApplication(config, {
+        runtime,
+        resourceObserver,
+        sandboxProvider,
+    });
+
+    try {
+        await composition.application.start();
+        const run = composition.application.submitRun({
+            tenantId:"tenant-network",
+            harnessSessionId:"session-network",
+            userInput:"联网任务",
+            workspacePath:"/tmp/network-workspace",
+            runPolicy:{ ...unrestrictedPolicy, allowNetwork:true },
+        });
+
+        await composition.queuePump.tick();
+
+        expect(createCalls).toBe(0);
+        expect(runtime.startRequests).toHaveLength(0);
+        expect(composition.runStore.get(run.id)?.status).toBe("INTERRUPTED");
+        const interrupted = composition.runStore.listEvents(run.id)
+            .find((event) => event.type === "RUN_INTERRUPTED");
+        expect(JSON.stringify(interrupted?.payload)).toContain(
+            "allowNetwork=true 被平台策略拒绝",
+        );
+    } finally {
+        await composition.close();
+    }
 });

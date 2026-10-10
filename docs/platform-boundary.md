@@ -198,6 +198,7 @@ HTTP API ──> Master (调度/审计/策略/LLM网关)
 - Broker 租户隔离 + capability token；systemd worker 专用 UID/cgroup；
 - 外部模型服务 observer；M4 删除 VRAM/GPU 观测与预热池（提交 7684287）；
 - 队列 pump 连续并发：submit 后 kick 独立抢 slot，drain 批次不再串行化后提交（src/scheduling/run-scheduler.ts）。
+- B2 联网 fail-closed：修复请求级 `runPolicy.allowNetwork=true` 在 strict/microVM 下被平台层 `allowNetwork:false` 交集吞掉、静默降级为无网运行的问题（`src/policies/effective-policy.ts` 的 `assertNetworkRequestAllowed` + `src/runtime/run-executor.ts` 在创建 VM 前断言）；真机 Run `157c79d8-6838-43f7-8157-f581996b5a3e` 以 `INTERRUPTED` 终态失败，事件消息为“allowNetwork=true 被平台策略拒绝…”，未创建 sandbox；`scripts/p0-e2e-smoke.ts` 复跑通过 `P0_E2E_SMOKE_OK label=249754dd`。
 
 剩余 P0（达到个人可用 Demo）：
 

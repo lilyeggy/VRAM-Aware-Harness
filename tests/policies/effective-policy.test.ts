@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
 import {
+    assertNetworkRequestAllowed,
     computeEffectivePolicy,
     createPolicyLayer,
     unrestrictedPolicy,
@@ -94,4 +95,55 @@ test("缺少任一规范策略层时拒绝生成有效快照", () => {
         layers: [createPolicyLayer("platform", "PLATFORM")],
         createdAt: "2026-08-10T10:00:00.000Z",
     })).toThrow("缺少策略层：TENANT");
+});
+
+test("B2：请求级 allowNetwork=true 被有效策略拒绝时必须 fail-closed", () => {
+    const snapshot = computeEffectivePolicy({
+        id: "network-snapshot",
+        runId: "run-network",
+        tenantId: "tenant-network",
+        layers: [
+            createPolicyLayer("platform", "PLATFORM", constraints({
+                allowNetwork: false,
+            })),
+            createPolicyLayer("tenant", "TENANT"),
+            createPolicyLayer("template", "TEMPLATE"),
+            createPolicyLayer("workspace", "WORKSPACE"),
+            createPolicyLayer("run", "RUN"),
+        ],
+        createdAt: "2026-10-10T00:00:00.000Z",
+    });
+
+    expect(snapshot.allowNetwork).toBe(false);
+    expect(() => assertNetworkRequestAllowed(
+        constraints({ allowNetwork: true }),
+        snapshot,
+    )).toThrow("allowNetwork=true 被平台策略拒绝");
+    expect(() => assertNetworkRequestAllowed(
+        constraints({ allowNetwork: false }),
+        snapshot,
+    )).not.toThrow();
+    expect(() => assertNetworkRequestAllowed(undefined, snapshot)).not.toThrow();
+});
+
+test("B2：开发档允许联网时，请求级 allowNetwork=true 不被拒绝", () => {
+    const snapshot = computeEffectivePolicy({
+        id: "network-snapshot-development",
+        runId: "run-network-development",
+        tenantId: "tenant-network-development",
+        layers: [
+            createPolicyLayer("platform", "PLATFORM"),
+            createPolicyLayer("tenant", "TENANT"),
+            createPolicyLayer("template", "TEMPLATE"),
+            createPolicyLayer("workspace", "WORKSPACE"),
+            createPolicyLayer("run", "RUN"),
+        ],
+        createdAt: "2026-10-10T00:00:00.000Z",
+    });
+
+    expect(snapshot.allowNetwork).toBe(true);
+    expect(() => assertNetworkRequestAllowed(
+        constraints({ allowNetwork: true }),
+        snapshot,
+    )).not.toThrow();
 });

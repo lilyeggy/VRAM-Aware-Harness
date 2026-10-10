@@ -12,6 +12,7 @@ import {
 } from "../sessions/harness-session.ts";
 import type { HarnessSessionStore } from "../sessions/harness-session-store.ts";
 import {
+    assertNetworkRequestAllowed,
     computeEffectivePolicy,
     createPolicyLayer,
     unrestrictedPolicy,
@@ -119,6 +120,9 @@ export class RunExecutor implements AgentRuntime {
             }),
             this.sandboxProfile,
         );
+        // B2：请求级 allowNetwork=true 若被平台/租户交集拒绝，必须在创建 VM
+        // 之前 fail-closed，不能静默降级为无网运行。
+        assertNetworkRequestAllowed(run.runPolicy, snapshot);
         this.policies.saveSnapshot(snapshot);
 
         let attempt = createRunAttempt({

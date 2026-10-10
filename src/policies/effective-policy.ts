@@ -153,6 +153,26 @@ function intersectRoots(
     return [...roots];
 }
 
+/**
+ * B2 网络边界：请求级策略显式要求联网，而平台/租户交集后的有效策略不允许联网时，
+ * 必须 fail-closed 拒绝该 Run，而不是静默降级为“无网运行”。
+ *
+ * 背景：`computeEffectivePolicy` 对布尔权限取交集（deny wins），因此
+ * `runPolicy.allowNetwork=true` 会被平台层的 `allowNetwork=false` 吞掉；
+ * 若不在执行前显式拒绝，Provider 只会看到 effective=false 并正常创建 VM。
+ */
+export function assertNetworkRequestAllowed(
+    requested: PolicyConstraints | undefined,
+    effective: Pick<EffectivePolicySnapshot, "allowNetwork">,
+): void {
+    if (requested?.allowNetwork === true && effective.allowNetwork === false) {
+        throw new Error(
+            "allowNetwork=true 被平台策略拒绝：本部署 microVM 不提供网卡服务，"
+            + "请将 runPolicy.allowNetwork 设为 false。",
+        );
+    }
+}
+
 export function withSandboxProfile(
     snapshot: EffectivePolicySnapshot,
     profile: SandboxProfile,
