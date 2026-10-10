@@ -18,6 +18,10 @@ Restart=on-failure
 RestartSec=3
 NoNewPrivileges=true
 PrivateTmp=true
+# 控制面 egress ACL（§9.7 v1.3 第 3 项）：Master 只监听/访问 loopback；
+# 如需从局域网访问 API，把入口地址加入 IPAddressAllow。
+IPAddressDeny=any
+IPAddressAllow=127.0.0.0/8
 
 [Install]
 WantedBy=multi-user.target

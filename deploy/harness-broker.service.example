@@ -19,6 +19,8 @@ RuntimeDirectoryMode=0755
 Delegate=yes
 NoNewPrivileges=true
 PrivateTmp=true
+# 控制面 egress ACL（§9.7 v1.3 第 3 项）：Broker 只走 Unix socket / vsock，禁止 IP 出站。
+IPAddressDeny=any
 
 [Install]
 WantedBy=multi-user.target

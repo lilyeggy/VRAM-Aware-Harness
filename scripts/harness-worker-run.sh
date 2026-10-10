@@ -44,6 +44,13 @@ if [ -z "$UNIT_NAME" ]; then
   UNIT_NAME="${UNIT_PREFIX:-harness-worker}-$RUN_ID"
 fi
 
+# 控制面 egress ACL（§9.7 v1.3 第 3 项）：
+# 默认只允许 loopback（DNS stub 在 127.0.0.53）；要访问外部模型服务时，
+# 必须在 /etc/harness/worker-launcher.conf 用 WORKER_EGRESS_ALLOW 显式放行
+# 模型服务 CIDR（例如 opencode.ai 的 Cloudflare 段 172.64.0.0/13）。
+EGRESS_ALLOW_RAW="${WORKER_EGRESS_ALLOW:-127.0.0.0/8}"
+EGRESS_ALLOW="$(printf '%s' "$EGRESS_ALLOW_RAW" | tr ',' ' ')"
+
 exec /usr/bin/systemd-run \
   --quiet \
   --collect \
@@ -72,10 +79,12 @@ exec /usr/bin/systemd-run \
   --property=RestrictSUIDSGID=yes \
   --property=RemoveIPC=yes \
   --property=LockPersonality=yes \
+  --property=IPAddressDeny=any \
+  --property="IPAddressAllow=$EGRESS_ALLOW" \
   --property="SystemCallFilter=@system-service landlock_create_ruleset landlock_add_rule landlock_restrict_self" \
   --property=SystemCallErrorNumber=EPERM \
   --property="ReadWritePaths=$WORKER_RW_PATHS" \
-  --property="RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6" \
+  --property="RestrictAddressFamilies=AF_UNIX AF_INET" \
   --setenv="PATH=$WORKER_PATH" \
   --setenv="HOME=$WORKER_HOME" \
   --setenv=TMPDIR=/tmp \
