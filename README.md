@@ -103,7 +103,7 @@ src/
 bun test ./tests
 ```
 
-当前测试基线：`499 pass / 7 skip / 0 fail`。
+当前测试基线：`501 pass / 7 skip / 0 fail`。
 
 实验室/他人接入前的最小运维：
 

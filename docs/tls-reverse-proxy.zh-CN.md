@@ -103,3 +103,27 @@ ss -ltnp | grep 3100
 - Master 交给 journald 时：`journalctl --vacuum-time=14d`。
 - Master 重定向到文件时：参考 `deploy/harness-logrotate.example`。
 - 磁盘水位仍用 `bun run scripts/harness-ops.ts disk-check --path / --warn 80 --critical 90`。
+
+## 8. 没有 Caddy/Nginx 时的临时验证
+
+如果机器上暂时不能安装 Caddy/Nginx，可以用仓库内的开发用 TLS 反向代理跑通同一条链路：
+
+```bash
+mkdir -p /tmp/harness-tls && cd /tmp/harness-tls
+openssl req -x509 -newkey rsa:2048 -nodes -days 2 \
+  -keyout key.pem -out cert.pem \
+  -subj "/CN=127.0.0.1" \
+  -addext "subjectAltName=IP:127.0.0.1,DNS:localhost"
+
+cd /srv/VRAM-Aware-Harness
+TLS_PROXY_CERT=/tmp/harness-tls/cert.pem \
+TLS_PROXY_KEY=/tmp/harness-tls/key.pem \
+bun run scripts/dev-tls-proxy.ts
+
+# 另开一个终端：让 smoke 信任这张自签证书
+NODE_EXTRA_CA_CERTS=/tmp/harness-tls/cert.pem \
+HARNESS_BASE_URL=https://127.0.0.1:8443 \
+bun run scripts/p0-e2e-smoke.ts
+```
+
+`scripts/dev-tls-proxy.ts` 只是测试工具：它会把请求转发到 `TLS_PROXY_UPSTREAM`（默认 `http://127.0.0.1:3100`），并补 `X-Forwarded-Proto: https`。生产仍应使用 Caddy/Nginx 管理证书与日志。
