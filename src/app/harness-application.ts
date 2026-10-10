@@ -56,6 +56,8 @@ export interface QueuePump {
     stop(): void;
     stopAndDrain(): Promise<void>;
     tick(): Promise<void>;
+    /** 可选：不等待当前 drain 批次，直接尝试推进一个 Run。 */
+    kick?(): void;
 }
 
 /**
@@ -154,13 +156,21 @@ export class HarnessApplication {
         }
     }
 
+    private requestPump(): void {
+        if (this.queuePump.kick) {
+            this.queuePump.kick();
+            return;
+        }
+        void this.queuePump.tick();
+    }
+
     submitRun(input:StartRunInput):AgentRun {
         this.assertStarted();
 
         const run = this.coordinator.submit(input);
 
         // 不等待 Run 执行结束，但是立即请求调度，不必等下一个轮询周期
-        void this.queuePump.tick();
+        this.requestPump();
 
         return run;
     }
@@ -171,7 +181,7 @@ export class HarnessApplication {
         const run = this.coordinator.submitResume(input);
 
         // 恢复任务与新任务共用同一条自动推进路径。
-        void this.queuePump.tick();
+        this.requestPump();
 
         return run;
     }

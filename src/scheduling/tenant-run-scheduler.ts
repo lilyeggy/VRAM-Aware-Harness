@@ -346,6 +346,11 @@ export class TenantRunScheduler {
         return true;
     }
 
+    /** 该 Run 是否已被 claim、当前占用活跃 slot。 */
+    isActive(runId:string):boolean {
+        return this.activeTenantByRunId.has(runId);
+    }
+
     // 获取最大并发上限
     getCapacity(tenantId:string):SchedulerCapacity {
         return {

@@ -168,6 +168,7 @@ export class RunScheduler  {
 
     private timer: ReturnType<typeof setInterval> | null = null;
     private inFlight: Promise<void> | null = null;
+    private readonly backgroundAttempts = new Set<Promise<void>>();
 
     start(): void {
         if (this.timer !== null || this.options.intervalMs === undefined) return;
@@ -185,15 +186,48 @@ export class RunScheduler  {
 
     async stopAndDrain(): Promise<void> {
         this.stop();
-        while (this.inFlight !== null) {
-            await this.inFlight;
+        while (this.inFlight !== null || this.backgroundAttempts.size > 0) {
+            if (this.inFlight !== null) {
+                await this.inFlight;
+            }
+            await this.waitForBackgroundAttempts();
         }
+    }
+
+    private async waitForBackgroundAttempts(): Promise<void> {
+        while (this.backgroundAttempts.size > 0) {
+            await Promise.allSettled([...this.backgroundAttempts]);
+        }
+    }
+
+    /**
+     * 不等待当前 drain 批次，直接尝试推进一个可 claim 的 Run。
+     *
+     * drainOnce 会等待本批次所有 Run 执行结束才处理下一批；
+     * HTTP 提交等场景下，后到的 Run 若继续走 drain，会被批次屏障
+     * 串行化。提交后调用 kick()，让 attemptNext 在当前批次之外
+     * 独立抢一个 slot，从而让不同批次也能并发。
+     */
+    kick(): void {
+        this.enforceQueueTtl();
+        const attempt = (async () => {
+            try {
+                await this.attemptNext();
+            } catch (error) {
+                this.options.onError?.(error);
+            }
+        })();
+        this.backgroundAttempts.add(attempt);
+        void attempt.finally(() => {
+            this.backgroundAttempts.delete(attempt);
+        });
     }
 
     async tick(): Promise<void> {
         const work = (async () => {
             try {
                 await this.drain();
+                await this.waitForBackgroundAttempts();
             } catch (error) {
                 this.options.onError?.(error);
             }
@@ -360,6 +394,13 @@ export class RunScheduler  {
 
         for (const run of reader.listQueuedRuns()) {
             if (run.status !== "QUEUED") {
+                continue;
+            }
+
+            // 已被 claim、正在执行的 Run 不在内存等待队列，但 DB 可能仍处于
+            // QUEUED 的短暂窗口；不能把它当孤儿重新入队（enqueue 会抛
+            // "Run 正在执行中"）。
+            if (this.scheduler.isActive(run.id)) {
                 continue;
             }
 

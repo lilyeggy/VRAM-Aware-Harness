@@ -1482,3 +1482,57 @@ test("提交到已满 scheduler 时立即记录阻塞原因，不等待下一次
         db.close();
     }
 });
+
+test("kick 可并发启动 drain 批次之外的新 Run", async () => {
+    const db = openHarnessDatabase(":memory:");
+    const store = new RunStore(db);
+    const runtime = new BlockingAgentRuntime();
+    const runService = new RunService(store, runtime);
+    const scheduler = new TenantRunScheduler({
+        maxActiveRuns: 2,
+        maxActiveRunsPerTenant: 1,
+    });
+    const admission: ResourceAdmissionEvaluator = {
+        async evaluate(request) {
+            return createAdmissionResult(createDecision(
+                request,
+                "START",
+                "RESOURCE_NORMAL",
+            ));
+        },
+    };
+    const coordinator = new RunScheduler(runService, scheduler, admission);
+
+    try {
+        const firstRun = coordinator.submit({
+            tenantId: "tenant-a",
+            harnessSessionId: "session-a",
+            userInput: "先执行",
+            workspacePath: "/tmp/workspace-a",
+        });
+        const firstDrain = coordinator.drain();
+        await runtime.waitForStartCount(1);
+
+        const secondRun = coordinator.submit({
+            tenantId: "tenant-b",
+            harnessSessionId: "session-b",
+            userInput: "批次外并发",
+            workspacePath: "/tmp/workspace-b",
+        });
+        coordinator.kick();
+
+        await runtime.waitForStartCount(2);
+        expect(runtime.maxActiveStartCount).toBe(2);
+        expect(scheduler.listQueue()).toEqual([]);
+
+        runtime.releaseAllStarted();
+        await firstDrain;
+        await coordinator.stopAndDrain();
+
+        expect(store.get(firstRun.id)?.status).toBe("COMPLETED");
+        expect(store.get(secondRun.id)?.status).toBe("COMPLETED");
+    } finally {
+        runtime.releaseAllStarted();
+        db.close();
+    }
+});
