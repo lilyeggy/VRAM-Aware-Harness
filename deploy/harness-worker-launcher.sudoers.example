@@ -1,0 +1,4 @@
+# /etc/sudoers.d/harness-worker-launcher
+# 只允许 Master 账号免密调用窄 helper；helper 再用 systemd-run 拉起 Worker 单元。
+harness ALL=(root) NOPASSWD: /usr/local/sbin/harness-worker-run
+Defaults:harness !requiretty

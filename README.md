@@ -37,11 +37,10 @@
 - ToolGateway 策略白名单与工作区路径围栏
 - 审计事件按租户可查
 
-### 最小 LLM Gateway
-- 多后端路由：priority / round-robin / least-active
-- 健康探测、熔断、失败回退
-- 上下文预算压缩
-- 不包含 prefix cache、stream usage 采集、工具参数修复
+### 外部模型调用
+- 外部 OpenAI 兼容服务（opencode-go / 自建 vLLM 等）经 Pi runtime 调用
+- 平台不承载模型、不做 GPU/VRAM 观测、不做显存感知调度
+- 可选的多后端网关与上下文预算兜底保留在代码中，不属于个人项目裁剪边界的核心验收
 
 ## 快速开始
 
@@ -59,15 +58,21 @@ bun run scripts/user-console-demo-server.ts
 # http://127.0.0.1:3977/app
 ```
 
-连接真实 vLLM：
+单机 systemd 部署（Broker 以 root 运行，Master/Worker 非特权）见 `docs/deployment-single-node-systemd.zh-CN.md`。
+
+连接外部模型服务（OpenAI 兼容 / opencode-go / 自建 vLLM）：
 
 ```bash
 HARNESS_PORT=13000 \
 HARNESS_DATABASE_PATH=./data/harness.sqlite \
 HARNESS_WORKSPACE_ROOT=./data/workspaces \
-VLLM_BASE_URL=http://127.0.0.1:18000/v1 \
+PI_PROVIDER=opencode-go \
+PI_MODEL_ID=deepseek-v4.1-flash \
+PI_AUTH_PATH=~/.pi/agent/auth.json \
 bun run src/main.ts
 ```
+
+模型接入沿用 Pi runtime（`PI_PROVIDER` / `PI_MODEL_ID` / `PI_MODELS_PATH` / `PI_AUTH_PATH`）；平台不承载模型，也不做显存感知调度。
 
 ## 目录
 
@@ -85,7 +90,7 @@ src/
 ├── tools/       工具执行账本与 ToolGateway
 ├── policies/    有效策略与工具守卫
 ├── checkpoints/ Checkpoint 与恢复
-├── llm-gateway/ 最小模型路由网关
+├── llm-gateway/ 外部模型调用网关（可选多后端）
 ├── workspaces/  Workspace Diff 与 Artifact
 ├── sessions/    Session 存储
 ├── audit/       访问审计
@@ -98,4 +103,4 @@ src/
 bun test ./tests
 ```
 
-当前测试基线：`373 pass / 0 fail`。
+当前测试基线：`458 pass / 7 skip / 0 fail`。

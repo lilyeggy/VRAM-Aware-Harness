@@ -1,19 +1,21 @@
+# 单机 systemd 部署示例：Master（非 root）。
+# 完整步骤见 docs/deployment-single-node-systemd.zh-CN.md。
 [Unit]
-Description=VRAM-Aware Harness Agent Task Service
-After=network-online.target docker.service
+Description=Harness Master (non-root)
+Requires=harness-broker.service
+After=harness-broker.service network-online.target
 Wants=network-online.target
-Requires=docker.service
 
 [Service]
 Type=simple
 User=harness
-Group=docker
+Group=harness
+SupplementaryGroups=harness-worker
 WorkingDirectory=/srv/VRAM-Aware-Harness
-EnvironmentFile=/etc/vram-aware-harness/harness.env
-Environment=PATH=/home/harness/.bun/bin:/usr/local/bin:/usr/bin:/bin
-ExecStart=/home/harness/.bun/bin/bun run start
+EnvironmentFile=/etc/harness/master.env
+ExecStart=/usr/local/bin/bun run src/main.ts
 Restart=on-failure
-RestartSec=5
+RestartSec=3
 NoNewPrivileges=true
 PrivateTmp=true
 

@@ -193,14 +193,16 @@ HTTP API ──> Master (调度/审计/策略/LLM网关)
 
 - 多租户 microVM 隔离与 jailer + 快照并发真机验证；
 - Broker 租户隔离 + capability token；systemd worker 专用 UID/cgroup；
-- 外部模型服务 observer；M4 删除 VRAM/GPU 观测与预热池（提交 7684287）。
+- 外部模型服务 observer；M4 删除 VRAM/GPU 观测与预热池（提交 7684287）；
+- 队列 pump 连续并发：submit 后 kick 独立抢 slot，drain 批次不再串行化后提交（src/scheduling/run-scheduler.ts）。
 
 剩余 P0（达到个人可用 Demo）：
 
-- 把 M4 同步到 172.17.43.193 并复跑测试；
-- 补单机 systemd 部署/启动文档；
-- 补 3 条端到端 smoke：串行、并发、跨租户拒绝；
-- 确保 README 与本文档一致。
+- 已无未完成项。2026-10-10 收口：
+  - M4 已同步 172.17.43.193，远程 `bun test ./tests` = 464 pass / 0 fail；
+  - 单机 systemd 部署文档 `docs/deployment-single-node-systemd.zh-CN.md`，部署示例 `deploy/harness-broker.service.example`、`deploy/harness.service.example`、`deploy/harness-worker-launcher.sudoers.example`；
+  - `scripts/p0-e2e-smoke.ts` 真机通过：串行 maxActive=1；并发 maxActive=2 且事件重叠；跨租户 GET run/events/output + interrupt + 在对方 workspace 提交全部 404；
+  - README 已对齐外部模型边界与测试基线。
 
 暂缓的增强（不在当前边界内）：
 

@@ -1,0 +1,24 @@
+# 单机 systemd 部署示例：Sandbox Broker（root，唯一特权组件）。
+# 完整步骤见 docs/deployment-single-node-systemd.zh-CN.md。
+[Unit]
+Description=Harness Sandbox Broker (root, jailer Firecracker)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+Group=root
+WorkingDirectory=/srv/VRAM-Aware-Harness
+EnvironmentFile=/etc/harness/broker.env
+ExecStart=/usr/local/bin/bun run src/sandbox/broker/broker-main.ts
+Restart=on-failure
+RestartSec=3
+RuntimeDirectory=harness
+RuntimeDirectoryMode=0755
+Delegate=yes
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
