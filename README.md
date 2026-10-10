@@ -103,4 +103,19 @@ src/
 bun test ./tests
 ```
 
-当前测试基线：`481 pass / 7 skip / 0 fail`。
+当前测试基线：`493 pass / 7 skip / 0 fail`。
+
+实验室/他人接入前的最小运维：
+
+```bash
+# 注册收口：open（默认兼容）/ invite（需邀请码）/ closed
+HARNESS_REGISTRATION_MODE=invite
+HARNESS_REGISTRATION_INVITE_CODE=change-me
+
+# 磁盘水位、SQLite 备份/恢复、VM 与快照清理
+bun run scripts/harness-ops.ts disk-check --path / --warn 80 --critical 90
+bun run scripts/harness-ops.ts backup --database data/harness.sqlite --backup-dir data/backups --keep 7
+bun run scripts/harness-ops.ts cleanup --vm-runtime /var/lib/harness/vm --snapshot-pool /var/lib/harness/snapshots --max-age-hours 24 --max-snapshots 8 --apply
+```
+
+详见 `docs/deployment-single-node-systemd.zh-CN.md` 与 `docs/platform-boundary.md` §9.5。

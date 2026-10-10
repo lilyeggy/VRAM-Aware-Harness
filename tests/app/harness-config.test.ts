@@ -68,6 +68,33 @@ test("HARNESS_ENV=production 强制 jailer + microvm + broker", () => {
     })).toThrow("必须设置 HARNESS_SANDBOX_BROKER_SOCKET");
 });
 
+test("注册策略默认 open，invite 必须带邀请码", () => {
+    expect(loadHarnessConfig({ VLLM_MODEL_ID:"m" }).registrationMode).toBe("open");
+
+    expect(loadHarnessConfig({
+        VLLM_MODEL_ID:"m",
+        HARNESS_REGISTRATION_MODE:"closed",
+    }).registrationMode).toBe("closed");
+
+    expect(() => loadHarnessConfig({
+        VLLM_MODEL_ID:"m",
+        HARNESS_REGISTRATION_MODE:"invite",
+    })).toThrow("HARNESS_REGISTRATION_MODE=invite 必须设置 HARNESS_REGISTRATION_INVITE_CODE");
+
+    const invite = loadHarnessConfig({
+        VLLM_MODEL_ID:"m",
+        HARNESS_REGISTRATION_MODE:"invite",
+        HARNESS_REGISTRATION_INVITE_CODE:"lab-code",
+    });
+    expect(invite.registrationMode).toBe("invite");
+    expect(invite.registrationInviteCode).toBe("lab-code");
+
+    expect(() => loadHarnessConfig({
+        VLLM_MODEL_ID:"m",
+        HARNESS_REGISTRATION_MODE:"bogus",
+    })).toThrow("HARNESS_REGISTRATION_MODE 不支持");
+});
+
 test("loadHarnessConfig 解析显式环境变量", () => {
     const config = loadHarnessConfig({
         VLLM_MODEL_ID:"qwen3.5-9b",

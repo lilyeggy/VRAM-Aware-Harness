@@ -209,6 +209,13 @@ HTTP API ──> Master (调度/审计/策略/LLM网关)
   - `scripts/p0-e2e-smoke.ts` 真机通过：串行 maxActive=1；并发 maxActive=2 且事件重叠；跨租户 GET run/events/output + interrupt + 在对方 workspace 提交全部 404；
   - README 已对齐外部模型边界与测试基线。
 
+实验室接入维护记录（2026-10-10，不新增 §9.2 能力）：
+
+- 注册收口（安全加固）：`HARNESS_REGISTRATION_MODE=open|invite|closed` 默认 `open` 保持旧部署兼容；`invite` 必须配置 `HARNESS_REGISTRATION_INVITE_CODE`，比较走 SHA-256 + `timingSafeEqual`；策略拒绝返回 403。交给实验室/他人使用前应显式设为 `invite` 或 `closed`。
+- 单机运维脚本（部署兼容）：`src/ops/harness-maintenance.ts` + `scripts/harness-ops.ts` 提供 `disk-check`、`backup`（SQLite `VACUUM INTO`，保留最近 N 份）、`restore`（清理旧 WAL/SHM，覆盖需 `--force`）、`cleanup`（VM runtime 与快照池按年龄/条目数清理，默认 dry-run）。
+- 用户控制台美化（产品打磨）：`src/http/harness-user-console.ts` + `web/app.js` / `web/app.css` 保持 same-origin 无构建；本轮增加注册邀请码入口与样式改进。
+- 以上均属 §9.6 允许的 bug/安全修复、测试与文档维护、部署兼容性修复，不改变 §9.2/§9.3 的范围划分。
+
 暂缓的增强（不在当前边界内）：
 
 - 已在 §9.7 v1.3 解冻并实现：Broker SO_PEERCRED、worker seccomp/Landlock/只读 rootfs、控制面 egress ACL、不可变审计存储、租户成本账单；

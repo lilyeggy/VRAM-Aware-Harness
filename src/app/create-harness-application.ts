@@ -9,6 +9,7 @@ import {
 
 import { HarnessHttpApi } from "../http/harness-http-api.ts";
 import { ApiCredentialStore } from "../auth/api-credential-store.ts";
+import { assertRegistrationAllowed } from "../auth/registration-policy.ts";
 import { AccessAuditStore } from "../audit/access-audit-store.ts";
 import { TenantBillingStore } from "../billing/tenant-billing.ts";
 import { WorkspaceStore } from "../workspaces/workspace-store.ts";
@@ -518,7 +519,14 @@ export async function createHarnessApplication(
         checkpointStore,
         {
             authenticate: (rawKey) => credentialStore.authenticate(rawKey),
-            registerUser: (email, password) => credentialStore.registerUser(email, password),
+            registerUser: async (email, password, inviteCode) => {
+                assertRegistrationAllowed({
+                    mode: config.registrationMode,
+                    inviteCode: config.registrationInviteCode,
+                    providedInviteCode: inviteCode,
+                });
+                return credentialStore.registerUser(email, password);
+            },
             loginUser: (email, password) => credentialStore.loginUser(email, password),
             revokeSession: (token) => credentialStore.revokeSession(token),
             sessionOwner: (token) => credentialStore.sessionOwner(token),

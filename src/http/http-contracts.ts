@@ -69,7 +69,7 @@ export interface CheckpointLookup {
 
 export interface HttpAccessControl {
     authenticate(rawKey: string): RequestPrincipal | null;
-    registerUser?(email: string, password: string): Promise<{ userId: string; tenantId: string }>;
+    registerUser?(email: string, password: string, inviteCode?: string): Promise<{ userId: string; tenantId: string }>;
     loginUser?(email: string, password: string): Promise<{ token: string; userId: string; tenantId: string; expiresAt: string } | null>;
     revokeSession?(token: string): boolean;
     revokeAllSessions?(userId: string): number;

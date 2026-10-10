@@ -31,6 +31,16 @@ export interface HarnessConfig {
     bootstrapApiKey:string | undefined;
     /** Pi/Worker 经 LLM 网关调用模型的专用凭证（仅 models:generate scope）。 */
     agentApiKey:string | undefined;
+    /**
+     * 账户注册策略：
+     * - open：任意可达客户端均可注册（旧默认，个人自用/Demo）；
+     * - invite：必须携带正确邀请码才能注册（实验室小范围内网推荐）；
+     * - closed：完全关闭注册，账号只能由运维预置。
+     * 默认 open，保持既有部署兼容；交给他人使用前应显式改为 invite/closed。
+     */
+    registrationMode:"open" | "invite" | "closed";
+    /** registrationMode=invite 时必需；服务端用 timing-safe 比较。 */
+    registrationInviteCode?:string;
     sandboxProvider:"managed-local" | "container" | "microvm";
     sandboxProfile:SandboxProfile;
     sandboxRuntime:"runsc" | "runc" | "firecracker";
@@ -178,6 +188,13 @@ export function loadHarnessConfig(
     // 每租户并发仍然可配（HARNESS_MAX_ACTIVE_RUNS_PER_TENANT）。
     const maxActiveRuns = posInt("HARNESS_MAX_ACTIVE_RUNS", 30);
     const maxActiveRunsPerTenant = posInt("HARNESS_MAX_ACTIVE_RUNS_PER_TENANT", 10);
+    const registrationMode = loadRegistrationMode(environment.HARNESS_REGISTRATION_MODE);
+    const registrationInviteCode = environment.HARNESS_REGISTRATION_INVITE_CODE?.trim() || undefined;
+    if (registrationMode === "invite" && registrationInviteCode === undefined) {
+        throw new Error(
+            "HARNESS_REGISTRATION_MODE=invite 必须设置 HARNESS_REGISTRATION_INVITE_CODE",
+        );
+    }
 
     if (maxActiveRunsPerTenant > maxActiveRuns) {
         throw new Error(
@@ -259,6 +276,8 @@ export function loadHarnessConfig(
         workspaceRoot,
         bootstrapApiKey:environment.HARNESS_BOOTSTRAP_API_KEY,
         agentApiKey:environment.HARNESS_AGENT_API_KEY,
+        registrationMode,
+        ...(registrationInviteCode === undefined ? {} : { registrationInviteCode }),
         sandboxProvider,
         sandboxProfile,
         sandboxRuntime,
@@ -375,6 +394,18 @@ export function loadHarnessConfig(
         workerPiAuthPath: environment.HARNESS_WORKER_PI_AUTH_PATH?.trim() || undefined,
         workerPiModelsPath: environment.HARNESS_WORKER_PI_MODELS_PATH?.trim() || undefined,
     };
+}
+
+function loadRegistrationMode(
+    value:string | undefined,
+):"open" | "invite" | "closed" {
+    const mode = value?.trim() || "open";
+    if (mode !== "open" && mode !== "invite" && mode !== "closed") {
+        throw new Error(
+            `HARNESS_REGISTRATION_MODE 不支持：${mode}（可选 open/invite/closed）`,
+        );
+    }
+    return mode;
 }
 
 function requiredString(

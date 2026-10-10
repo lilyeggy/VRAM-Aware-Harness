@@ -1,4 +1,5 @@
 import { digest } from "../../auth/api-credential-store.ts";
+import { RegistrationPolicyError } from "../../auth/registration-policy.ts";
 import type { RequestPrincipal } from "../../auth/request-principal.ts";
 import type { HttpAccessControl } from "../http-contracts.ts";
 import {
@@ -37,9 +38,22 @@ export async function handleAuthRoute(
         if (request.method === "POST" && segments.join("/") === "auth/register") {
             if (!ctx.accessControl?.registerUser) throw new HttpError(503, "账户服务未启用");
             const body = await readJsonObject(request);
+            const inviteCode = typeof body.inviteCode === "string" ? body.inviteCode : undefined;
             try {
-                return jsonResponse({ user: await ctx.accessControl.registerUser(requiredString(body, "email"), requiredString(body, "password")) }, 201);
-            } catch (error) { throw new HttpError(409, error instanceof Error ? error.message : String(error)); }
+                return jsonResponse({
+                    user: await ctx.accessControl.registerUser(
+                        requiredString(body, "email"),
+                        requiredString(body, "password"),
+                        inviteCode,
+                    ),
+                }, 201);
+            } catch (error) {
+                // 注册策略拒绝是 403（不是账号冲突的 409），让客户端/日志能区分。
+                if (error instanceof RegistrationPolicyError) {
+                    throw new HttpError(403, error.message);
+                }
+                throw new HttpError(409, error instanceof Error ? error.message : String(error));
+            }
         }
         if (request.method === "POST" && segments.join("/") === "auth/login") {
             if (!ctx.accessControl?.loginUser) throw new HttpError(503, "账户服务未启用");

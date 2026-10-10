@@ -48,6 +48,7 @@ ${USER_CONSOLE_CSS}
     </div>
     <div class="field"><label>邮箱</label><input id="authEmail" type="email" autocomplete="username" placeholder="you@team.local"></div>
     <div class="field"><label>密码</label><input id="authPassword" type="password" autocomplete="current-password" placeholder="至少 8 位"></div>
+    <div class="field hidden" id="inviteField"><label>邀请码</label><input id="authInvite" type="text" autocomplete="off" placeholder="实验室邀请码"></div>
     <div id="authError" class="autherr"></div>
     <button id="authSubmit" class="authbtn" type="button">登录</button>
     <div class="authalt">或</div>
@@ -82,7 +83,7 @@ ${USER_CONSOLE_CSS}
     <header class="topbar">
       <button id="menuBtn" class="menuBtn" type="button">☰</button>
       <div class="titlewrap"><b id="convTitle">新对话</b><span id="convSub">选择或创建一条对话开始任务</span></div>
-      <a class="oplink" href="/" target="_blank" title="打开运营/开发者控制台"><span>运营控制台 </span>↗</a>
+      <a class="oplink" href="/health" target="_blank" title="查看服务健康状态"><span>服务状态 </span>↗</a>
     </header>
     <div class="stage" id="stage">
       <div class="hero" id="hero">

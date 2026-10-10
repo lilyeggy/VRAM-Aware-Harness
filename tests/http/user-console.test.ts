@@ -15,6 +15,11 @@ test("userConsoleResponse 返回带 CSP 的中文 HTML 页面", () => {
         expect(html).toContain("authEmail");
         expect(html).toContain("convList");
         expect(html).toContain("新对话");
+        // 实验室接入：注册页必须能携带邀请码；顶部不再指向会 302 回 /app 的假"运营控制台"。
+        expect(html).toContain("inviteField");
+        expect(html).toContain("authInvite");
+        expect(html).toContain('href="/health"');
+        expect(html).not.toContain("运营控制台");
         // 页面绝不接受客户端自报 tenantId：租户只能由服务端凭证派生。
         expect(html).not.toMatch(/tenantId\s*[=:]/);
         // 模板字符串必须完整闭合，防止把 TS 源码片段发给浏览器。
@@ -54,6 +59,8 @@ test("用户工作台的内联脚本必须能被浏览器引擎解析（N1 回�
     // 关键引导函数必须以可解析的函数体形式存在（而非残缺字符串）。
     expect(html).toContain("function showAuth");
     expect(html).toContain("function enterApp");
+    // 注册提交路径必须把邀请码放进请求体（前端不再只能发 email/password）。
+    expect(html).toContain("body.inviteCode = inviteCode");
     // markdown 渲染里不得残留模板级吃掉的裸 CR/LF（曾经的白屏根因）。
     expect(html).not.toContain("replace(/\r\n?/g");
 });

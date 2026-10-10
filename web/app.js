@@ -163,6 +163,8 @@ function setAuthMode(mode){
   $('tabLogin').className = mode === 'login' ? 'on' : '';
   $('tabRegister').className = mode === 'register' ? 'on' : '';
   $('authSubmit').textContent = mode === 'login' ? '登录' : '注册并进入';
+  var inviteField = $('inviteField');
+  if(inviteField) inviteField.classList.toggle('hidden', mode !== 'register');
   $('authError').textContent = '';
 }
 function showAuth(){
@@ -192,7 +194,13 @@ function doAuthLogin(){
   if(!email || !password){ $('authError').textContent = '请填写邮箱和密码'; return; }
   $('authError').textContent = '';
   var path = authMode === 'login' ? '/auth/login' : '/auth/register';
-  api(path, { method:'POST', body:{ email: email, password: password } }).then(function(body){
+  var body = { email: email, password: password };
+  if(authMode === 'register'){
+    var inviteInput = $('authInvite');
+    var inviteCode = inviteInput ? inviteInput.value.trim() : '';
+    if(inviteCode) body.inviteCode = inviteCode;
+  }
+  api(path, { method:'POST', body: body }).then(function(body){
     if(authMode === 'register'){ return api('/auth/login', { method:'POST', body:{ email: email, password: password } }); }
     return body;
   }).then(function(body){

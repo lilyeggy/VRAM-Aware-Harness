@@ -168,6 +168,9 @@ HARNESS_DATABASE_PATH=/var/lib/harness/harness.sqlite
 HARNESS_WORKSPACE_ROOT=/var/lib/harness/workspaces
 HARNESS_VM_RUNTIME_ROOT=/var/lib/harness/vm-runtime
 HARNESS_BOOTSTRAP_API_KEY=replace-with-bootstrap-key
+# 实验室/他人使用前建议收口注册：invite 需邀请码，closed 完全关闭。
+HARNESS_REGISTRATION_MODE=invite
+HARNESS_REGISTRATION_INVITE_CODE=replace-with-lab-invite-code
 
 HARNESS_SANDBOX_PROVIDER=microvm
 HARNESS_USE_JAILER=true
@@ -236,6 +239,7 @@ WantedBy=multi-user.target
   bun run scripts/tenant-billing-smoke.ts --database /srv/VRAM-Aware-Harness/data/live-full-flow/harness.sqlite
   ```
   期望 `TENANT_BILLING_SMOKE_OK` 与 `TENANT_BILLING_VERIFY_OK`。
+- 注册收口（实验室接入）：`HARNESS_REGISTRATION_MODE=open|invite|closed` 默认 `open` 保持旧部署兼容；`invite` 必须同时设置 `HARNESS_REGISTRATION_INVITE_CODE`，服务端用 timing-safe 比较；策略拒绝返回 403（不是账号冲突的 409）。交给实验室或他人使用前建议显式设为 `invite` 或 `closed`。
 - 验证：Run 执行期间 `systemctl show 'harness-worker-<runId>.service' -p SystemCallFilter -p ProtectSystem -p ReadWritePaths -p IPAddressDeny -p IPAddressAllow` 应看到上述属性；Worker stderr 会打印 `[worker] landlock=on abi=<n>`。
 
 ## 7. 启动与验收
@@ -253,6 +257,30 @@ curl -fsS http://127.0.0.1:3100/health
 cd /srv/VRAM-Aware-Harness
 HARNESS_BASE_URL=http://127.0.0.1:3100 bun run scripts/p0-e2e-smoke.ts
 # 期望最后一行：P0_E2E_SMOKE_OK
+```
+
+单机运维（磁盘水位 / SQLite 备份 / VM 与快照清理）：
+
+```bash
+cd /srv/VRAM-Aware-Harness
+# 磁盘水位：warn 80%、critical 90%；critical 时退出码 2
+bun run scripts/harness-ops.ts disk-check --path / --warn 80 --critical 90
+
+# SQLite 一致性备份（VACUUM INTO），默认保留最近 7 份
+bun run scripts/harness-ops.ts backup \
+  --database /var/lib/harness/harness.sqlite \
+  --backup-dir /var/lib/harness/backups --keep 7
+
+# 恢复：目标库存在时必须显式 --force；会清理旧 -wal/-shm
+bun run scripts/harness-ops.ts restore \
+  --backup /var/lib/harness/backups/harness-<timestamp>.sqlite \
+  --database /var/lib/harness/harness.sqlite --force
+
+# 清理：默认 dry-run；确认后加 --apply
+bun run scripts/harness-ops.ts cleanup \
+  --vm-runtime /var/lib/harness/vm-runtime \
+  --snapshot-pool /var/lib/harness/snapshots \
+  --max-age-hours 24 --max-snapshots 8 --apply
 ```
 
 Run 执行期间可观察 Worker 单元与 cgroup：
@@ -276,5 +304,6 @@ systemctl show harness-master -p IPAddressDeny -p IPAddressAllow
 - 控制面 egress：Broker 禁 IP 出站；Master 只允许 loopback；Worker 默认只允许 loopback，仅 `WORKER_EGRESS_ALLOW` 放行的模型服务 CIDR 可达。
 - Broker 只暴露 `create/execute/terminate`；control token 只存在于 root 可读文件与 Master 进程，Worker 只拿自己 sandbox 的 capability token；`HARNESS_SANDBOX_BROKER_MASTER_UID` / `HARNESS_SANDBOX_BROKER_WORKER_UID` 再把操作绑定到进程 UID。
 - Master 应只监听内网/本机，前置反向代理时自行加 TLS 与访问控制；平台只做 API Key/租户级授权。
-- 快照池、VM runtime、workspaces 都属于 Broker/Master 的本地数据目录；不要手工修改正在使用的磁盘。
+- 快照池、VM runtime、workspaces 都属于 Broker/Master 的本地数据目录；不要手工修改正在使用的磁盘。生产建议用 systemd timer 定时执行 `harness-ops.ts backup` 与 `cleanup`（cleanup 先 dry-run 观察）。
+- 注册收口：`HARNESS_REGISTRATION_MODE` 默认 `open`；交给实验室/他人使用前应设为 `invite`（配 `HARNESS_REGISTRATION_INVITE_CODE`）或 `closed`，避免服务可达即可自助注册。
 - 已实现：Broker SO_PEERCRED（v1.3 第 1 项）、Worker seccomp/Landlock/只读 rootfs（v1.3 第 2 项）、控制面 egress ACL（v1.3 第 3 项）、不可变审计存储（v1.3 第 4 项）与租户成本账单（v1.3 第 5 项，见 `docs/platform-boundary.md §9.7`）。
