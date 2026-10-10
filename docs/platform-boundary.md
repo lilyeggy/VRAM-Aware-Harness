@@ -180,6 +180,7 @@ HTTP API ──> Master (调度/审计/策略/LLM网关)
 - 不做 Agent 网络访问：microVM 无网卡；allowNetwork=true 一律拒绝。
 - 不做企业身份（SSO/SCIM）、合规认证、复杂 RBAC 后台。
 - 不做完整插件生态、GUI 工作流编排、成本结算系统。
+- 不做共享 / 协作 / 团队空间：产品定位是单用户个人云端 Agent 助手（类 Grok bot / Manus cue / Muse）；多租户隔离是让每个人用自己的账号，不是多人协作平台。
 
 ### 9.4 验收标准（裁剪版）
 
