@@ -14,8 +14,8 @@ export function startHarnessHttpServer(
     return Bun.serve({
         hostname:options.hostname ?? "127.0.0.1",
         port:options.port ?? 3000,
-        fetch(request) {
-            return api.fetch(request);
+        fetch(request, server) {
+            return api.fetch(request, server.requestIP(request)?.address);
         },
     });
 }

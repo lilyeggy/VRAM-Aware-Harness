@@ -9,6 +9,7 @@ export class HttpError extends Error {
     constructor(
         readonly status: number,
         message: string,
+        readonly headers?: Record<string, string>,
     ) {
         super(message);
     }
@@ -240,11 +241,16 @@ export function runForResponse(run: AgentRun): Record<string, unknown> {
     };
 }
 
-export function jsonResponse(value:unknown, status = 200):Response {
+export function jsonResponse(
+    value:unknown,
+    status = 200,
+    headers:Record<string,string> = {},
+):Response {
     return new Response(JSON.stringify(value), {
         status,
         headers:{
             "content-type":"application/json; charset=utf-8",
+            ...headers,
         },
     });
 }

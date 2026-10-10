@@ -103,7 +103,7 @@ src/
 bun test ./tests
 ```
 
-当前测试基线：`501 pass / 7 skip / 0 fail`。
+当前测试基线：`511 pass / 7 skip / 0 fail`。
 
 实验室/他人接入前的最小运维：
 
@@ -111,6 +111,10 @@ bun test ./tests
 # 注册收口：open（默认兼容）/ invite（需邀请码）/ closed
 HARNESS_REGISTRATION_MODE=invite
 HARNESS_REGISTRATION_INVITE_CODE=change-me
+
+# HTTP 入口限流（默认开启；可按实验室人数调整）
+HARNESS_RATE_LIMIT_MAX_PER_TENANT=600
+HARNESS_RATE_LIMIT_MAX_PER_IP=120
 
 # 磁盘水位、SQLite 备份/恢复、VM 与快照清理
 bun run scripts/harness-ops.ts disk-check --path / --warn 80 --critical 90

@@ -95,6 +95,34 @@ test("注册策略默认 open，invite 必须带邀请码", () => {
     })).toThrow("HARNESS_REGISTRATION_MODE 不支持");
 });
 
+test("限流默认开启，可显式配置窗口与上限", () => {
+    const defaults = loadHarnessConfig({ VLLM_MODEL_ID:"m" });
+    expect(defaults.rateLimitEnabled).toBe(true);
+    expect(defaults.rateLimitWindowMs).toBe(60_000);
+    expect(defaults.rateLimitMaxPerTenant).toBe(600);
+    expect(defaults.rateLimitMaxPerIp).toBe(120);
+    expect(defaults.trustProxy).toBe(false);
+
+    const custom = loadHarnessConfig({
+        VLLM_MODEL_ID:"m",
+        HARNESS_RATE_LIMIT_ENABLED:"false",
+        HARNESS_RATE_LIMIT_WINDOW_MS:"30000",
+        HARNESS_RATE_LIMIT_MAX_PER_TENANT:"50",
+        HARNESS_RATE_LIMIT_MAX_PER_IP:"20",
+        HARNESS_TRUST_PROXY:"true",
+    });
+    expect(custom.rateLimitEnabled).toBe(false);
+    expect(custom.rateLimitWindowMs).toBe(30_000);
+    expect(custom.rateLimitMaxPerTenant).toBe(50);
+    expect(custom.rateLimitMaxPerIp).toBe(20);
+    expect(custom.trustProxy).toBe(true);
+
+    expect(() => loadHarnessConfig({
+        VLLM_MODEL_ID:"m",
+        HARNESS_RATE_LIMIT_ENABLED:"yes",
+    })).toThrow("HARNESS_RATE_LIMIT_ENABLED 必须是 true 或 false");
+});
+
 test("loadHarnessConfig 解析显式环境变量", () => {
     const config = loadHarnessConfig({
         VLLM_MODEL_ID:"qwen3.5-9b",

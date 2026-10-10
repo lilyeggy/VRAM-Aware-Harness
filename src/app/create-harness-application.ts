@@ -8,6 +8,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 
 import { HarnessHttpApi } from "../http/harness-http-api.ts";
+import { RateLimiter } from "../http/rate-limiter.ts";
 import { ApiCredentialStore } from "../auth/api-credential-store.ts";
 import { assertRegistrationAllowed } from "../auth/registration-policy.ts";
 import { AccessAuditStore } from "../audit/access-audit-store.ts";
@@ -514,6 +515,12 @@ export async function createHarnessApplication(
             llmHealthMonitor.start();
         }
     }
+    const rateLimiter = new RateLimiter({
+        enabled: config.rateLimitEnabled,
+        windowMs: config.rateLimitWindowMs,
+        maxRequestsPerTenant: config.rateLimitMaxPerTenant,
+        maxRequestsPerIp: config.rateLimitMaxPerIp,
+    });
     const httpApi = new HarnessHttpApi(
         application,
         checkpointStore,
@@ -539,6 +546,8 @@ export async function createHarnessApplication(
         resourceMetrics,
         // N8：提交期输入上界。
         { maxUserInputChars: config.maxUserInputChars },
+        rateLimiter,
+        config.trustProxy,
     );
 
     let closed = false;

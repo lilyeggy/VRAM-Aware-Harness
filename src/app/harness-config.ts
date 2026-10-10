@@ -41,6 +41,20 @@ export interface HarnessConfig {
     registrationMode:"open" | "invite" | "closed";
     /** registrationMode=invite 时必需；服务端用 timing-safe 比较。 */
     registrationInviteCode?:string;
+    /** HTTP 入口限流开关（默认开启，防止单租户/单 IP 刷爆）。 */
+    rateLimitEnabled:boolean;
+    /** 限流固定窗口大小（ms，默认 60000）。 */
+    rateLimitWindowMs:number;
+    /** 每租户每窗口请求上限（默认 600）。 */
+    rateLimitMaxPerTenant:number;
+    /** 每 IP 每窗口请求上限（默认 120）。 */
+    rateLimitMaxPerIp:number;
+    /**
+     * 是否信任 X-Forwarded-For 作为客户端 IP。
+     * 仅在 Master 只监听 loopback、前面是可信 Caddy/Nginx 时开启；
+     * 直接暴露时开启会让客户端伪造 IP 绕过限流。
+     */
+    trustProxy:boolean;
     sandboxProvider:"managed-local" | "container" | "microvm";
     sandboxProfile:SandboxProfile;
     sandboxRuntime:"runsc" | "runc" | "firecracker";
@@ -195,6 +209,12 @@ export function loadHarnessConfig(
             "HARNESS_REGISTRATION_MODE=invite 必须设置 HARNESS_REGISTRATION_INVITE_CODE",
         );
     }
+
+    const rateLimitEnabled = boolValue(environment, "HARNESS_RATE_LIMIT_ENABLED", true);
+    const rateLimitWindowMs = positiveInteger(environment, "HARNESS_RATE_LIMIT_WINDOW_MS", 60_000);
+    const rateLimitMaxPerTenant = positiveInteger(environment, "HARNESS_RATE_LIMIT_MAX_PER_TENANT", 600);
+    const rateLimitMaxPerIp = positiveInteger(environment, "HARNESS_RATE_LIMIT_MAX_PER_IP", 120);
+    const trustProxy = boolValue(environment, "HARNESS_TRUST_PROXY", false);
 
     if (maxActiveRunsPerTenant > maxActiveRuns) {
         throw new Error(
@@ -373,6 +393,11 @@ export function loadHarnessConfig(
 
         maxActiveRuns,
         maxActiveRunsPerTenant,
+        rateLimitEnabled,
+        rateLimitWindowMs,
+        rateLimitMaxPerTenant,
+        rateLimitMaxPerIp,
+        trustProxy,
         pumpIntervalMs:posInt("HARNESS_PUMP_INTERVAL_MS", 1_000),
         queueTtlMs:posInt("HARNESS_QUEUE_TTL_MS", 300_000),
         schedulerAgingMs:nonNeg("HARNESS_SCHEDULER_AGING_MS", 60_000),
@@ -447,6 +472,22 @@ function nonNegativeInteger(
     }
 
     return value;
+}
+
+function boolValue(
+    environment:HarnessEnvironment,
+    name:string,
+    defaultValue:boolean,
+):boolean {
+    const rawValue = environment[name]?.trim();
+
+    if (rawValue === undefined || rawValue.length === 0) {
+        return defaultValue;
+    }
+    if (rawValue === "true") return true;
+    if (rawValue === "false") return false;
+
+    throw new Error(`${name} 必须是 true 或 false`);
 }
 
 function numberValue(

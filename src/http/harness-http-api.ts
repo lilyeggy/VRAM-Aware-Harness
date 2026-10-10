@@ -10,6 +10,7 @@ import type {
     HttpAccessControl,
 } from "./http-contracts.ts";
 import { HttpError, bearerToken, jsonResponse } from "./http-utils.ts";
+import type { RateLimiter } from "./rate-limiter.ts";
 import { handleAuthRoute } from "./routes/auth.ts";
 import { handleConversationsRoute } from "./routes/conversations.ts";
 import { handleGatewayRoute } from "./routes/gateway.ts";
@@ -39,14 +40,20 @@ export class HarnessHttpApi implements HttpRouteContext {
         readonly llmGateway?: LlmGateway,
         readonly resourceMetrics?: ResourceMetricsSampler,
         readonly limits?: { maxUserInputChars: number },
+        readonly rateLimiter?: RateLimiter,
+        readonly trustProxy = false,
     ) {}
 
-    async fetch(request: Request): Promise<Response> {
+    /** 同一请求可能多次 requirePrincipal（例如先读 run 再读 events）；租户限流只记一次。 */
+    private readonly tenantRateLimited = new WeakSet<Request>();
+
+    async fetch(request: Request, clientIp?: string): Promise<Response> {
         try {
+            this.enforceIpRateLimit(request, clientIp);
             return await this.route(request);
         } catch (error) {
             if (error instanceof HttpError) {
-                return jsonResponse({ error: error.message }, error.status);
+                return jsonResponse({ error: error.message }, error.status, error.headers);
             }
 
             return jsonResponse({
@@ -55,6 +62,51 @@ export class HarnessHttpApi implements HttpRouteContext {
                     : String(error),
             }, 409);
         }
+    }
+
+    private enforceIpRateLimit(request: Request, clientIp?: string): void {
+        if (this.rateLimiter === undefined || this.rateLimiter.enabled === false) {
+            return;
+        }
+
+        const path = new URL(request.url).pathname;
+        // 健康检查/就绪探针不应被限流，否则反向代理或监控会把服务打成 429。
+        if (path === "/health" || path === "/ready") return;
+
+        const decision = this.rateLimiter.consumeIp(this.resolveClientIp(request, clientIp));
+        if (decision.allowed === false) {
+            throw new HttpError(429, "请求过于频繁，请稍后再试", {
+                "retry-after": String(decision.retryAfterSeconds),
+                "x-ratelimit-limit": String(decision.limit),
+                "x-ratelimit-remaining": "0",
+            });
+        }
+    }
+
+    private enforceTenantRateLimit(request: Request, tenantId: string): void {
+        if (this.rateLimiter === undefined || this.rateLimiter.enabled === false) {
+            return;
+        }
+        if (this.tenantRateLimited.has(request)) return;
+        this.tenantRateLimited.add(request);
+
+        const decision = this.rateLimiter.consumeTenant(tenantId);
+        if (decision.allowed === false) {
+            throw new HttpError(429, "租户请求过于频繁，请稍后再试", {
+                "retry-after": String(decision.retryAfterSeconds),
+                "x-ratelimit-limit": String(decision.limit),
+                "x-ratelimit-remaining": "0",
+            });
+        }
+    }
+
+    private resolveClientIp(request: Request, clientIp?: string): string {
+        if (this.trustProxy) {
+            const forwarded = request.headers.get("x-forwarded-for");
+            const first = forwarded?.split(",")[0]?.trim();
+            if (first !== undefined && first.length > 0) return first;
+        }
+        return clientIp ?? "unknown";
     }
 
     private async route(request: Request): Promise<Response> {
@@ -109,6 +161,7 @@ export class HarnessHttpApi implements HttpRouteContext {
     requirePrincipal(request: Request, scope: string): RequestPrincipal {
         if (this.accessControl === undefined) {
             // Retained only for direct legacy unit tests; composition always injects auth.
+            this.enforceTenantRateLimit(request, "legacy");
             return { tenantId: "legacy", scopes: ["*"] };
         }
         const rawKey = bearerToken(request)
@@ -130,6 +183,7 @@ export class HarnessHttpApi implements HttpRouteContext {
             this.audit(scope, "DENY", principal, "missing_scope");
             throw new HttpError(403, `缺少权限：${scope}`);
         }
+        this.enforceTenantRateLimit(request, principal.tenantId);
         this.audit(scope, "ALLOW", principal, "scope_granted");
         return principal;
     }
