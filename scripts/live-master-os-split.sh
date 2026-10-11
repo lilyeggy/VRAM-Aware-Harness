@@ -1,7 +1,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 ROOT="$PWD"
-DATA="$ROOT/data/live-full-flow"
+DATA="${HARNESS_DATA_ROOT:-$ROOT/data/live-full-flow}"
 mkdir -p "$DATA/workspaces" "$DATA/vm-runtime"
 export HARNESS_DATABASE_PATH="$DATA/harness.sqlite"
 export HARNESS_WORKSPACE_ROOT="$DATA/workspaces"
