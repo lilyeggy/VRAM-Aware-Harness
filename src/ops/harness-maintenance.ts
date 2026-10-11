@@ -230,6 +230,59 @@ function pruneDirectories(input:{
     };
 }
 
+export interface ArtifactPruneResult {
+    /** 被清理的 Run id 列表。 */
+    removed:string[];
+    /** 随目录一起删除的 artifact 行数。 */
+    files:number;
+    dryRun:boolean;
+}
+
+/**
+ * F9：按 Run 最新 artifact 时间清理过期 artifact 目录与索引行。
+ * 目录布局与 RunArtifactStore 一致：<artifactRoot>/<runId>/<path>。
+ */
+export function pruneArtifacts(input:{
+    artifactRoot:string;
+    databasePath:string;
+    maxAgeMs:number;
+    dryRun?:boolean;
+    now?:Date;
+}):ArtifactPruneResult {
+    const dryRun = input.dryRun === true;
+    const nowMs = (input.now ?? new Date()).getTime();
+    if (existsSync(input.artifactRoot) === false) {
+        return { removed:[], files:0, dryRun };
+    }
+    const database = new Database(input.databasePath);
+    try {
+        const cutoff = new Date(nowMs - input.maxAgeMs).toISOString();
+        const runs = database.query<
+            { runId:string; count:number },
+            string
+        >(`
+            SELECT run_id AS runId, COUNT(*) AS count
+            FROM run_artifacts
+            GROUP BY run_id
+            HAVING MAX(created_at) < ?;
+        `).all(cutoff);
+        const removed:string[] = [];
+        let files = 0;
+        for (const run of runs) {
+            removed.push(run.runId);
+            files += run.count;
+            if (dryRun === false) {
+                rmSync(join(input.artifactRoot, run.runId), { recursive:true, force:true });
+                database.query("DELETE FROM run_artifacts WHERE run_id = ?;")
+                    .run(run.runId);
+            }
+        }
+        return { removed, files, dryRun };
+    } finally {
+        database.close();
+    }
+}
+
 function formatTimestamp(date:Date):string {
     return date.toISOString()
         .replace(/[-:]/g, "")

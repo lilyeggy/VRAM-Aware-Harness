@@ -13,6 +13,7 @@
 import {
     backupSqliteDatabase,
     checkDiskUsage,
+    pruneArtifacts,
     pruneSnapshotPool,
     pruneVmRuntime,
     restoreSqliteDatabase,
@@ -67,7 +68,7 @@ function usage():void {
   disk-check --path <路径> [--warn 80] [--critical 90]
   backup --database <sqlite> --backup-dir <目录> [--keep 7]
   restore --backup <sqlite> --database <sqlite> [--force]
-  cleanup --vm-runtime <目录> --snapshot-pool <目录> [--max-age-hours 24] [--max-snapshots 8] [--apply]
+  cleanup --vm-runtime <目录> --snapshot-pool <目录> [--artifacts <目录> --database <sqlite>] [--max-age-hours 24] [--max-snapshots 8] [--apply]
 `);
 }
 
@@ -121,9 +122,17 @@ try {
                 maxEntries:numberArg(args, "max-snapshots", 8),
                 dryRun,
             });
-        console.log(JSON.stringify({ vmRuntime, snapshotPool }));
+        const artifacts = args.artifacts === undefined
+            ? { removed:[], files:0, dryRun }
+            : pruneArtifacts({
+                artifactRoot:stringArg(args, "artifacts"),
+                databasePath:stringArg(args, "database"),
+                maxAgeMs,
+                dryRun,
+            });
+        console.log(JSON.stringify({ vmRuntime, snapshotPool, artifacts }));
         console.log(
-            `HARNESS_OPS_CLEANUP_OK dryRun=${dryRun} vmRuntimeRemoved=${vmRuntime.removed.length} snapshotPoolRemoved=${snapshotPool.removed.length}`,
+            `HARNESS_OPS_CLEANUP_OK dryRun=${dryRun} vmRuntimeRemoved=${vmRuntime.removed.length} snapshotPoolRemoved=${snapshotPool.removed.length} artifactsRemoved=${artifacts.removed.length} artifactFiles=${artifacts.files}`,
         );
     } else {
         usage();

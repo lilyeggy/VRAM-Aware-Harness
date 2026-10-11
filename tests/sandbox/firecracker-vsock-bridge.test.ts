@@ -219,4 +219,52 @@ describe("FirecrackerVsockBridge", () => {
         await bridge.connect();
         bridge.close();
     });
+
+    it("F4：宿主侧按 maxOutputBytes 硬截断 guest 输出，不信任 guest 自觉", async () => {
+        await setupMockServer((msg, sock) => {
+            const req = JSON.parse(msg);
+            if (req.type === "exec") {
+                const id = req.id;
+                // guest 不守约：发送超过 maxOutputBytes 的两块 stdout。
+                sock.write(JSON.stringify({
+                    v: 1,
+                    type: "exec_output",
+                    id,
+                    stream: "stdout",
+                    data: Buffer.from("12345678").toString("base64"),
+                }) + "\n");
+                sock.write(JSON.stringify({
+                    v: 1,
+                    type: "exec_output",
+                    id,
+                    stream: "stdout",
+                    data: Buffer.from("ABCDEFGH").toString("base64"),
+                }) + "\n");
+                // guest 谎报未截断。
+                sock.write(JSON.stringify({
+                    v: 1,
+                    type: "exec_result",
+                    id,
+                    exitCode: 0,
+                    truncated: false,
+                }) + "\n");
+            }
+        });
+
+        const bridge = new FirecrackerVsockBridge(testSocketPath, 5000);
+        await bridge.connect();
+
+        const chunks: string[] = [];
+        const result = await bridge.execute(["flood"], {
+            maxOutputBytes: 10,
+            onStdoutChunk: (chunk) => chunks.push(chunk),
+        });
+
+        expect(result.stdout).toBe("12345678AB");
+        expect(Buffer.byteLength(result.stdout, "utf8")).toBe(10);
+        expect(result.truncated).toBe(true);
+        expect(chunks.join("")).toBe("12345678AB");
+
+        bridge.close();
+    });
 });

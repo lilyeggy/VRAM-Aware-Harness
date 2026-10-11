@@ -23,3 +23,24 @@ test("Workspace 快照忽略非交付目录，并生成新增修改删除 Diff",
     expect(diff.deleted).toEqual([]);
     await rm(root, { recursive: true, force: true });
 });
+
+test("F9：文件数超过上限时 fail-closed，不生成不完整 Diff", async () => {
+    const root = `/tmp/harness-snapshot-limit-${crypto.randomUUID()}`;
+    await mkdir(root, { recursive: true });
+    await writeFile(join(root, "a.txt"), "a");
+    await writeFile(join(root, "b.txt"), "b");
+    await expect(snapshotWorkspace(root, { maxFiles: 1 })).rejects.toThrow(
+        "Workspace 文件数超过快照上限 1",
+    );
+    await rm(root, { recursive: true, force: true });
+});
+
+test("F9：目录深度超过上限时 fail-closed", async () => {
+    const root = `/tmp/harness-snapshot-depth-${crypto.randomUUID()}`;
+    await mkdir(join(root, "a", "b"), { recursive: true });
+    await writeFile(join(root, "a", "b", "c.txt"), "c");
+    await expect(snapshotWorkspace(root, { maxDepth: 1 })).rejects.toThrow(
+        "Workspace 目录深度超过快照上限 1",
+    );
+    await rm(root, { recursive: true, force: true });
+});

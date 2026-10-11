@@ -13,6 +13,7 @@ import { join } from "node:path";
 import {
     backupSqliteDatabase,
     classifyDiskUsage,
+    pruneArtifacts,
     pruneSnapshotPool,
     pruneVmRuntime,
     restoreSqliteDatabase,
@@ -166,4 +167,52 @@ test("pruneSnapshotPool 同时按年龄与最大条目数清理", () => {
     });
     expect(byAge.removed).toEqual([middle]);
     expect(existsSync(newest)).toBe(true);
+});
+
+test("pruneArtifacts 按 Run 最新 artifact 时间清理目录与索引行", () => {
+    const dir = tempDir();
+    const databasePath = join(dir, "harness.sqlite");
+    const db = new Database(databasePath, { create:true });
+    db.exec(`
+        CREATE TABLE run_artifacts (
+            run_id TEXT NOT NULL,
+            path TEXT NOT NULL,
+            hash TEXT NOT NULL,
+            size INTEGER NOT NULL,
+            created_at TEXT NOT NULL,
+            PRIMARY KEY (run_id, path)
+        );
+    `);
+    const now = new Date("2026-10-11T12:00:00.000Z");
+    const oldIso = new Date(now.getTime() - 48 * 3_600_000).toISOString();
+    const newIso = new Date(now.getTime() - 1 * 3_600_000).toISOString();
+    db.query("INSERT INTO run_artifacts VALUES (?,?,?,?,?)")
+        .run("old-run", "a.txt", "h", 1, oldIso);
+    db.query("INSERT INTO run_artifacts VALUES (?,?,?,?,?)")
+        .run("new-run", "b.txt", "h", 1, newIso);
+    db.close();
+
+    const artifactRoot = join(dir, "artifacts");
+    mkdirSync(join(artifactRoot, "old-run"), { recursive:true });
+    writeFileSync(join(artifactRoot, "old-run", "a.txt"), "a");
+    mkdirSync(join(artifactRoot, "new-run"), { recursive:true });
+    writeFileSync(join(artifactRoot, "new-run", "b.txt"), "b");
+
+    const dry = pruneArtifacts({
+        artifactRoot, databasePath, maxAgeMs:24 * 3_600_000, dryRun:true, now,
+    });
+    expect(dry.removed).toEqual(["old-run"]);
+    expect(existsSync(join(artifactRoot, "old-run"))).toBe(true);
+
+    const applied = pruneArtifacts({
+        artifactRoot, databasePath, maxAgeMs:24 * 3_600_000, dryRun:false, now,
+    });
+    expect(applied.removed).toEqual(["old-run"]);
+    expect(existsSync(join(artifactRoot, "old-run"))).toBe(false);
+    expect(existsSync(join(artifactRoot, "new-run"))).toBe(true);
+
+    const check = new Database(databasePath);
+    const remaining = check.query("SELECT run_id FROM run_artifacts").all() as { run_id:string }[];
+    check.close();
+    expect(remaining.map((row) => row.run_id)).toEqual(["new-run"]);
 });

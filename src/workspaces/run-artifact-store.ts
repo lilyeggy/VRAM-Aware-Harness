@@ -10,12 +10,30 @@ export interface RunArtifact extends WorkspaceFileSnapshot {
     readonly createdAt: string;
 }
 
+export interface RunArtifactStoreOptions {
+    /** F9：单次 Run 最多捕获的 artifact 文件数。 */
+    readonly maxFilesPerRun?: number;
+    /** F9：单次 Run 最多捕获的 artifact 总字节数。 */
+    readonly maxBytesPerRun?: number;
+}
+
+export const DEFAULT_ARTIFACT_MAX_FILES_PER_RUN = 200;
+export const DEFAULT_ARTIFACT_MAX_BYTES_PER_RUN = 50 * 1024 * 1024;
+
 /** Immutable copies of the user-visible files produced by a terminal Run. */
 export class RunArtifactStore {
     private readonly root: string;
+    private readonly maxFilesPerRun: number;
+    private readonly maxBytesPerRun: number;
 
-    constructor(private readonly db: Database, rootPath: string) {
+    constructor(
+        private readonly db: Database,
+        rootPath: string,
+        options: RunArtifactStoreOptions = {},
+    ) {
         this.root = resolve(rootPath);
+        this.maxFilesPerRun = options.maxFilesPerRun ?? DEFAULT_ARTIFACT_MAX_FILES_PER_RUN;
+        this.maxBytesPerRun = options.maxBytesPerRun ?? DEFAULT_ARTIFACT_MAX_BYTES_PER_RUN;
     }
 
     async capture(
@@ -24,7 +42,22 @@ export class RunArtifactStore {
         files: readonly WorkspaceFileSnapshot[],
     ): Promise<RunArtifact[]> {
         const captured: RunArtifact[] = [];
+        let capturedBytes = 0;
         for (const file of files) {
+            if (captured.length >= this.maxFilesPerRun) {
+                console.warn(
+                    `[artifacts] Run ${runId} 达到 artifact 文件数上限 ${this.maxFilesPerRun}，`
+                    + "停止捕获后续文件（可通过 HARNESS_ARTIFACT_MAX_FILES_PER_RUN 调大）。",
+                );
+                break;
+            }
+            if (capturedBytes + file.size > this.maxBytesPerRun) {
+                console.warn(
+                    `[artifacts] Run ${runId} 达到 artifact 总字节上限 ${this.maxBytesPerRun}，`
+                    + "停止捕获后续文件（可通过 HARNESS_ARTIFACT_MAX_BYTES_PER_RUN 调大）。",
+                );
+                break;
+            }
             const source = resolve(workspacePath, file.path);
             const destination = this.artifactPath(runId, file.path);
             // Defend against a TOCTOU symlink introduced after Workspace snapshotting.
@@ -44,6 +77,7 @@ export class RunArtifactStore {
                 ON CONFLICT(run_id, path) DO NOTHING;
             `).run(artifact);
             captured.push(artifact);
+            capturedBytes += file.size;
         }
         return captured;
     }

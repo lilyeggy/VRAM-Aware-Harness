@@ -187,10 +187,18 @@ export async function createHarnessApplication(
     const artifactStore = new RunArtifactStore(
         database,
         resolve(config.workspaceRoot, "..", "artifacts"),
+        {
+            maxFilesPerRun: config.artifactMaxFilesPerRun,
+            maxBytesPerRun: config.artifactMaxBytesPerRun,
+        },
     );
     const workspaceResultCoordinator = new RunWorkspaceResultCoordinator(
         workspaceResultStore,
         artifactStore,
+        {
+            maxFiles: config.workspaceSnapshotMaxFiles,
+            maxDepth: config.workspaceSnapshotMaxDepth,
+        },
     );
     if (config.bootstrapApiKey !== undefined) {
         // A repeat start must not overwrite credentials or make a second bootstrap identity.

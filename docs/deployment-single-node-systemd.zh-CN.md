@@ -293,6 +293,8 @@ bun run scripts/harness-ops.ts restore \
 bun run scripts/harness-ops.ts cleanup \
   --vm-runtime /var/lib/harness/vm-runtime \
   --snapshot-pool /var/lib/harness/snapshots \
+  --artifacts /var/lib/harness/artifacts \
+  --database /var/lib/harness/harness.sqlite \
   --max-age-hours 24 --max-snapshots 8 --apply
 ```
 
@@ -356,11 +358,13 @@ DB=/data/harness/live-full-flow/harness.sqlite
 BACKUP_DIR=/data/harness/backups
 VM_RUNTIME=/data/harness/live-full-flow/vm-runtime
 SNAPSHOT_POOL=/data/harness/snapshots-mt
+ARTIFACT_ROOT=/data/harness/live-full-flow/artifacts
 
 $BUN run scripts/harness-ops.ts disk-check --path /data --warn 80 --critical 90 || true
 $BUN run scripts/harness-ops.ts disk-check --path / --warn 80 --critical 90 || true
 $BUN run scripts/harness-ops.ts backup --database "$DB" --backup-dir "$BACKUP_DIR" --keep 7
-$BUN run scripts/harness-ops.ts cleanup --vm-runtime "$VM_RUNTIME" --snapshot-pool "$SNAPSHOT_POOL" --max-age-hours 72 --max-snapshots 8 --apply
+$BUN run scripts/harness-ops.ts cleanup --vm-runtime "$VM_RUNTIME" --snapshot-pool "$SNAPSHOT_POOL" \
+  --artifacts "$ARTIFACT_ROOT" --database "$DB" --max-age-hours 72 --max-snapshots 8 --apply
 ```
 
 创建 `/etc/systemd/system/harness-maintenance.service`：

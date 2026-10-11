@@ -14,6 +14,45 @@ interface VsockFrame {
     reason?: string;
 }
 
+interface BoundedAppend {
+    text: string;
+    bytes: number;
+    appended: string;
+    truncated: boolean;
+}
+
+/**
+ * F4：宿主侧输出上限。guest agent 属于不可信面，不能只靠它遵守
+ * maxOutputBytes；这里按字节硬截断，超出部分丢弃并标记 truncated。
+ */
+function boundedAppend(
+    current: string,
+    currentBytes: number,
+    decoded: string,
+    maxBytes: number,
+): BoundedAppend {
+    const remaining = maxBytes - currentBytes;
+    if (remaining <= 0) {
+        return { text: current, bytes: currentBytes, appended: "", truncated: true };
+    }
+    const buffer = Buffer.from(decoded, "utf8");
+    if (buffer.length <= remaining) {
+        return {
+            text: current + decoded,
+            bytes: currentBytes + buffer.length,
+            appended: decoded,
+            truncated: false,
+        };
+    }
+    const appended = buffer.subarray(0, remaining).toString("utf8");
+    return {
+        text: current + appended,
+        bytes: maxBytes,
+        appended,
+        truncated: true,
+    };
+}
+
 export class FirecrackerVsockBridge {
     private socket: Socket | null = null;
     private rawBuffer = "";
@@ -267,6 +306,10 @@ export class FirecrackerVsockBridge {
                 const execId = randomBytes(8).toString("hex");
                 let stdout = "";
                 let stderr = "";
+                let stdoutBytes = 0;
+                let stderrBytes = 0;
+                let hostTruncated = false;
+                const maxOutputBytes = options?.maxOutputBytes ?? 1048576;
 
                 const req = {
                     v: 1,
@@ -276,7 +319,7 @@ export class FirecrackerVsockBridge {
                     cwd: options?.workdir ?? "/workspace",
                     env: options?.env ? { ...options.env } : {},
                     timeoutMs: options?.timeoutMs ?? 60000,
-                    maxOutputBytes: options?.maxOutputBytes ?? 1048576,
+                    maxOutputBytes,
                 };
 
                 const executePromise = new Promise<MicrovmExecutionResult>((res, rej) => {
@@ -296,11 +339,17 @@ export class FirecrackerVsockBridge {
                         onOutput: (stream, base64Data) => {
                             const decoded = Buffer.from(base64Data, "base64").toString("utf8");
                             if (stream === "stdout") {
-                                stdout += decoded;
-                                options?.onStdoutChunk?.(decoded);
+                                const appended = boundedAppend(stdout, stdoutBytes, decoded, maxOutputBytes);
+                                stdout = appended.text;
+                                stdoutBytes = appended.bytes;
+                                if (appended.truncated) hostTruncated = true;
+                                if (appended.appended.length > 0) options?.onStdoutChunk?.(appended.appended);
                             } else {
-                                stderr += decoded;
-                                options?.onStderrChunk?.(decoded);
+                                const appended = boundedAppend(stderr, stderrBytes, decoded, maxOutputBytes);
+                                stderr = appended.text;
+                                stderrBytes = appended.bytes;
+                                if (appended.truncated) hostTruncated = true;
+                                if (appended.appended.length > 0) options?.onStderrChunk?.(appended.appended);
                             }
                         },
                         onResult: (exitCode, timedOut, truncated) => {
@@ -311,7 +360,7 @@ export class FirecrackerVsockBridge {
                                 stdout,
                                 stderr,
                                 ...(timedOut ? { timedOut: true } : {}),
-                                ...(truncated ? { truncated: true } : {}),
+                                ...(truncated || hostTruncated ? { truncated: true } : {}),
                             });
                         },
                         onError: (err) => {

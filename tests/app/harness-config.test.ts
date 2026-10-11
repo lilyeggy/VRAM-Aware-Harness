@@ -373,3 +373,23 @@ test("HARNESS_WORKER_ISOLATION=systemd 解析专用 UID/cgroup 与 worker 凭据
     expect(config.workerPiAuthPath).toBe("/var/lib/harness-worker/auth.json");
     expect(config.workerPiModelsPath).toBe("/var/lib/harness-worker/models-store.json");
 });
+
+test("loadHarnessConfig 为 F9 注入快照/artifact 限额默认值并支持覆盖", () => {
+    const defaults = loadHarnessConfig({ VLLM_MODEL_ID: "m" }, "/tmp/harness-project");
+    expect(defaults.workspaceSnapshotMaxFiles).toBe(20_000);
+    expect(defaults.workspaceSnapshotMaxDepth).toBe(32);
+    expect(defaults.artifactMaxFilesPerRun).toBe(200);
+    expect(defaults.artifactMaxBytesPerRun).toBe(50 * 1024 * 1024);
+
+    const custom = loadHarnessConfig({
+        VLLM_MODEL_ID: "m",
+        HARNESS_WORKSPACE_SNAPSHOT_MAX_FILES: "10",
+        HARNESS_WORKSPACE_SNAPSHOT_MAX_DEPTH: "3",
+        HARNESS_ARTIFACT_MAX_FILES_PER_RUN: "5",
+        HARNESS_ARTIFACT_MAX_BYTES_PER_RUN: "1024",
+    }, "/tmp/harness-project");
+    expect(custom.workspaceSnapshotMaxFiles).toBe(10);
+    expect(custom.workspaceSnapshotMaxDepth).toBe(3);
+    expect(custom.artifactMaxFilesPerRun).toBe(5);
+    expect(custom.artifactMaxBytesPerRun).toBe(1024);
+});

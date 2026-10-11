@@ -1,4 +1,4 @@
-import { diffWorkspace, snapshotWorkspace, type WorkspaceDiff, type WorkspaceFileSnapshot } from "./workspace-snapshot.ts";
+import { diffWorkspace, snapshotWorkspace, type WorkspaceDiff, type WorkspaceFileSnapshot, type WorkspaceSnapshotOptions } from "./workspace-snapshot.ts";
 import type { RunWorkspaceResultStore } from "./run-workspace-result-store.ts";
 import type { RunArtifact, RunArtifactStore } from "./run-artifact-store.ts";
 
@@ -9,10 +9,11 @@ export class RunWorkspaceResultCoordinator {
     constructor(
         private readonly store?: RunWorkspaceResultStore,
         private readonly artifacts?: RunArtifactStore,
+        private readonly snapshotOptions: WorkspaceSnapshotOptions = {},
     ) {}
 
     async captureBefore(runId: string, workspacePath: string): Promise<void> {
-        const before = await snapshotWorkspace(workspacePath);
+        const before = await snapshotWorkspace(workspacePath, this.snapshotOptions);
         this.beforeByRun.set(runId, before);
         this.store?.saveSnapshot(runId, "BEFORE", before);
     }
@@ -21,7 +22,7 @@ export class RunWorkspaceResultCoordinator {
         const before = this.beforeByRun.get(runId) ?? this.store?.getSnapshot(runId, "BEFORE");
         this.beforeByRun.delete(runId);
         if (before === undefined || before === null) return null;
-        const after = await snapshotWorkspace(workspacePath);
+        const after = await snapshotWorkspace(workspacePath, this.snapshotOptions);
         const diff = diffWorkspace(before, after);
         this.store?.saveSnapshot(runId, "AFTER", after);
         this.store?.saveDiff(runId, diff);

@@ -108,6 +108,14 @@ export interface HarnessConfig {
 
     maxActiveRuns:number;
     maxActiveRunsPerTenant:number;
+    /** F9：workspace 快照最多扫描文件数，超限 fail-closed。 */
+    workspaceSnapshotMaxFiles:number;
+    /** F9：workspace 快照最大递归深度，超限 fail-closed。 */
+    workspaceSnapshotMaxDepth:number;
+    /** F9：单 Run 最多捕获 artifact 文件数，超限停止捕获。 */
+    artifactMaxFilesPerRun:number;
+    /** F9：单 Run 最多捕获 artifact 总字节数，超限停止捕获。 */
+    artifactMaxBytesPerRun:number;
     pumpIntervalMs:number;
     /**
      * 支柱 3：排队 TTL。Run 在队列中等待超过该时长且未获得调度准入时，
@@ -202,6 +210,10 @@ export function loadHarnessConfig(
     // 每租户并发仍然可配（HARNESS_MAX_ACTIVE_RUNS_PER_TENANT）。
     const maxActiveRuns = posInt("HARNESS_MAX_ACTIVE_RUNS", 30);
     const maxActiveRunsPerTenant = posInt("HARNESS_MAX_ACTIVE_RUNS_PER_TENANT", 10);
+    const workspaceSnapshotMaxFiles = posInt("HARNESS_WORKSPACE_SNAPSHOT_MAX_FILES", 20_000);
+    const workspaceSnapshotMaxDepth = posInt("HARNESS_WORKSPACE_SNAPSHOT_MAX_DEPTH", 32);
+    const artifactMaxFilesPerRun = posInt("HARNESS_ARTIFACT_MAX_FILES_PER_RUN", 200);
+    const artifactMaxBytesPerRun = posInt("HARNESS_ARTIFACT_MAX_BYTES_PER_RUN", 50 * 1024 * 1024);
     const registrationMode = loadRegistrationMode(environment.HARNESS_REGISTRATION_MODE);
     const registrationInviteCode = environment.HARNESS_REGISTRATION_INVITE_CODE?.trim() || undefined;
     if (registrationMode === "invite" && registrationInviteCode === undefined) {
@@ -393,6 +405,10 @@ export function loadHarnessConfig(
 
         maxActiveRuns,
         maxActiveRunsPerTenant,
+        workspaceSnapshotMaxFiles,
+        workspaceSnapshotMaxDepth,
+        artifactMaxFilesPerRun,
+        artifactMaxBytesPerRun,
         rateLimitEnabled,
         rateLimitWindowMs,
         rateLimitMaxPerTenant,

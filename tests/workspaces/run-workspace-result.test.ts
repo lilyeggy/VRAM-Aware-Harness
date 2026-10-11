@@ -5,6 +5,7 @@ import { RunWorkspaceResultCoordinator } from "../../src/workspaces/run-workspac
 import { RunWorkspaceResultStore } from "../../src/workspaces/run-workspace-result-store.ts";
 import { openHarnessDatabase } from "../../src/storage/database.ts";
 import { RunArtifactStore } from "../../src/workspaces/run-artifact-store.ts";
+import { snapshotWorkspace } from "../../src/workspaces/workspace-snapshot.ts";
 
 test("Run 前后 Workspace 快照生成用户结果 Diff", async () => {
     const root = `/tmp/harness-result-${crypto.randomUUID()}`;
@@ -67,5 +68,33 @@ test("终态 Run 把已验证的新增文件保存为不可变 Artifact", async 
         db.close();
         await rm(root, { recursive: true, force: true });
         await rm(artifacts, { recursive: true, force: true });
+    }
+});
+
+test("F9：artifact 达到文件数/字节上限后停止捕获，保留已捕获部分", async () => {
+    const root = `/tmp/harness-artifact-cap-ws-${crypto.randomUUID()}`;
+    const artifacts = `/tmp/harness-artifact-cap-store-${crypto.randomUUID()}`;
+    const artifactsBytes = `${artifacts}-bytes`;
+    const db = openHarnessDatabase(":memory:");
+    try {
+        db.exec("PRAGMA foreign_keys = OFF;");
+        await mkdir(root, { recursive: true });
+        await writeFile(join(root, "a.txt"), "aaaa");
+        await writeFile(join(root, "b.txt"), "bbbb");
+        await writeFile(join(root, "c.txt"), "cccc");
+        const manifest = await snapshotWorkspace(root);
+
+        const byFiles = new RunArtifactStore(db, artifacts, { maxFilesPerRun: 2 });
+        const capturedByFiles = await byFiles.capture(crypto.randomUUID(), root, manifest);
+        expect(capturedByFiles.map((item) => item.path)).toEqual(["a.txt", "b.txt"]);
+
+        const byBytes = new RunArtifactStore(db, artifactsBytes, { maxBytesPerRun: 5 });
+        const capturedByBytes = await byBytes.capture(crypto.randomUUID(), root, manifest);
+        expect(capturedByBytes.map((item) => item.path)).toEqual(["a.txt"]);
+    } finally {
+        db.close();
+        await rm(root, { recursive: true, force: true });
+        await rm(artifacts, { recursive: true, force: true });
+        await rm(artifactsBytes, { recursive: true, force: true });
     }
 });
