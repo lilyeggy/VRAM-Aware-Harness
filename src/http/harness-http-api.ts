@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type { RequestPrincipal } from "../auth/request-principal.ts";
 import { digest } from "../auth/api-credential-store.ts";
 import { hasScope } from "../auth/request-principal.ts";
@@ -56,11 +57,15 @@ export class HarnessHttpApi implements HttpRouteContext {
                 return jsonResponse({ error: error.message }, error.status, error.headers);
             }
 
+            // F10：未知异常是服务端内部错误，语义应为 500，且不能把
+            // Bun/SQLite 的原始 message（可能含文件路径、SQL 片段、邮箱唯一约束）
+            // 透给客户端。给客户端一个通用文案 + requestId，原文只进服务端日志。
+            const requestId = randomUUID().slice(0, 8);
+            console.error(`[http] 内部错误 requestId=${requestId}`, error);
             return jsonResponse({
-                error: error instanceof Error
-                    ? error.message
-                    : String(error),
-            }, 409);
+                error: "内部错误，请稍后重试",
+                requestId,
+            }, 500);
         }
     }
 

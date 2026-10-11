@@ -197,6 +197,15 @@ export class SandboxBrokerServer {
                 const handle = await this.options.provider.create(request.input);
                 const record = this.options.readRecord(handle.id);
                 if (record === null) {
+                    // F6：create 已经真实建好 VM，但 readRecord 失败时如果不回收，
+                    // Broker 侧不会登记 tenantBySandbox/tokenBySandbox，后续
+                    // terminate 会在 assertTenant 处直接报“Broker 不认识 sandbox”，
+                    // 连 controlToken 兜底都走不通——变成不可寻址孤儿 VM。
+                    try {
+                        await this.options.provider.terminate(handle.id);
+                    } catch (cleanupError) {
+                        this.options.onError?.(cleanupError);
+                    }
                     throw new Error("Broker created sandbox but record is missing: " + handle.id);
                 }
                 this.tenantBySandbox.set(handle.id, request.input.policy.tenantId);

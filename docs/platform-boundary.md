@@ -219,6 +219,12 @@ HTTP API ──> Master (调度/审计/策略/LLM网关)
 - TLS / 反向代理（部署安全）：`docs/tls-reverse-proxy.zh-CN.md` + `deploy/harness-caddy.example` + `deploy/harness-nginx.example`；Master 继续只监听 loopback，外部入口由 Caddy/Nginx 终止 TLS，只放行 443（可选 80），不放行 3100。无 Caddy/Nginx 时可用 `scripts/dev-tls-proxy.ts` 做临时验证。
 - 真机 HTTPS 全链路验证（2026-10-10）：在 172.17.43.193 用 `scripts/dev-tls-proxy.ts`（自签证书）反代 Master，`NODE_EXTRA_CA_CERTS=... HARNESS_BASE_URL=https://127.0.0.1:8443 bun run scripts/p0-e2e-smoke.ts` 通过 `P0_E2E_SMOKE_OK label=f3ac25a8`（serial maxActive=1、concurrent maxActive=2 overlap=true、跨租户 404）；随后清理 broker/master/proxy、`data/live-full-flow`、`snapshots-mt`、`/run/harness` 与 `/tmp/harness-tls`，无残留。
 - 升级/回滚 runbook（部署兼容）：`docs/upgrade-rollback-runbook.zh-CN.md` + `deploy/harness-logrotate.example`；迁移向前执行，回滚必须先 `harness-ops.ts backup` 再 `restore`，并附升级后验收命令。
+- 补充审查报告第一批修复（2026-10-11，安全/可靠性加固，不新增 §9.2 能力）：
+  - F1 Firecracker API 超时：`src/sandbox/microvm/firecracker-sandbox-driver.ts` 的 `putSocket` 增加 `timeoutMs`（默认 10s，`/snapshot/load` 与 `/snapshot/create` 为 60s），API 卡死时 `req.destroy` 并 reject，create/terminate 不再无限挂起；新增 `tests/sandbox/firecracker-api-timeout.test.ts`。
+  - F3 SQLite WAL/busy_timeout：`src/storage/database.ts` 的 `configureDatabase` 增加 `PRAGMA journal_mode = WAL` 与 `PRAGMA busy_timeout = 5000`，让 `harness-maintenance.ts` 的跨进程 `VACUUM INTO` 备份与 Master 写入不再互斥；新增数据库 PRAGMA 回归测试。
+  - F6 Broker create 孤儿回收：`src/sandbox/broker/sandbox-broker-server.ts` 在 create 后 `readRecord` 为 null 时先 `provider.terminate(handle.id)` 再抛错，避免产生不可寻址孤儿 VM；新增 Broker 回归测试。
+  - F10 HTTP 内部错误收口：`src/http/harness-http-api.ts` catch-all 由 409 + 原始 message 改为 500 + 通用文案 + requestId，原始异常只进服务端日志；`src/http/routes/auth.ts` 重复邮箱映射为 409 “该邮箱已被注册”，已知输入校验错误映射为 400；新增 HTTP/注册回归测试。
+  - 本地 `bun test ./tests` = 523 pass / 7 skip / 0 fail；typecheck 保持既有 9 条基线错误。
 - 以上均属 §9.6 允许的 bug/安全修复、测试与文档维护、部署兼容性修复，不改变 §9.2/§9.3 的范围划分。
 
 暂缓的增强（不在当前边界内）：

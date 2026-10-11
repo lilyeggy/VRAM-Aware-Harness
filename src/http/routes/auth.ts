@@ -52,7 +52,18 @@ export async function handleAuthRoute(
                 if (error instanceof RegistrationPolicyError) {
                     throw new HttpError(403, error.message);
                 }
-                throw new HttpError(409, error instanceof Error ? error.message : String(error));
+                const message = error instanceof Error ? error.message : String(error);
+                // F10：重复邮箱只回一个稳定的 409，不透出 SQLite 的
+                // "UNIQUE constraint failed: users.email"（可能含 schema/表名）。
+                if (message.includes("UNIQUE constraint failed") || message.includes("SQLITE_CONSTRAINT")) {
+                    throw new HttpError(409, "该邮箱已被注册");
+                }
+                // 已知的输入校验错误是安全的客户端错误（400）；其余交给
+                // HarnessHttpApi 的 500 通用兜底，避免把内部细节当业务错误返回。
+                if (message === "邮箱格式无效" || message === "密码至少需要 8 个字符") {
+                    throw new HttpError(400, message);
+                }
+                throw error;
             }
         }
         if (request.method === "POST" && segments.join("/") === "auth/login") {

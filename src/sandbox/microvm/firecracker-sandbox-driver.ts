@@ -301,9 +301,18 @@ export class FirecrackerSandboxDriver implements MicrovmDriver {
         path: string,
         payload: unknown,
         method: "PUT" | "PATCH" = "PUT",
+        timeoutMs = 10_000,
     ): Promise<void> {
         return new Promise<void>((resolve, reject) => {
             const data = JSON.stringify(payload);
+            let settled = false;
+            let timer: ReturnType<typeof setTimeout> | undefined;
+            const settle = (fn: () => void) => {
+                if (settled) return;
+                settled = true;
+                if (timer !== undefined) clearTimeout(timer);
+                fn();
+            };
             const req = http.request({
                 socketPath,
                 path,
@@ -317,14 +326,24 @@ export class FirecrackerSandboxDriver implements MicrovmDriver {
                 let body = "";
                 res.on("data", (chunk) => { body += chunk; });
                 res.on("end", () => {
-                    if (res.statusCode && res.statusCode >= 200 && res.statusCode < 300) {
-                        resolve();
-                    } else {
-                        reject(new Error(`Firecracker API error [${path}]: ${res.statusCode} ${body}`));
-                    }
+                    settle(() => {
+                        if (res.statusCode && res.statusCode >= 200 && res.statusCode < 300) {
+                            resolve();
+                        } else {
+                            reject(new Error(`Firecracker API error [${path}]: ${res.statusCode} ${body}`));
+                        }
+                    });
                 });
             });
-            req.on("error", reject);
+            timer = setTimeout(() => {
+                const error = new Error(
+                    `Firecracker API 超时 [${path}]：${timeoutMs}ms 内未完成；`
+                    + "拒绝无限期等待（snapshot/create 等重操作请放宽 timeoutMs）。",
+                );
+                settle(() => reject(error));
+                req.destroy(error);
+            }, timeoutMs);
+            req.on("error", (error) => settle(() => reject(error)));
             req.write(data);
             req.end();
         });
@@ -579,7 +598,7 @@ export class FirecrackerSandboxDriver implements MicrovmDriver {
                         uds_path: this.useJailer ? "/vsock.sock" : vsockUdsOnHost,
                     },
                     resume_vm: true,
-                });
+                }, "PUT", 60_000);
             } else {
                 // 冷启动路径：完整配置再开机。
                 await this.putSocket(apiSocketOnHost, "/boot-source", {
@@ -663,7 +682,7 @@ export class FirecrackerSandboxDriver implements MicrovmDriver {
                                 snapshot_type: "Full",
                                 snapshot_path: snapForApi,
                                 mem_file_path: memForApi,
-                            });
+                            }, "PUT", 60_000);
                             if (snapInChroot !== undefined && memInChroot !== undefined) {
                                 await copyFileReflink(snapInChroot, poolPaths.snapshotPath);
                                 await copyFileReflink(memInChroot, poolPaths.memFilePath);

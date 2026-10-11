@@ -310,3 +310,15 @@ test("Broker 连接白名单拒绝非授权 UID", async () => {
         allowedPeerUids: new Set([1004]),
     });
 });
+
+test("Broker create 后 readRecord 失败时回收 sandbox，避免不可寻址孤儿", async () => {
+    await withBroker(async ({ client, terminated }) => {
+        await expect(client.create({
+            id: "sandbox-orphan",
+            runId: "run-orphan",
+            workspacePath: "/tmp/workspace-orphan",
+            policy: { tenantId: "tenant-1" } as never,
+        })).rejects.toThrow("record is missing");
+        expect(terminated).toEqual(["sandbox-orphan"]);
+    }, {}, { readRecord: () => null });
+});

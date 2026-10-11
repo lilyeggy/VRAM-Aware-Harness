@@ -1,3 +1,6 @@
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { expect, test } from "bun:test";
 
 import {
@@ -72,5 +75,39 @@ test("重复运行 migration 不会重复应用已有版本", () => {
         expect(rows.map((row) => row.version)).toEqual([1, 2]);
     } finally {
         db.close();
+    }
+});
+
+interface PragmaJournalRow {
+    journal_mode?: string;
+}
+
+interface PragmaTimeoutRow {
+    timeout?: number;
+}
+
+test("数据库连接启用 WAL 与 busy_timeout，避免跨进程备份与写入互斥", () => {
+    const memory = openHarnessDatabase(":memory:");
+    try {
+        // :memory: 不支持 WAL，SQLite 会保持 memory journal；但 busy_timeout 仍应生效。
+        expect(memory.query<PragmaJournalRow, []>("PRAGMA journal_mode;").get()?.journal_mode)
+            .toBe("memory");
+        expect(memory.query<PragmaTimeoutRow, []>("PRAGMA busy_timeout;").get()?.timeout)
+            .toBe(5000);
+    } finally {
+        memory.close();
+    }
+
+    const dir = mkdtempSync(join(tmpdir(), "harness-db-pragma-"));
+    const path = join(dir, "harness.sqlite");
+    const fileDb = openHarnessDatabase(path);
+    try {
+        expect(fileDb.query<PragmaJournalRow, []>("PRAGMA journal_mode;").get()?.journal_mode)
+            .toBe("wal");
+        expect(fileDb.query<PragmaTimeoutRow, []>("PRAGMA busy_timeout;").get()?.timeout)
+            .toBe(5000);
+    } finally {
+        fileDb.close();
+        rmSync(dir, { recursive: true, force: true });
     }
 });

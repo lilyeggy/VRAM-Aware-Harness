@@ -57,6 +57,12 @@ function configureDatabase(db:Database):void {
     // migration v1 里 run_events.run_id 引用了 agent_runs.id；
     // 如果不开启 foreign_keys，就算写入不存在的 run_id，SQLite 也可能放行。
     db.exec("PRAGMA foreign_keys = ON;")
+    // F3：Master 是常驻写者，运维备份（harness-maintenance.ts 的 VACUUM INTO）
+    // 会从另一个进程对活库做一致性快照。默认 rollback journal 下两者会互斥：
+    // 没有 busy_timeout 时备份可能间歇性 SQLITE_BUSY，备份期间 Master 写入也会排队。
+    // WAL 让读写不再互斥，busy_timeout 给偶发锁冲突一个重试窗口。
+    db.exec("PRAGMA journal_mode = WAL;")
+    db.exec("PRAGMA busy_timeout = 5000;")
 }
 
 /**

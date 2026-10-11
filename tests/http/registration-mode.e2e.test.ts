@@ -103,3 +103,42 @@ test("invite 模式：错误邀请码 403，正确邀请码 201", async () => {
         await composition.close();
     }
 });
+
+test("重复邮箱返回 409 通用文案，不泄露 SQLite 约束（F10）", async () => {
+    const composition = await createComposition({ HARNESS_REGISTRATION_MODE:"open" });
+    try {
+        const first = await composition.httpApi.fetch(registerRequest("duplicate@example.com"));
+        expect(first.status).toBe(201);
+
+        const second = await composition.httpApi.fetch(registerRequest("duplicate@example.com"));
+        expect(second.status).toBe(409);
+        const body = (await second.json()) as { error?:string };
+        expect(body.error).toBe("该邮箱已被注册");
+        expect(JSON.stringify(body)).not.toContain("UNIQUE constraint failed");
+    } finally {
+        await composition.close();
+    }
+});
+
+test("注册输入校验错误返回 400，不把内部异常当 409（F10）", async () => {
+    const composition = await createComposition({ HARNESS_REGISTRATION_MODE:"open" });
+    try {
+        const badEmail = await composition.httpApi.fetch(registerRequest("not-an-email"));
+        expect(badEmail.status).toBe(400);
+        expect(((await badEmail.json()) as { error?:string }).error).toContain("邮箱格式无效");
+
+        const shortPassword = await composition.httpApi.fetch(new Request(
+            "http://harness.local/auth/register",
+            {
+                method:"POST",
+                headers:{ "content-type":"application/json" },
+                body:JSON.stringify({ email:"short@example.com", password:"123" }),
+            },
+        ));
+        expect(shortPassword.status).toBe(400);
+        expect(((await shortPassword.json()) as { error?:string }).error)
+            .toContain("密码至少需要 8 个字符");
+    } finally {
+        await composition.close();
+    }
+});

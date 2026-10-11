@@ -598,3 +598,26 @@ test("N16：非法 resolution → 400", async () => {
 
     expect(response.status).toBe(400);
 });
+
+test("未知异常返回 500 通用文案与 requestId，不透出内部 message（F10）", async () => {
+    const application = {
+        isStarted() { return true; },
+        getRunsForTenant() {
+            throw new Error("SQLITE_CONSTRAINT: UNIQUE constraint failed: users.email");
+        },
+    } as unknown as HarnessHttpApplication;
+    const api = new HarnessHttpApi(application, { get: () => null }, {
+        authenticate: () => ({ tenantId: "tenant-a", scopes: ["*"] }),
+        workspaceService: {} as never,
+    });
+
+    const response = await api.fetch(new Request("http://harness.local/runs", {
+        headers: { authorization: "Bearer good-key" },
+    }));
+
+    expect(response.status).toBe(500);
+    const body = await response.json() as { error?: string; requestId?: string };
+    expect(body.error).toBe("内部错误，请稍后重试");
+    expect(body.requestId).toMatch(/^[0-9a-f]{8}$/);
+    expect(JSON.stringify(body)).not.toContain("UNIQUE constraint failed");
+});
