@@ -285,5 +285,5 @@ HTTP API ──> Master (调度/审计/策略/LLM网关)
   - Phase 3：5 的崩溃恢复 + 6 的 retry/backoff/Run 幂等键 + artifact 一致性窗口；
   - Phase 4：9 的 MCP 接入。
 - 进度（2026-10-11）：
-  - Phase 1 VM benchmark 已完成：真机 172.17.43.193（jailer + Firecracker v1.17.0）冷启动 median 1477ms、快照热恢复 median 513ms、10 并发热恢复墙钟 766ms；同时修复 `warmHit` 恒 false 的可观测性缺陷（`src/sandbox/microvm/*`）。本地 `bun test ./tests` = 533 pass / 7 skip / 0 fail，typecheck 保持既有 9 条基线错误。
+  - Phase 1 VM benchmark 已完成：真机 172.17.43.193（jailer + Firecracker v1.17.0）冷启动 median 1477ms、快照热恢复 median 513ms、10 并发热恢复墙钟 766ms；同时修复 `warmHit` 恒 false 的可观测性缺陷（`src/sandbox/microvm/*`）。本地 `bun test ./tests` = 533 pass / 7 skip / 0 fail，typecheck 保持既有 9 条基线错误；远程 172.17.43.193 `bun test ./tests` = 540 pass / 0 fail。
   - 提交：`aab6b10`（warmHit + VM benchmark）、`5b3b83c`（并发矩阵脚本）。
