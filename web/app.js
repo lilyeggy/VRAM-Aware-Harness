@@ -28,23 +28,75 @@ var SUGGESTIONS = [
 ];
 
 function esc(v){ return String(v == null ? '' : v).replace(/[&<>"']/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); }
+function mdTableCells(line){
+  var t = String(line).trim();
+  if(t.charAt(0) === '|') t = t.slice(1);
+  if(t.charAt(t.length - 1) === '|') t = t.slice(0, -1);
+  return t.split('|').map(function(cell){ return cell.trim(); });
+}
+function mdTableSeparator(line){
+  var cells = mdTableCells(line);
+  if(cells.length === 0) return false;
+  for(var i = 0; i < cells.length; i++){
+    if(!/^:?-{3,}:?$/.test(cells[i])) return false;
+  }
+  return true;
+}
+function mdTableAlignments(line){
+  return mdTableCells(line).map(function(cell){
+    var left = cell.charAt(0) === ':';
+    var right = cell.charAt(cell.length - 1) === ':';
+    if(left && right) return 'center';
+    if(right) return 'right';
+    if(left) return 'left';
+    return '';
+  });
+}
 function markdown(v){
   var lines = String(v == null ? '' : v).replace(/\r\n?/g,'\n').split('\n'), out = [], para = [], fenced = false, code = [];
   function flush(){ if(para.length){ out.push('<p>' + inlineMd(para.join('<br>')) + '</p>'); para=[]; } }
-  lines.forEach(function(raw){
-    if(/^\s*```/.test(raw)){ if(fenced){ out.push('<pre><code>' + esc(code.join('\n')) + '</code></pre>'); code=[]; fenced=false; } else { flush(); fenced=true; } return; }
-    if(fenced){ code.push(raw); return; }
+  for(var i = 0; i < lines.length; i++){
+    var raw = lines[i];
+    if(/^\s*```/.test(raw)){ if(fenced){ out.push('<pre><code>' + esc(code.join('\n')) + '</code></pre>'); code=[]; fenced=false; } else { flush(); fenced=true; } continue; }
+    if(fenced){ code.push(raw); continue; }
+    if(raw.indexOf('|') !== -1 && i + 1 < lines.length && mdTableSeparator(lines[i + 1])){
+      flush();
+      var header = mdTableCells(raw);
+      var aligns = mdTableAlignments(lines[i + 1]);
+      var body = [];
+      var j = i + 2;
+      while(j < lines.length && lines[j].trim() !== '' && !/^\s*```/.test(lines[j]) && lines[j].indexOf('|') !== -1){
+        body.push(mdTableCells(lines[j]));
+        j++;
+      }
+      var table = '<table><thead><tr>';
+      for(var h = 0; h < header.length; h++){
+        table += '<th' + (aligns[h] ? ' style="text-align:' + aligns[h] + '"' : '') + '>' + inlineMd(esc(header[h])) + '</th>';
+      }
+      table += '</tr></thead><tbody>';
+      for(var r = 0; r < body.length; r++){
+        table += '<tr>';
+        for(var c = 0; c < header.length; c++){
+          table += '<td' + (aligns[c] ? ' style="text-align:' + aligns[c] + '"' : '') + '>' + inlineMd(esc(body[r][c] == null ? '' : body[r][c])) + '</td>';
+        }
+        table += '</tr>';
+      }
+      table += '</tbody></table>';
+      out.push(table);
+      i = j - 1;
+      continue;
+    }
     var line = esc(raw), m;
-    if(!line.trim()){ flush(); return; }
-    if((m=line.match(/^###\s+(.+)$/))){ flush(); out.push('<h3>' + inlineMd(m[1]) + '</h3>'); return; }
-    if((m=line.match(/^##\s+(.+)$/))){ flush(); out.push('<h2>' + inlineMd(m[1]) + '</h2>'); return; }
-    if((m=line.match(/^#\s+(.+)$/))){ flush(); out.push('<h1>' + inlineMd(m[1]) + '</h1>'); return; }
-    if((m=line.match(/^\s*[-*]\s+(.+)$/))){ flush(); out.push('<ul><li>' + inlineMd(m[1]) + '</li></ul>'); return; }
-    if((m=line.match(/^\s*\d+\.\s+(.+)$/))){ flush(); out.push('<ol><li>' + inlineMd(m[1]) + '</li></ol>'); return; }
-    if((m=line.match(/^\s*&gt;\s?(.+)$/))){ flush(); out.push('<blockquote>' + inlineMd(m[1]) + '</blockquote>'); return; }
-    if(/^\s*([-*_])(?:\s*\\1){2,}\s*$/.test(raw)){ flush(); out.push('<hr>'); return; }
+    if(!line.trim()){ flush(); continue; }
+    if((m=line.match(/^###\s+(.+)$/))){ flush(); out.push('<h3>' + inlineMd(m[1]) + '</h3>'); continue; }
+    if((m=line.match(/^##\s+(.+)$/))){ flush(); out.push('<h2>' + inlineMd(m[1]) + '</h2>'); continue; }
+    if((m=line.match(/^#\s+(.+)$/))){ flush(); out.push('<h1>' + inlineMd(m[1]) + '</h1>'); continue; }
+    if((m=line.match(/^\s*[-*]\s+(.+)$/))){ flush(); out.push('<ul><li>' + inlineMd(m[1]) + '</li></ul>'); continue; }
+    if((m=line.match(/^\s*\d+\.\s+(.+)$/))){ flush(); out.push('<ol><li>' + inlineMd(m[1]) + '</li></ol>'); continue; }
+    if((m=line.match(/^\s*&gt;\s?(.+)$/))){ flush(); out.push('<blockquote>' + inlineMd(m[1]) + '</blockquote>'); continue; }
+    if(/^\s*([-*_])(?:\s*\\1){2,}\s*$/.test(raw)){ flush(); out.push('<hr>'); continue; }
     para.push(line);
-  });
+  }
   if(fenced) out.push('<pre><code>' + esc(code.join('\n')) + '</code></pre>');
   flush();
   return out.join('');

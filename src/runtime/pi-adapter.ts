@@ -45,6 +45,15 @@ function piAgentDir():string {
 }
 
 /**
+ * Pi 默认系统提示词是英文，且没有任何语言约束；用户用中文提问时模型会
+ * 继续用英文回答。这里追加一条语言指令，要求跟随用户最新消息的语言。
+ */
+const RESPONSE_LANGUAGE_INSTRUCTION =
+    "Always respond in the same language as the user's latest message. "
+    + "If the user writes in Chinese, respond in Chinese. "
+    + "如果用户使用中文提问，请用中文回答。";
+
+/**
  * N18：Pi 的 `runtime_session_ref` 就是会话 JSONL 的文件路径，所以用文件可达性
  * 判定；与恢复决策层注入的是同一个实现，两处口径保持一致。
  */
@@ -659,6 +668,7 @@ export class PiAdapter implements AgentRuntime{
             cwd: workspacePath,
             agentDir: piAgentDir(),
             noSkills: allowed.size === 0,
+            appendSystemPrompt: [RESPONSE_LANGUAGE_INSTRUCTION],
             skillsOverride: (base) => ({
                 ...base,
                 skills: base.skills.filter((skill) => allowed.has(skill.name)),

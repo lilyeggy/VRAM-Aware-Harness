@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
 
 import { HarnessHttpApi, type HarnessHttpApplication } from "../../src/http/harness-http-api.ts";
 import { userConsoleResponse } from "../../src/http/harness-user-console.ts";
@@ -281,4 +282,36 @@ test("文件变更的 modified 条目必须取到真实路径（N24 回归）", 
 
     // 渲染处必须用 diffPath，不能退回 f.path
     expect(html).not.toContain("esc(f.path || f)");
+});
+
+
+function loadMarkdownRenderer(): { markdown: (v: string) => string } {
+    const source = readFileSync(new URL("../../web/app.js", import.meta.url), "utf8");
+    const start = source.indexOf("function esc(");
+    const end = source.indexOf("function toast(");
+    expect(start).toBeGreaterThanOrEqual(0);
+    expect(end).toBeGreaterThan(start);
+    const segment = source.slice(start, end);
+    const factory = new Function(
+        `${segment}\nreturn { markdown: markdown };`,
+    ) as () => { markdown: (v: string) => string };
+    return factory();
+}
+
+test("Markdown 表格必须渲染为 table，而不是裸管道文本（N29 回归）", () => {
+    const { markdown } = loadMarkdownRenderer();
+    const html = markdown("| Check | Result |\n|---|---|\n| Working dir | /workspace |\n| Volume | 24 KB |");
+    expect(html).toContain("<table>");
+    expect(html).toContain("<th>Check</th>");
+    expect(html).toContain("<th>Result</th>");
+    expect(html).toContain("<td>Working dir</td>");
+    expect(html).toContain("<td>/workspace</td>");
+    expect(html).not.toContain("| Check |");
+});
+
+test("Markdown 表格支持对齐标记（N29 回归）", () => {
+    const { markdown } = loadMarkdownRenderer();
+    const html = markdown("| Left | Right |\n|:---|---:|\n| a | b |");
+    expect(html).toContain('style="text-align:left"');
+    expect(html).toContain('style="text-align:right"');
 });

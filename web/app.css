@@ -115,6 +115,10 @@ button:focus-visible,a:focus-visible,input:focus-visible,textarea:focus-visible,
 .agenthead small{color:var(--faint);font-size:11px}
 .agentbody{overflow-wrap:anywhere;font-size:14.5px;color:var(--ink)}
 .agentbody p{margin:0 0 11px}.agentbody p:last-child{margin-bottom:0}.agentbody h1,.agentbody h2,.agentbody h3{font-family:var(--serif);line-height:1.3;margin:16px 0 8px}.agentbody h1{font-size:23px}.agentbody h2{font-size:20px}.agentbody h3{font-size:17px}.agentbody ul,.agentbody ol{margin:7px 0 11px;padding-left:24px}.agentbody li{margin:3px 0}.agentbody blockquote{border-left:3px solid var(--line2);margin:10px 0;padding:3px 12px;color:var(--muted)}.agentbody code{background:#f1eee5;border-radius:4px;padding:2px 5px;font:12px var(--mono)}.agentbody pre{background:var(--code);color:var(--codeink);border-radius:10px;padding:12px 14px;overflow:auto;margin:10px 0}.agentbody pre code{background:transparent;padding:0;color:inherit;white-space:pre;font:12px/1.65 var(--mono)}.agentbody a{color:var(--accent);text-decoration:underline}
+.agentbody table{border-collapse:collapse;width:100%;margin:10px 0 14px;font-size:13.5px;line-height:1.5}
+.agentbody th,.agentbody td{border:1px solid var(--line2);padding:7px 10px;vertical-align:top}
+.agentbody th{background:var(--side);font-weight:600;text-align:left}
+.agentbody tbody tr:nth-child(even) td{background:rgba(0,0,0,.015)}
 .reasoning{border:1px solid var(--line);border-radius:11px;background:var(--card);overflow:hidden}
 .reasoning summary{cursor:pointer;padding:8px 12px;color:var(--muted);font-size:12px;font-weight:600}
 .reasoning pre{margin:0;padding:10px 13px;border-top:1px solid var(--line);white-space:pre-wrap;overflow-wrap:anywhere;color:var(--muted);font:12px/1.7 var(--mono);max-height:280px;overflow:auto}
