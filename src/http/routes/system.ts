@@ -1,4 +1,5 @@
 import { HttpError, jsonResponse } from "../http-utils.ts";
+import { renderPrometheusMetrics } from "../../observability/metrics.ts";
 import { userConsoleResponse } from "../harness-user-console.ts";
 import type { HttpRouteContext } from "./route-context.ts";
 
@@ -55,6 +56,24 @@ export async function handleSystemRoute(
                         : ctx.application.getQueue().filter((entry) =>
                             entry.tenantId === principal.tenantId),
                 });
+            }
+            case "metrics": {
+                // §9.8 v1.4：最小可观测性；只暴露进程内计数与 RunStore 聚合，
+                // 不引入 Prometheus SDK，也不泄漏租户级明细。
+                ctx.requirePrincipal(request, "metrics:read");
+                const snapshot = ctx.application.getMetricsSnapshot?.();
+                if (snapshot === undefined) {
+                    throw new HttpError(501, "未配置指标");
+                }
+                return new Response(
+                    renderPrometheusMetrics(snapshot, ctx.httpRequestCounts),
+                    {
+                        status: 200,
+                        headers: {
+                            "content-type": "text/plain; version=0.0.4; charset=utf-8",
+                        },
+                    },
+                );
             }
             case "resources": {
                 const principal = ctx.requirePrincipal(request, "resources:read");

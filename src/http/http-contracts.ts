@@ -28,6 +28,7 @@ import type { AccessAuditStore } from "../audit/access-audit-store.ts";
 import type { TenantBillingStore } from "../billing/tenant-billing.ts";
 import type { Conversation } from "../sessions/harness-session.ts";
 import type { ToolExecution } from "../tools/tool-execution.ts";
+import type { HarnessMetricsSnapshot } from "../observability/metrics.ts";
 export type UnknownEffectResolution = "NO_EFFECT" | "EFFECT_OCCURRED";
 
 export interface HarnessHttpApplication {
@@ -52,6 +53,8 @@ export interface HarnessHttpApplication {
     getRunLimitations?(runId:string):RunLimitation[];
     getQueue():QueueEntry[];
     observeResources():Promise<ResourceObservation>;
+    /** §9.8 v1.4：最小可观测性快照；未装配时 GET /metrics 返回 501。 */
+    getMetricsSnapshot?():HarnessMetricsSnapshot;
     interruptRun(runId:string):Promise<AgentRun>;
     resumeRun(input:ResumeRunInput):AgentRun;
     /** N15：策略管理面（读写租户/平台策略层）。未装配时相关路由返回 503。 */

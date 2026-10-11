@@ -103,9 +103,11 @@ src/
 bun test ./tests
 ```
 
-当前测试基线：`533 pass / 7 skip / 0 fail`。
+当前测试基线：`536 pass / 7 skip / 0 fail`。
 
 生产级 VM 生命周期基准（Phase 1，§9.8 v1.4）见 `docs/vm-lifecycle-benchmark.zh-CN.md`，运行脚本为 `scripts/vm-lifecycle-benchmark.ts`。
+
+最小可观测性：`GET /metrics` 返回 Prometheus 文本，需要 `metrics:read` scope（bootstrap key 的 `*` 可读），包含 `harness_runs{status}`、`harness_runs_queued`、`harness_sandbox_acquisitions_total{warm}`、`harness_http_requests_total{status}` 等。
 
 实验室/他人接入前的最小运维：
 

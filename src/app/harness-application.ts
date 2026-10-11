@@ -36,6 +36,7 @@ import { createConversation } from "../sessions/harness-session.ts";
 import type { HarnessSessionStore } from "../sessions/harness-session-store.ts";
 import { summarizeToolDenials, type RunLimitation } from "../policies/run-limitations.ts";
 import type { ToolExecution } from "../tools/tool-execution.ts";
+import type { HarnessMetricsSnapshot } from "../observability/metrics.ts";
 
 /**
  * N16：人工消解 UNKNOWN_EFFECT 只需要"读未决执行 + 作废它"两个能力，
@@ -71,6 +72,7 @@ export class HarnessApplication {
     private started = false;
     private startPromise : Promise<void> | null = null;
     private stopPromise : Promise<void> | null = null;
+    private readonly createdAt = Date.now();
 
     constructor(
         private readonly coordinator: RunScheduler,
@@ -276,6 +278,17 @@ export class HarnessApplication {
 
     observeResources():Promise<ResourceObservation> {
         return this.resourceObserver.observe();
+    }
+
+    /** §9.8 v1.4：最小可观测性快照；计数来自 RunStore，队列长度来自调度器。 */
+    getMetricsSnapshot():HarnessMetricsSnapshot {
+        return {
+            started: this.started,
+            uptimeSeconds: Math.floor((Date.now() - this.createdAt) / 1000),
+            queueLength: this.getQueue().length,
+            runStatusCounts: this.runStore.countByStatus(),
+            sandboxAcquisitions: this.runStore.sandboxAcquisitionStats(),
+        };
     }
 
     interruptRun(runId:string) : Promise<AgentRun> {

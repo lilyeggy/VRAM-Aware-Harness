@@ -251,6 +251,64 @@ export class RunStore {
     }
 
     /**
+     * §9.8 v1.4：按状态汇总 Run，供最小 /metrics 使用。
+     */
+    countByStatus(): Record<AgentRunStatus, number> {
+        const counts: Record<AgentRunStatus, number> = {
+            QUEUED: 0,
+            RUNNING: 0,
+            WAITING_TOOL: 0,
+            INTERRUPTED: 0,
+            COMPLETED: 0,
+            FAILED: 0,
+        };
+        const rows = this.db
+            .query<{ status: AgentRunStatus; count: number }, []>(`
+                SELECT status, COUNT(*) AS count
+                FROM agent_runs
+                GROUP BY status;
+            `)
+            .all();
+        for (const row of rows) {
+            counts[row.status] = row.count;
+        }
+        return counts;
+    }
+
+    /**
+     * §9.8 v1.4：沙箱获取冷/热次数与耗时总和，供最小 /metrics 使用。
+     */
+    sandboxAcquisitionStats(): {
+        total: number;
+        warm: number;
+        cold: number;
+        durationMsSum: number;
+    } {
+        const row = this.db
+            .query<{
+                total: number;
+                warm: number;
+                durationMsSum: number | null;
+            }, []>(`
+                SELECT
+                    COUNT(*) AS total,
+                    SUM(CASE WHEN json_extract(payload_json, '$.warmHit') = 1 THEN 1 ELSE 0 END) AS warm,
+                    SUM(json_extract(payload_json, '$.durationMs')) AS durationMsSum
+                FROM run_events
+                WHERE type = 'SANDBOX_ACQUIRED';
+            `)
+            .get();
+        const total = row?.total ?? 0;
+        const warm = row?.warm ?? 0;
+        return {
+            total,
+            warm,
+            cold: total - warm,
+            durationMsSum: row?.durationMsSum ?? 0,
+        };
+    }
+
+    /**
      * 保存 Run 的新快照，并追加导致这次变化的事件。
      *
      * 状态机负责判断 from -> to 是否是合法转换。

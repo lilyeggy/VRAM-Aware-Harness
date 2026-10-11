@@ -48,12 +48,18 @@ export class HarnessHttpApi implements HttpRouteContext {
     /** 同一请求可能多次 requirePrincipal（例如先读 run 再读 events）；租户限流只记一次。 */
     private readonly tenantRateLimited = new WeakSet<Request>();
 
+    /** §9.8 v1.4：进程内 HTTP 状态码计数，供 /metrics 渲染。 */
+    readonly httpRequestCounts = new Map<number, number>();
+
     async fetch(request: Request, clientIp?: string): Promise<Response> {
         try {
             this.enforceIpRateLimit(request, clientIp);
-            return await this.route(request);
+            const response = await this.route(request);
+            this.recordHttpStatus(response.status);
+            return response;
         } catch (error) {
             if (error instanceof HttpError) {
+                this.recordHttpStatus(error.status);
                 return jsonResponse({ error: error.message }, error.status, error.headers);
             }
 
@@ -62,11 +68,16 @@ export class HarnessHttpApi implements HttpRouteContext {
             // 透给客户端。给客户端一个通用文案 + requestId，原文只进服务端日志。
             const requestId = randomUUID().slice(0, 8);
             console.error(`[http] 内部错误 requestId=${requestId}`, error);
+            this.recordHttpStatus(500);
             return jsonResponse({
                 error: "内部错误，请稍后重试",
                 requestId,
             }, 500);
         }
+    }
+
+    private recordHttpStatus(status: number): void {
+        this.httpRequestCounts.set(status, (this.httpRequestCounts.get(status) ?? 0) + 1);
     }
 
     private enforceIpRateLimit(request: Request, clientIp?: string): void {

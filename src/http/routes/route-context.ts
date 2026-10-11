@@ -19,6 +19,8 @@ export interface HttpRouteContext {
     readonly llmGateway?: LlmGateway;
     readonly resourceMetrics?: ResourceMetricsSampler;
     readonly limits?: { maxUserInputChars: number };
+    /** §9.8 v1.4：进程内 HTTP 状态码计数，供 /metrics 渲染。 */
+    readonly httpRequestCounts?: ReadonlyMap<number, number>;
 
     requirePrincipal(request: Request, scope: string): RequestPrincipal;
     getRequiredRun(runId: string, request?: Request, scope?: string): AgentRun;
