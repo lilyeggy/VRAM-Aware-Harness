@@ -158,6 +158,8 @@ WantedBy=multi-user.target
 
 ## 6. 启动 Master（非 root）
 
+> 数据盘建议：如果机器有独立数据盘（例如 `/data`），把上面的 `/var/lib/harness` 全部换成 `/data/harness`，并确保 Broker(root) 与 Master(非 root) 对相应子目录有写权限。172.17.43.193 当前使用 `/data/harness/live-full-flow`（DB/workspaces/vm-runtime）与 `/data/harness/snapshots-mt`（快照池），备份放 `/data/harness/backups`。
+
 创建 `/etc/harness/master.env`：
 
 ```sh
