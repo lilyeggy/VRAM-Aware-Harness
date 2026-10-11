@@ -103,7 +103,7 @@ src/
 bun test ./tests
 ```
 
-当前测试基线：`578 pass / 7 skip / 0 fail`。
+当前测试基线：`585 pass / 7 skip / 0 fail`。
 
 生产级 VM 生命周期基准（Phase 1，§9.8 v1.4）见 `docs/vm-lifecycle-benchmark.zh-CN.md`，运行脚本为 `scripts/vm-lifecycle-benchmark.ts`。
 队列优先级 / 深度 backpressure / RunAttempt 租约心跳（Phase 2，§9.8 v1.4）见 `.env.example` 的 `HARNESS_MAX_QUEUED_RUNS*` 与 `HARNESS_RUN_LEASE_*`。

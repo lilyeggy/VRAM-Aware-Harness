@@ -291,3 +291,40 @@ HTTP API ──> Master (调度/审计/策略/LLM网关)
 - Phase 2 队列与 Worker 已完成（本地）：migration v3 `queue_priority_and_run_lease`（`agent_runs.priority`、`run_attempts.lease_owner/lease_expires_at/heartbeat_at`）；`TenantRunScheduler` 支持 priority（跨租户优先于轮转/老化，同优先级 FIFO）；`RunScheduler` 增加 `maxQueuedRuns`/`maxQueuedRunsPerTenant` backpressure，超限抛 `QueueBackpressureError` 并由 HTTP 映射 429 + Retry-After；新增 `RunLeaseManager`（acquire/heartbeat/release/reapExpired）接入 `RunExecutor` 与 `RunScheduler`，过期租约回收为 INTERRUPTED 并释放 slot。本地 `bun test ./tests` = 544 pass / 7 skip / 0 fail，typecheck 9 条既有基线错误。 远程 172.17.43.193：`bun test ./tests` = 553 pass / 0 fail；`harness.service` 重启后 migration v3 生效（`agent_runs.priority`、`run_attempts.lease_owner/lease_expires_at/heartbeat_at`），`p0-e2e-smoke` 通过 `label=f88ea967`（serial maxActive=1、concurrent maxActive=2 overlap=true、跨租户 404）；真实 Run 的 `run_attempts` 显示 `heartbeat_at` 已写入、`lease_owner` 结束后清空（acquire/release 生效）。提交 `c6f620e`。
 - Phase 3 Durable Execution / Retry / 幂等（本地完成，待真机复验）：migration v4 `run_idempotency_and_retry`（`agent_runs.idempotency_key` + 租户内部分唯一索引、`retry_count`、`retry_at`）；`RunStore.findByTenantIdempotencyKey` 与 `RunService.createQueuedRun` 幂等返回既有 Run；`POST /runs` 与会话消息接受可选 `idempotencyKey`（>200 字符 400）；无任何 PREPARED 工具副作用时可重试失败按指数退避回到 QUEUED（事件 `RUN_QUEUED` reason `RETRY`），达到 `HARNESS_RUN_MAX_ATTEMPTS` 或有副作用证据时保持 INTERRUPTED；确定性策略拒绝（`PolicyRejectionError`）不重试；`RunScheduler.reconcileQueuedRuns` 跳过未到 `retryAt` 的 QUEUED Run；`RecoveryService.planForInterruptedRun` + 组合根租约过期处理器把 Worker 崩溃的 Run 交给 `RecoveryExecutor`（AUTO_RESUME / MANUAL_REVIEW）；终态后追加 `RUN_ARTIFACTS_READY` 事件消除 artifacts 读取一致性窗口。本地 `bun test ./tests` = 558 pass / 7 skip / 0 fail，typecheck 9 条既有基线错误。 真机 172.17.43.193 已复验：migration 版本 `[1,2,3,4]`、`agent_runs` 含 `idempotency_key/retry_count/retry_at`、部分唯一索引存在；`POST /runs` 同 `idempotencyKey` 重放两次均 202 且返回同一 Run id（修复重复入队 500）；Run `26fcc090-d1ad-4637-8161-6856711e3f56` COMPLETED，事件尾部含 `RUN_ARTIFACTS_READY`；远程 `bun test ./tests` = 565 pass / 0 fail；p0 smoke `P0_E2E_SMOKE_OK label=d3af9012`。
 - Phase 4 MCP 接入已完成（真机复验）：新增 `src/mcp/mcp-protocol.ts`（`McpServerConfig` / `McpToolDescriptor` / `parseMcpServers` / `sanitizeMcpToolSegment`）、`src/mcp/mcp-stdio-client.ts`（stdio JSON-RPC：initialize / notifications/initialized / tools/list / tools/call，默认 10s 超时）、`src/mcp/mcp-tool-registry.ts`（多 server 启动、单个失败跳过、`callTool` fail-closed）、`src/mcp/mcp-pi-tools.ts`（工具名 `mcp__<server>__<tool>`，`readOnlyHint` → `READ_ONLY` 否则 `UNKNOWN_EFFECT`，经 `ToolGateway.execute` 记账）；`HarnessConfig.mcpServers` 解析 `HARNESS_MCP_SERVERS`，in-process 路径由 Master 持有注册表并传给 `PiAdapterConfig.mcpTools`，process/systemd 路径随 `WorkerRuntimeConfig.mcpServers` 下发、由 Worker 拉起并继承其 seccomp/Landlock/egress ACL。测试：`tests/mcp/mcp-protocol.test.ts`、`tests/mcp/mcp-stdio-client.test.ts`、`tests/mcp/mcp-tool-registry.test.ts`、`tests/mcp/mcp-pi-tools.test.ts`、`tests/app/create-harness-application.test.ts`（in-process 启动 MCP）、`tests/deploy/mcp-phase4.test.ts`；烟测 `scripts/mcp-smoke.ts` 输出 `MCP_SMOKE_OK servers=1 tools=2 call=echo:smoke`。本地 `bun test ./tests` = 577 pass / 7 skip / 0 fail，typecheck 9 条既有基线错误。 真机 172.17.43.193（production systemd worker + jailer，`HARNESS_MCP_SERVERS` 指向 fixture）：`scripts/mcp-smoke.ts` 输出 `MCP_SMOKE_OK servers=1 tools=2 call=echo:smoke`；Run `f1dc66c9-cddc-4a7b-9d18-be64963a3a98` COMPLETED，事件 `TOOL_STARTED {"toolName":"mcp__echo__echo","arguments":{"text":"mcp-live"}}` → `TOOL_COMPLETED {"content":[{"type":"text","text":"echo:mcp-live"}],"isError":false}`，finalText `echo:mcp-live`；远程 `bun test ./tests` = 585 pass / 0 fail。真机发现并修复缺陷：Pi SDK `agent-session.js` 的 `_refreshToolRegistry` 用 `allowedToolNames` 过滤 customTools，而 `PiAdapter` 原只传 `tools:[...config.tools]`，导致 MCP 工具对模型不可见（首轮 Run `06cf4e7e-a3c8-49d6-8514-fc1371189185` 模型只看到 read/bash/edit/write/grep/find/ls）；修复为 `tools:[...new Set([...config.tools, ...customTools.map((tool) => tool.name)])]`（两处 `createAgentSession` 调用），并以 `tests/deploy/mcp-phase4.test.ts` 守卫。
+
+### 9.9 解冻决策：v1.5（2026-10-11）
+
+- 决策：在 §9.8 v1.4 的 Phase 1-4 之后，用户确认追加 Phase 5「生产级故障注入与恢复验收」。这不是新增产品能力，而是对既有能力（§9.8 的 3/5/6/8 + 最小可观测性）做对抗性验收：在真实故障下证明租约回收、恢复决策、重试退避、幂等、backpressure、备份一致性、跨租户隔离不退化。
+- 范围（仅用于验收，不新增产品能力）：
+  - F1 Worker 崩溃：kill systemd worker 后，RunAttempt 租约过期 → reaper 回收 → Run INTERRUPTED → `RecoveryService.planForInterruptedRun` → AUTO_RESUME（无副作用）或 MANUAL_REVIEW（UNKNOWN_EFFECT / NO_CHECKPOINT）→ scheduler slot 释放、无孤儿 microVM/worker。
+  - F2 Broker 不可达：停止 Broker 后提交 Run → fail-closed INTERRUPTED，无孤儿 sandbox 记录与残留 VM；Broker 恢复后新 Run 正常。
+  - F3 模型调用失败：注入失败 ModelRuntime → 退避重试（`RUN_QUEUED` reason `RETRY`、`retryAt` 递增）到 `HARNESS_RUN_MAX_ATTEMPTS` 后保持 INTERRUPTED；`PolicyRejectionError` 与存在 PREPARED 副作用时不重试。
+  - F4 幂等键并发重放：同 `idempotencyKey` 并发 N 次 `POST /runs` → 只创建 1 个 Run，全部返回同一 runId，无 500。
+  - F5 队列 backpressure：超过 `HARNESS_MAX_QUEUED_RUNS` → 429 + `Retry-After`/`x-queue-limit`/`x-queue-current`；被拒请求不落库。
+  - F6 运行中备份一致性：Run 执行中 `harness-ops backup` → 备份可打开、`audit-chain-smoke` 校验通过、无 `SQLITE_BUSY`。
+  - F7 故障态跨租户隔离：F1/F2 故障期间跨租户 run/events/output/artifacts/interrupt/workspace 提交仍全部 404。
+- 理由：§9.8 的验收只证明「正常路径可用」；面试叙事需要「故障下仍可解释、可恢复、不重复副作用」。不做 1/2/4/7/10/12 的结论不变。
+- 边界影响：仅新增验收脚本与测试，不新增产品能力；不改变 Agent 无网络（B2）与单机定位（§9.3）。
+- 验收要求：F1-F7 每项必须有测试；F1/F2/F4/F5/F6/F7 需在 172.17.43.193 留下验证记录；未完成前该项视为暂缓。
+- 代码引用：涉及代码/文档变更必须在提交信息或注释中引用「§9.9 v1.5」。
+- 交付物：
+  - `scripts/phase5-fault-injection.ts`：HTTP 层故障注入（F4/F5/F7 + 汇总）。
+  - `scripts/phase5-worker-crash.ts`：F1/F2 真机编排（杀 worker / 停 broker + 轮询恢复 + 残留检查）。
+  - `tests/recovery/lease-expiry-recovery.test.ts`：租约过期 → 恢复决策接线（AUTO_RESUME / MANUAL_REVIEW）。
+  - `tests/http/idempotency-concurrency.e2e.test.ts`：并发同键重放。
+  - `tests/ops/backup-consistency.test.ts`：WAL 运行中备份 + 审计链校验。
+
+- 已落地（本地，2026-10-11）：
+  - F1：`tests/recovery/lease-expiry-recovery.test.ts` 两个用例——过期租约经 `tick()` 回收为 INTERRUPTED 且落 `MANUAL_REVIEW_REQUIRED`（无 Checkpoint）；有安全 READ_ONLY Checkpoint 时 `AUTO_RESUME` 续跑至 COMPLETED（`runtime.resumeRequests` 长度 1，事件 `RUN_QUEUED` reason `AUTO_RECOVERY`）。
+  - F2：`tests/runtime/broker-unreachable.test.ts`——Broker socket 缺失时 Run fail-closed 为 INTERRUPTED（`START_FAILED`），`SandboxStore.listUnsettled()` 为空、队列为空。
+  - F3：沿用 Phase 3 的 `tests/runs/run-service-retry.test.ts`（无副作用退避重试、PREPARED 副作用不重试、maxAttempts 后 INTERRUPTED）、`tests/scheduling/run-scheduler-retry-at.test.ts`（retryAt 门控）与 `tests/app/create-harness-application.test.ts`（PolicyRejectionError 不重试，Run 直接 INTERRUPTED）。
+  - F4：`tests/http/idempotency-concurrency.e2e.test.ts`——同 idempotencyKey 并发 8 次提交只创建 1 个 Run，全部返回同一 id。
+  - F5：`tests/scheduling/queue-backpressure-fault.test.ts`——占满 active slot 并排队 1 个 Run 后，第三个提交抛 `QueueBackpressureError` 且 `listForTenant` 为空（被拒请求不落库）。
+  - F6：`tests/ops/backup-consistency.test.ts`——另一连接持写事务（WAL）时 `VACUUM INTO` 备份成功；备份 `schema_migrations` = [1,2,3,4]、`access_audit_events` 非空且 `AccessAuditStore.verifyChain()` ok。
+  - F7：`tests/http/fault-isolation.e2e.test.ts`——故障态 Run（租约过期 INTERRUPTED）对其它租户的 run/events/output/artifacts/interrupt 与「在对方 workspace 提交」全部 404。
+  - 本地 `bun test ./tests` = 585 pass / 7 skip / 0 fail；typecheck 9 条既有基线错误。真机 172.17.43.193 验证记录见提交与部署文档。
+
+- 真机 172.17.43.193 发现（2026-10-11，Phase 5 验收期间）：
+  - Worker egress 双栈修复：§9.7 v1.3 第 3 项曾把 Worker 限制为 `RestrictAddressFamilies=AF_UNIX AF_INET`（仅 IPv4），以规避 IPv6 被 `IPAddressDeny=::/0` 丢弃导致的挂起。本次真机遇到「宿主 IPv4 到 opencode.ai 的 Cloudflare 段 172.65.90.0/24 不可达、IPv6 2606:4700:78:: 可用」，Worker 因只建 IPv4 套接字而全部 SYN-SENT 挂起。修复：`scripts/harness-worker-run.sh` 恢复 `AF_INET6`，`WORKER_EGRESS_ALLOW` 同时放行 IPv4 与 IPv6 CIDR（`127.0.0.0/8,172.64.0.0/13,2606:4700:78::/48`）；`scripts/harness-worker-launcher.conf.example`、`docs/deployment-single-node-systemd.zh-CN.md`、`tests/deploy/control-plane-egress.test.ts` 同步更新。
+  - 外部模型服务不可达时的故障形态（真实观察）：TCP SYN 被黑洞丢弃时，Run 长时间停在 `RUNNING`（事件停在 `SESSION_INITIALIZED` 或 `MODEL_STARTED`），Worker 心跳持续续租，租约回收器不会触发；唯一兜底是 `HARNESS_EXECUTION_TIMEOUT_MS`（默认 30 分钟）。平台侧没有模型服务健康探测/告警，也没有单次模型调用超时。实验室部署建议把 `HARNESS_EXECUTION_TIMEOUT_MS` 下调到 5 分钟，并把模型服务可达性纳入外部监控。
+  - 该现象同时说明：F3「模型调用失败」在真实网络下更可能是**挂起**而非快速报错，退避重试（Phase 3）覆盖的是抛错路径。
