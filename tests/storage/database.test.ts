@@ -72,7 +72,7 @@ test("重复运行 migration 不会重复应用已有版本", () => {
             `)
             .all();
 
-        expect(rows.map((row) => row.version)).toEqual([1, 2]);
+        expect(rows.map((row) => row.version)).toEqual([1, 2, 3]);
     } finally {
         db.close();
     }

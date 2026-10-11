@@ -108,6 +108,16 @@ export interface HarnessConfig {
 
     maxActiveRuns:number;
     maxActiveRunsPerTenant:number;
+    /** §9.8 v1.4 Phase 2：全局排队深度上限，0 = 不启用 backpressure。 */
+    maxQueuedRuns:number;
+    /** §9.8 v1.4 Phase 2：单租户排队深度上限，0 = 不启用 backpressure。 */
+    maxQueuedRunsPerTenant:number;
+    /** §9.8 v1.4 Phase 2：RunAttempt 租约 TTL（ms）。 */
+    runLeaseTtlMs:number;
+    /** §9.8 v1.4 Phase 2：RunAttempt 心跳间隔（ms），必须小于 TTL。 */
+    runLeaseHeartbeatMs:number;
+    /** §9.8 v1.4 Phase 2：本实例 ID，用于租约 owner 区分。 */
+    instanceId:string;
     /** F9：workspace 快照最多扫描文件数，超限 fail-closed。 */
     workspaceSnapshotMaxFiles:number;
     /** F9：workspace 快照最大递归深度，超限 fail-closed。 */
@@ -210,6 +220,19 @@ export function loadHarnessConfig(
     // 每租户并发仍然可配（HARNESS_MAX_ACTIVE_RUNS_PER_TENANT）。
     const maxActiveRuns = posInt("HARNESS_MAX_ACTIVE_RUNS", 30);
     const maxActiveRunsPerTenant = posInt("HARNESS_MAX_ACTIVE_RUNS_PER_TENANT", 10);
+    // §9.8 v1.4 Phase 2：默认 0 = 不限制，显式配置后 submit 在队列深度超限时
+    // 返回 429（QueueBackpressureError）。
+    const maxQueuedRuns = nonNeg("HARNESS_MAX_QUEUED_RUNS", 0);
+    const maxQueuedRunsPerTenant = nonNeg("HARNESS_MAX_QUEUED_RUNS_PER_TENANT", 0);
+    const runLeaseTtlMs = posInt("HARNESS_RUN_LEASE_TTL_MS", 60_000);
+    const runLeaseHeartbeatMs = posInt("HARNESS_RUN_LEASE_HEARTBEAT_MS", 10_000);
+    if (runLeaseHeartbeatMs >= runLeaseTtlMs) {
+        throw new Error(
+            "HARNESS_RUN_LEASE_HEARTBEAT_MS 必须小于 HARNESS_RUN_LEASE_TTL_MS",
+        );
+    }
+    const instanceId = environment.HARNESS_INSTANCE_ID?.trim()
+        || `harness-${process.pid}`;
     const workspaceSnapshotMaxFiles = posInt("HARNESS_WORKSPACE_SNAPSHOT_MAX_FILES", 20_000);
     const workspaceSnapshotMaxDepth = posInt("HARNESS_WORKSPACE_SNAPSHOT_MAX_DEPTH", 32);
     const artifactMaxFilesPerRun = posInt("HARNESS_ARTIFACT_MAX_FILES_PER_RUN", 200);
@@ -405,6 +428,11 @@ export function loadHarnessConfig(
 
         maxActiveRuns,
         maxActiveRunsPerTenant,
+        maxQueuedRuns,
+        maxQueuedRunsPerTenant,
+        runLeaseTtlMs,
+        runLeaseHeartbeatMs,
+        instanceId,
         workspaceSnapshotMaxFiles,
         workspaceSnapshotMaxDepth,
         artifactMaxFilesPerRun,

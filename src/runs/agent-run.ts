@@ -46,6 +46,9 @@ export interface AgentRun{
 
     /** Stage 1 正式控制面入口为新 Run 固定的不可变执行证据。 */
     runPolicy?:PolicyConstraints;
+
+    /** §9.8 v1.4 Phase 2：调度优先级（越大越先调度），缺省 0。 */
+    priority?: number;
 }
 // 这个就是对于一个任务，我们一定要区分这个任务的来源、这个任务属于的 session等等
 

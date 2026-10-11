@@ -263,6 +263,7 @@ test("submit 持久化 QUEUED Run 并入队，但不启动 Runtime", () => {
             tenantId: "tenant-a",
             reasonCode: "AWAITING_SCHEDULING",
             enqueuedAt: expect.any(String),
+            priority: 0,
             position: 1,
             tenantPosition: 1,
         }]);
@@ -402,6 +403,7 @@ test("attemptNext 在 CRITICAL 决策后释放 slot 并保留原入队时间", a
             tenantId: "tenant-a",
             reasonCode: "RESOURCE_CRITICAL",
             enqueuedAt: originalEnqueuedAt!,
+            priority: 0,
             position: 1,
             tenantPosition: 1,
         }]);

@@ -128,6 +128,7 @@ function createApi(
                 runId:currentRun.id,
                 tenantId:currentRun.tenantId,
                 reasonCode:"RESOURCE_CRITICAL",
+                priority:0,
                 enqueuedAt:timestamp,
                 position:1,
                 tenantPosition:1,
@@ -620,4 +621,46 @@ test("未知异常返回 500 通用文案与 requestId，不透出内部 message
     expect(body.error).toBe("内部错误，请稍后重试");
     expect(body.requestId).toMatch(/^[0-9a-f]{8}$/);
     expect(JSON.stringify(body)).not.toContain("UNIQUE constraint failed");
+});
+
+test("POST /runs 解析 priority 并传给 submitRun", async () => {
+    const { api, getSubmittedInput } = createApi();
+    const response = await api.fetch(new Request(
+        "http://harness.local/runs",
+        {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({
+                tenantId: "tenant-api",
+                sessionId: "session-priority",
+                userInput: "优先级",
+                workspacePath: "/tmp/api-workspace",
+                priority: 7,
+            }),
+        },
+    ));
+    expect(response.status).toBe(202);
+    expect(getSubmittedInput()?.priority).toBe(7);
+});
+
+test("POST /runs 拒绝非法 priority", async () => {
+    const { api } = createApi();
+    const response = await api.fetch(new Request(
+        "http://harness.local/runs",
+        {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({
+                tenantId: "tenant-api",
+                sessionId: "session-priority-bad",
+                userInput: "非法优先级",
+                workspacePath: "/tmp/api-workspace",
+                priority: -1,
+            }),
+        },
+    ));
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({
+        error: "priority 必须是非负整数",
+    });
 });

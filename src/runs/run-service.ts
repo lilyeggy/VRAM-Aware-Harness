@@ -26,6 +26,8 @@ export interface StartRunInput {
     workspacePath : string;
     runPolicy?: PolicyConstraints;
     thinkingLevel?: ThinkingLevel;
+    /** §9.8 v1.4 Phase 2：调度优先级（越大越先调度），缺省 0。 */
+    priority?: number;
 }
 
 export interface ResumeRunInput {
@@ -108,6 +110,7 @@ export class RunService{
             checkpointId:null,
             failureReason:null,
             thinkingLevel: input.thinkingLevel ?? "off",
+            priority: input.priority ?? 0,
             ...(input.runPolicy === undefined
                 ? {}
                 : { runPolicy: input.runPolicy }),
@@ -590,7 +593,7 @@ export class RunService{
     private markRuntimeInvocationFailureInterrupted(
         runId: string,
         error: unknown,
-        reason:"START_FAILED" | "RESUME_FAILED"
+        reason:"START_FAILED" | "RESUME_FAILED" | "LEASE_EXPIRED"
     ): void {
         const currentRun = this.getRequiredRun(runId);
 
@@ -627,6 +630,18 @@ export class RunService{
                     message,
                 },
             },
+        );
+    }
+
+    /**
+     * §9.8 v1.4 Phase 2：执行器租约过期回收入口。Run 从 RUNNING/WAITING_TOOL
+     * 退回 INTERRUPTED，Checkpoint 仍可恢复；由 RunLeaseManager.reapExpired 调用。
+     */
+    markLeaseExpired(runId: string): void {
+        this.markRuntimeInvocationFailureInterrupted(
+            runId,
+            new Error("执行器租约过期，Run 已退回 INTERRUPTED，等待恢复"),
+            "LEASE_EXPIRED",
         );
     }
 

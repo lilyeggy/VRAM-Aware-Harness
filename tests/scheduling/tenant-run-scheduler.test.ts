@@ -53,6 +53,7 @@ test("enqueue 为新 Run 补齐默认排队事实", () => {
         tenantId: "tenant-a",
         reasonCode: "AWAITING_SCHEDULING",
         enqueuedAt: "2026-08-02T10:00:00.000Z",
+        priority: 0,
     });
 });
 

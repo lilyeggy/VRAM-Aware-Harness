@@ -199,6 +199,21 @@ export function optionalPositiveNumber(value:unknown, field:string):number | nul
     return value;
 }
 
+export function optionalNonNegativeInteger(
+    body:Record<string,unknown>,
+    field:string,
+):number | null {
+    const value = body[field];
+
+    if (value === undefined) {
+        return null;
+    }
+    if (typeof value === "number" && Number.isInteger(value) && value >= 0) {
+        return value;
+    }
+    throw new HttpError(400, `${field} 必须是非负整数`);
+}
+
 export function optionalPositiveInteger(value:unknown, field:string):number | null {
     if (value === undefined || value === null) {
         return null;

@@ -78,6 +78,7 @@ import { BrokerSandboxProvider } from "../sandbox/broker/broker-sandbox-provider
 import { RunService } from "../runs/run-service.ts";
 import { RunStore } from "../runs/runstore.ts";
 import { RunAttemptStore } from "../runs/run-attempt-store.ts";
+import { RunLeaseManager } from "../runs/run-lease-manager.ts";
 import { RunOutputStore } from "../runs/run-output-store.ts";
 import { HarnessSessionStore } from "../sessions/harness-session-store.ts";
 import {
@@ -168,6 +169,14 @@ export async function createHarnessApplication(
     const decisionStore = new PolicyDecisionStore(database);
     const sessionStore = new HarnessSessionStore(database);
     const attemptStore = new RunAttemptStore(database);
+    const leaseManager = new RunLeaseManager(attemptStore, {
+        owner: config.instanceId,
+        leaseTtlMs: config.runLeaseTtlMs,
+        heartbeatIntervalMs: config.runLeaseHeartbeatMs,
+        onError: (error) => {
+            console.error("[Harness] RunLeaseManager 异常:", error);
+        },
+    });
     const effectivePolicyStore = new EffectivePolicyStore(database);
     const policyRegistry = dependencies.policyRegistry ?? new PolicyRegistry();
     const sandboxStore = new SandboxStore(database);
@@ -358,6 +367,7 @@ export async function createHarnessApplication(
             skills: [],
         },
         config.sandboxProfile,
+        leaseManager,
     );
     const resourceObserver = dependencies.resourceObserver
         ?? new ExternalModelServiceResourceObserver();
@@ -396,6 +406,12 @@ export async function createHarnessApplication(
             // 支柱 3：排队 TTL——队列等待超过门限的 Run 安全熔断为
             // FAILED(QUEUE_TIMEOUT)，防止多租户调度器被死等任务拖垮。
             queueTtlMs: config.queueTtlMs,
+            // §9.8 v1.4 Phase 2：租约回收 + 队列深度 backpressure（0 = 不启用）。
+            leaseManager,
+            maxQueuedRuns: config.maxQueuedRuns > 0 ? config.maxQueuedRuns : undefined,
+            maxQueuedRunsPerTenant: config.maxQueuedRunsPerTenant > 0
+                ? config.maxQueuedRunsPerTenant
+                : undefined,
             // B4/B5：DB 对账——孤儿 QUEUED Run 重入队 + TTL 不依赖 pump 存活。
             queuedRunReader: runStore,
             // 启动恢复：把 DB 中 QUEUED Run 重建进内存队列。
@@ -407,6 +423,14 @@ export async function createHarnessApplication(
             }),
         },
     );
+    leaseManager.setExpiredHandler((attempt) => {
+        try {
+            runServiceRef?.markLeaseExpired(attempt.runId);
+        } catch (error) {
+            console.error("[Harness] 租约过期回退 Run 失败:", error);
+        }
+        coordinator.releaseLease(attempt.runId);
+    });
     const queuePump = coordinator;
     // N18：**仅在我们自己装配真实 Pi 运行时**（未注入 runtime）时注入会话引用
     // 可达性校验。注入式 runtime 是 demo / 测试替身，它们用的是合成引用

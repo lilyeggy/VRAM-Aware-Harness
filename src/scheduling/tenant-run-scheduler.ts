@@ -34,6 +34,8 @@ export interface EnqueueRunInput {
     sessionId?: string;
     reasonCode?: QueueReasonCode;
     enqueuedAt?: string;
+    /** §9.8 v1.4 Phase 2：调度优先级（越大越先调度），缺省 0。 */
+    priority?: number;
 }
 
 export interface QueuedRun {
@@ -42,6 +44,8 @@ export interface QueuedRun {
     sessionId?: string;
     reasonCode: QueueReasonCode;
     enqueuedAt: string;
+    /** §9.8 v1.4 Phase 2：调度优先级（越大越先调度），缺省 0。 */
+    priority: number;
 }
 
 export interface QueueEntry extends Omit<QueuedRun, "sessionId"> {
@@ -116,6 +120,7 @@ export class TenantRunScheduler {
                 input.reasonCode ?? "AWAITING_SCHEDULING",
             enqueuedAt:
                 input.enqueuedAt ?? new Date().toISOString(),
+            priority: input.priority ?? 0,
         };
         const tenantQueue = this.queuesByTenant.get(input.tenantId);
 
@@ -124,6 +129,7 @@ export class TenantRunScheduler {
             this.tenantOrder.push(input.tenantId);
         } else {
             tenantQueue.push(queuedRun);
+            tenantQueue.sort(compareQueuedRuns);
         }
 
         this.queuedRunByRunId.set(queuedRun.runId, queuedRun);
@@ -164,6 +170,13 @@ export class TenantRunScheduler {
         // 如果说当前活跃的 run 大于配置要求最大 run
         if (this.activeTenantByRunId.size >= this.config.maxActiveRuns){
             return null;
+        }
+
+        // §9.8 v1.4 Phase 2：显式优先级优先于轮转与老化。
+        const prioritized = this.claimPriority();
+
+        if (prioritized) {
+            return prioritized;
         }
 
         // N10：老化插队。先看有没有等太久的 Run，有就先调度它，
@@ -228,6 +241,76 @@ export class TenantRunScheduler {
      
         // 有等待任务，但是所有tenant都达到了自己的并发上限;
         return null;
+    }
+
+    /**
+     * §9.8 v1.4 Phase 2：跨租户挑选最高优先级的可调度 Run。
+     * 同优先级按入队时间升序；没有 priority>0 的候选时返回 null。
+     */
+    private claimPriority(): QueuedRun | null {
+        let bestTenantId: string | null = null;
+        let bestIndex = -1;
+        let bestRun: QueuedRun | null = null;
+
+        for (let index = 0; index < this.tenantOrder.length; index += 1) {
+            const tenantId = this.tenantOrder[index];
+
+            if (tenantId === undefined) {
+                continue;
+            }
+
+            const tenantQueue = this.queuesByTenant.get(tenantId);
+            const head = tenantQueue?.[0];
+
+            if (tenantQueue === undefined || head === undefined) {
+                continue;
+            }
+
+            if (head.priority <= 0) {
+                continue;
+            }
+
+            if (this.canClaim(tenantId, head) === false) {
+                continue;
+            }
+
+            if (
+                bestRun === null
+                || head.priority > bestRun.priority
+                || (
+                    head.priority === bestRun.priority
+                    && Date.parse(head.enqueuedAt) < Date.parse(bestRun.enqueuedAt)
+                )
+            ) {
+                bestTenantId = tenantId;
+                bestIndex = index;
+                bestRun = head;
+            }
+        }
+
+        if (bestTenantId === null || bestIndex < 0 || bestRun === null) {
+            return null;
+        }
+
+        const queue = this.queuesByTenant.get(bestTenantId);
+        const run = queue?.[0];
+
+        if (queue === undefined || run === undefined) {
+            return null;
+        }
+
+        this.tenantOrder.splice(bestIndex, 1);
+        queue.shift();
+
+        if (queue.length > 0) {
+            this.tenantOrder.push(bestTenantId);
+        } else {
+            this.queuesByTenant.delete(bestTenantId);
+        }
+
+        this.activate(run);
+
+        return run;
     }
 
     /**
@@ -454,6 +537,7 @@ export class TenantRunScheduler {
                 tenantId: run.tenantId,
                 reasonCode: run.reasonCode,
                 enqueuedAt: run.enqueuedAt,
+                priority: run.priority,
                 position:entries.length + 1,
                 tenantPosition,
             })
@@ -507,6 +591,13 @@ export class TenantRunScheduler {
 
 }
 
+
+function compareQueuedRuns(left: QueuedRun, right: QueuedRun): number {
+    return (
+        right.priority - left.priority
+        || Date.parse(left.enqueuedAt) - Date.parse(right.enqueuedAt)
+    );
+}
 
 function assertPositiveInteger(value: number, name: string): void {
     if (!Number.isInteger(value) || value <= 0) {

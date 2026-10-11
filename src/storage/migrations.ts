@@ -41,6 +41,21 @@ END;
  * - 触发器拒绝任何 UPDATE/DELETE，保证正常路径无法改写或删除审计事实；
  *   即使攻击者绕过触发器直接改库，hash 链校验也能发现篡改。
  */
+/**
+ * v3：§9.8 v1.4 Phase 2（队列/Worker）所需的最小持久化字段。
+ *
+ * - agent_runs.priority：提交时可选的调度优先级（越大越先调度）。
+ * - run_attempts 的 lease_owner / lease_expires_at / heartbeat_at：
+ *   Worker/执行器的租约与心跳事实，供崩溃后回收过期 Attempt。
+ */
+const queueLeaseFields = `
+ALTER TABLE agent_runs ADD COLUMN priority INTEGER NOT NULL DEFAULT 0;
+
+ALTER TABLE run_attempts ADD COLUMN lease_owner TEXT;
+ALTER TABLE run_attempts ADD COLUMN lease_expires_at TEXT;
+ALTER TABLE run_attempts ADD COLUMN heartbeat_at TEXT;
+`;
+
 export const migrations: readonly SchemaMigration[] = [
     {
         version: 1,
@@ -51,5 +66,10 @@ export const migrations: readonly SchemaMigration[] = [
         version: 2,
         name: "immutable_audit_chain",
         up: immutableAuditChain,
+    },
+    {
+        version: 3,
+        name: "queue_priority_and_run_lease",
+        up: queueLeaseFields,
     },
 ];

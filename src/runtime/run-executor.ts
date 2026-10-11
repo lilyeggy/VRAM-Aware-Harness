@@ -5,6 +5,7 @@ import {
     type RunAttemptKind,
 } from "../runs/run-attempt.ts";
 import type { RunAttemptStore } from "../runs/run-attempt-store.ts";
+import type { RunLeaseManager } from "../runs/run-lease-manager.ts";
 import type { RunStore } from "../runs/runstore.ts";
 import {
     bindRuntimeSession,
@@ -64,6 +65,7 @@ export class RunExecutor implements AgentRuntime {
         private readonly sandbox: SandboxProvider,
         private readonly config: RunExecutorRuntimeConfig,
         private readonly sandboxProfile: SandboxProfile = "development",
+        private readonly leaseManager?: RunLeaseManager,
     ) {
         this.sandbox.subscribe((event) => this.onSandboxFailure(event));
     }
@@ -136,6 +138,10 @@ export class RunExecutor implements AgentRuntime {
         });
         this.attempts.create(attempt);
 
+        if (this.leaseManager !== undefined) {
+            attempt = this.leaseManager.acquire(attempt);
+        }
+
         this.emit({
             type: "control_prepared",
             runId: run.id,
@@ -177,6 +183,7 @@ export class RunExecutor implements AgentRuntime {
 
         attempt = startRunAttempt(attempt, new Date().toISOString(), snapshot.id, handle.id);
         this.attempts.update(attempt, "PENDING");
+        this.leaseManager?.startHeartbeat(attempt.id);
         this.activeBySandboxId.set(handle.id, { attemptId: attempt.id });
 
         let terminal: "SUCCEEDED" | "FAILED" | "INTERRUPTED" | null = null;
@@ -254,6 +261,7 @@ export class RunExecutor implements AgentRuntime {
             throw error;
         } finally {
             unsubscribe();
+            this.leaseManager?.release(attempt.id);
             this.activeBySandboxId.delete(handle.id);
             await this.sandbox.terminate(handle.id);
         }
@@ -314,6 +322,7 @@ export class RunExecutor implements AgentRuntime {
         if (attempt?.status === "RUNNING") {
             const interrupted = finishRunAttempt(attempt, "INTERRUPTED", event.timestamp);
             this.attempts.update(interrupted, attempt.status);
+            this.leaseManager?.stopHeartbeat(attempt.id);
         }
         this.emit({
             type: "agent_interrupted",

@@ -10,11 +10,13 @@ export class RunAttemptStore {
             INSERT INTO run_attempts (
                 id, run_id, attempt_number, kind,
                 policy_snapshot_id, sandbox_id, status, created_at,
-                started_at, finished_at, failure_reason
+                started_at, finished_at, failure_reason,
+                lease_owner, lease_expires_at, heartbeat_at
             ) VALUES (
                 $id, $runId, $attemptNumber, $kind,
                 $policySnapshotId, $sandboxId, $status, $createdAt,
-                $startedAt, $finishedAt, $failureReason
+                $startedAt, $finishedAt, $failureReason,
+                $leaseOwner, $leaseExpiresAt, $heartbeatAt
             );
         `).run(parameters);
     }
@@ -28,7 +30,10 @@ export class RunAttemptStore {
                 status = $status,
                 started_at = $startedAt,
                 finished_at = $finishedAt,
-                failure_reason = $failureReason
+                failure_reason = $failureReason,
+                lease_owner = $leaseOwner,
+                lease_expires_at = $leaseExpiresAt,
+                heartbeat_at = $heartbeatAt
             WHERE id = $id AND status = $previousStatus;
         `).run(parameters);
         if (result.changes !== 1) {
@@ -52,6 +57,20 @@ export class RunAttemptStore {
         return this.queryOne("sandbox_id = $value", sandboxId);
     }
 
+    /**
+     * §9.8 v1.4 Phase 2：列出 RUNNING 且租约已过期的 Attempt。
+     */
+    listExpiredLeases(nowIso: string): RunAttempt[] {
+        return this.db.query<RunAttempt, { nowIso: string }>(`
+            ${attemptSelect}
+            WHERE status = 'RUNNING'
+              AND lease_owner IS NOT NULL
+              AND lease_expires_at IS NOT NULL
+              AND lease_expires_at < $nowIso
+            ORDER BY lease_expires_at ASC;
+        `).all({ nowIso });
+    }
+
     nextAttemptNumber(runId: string): number {
         const row = this.db.query<{ nextNumber: number }, { runId: string }>(`
             SELECT COALESCE(MAX(attempt_number), 0) + 1 AS nextNumber
@@ -73,6 +92,9 @@ const attemptSelect = `
         policy_snapshot_id AS policySnapshotId,
         sandbox_id AS sandboxId, status,
         created_at AS createdAt, started_at AS startedAt,
-        finished_at AS finishedAt, failure_reason AS failureReason
+        finished_at AS finishedAt, failure_reason AS failureReason,
+        lease_owner AS leaseOwner,
+        lease_expires_at AS leaseExpiresAt,
+        heartbeat_at AS heartbeatAt
     FROM run_attempts
 `;

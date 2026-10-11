@@ -23,6 +23,7 @@ import type {
 import { buildRecoveryContinuationInput } from "../runs/run-service.ts";
 import type { CheckpointStore } from "../checkpoints/checkpoint-store.ts";
 import type { RunEvent } from "../runs/agent-run.ts";
+import type { RunLeaseManager } from "../runs/run-lease-manager.ts";
 import type { RunStore } from "../runs/runstore.ts";
 
 import type {
@@ -48,11 +49,32 @@ export type SchedulerDrainResult =
         decision: PolicyDecision;
     };
 
+/**
+ * §9.8 v1.4 Phase 2：队列深度 backpressure。submit 在创建 Run 之前
+ * 检查全局/租户排队深度，超限直接拒绝，避免队列无限增长。
+ */
+export class QueueBackpressureError extends Error {
+    constructor(
+        message: string,
+        readonly scope: "GLOBAL" | "TENANT",
+        readonly limit: number,
+        readonly current: number,
+        readonly retryAfterSeconds: number,
+    ) {
+        super(message);
+        this.name = "QueueBackpressureError";
+    }
+}
+
 export interface RunSchedulerOptions {
     /**
      * 支柱 3：排队 TTL（ms）。undefined 表示不启用排队超时熔断。
      */
     queueTtlMs?: number;
+    /** §9.8 v1.4 Phase 2：全局排队深度上限，超限 submit 抛 QueueBackpressureError。 */
+    readonly maxQueuedRuns?: number;
+    /** §9.8 v1.4 Phase 2：单租户排队深度上限，超限 submit 抛 QueueBackpressureError。 */
+    readonly maxQueuedRunsPerTenant?: number;
     /** 时钟（测试注入）。 */
     now?: () => number;
     /**
@@ -70,6 +92,11 @@ export interface RunSchedulerOptions {
     readonly intervalMs?: number;
     /** 自动轮询异常回调。 */
     readonly onError?: (error: unknown) => void;
+    /**
+     * §9.8 v1.4 Phase 2：租约回收器。pump 每次 tick 与启动恢复时扫描
+     * 过期 RUNNING Attempt，避免死执行器永久占用 slot。
+     */
+    readonly leaseManager?: RunLeaseManager;
 }
 
 export function toQueueReasonCode(
@@ -226,6 +253,7 @@ export class RunScheduler  {
     async tick(): Promise<void> {
         const work = (async () => {
             try {
+                this.options.leaseManager?.reapExpired();
                 await this.drain();
                 await this.waitForBackgroundAttempts();
             } catch (error) {
@@ -331,11 +359,23 @@ export class RunScheduler  {
     }
 
     restore(): void {
+        this.options.leaseManager?.reapExpired();
         this.restoreQueuedRuns();
+    }
+
+    /**
+     * §9.8 v1.4 Phase 2：回收器判定租约过期后，释放该 Run 的调度 slot。
+     * 幂等；Run 已不在活跃集合时返回 false。
+     */
+    releaseLease(runId: string): boolean {
+        return this.scheduler.release(runId);
     }
 
     // submit只负责把用户任务变成 run 队列
     submit(input:StartRunInput) : AgentRun {
+        // §9.8 v1.4 Phase 2：先做队列深度 backpressure，再创建 Run。
+        this.assertQueueCapacity(input.tenantId);
+
         // 接收到用户任务输入后，创建对应持久化的Queued Run
         const run = this.runService.createQueuedRun(input);
 
@@ -344,11 +384,49 @@ export class RunScheduler  {
             runId:run.id,
             tenantId:run.tenantId,
             sessionId:run.harnessSessionId,
+            priority: run.priority ?? 0,
         })
         this.synchronizeQueueBlockers();
 
         // 返回 Queued Run
         return run;
+    }
+
+    private assertQueueCapacity(tenantId: string): void {
+        const maxQueuedRuns = this.options.maxQueuedRuns;
+        const maxQueuedRunsPerTenant = this.options.maxQueuedRunsPerTenant;
+
+        if (maxQueuedRuns === undefined && maxQueuedRunsPerTenant === undefined) {
+            return;
+        }
+
+        const queue = this.scheduler.listQueue();
+
+        if (maxQueuedRuns !== undefined && queue.length >= maxQueuedRuns) {
+            throw new QueueBackpressureError(
+                `全局排队深度已达上限：${queue.length}/${maxQueuedRuns}`,
+                "GLOBAL",
+                maxQueuedRuns,
+                queue.length,
+                5,
+            );
+        }
+
+        if (maxQueuedRunsPerTenant !== undefined) {
+            const tenantQueued = queue.filter(
+                (entry) => entry.tenantId === tenantId,
+            ).length;
+
+            if (tenantQueued >= maxQueuedRunsPerTenant) {
+                throw new QueueBackpressureError(
+                    `租户 ${tenantId} 排队深度已达上限：${tenantQueued}/${maxQueuedRunsPerTenant}`,
+                    "TENANT",
+                    maxQueuedRunsPerTenant,
+                    tenantQueued,
+                    5,
+                );
+            }
+        }
     }
 
     restoreQueuedRun(run:AgentRun):AgentRun {
@@ -360,6 +438,7 @@ export class RunScheduler  {
             runId:run.id,
             tenantId:run.tenantId,
             sessionId:run.harnessSessionId,
+            priority: run.priority ?? 0,
             // B4：排队时间取 DB updatedAt（进入/回到 QUEUED 的时刻），
             // 重启恢复不重置 TTL 时钟，等待时间跨重启累计。
             enqueuedAt:run.updatedAt,
@@ -438,6 +517,7 @@ export class RunScheduler  {
                 runId:run.id,
                 tenantId:run.tenantId,
                 sessionId:run.harnessSessionId,
+                priority: run.priority ?? 0,
                 enqueuedAt:run.updatedAt,
             });
             requeued.push(run.id);
@@ -460,6 +540,7 @@ export class RunScheduler  {
             tenantId: run.tenantId,
             ...(run.sessionId === undefined ? {} : { sessionId: run.sessionId }),
             reasonCode,
+            priority: run.priority,
             enqueuedAt: run.enqueuedAt,
         });
         this.synchronizeQueueBlockers();
@@ -693,6 +774,7 @@ export class RunScheduler  {
                 runId:run.id,
                 tenantId:run.tenantId,
                 sessionId:run.harnessSessionId,
+                priority: run.priority ?? 0,
                 // B4：与 restoreQueuedRun 一致，重启/恢复不重置 TTL 时钟。
                 enqueuedAt:run.updatedAt,
             });

@@ -1,7 +1,9 @@
 import { buildRecoveryContinuationInput } from "../../runs/run-service.ts";
+import { QueueBackpressureError } from "../../scheduling/run-scheduler.ts";
 import {
     HttpError,
     jsonResponse,
+    optionalNonNegativeInteger,
     optionalString,
     parseRunPolicy,
     parseThinkingLevel,
@@ -124,18 +126,32 @@ async function submitRun(request: Request, ctx: HttpRouteContext): Promise<Respo
     // N15：请求级策略层（RUN 层）。此前 StartRunInput.runPolicy
     // 没有任何产品调用方，受限运行只能靠测试直接调 Runtime。
     const runPolicy = parseRunPolicy(body);
-    const run = ctx.application.submitRun({
-        tenantId: ctx.accessControl === undefined
-            ? requiredString(body, "tenantId")
-            : principal.tenantId,
-        harnessSessionId: requestedSessionId ?? crypto.randomUUID(),
-        userInput: requireUserInput(body, ctx.limits?.maxUserInputChars),
-        thinkingLevel: parseThinkingLevel(body),
-        ...(runPolicy === undefined ? {} : { runPolicy }),
-        workspacePath: ctx.accessControl === undefined
-            ? requiredString(body, "workspacePath")
-            : (workspace as NonNullable<typeof workspace>).rootPath,
-    });
+    const priority = optionalNonNegativeInteger(body, "priority");
+    let run;
+    try {
+        run = ctx.application.submitRun({
+            tenantId: ctx.accessControl === undefined
+                ? requiredString(body, "tenantId")
+                : principal.tenantId,
+            harnessSessionId: requestedSessionId ?? crypto.randomUUID(),
+            userInput: requireUserInput(body, ctx.limits?.maxUserInputChars),
+            thinkingLevel: parseThinkingLevel(body),
+            ...(priority === null ? {} : { priority }),
+            ...(runPolicy === undefined ? {} : { runPolicy }),
+            workspacePath: ctx.accessControl === undefined
+                ? requiredString(body, "workspacePath")
+                : (workspace as NonNullable<typeof workspace>).rootPath,
+        });
+    } catch (error) {
+        if (error instanceof QueueBackpressureError) {
+            throw new HttpError(429, error.message, {
+                "retry-after": String(error.retryAfterSeconds),
+                "x-queue-limit": String(error.limit),
+                "x-queue-current": String(error.current),
+            });
+        }
+        throw error;
+    }
     ctx.auditResource("RUN", run.id, "RUN_SUBMIT", "ALLOW", principal.tenantId, "run_submitted");
     return jsonResponse({ run: runForResponse(run) }, 202);
 }

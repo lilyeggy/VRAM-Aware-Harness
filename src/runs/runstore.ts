@@ -52,6 +52,7 @@ interface AgentRunRow {
     /** 列表查询可以省略该列；缺失时按无策略处理，绝不能 JSON.parse(undefined)。 */
     runPolicyJson?: string | null;
     thinkingLevel: "off" | "minimal" | "low" | "medium" | "high";
+    priority: number;
 }
 
 export type DeduplicatedRunEvent = RunEvent & {
@@ -71,7 +72,8 @@ const RUN_LIST_COLUMNS = `
     finished_at AS finishedAt,
     checkpoint_id AS checkpointId,
     run_policy_json AS runPolicyJson,
-    thinking_level AS thinkingLevel
+    thinking_level AS thinkingLevel,
+    priority
 `;
 
 const RUN_DETAIL_COLUMNS = `
@@ -88,7 +90,8 @@ const RUN_DETAIL_COLUMNS = `
     checkpoint_id AS checkpointId,
     failure_reason AS failureReason,
     run_policy_json AS runPolicyJson,
-    thinking_level AS thinkingLevel
+    thinking_level AS thinkingLevel,
+    priority
 `;
 
 
@@ -128,7 +131,8 @@ export class RunStore {
                         checkpoint_id,
                         failure_reason,
                         run_policy_json,
-                        thinking_level
+                        thinking_level,
+                        priority
                     )
                     VALUES (
                         $id,
@@ -144,7 +148,8 @@ export class RunStore {
                         $checkpointId,
                         $failureReason,
                         $runPolicyJson,
-                        $thinkingLevel
+                        $thinkingLevel,
+                        $priority
                     );
                 `)
                 .run(parameters);
@@ -244,7 +249,7 @@ export class RunStore {
                 SELECT ${RUN_DETAIL_COLUMNS}
                 FROM agent_runs
                 WHERE status = 'QUEUED'
-                ORDER BY created_at ASC, rowid ASC;
+                ORDER BY priority DESC, created_at ASC, rowid ASC;
             `)
             .all()
             .map((row) => this.runFromRow(row));
@@ -382,6 +387,7 @@ export class RunStore {
                 ? null
                 : JSON.stringify(run.runPolicy),
             thinkingLevel: run.thinkingLevel ?? "off",
+            priority: run.priority ?? 0,
         };
     }
 
@@ -400,6 +406,7 @@ export class RunStore {
             checkpointId: row.checkpointId,
             failureReason: row.failureReason,
             thinkingLevel: row.thinkingLevel,
+            priority: row.priority,
         };
         if (typeof row.runPolicyJson === "string") {
             run.runPolicy = JSON.parse(row.runPolicyJson) as AgentRun["runPolicy"];
