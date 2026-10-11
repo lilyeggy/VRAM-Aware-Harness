@@ -373,19 +373,35 @@ export class RunScheduler  {
 
     // submit只负责把用户任务变成 run 队列
     submit(input:StartRunInput) : AgentRun {
+        // §9.8 v1.4 Phase 3：幂等键命中时直接返回既有 Run，不重复入队、
+        // 也不应被 backpressure 拒绝——重放同一请求是客户端重试语义。
+        if (input.idempotencyKey !== undefined) {
+            const existing = this.runService.findByTenantIdempotencyKey(
+                input.tenantId,
+                input.idempotencyKey,
+            );
+            if (existing !== null) {
+                return existing;
+            }
+        }
+
         // §9.8 v1.4 Phase 2：先做队列深度 backpressure，再创建 Run。
         this.assertQueueCapacity(input.tenantId);
 
         // 接收到用户任务输入后，创建对应持久化的Queued Run
         const run = this.runService.createQueuedRun(input);
 
-        // 把对应的 run 入队
-        this.scheduler.enqueue({
-            runId:run.id,
-            tenantId:run.tenantId,
-            sessionId:run.harnessSessionId,
-            priority: run.priority ?? 0,
-        })
+        // 并发同键请求的唯一约束竞态：createQueuedRun 会回查并返回既有 Run；
+        // 若它已经在执行或已在内存队列中，则不重复入队。
+        if (!this.scheduler.isActive(run.id) && !this.scheduler.isQueued(run.id)) {
+            // 把对应的 run 入队
+            this.scheduler.enqueue({
+                runId:run.id,
+                tenantId:run.tenantId,
+                sessionId:run.harnessSessionId,
+                priority: run.priority ?? 0,
+            })
+        }
         this.synchronizeQueueBlockers();
 
         // 返回 Queued Run
@@ -481,6 +497,14 @@ export class RunScheduler  {
             // "Run 正在执行中"）。
             if (this.scheduler.isActive(run.id)) {
                 continue;
+            }
+
+            // §9.8 v1.4 Phase 3：退避重试未到点的 QUEUED Run 先不入队。
+            if (run.retryAt != null && run.retryAt != undefined) {
+                const retryAtMs = Date.parse(run.retryAt);
+                if (Number.isFinite(retryAtMs) && retryAtMs > nowMs) {
+                    continue;
+                }
             }
 
             const enqueuedAtMs = Date.parse(run.updatedAt);

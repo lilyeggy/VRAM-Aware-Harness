@@ -338,3 +338,45 @@ test("N18：真实文件校验器——文件在则恢复，被删则拒绝", as
     rmSync(sessionFile);
     expect(isReachable(sessionFile)).toBe(false);
 });
+
+test("Phase 3：planForInterruptedRun 为已 INTERRUPTED 的 Run 建立恢复计划", () => {
+    const db = openHarnessDatabase(":memory:");
+    try {
+        const runStore = new RunStore(db);
+        const executionStore = new ToolExecutionStore(db);
+        const checkpointStore = new CheckpointStore(db);
+        const running = seedRunningRun(db);
+        const interruptedAt = "2026-07-28T10:00:02.000Z";
+        runStore.update(
+            {
+                ...running,
+                status: "INTERRUPTED",
+                updatedAt: interruptedAt,
+            },
+            {
+                eventId: "event-interrupted",
+                runId: running.id,
+                sequence: 3,
+                type: "RUN_INTERRUPTED",
+                timestamp: interruptedAt,
+                payloadVersion: 1,
+                payload: { reason: "LEASE_EXPIRED" },
+            },
+        );
+
+        const service = new RecoveryService(
+            runStore,
+            executionStore,
+            checkpointStore,
+        );
+        const plan = service.planForInterruptedRun(running.id);
+
+        expect(plan).not.toBeNull();
+        expect(plan?.run.id).toBe(running.id);
+        expect(plan?.decision.action).toBe("MANUAL_REVIEW");
+        expect(plan?.decision.reason).toBe("NO_CHECKPOINT");
+        expect(service.planForInterruptedRun("missing-run")).toBeNull();
+    } finally {
+        db.close();
+    }
+});

@@ -127,6 +127,11 @@ async function submitRun(request: Request, ctx: HttpRouteContext): Promise<Respo
     // 没有任何产品调用方，受限运行只能靠测试直接调 Runtime。
     const runPolicy = parseRunPolicy(body);
     const priority = optionalNonNegativeInteger(body, "priority");
+    // §9.8 v1.4 Phase 3：可选幂等键；同租户重复提交返回既有 Run。
+    const idempotencyKey = optionalString(body, "idempotencyKey");
+    if (idempotencyKey !== null && idempotencyKey.length > 200) {
+        throw new HttpError(400, "idempotencyKey 长度不能超过 200");
+    }
     let run;
     try {
         run = ctx.application.submitRun({
@@ -137,6 +142,7 @@ async function submitRun(request: Request, ctx: HttpRouteContext): Promise<Respo
             userInput: requireUserInput(body, ctx.limits?.maxUserInputChars),
             thinkingLevel: parseThinkingLevel(body),
             ...(priority === null ? {} : { priority }),
+            ...(idempotencyKey === null ? {} : { idempotencyKey }),
             ...(runPolicy === undefined ? {} : { runPolicy }),
             workspacePath: ctx.accessControl === undefined
                 ? requiredString(body, "workspacePath")

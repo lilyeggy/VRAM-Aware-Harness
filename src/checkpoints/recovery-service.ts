@@ -49,6 +49,41 @@ export class RecoveryService {
             .map((activeRun) => this.buildPlan(activeRun));
     }
 
+    /**
+     * §9.8 v1.4 Phase 3：为单个已 INTERRUPTED 的 Run 建立恢复计划。
+     *
+     * 用于 Worker 崩溃 / 租约过期后进程无需重启也能自动恢复：
+     * RunService.markLeaseExpired 先把 Run 落成 INTERRUPTED，这里只读取
+     * 既有 Checkpoint 与工具副作用证据，不重复写状态/事件。
+     */
+    planForInterruptedRun(runId: string): RunRecoveryPlan | null {
+        const run = this.runStore.get(runId);
+        if (run === null || run.status !== "INTERRUPTED") {
+            return null;
+        }
+        const preparedExecutions =
+            this.toolExecutionStore.listPreparedForRun(runId);
+        const checkpoint = this.getValidCheckpoint(run);
+        const decision = decideRecovery(
+            checkpoint?.id ?? null,
+            preparedExecutions,
+            createSessionRefCheck(checkpoint, this.isSessionRefReachable),
+        );
+        if (decision.reason === "SESSION_REF_UNREACHABLE") {
+            console.warn(
+                `[recovery] N18 恢复点已损坏，拒绝自动恢复：`
+                + `runId=${run.id} checkpointId=${checkpoint?.id}`
+                + ` runtimeSessionRef=${String(checkpoint?.runtimeSessionRef)}`,
+            );
+        }
+        return {
+            run,
+            checkpoint,
+            preparedExecutions,
+            decision,
+        };
+    }
+
     private buildPlan(activeRun: AgentRun): RunRecoveryPlan {
         const preparedExecutions =
             this.toolExecutionStore.listPreparedForRun(

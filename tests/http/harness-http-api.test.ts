@@ -664,3 +664,45 @@ test("POST /runs 拒绝非法 priority", async () => {
         error: "priority 必须是非负整数",
     });
 });
+
+test("POST /runs 解析并透传 idempotencyKey", async () => {
+    const { api, getSubmittedInput } = createApi();
+    const response = await api.fetch(new Request(
+        "http://harness.local/runs",
+        {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({
+                tenantId: "tenant-api",
+                sessionId: "session-idem",
+                userInput: "幂等提交",
+                workspacePath: "/tmp/api-workspace",
+                idempotencyKey: "idem-key-1",
+            }),
+        },
+    ));
+    expect(response.status).toBe(202);
+    expect(getSubmittedInput()?.idempotencyKey).toBe("idem-key-1");
+});
+
+test("POST /runs 拒绝超长 idempotencyKey", async () => {
+    const { api } = createApi();
+    const response = await api.fetch(new Request(
+        "http://harness.local/runs",
+        {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({
+                tenantId: "tenant-api",
+                sessionId: "session-idem-bad",
+                userInput: "超长幂等键",
+                workspacePath: "/tmp/api-workspace",
+                idempotencyKey: "x".repeat(201),
+            }),
+        },
+    ));
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({
+        error: "idempotencyKey 长度不能超过 200",
+    });
+});

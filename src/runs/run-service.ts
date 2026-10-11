@@ -15,8 +15,10 @@ import type {
 } from "./agent-run.ts"
 import type { RunStore } from "./runstore.ts"
 import type { PolicyConstraints } from "../policies/effective-policy.ts";
+import { PolicyRejectionError } from "../policies/effective-policy.ts";
 import type { RunOutputStore } from "./run-output-store.ts";
 import type { RunWorkspaceResultCoordinator } from "../workspaces/run-workspace-result.ts";
+import type { ToolExecutionStore } from "../tools/tool-execution-store.ts";
 
 
 export interface StartRunInput {
@@ -28,6 +30,15 @@ export interface StartRunInput {
     thinkingLevel?: ThinkingLevel;
     /** §9.8 v1.4 Phase 2：调度优先级（越大越先调度），缺省 0。 */
     priority?: number;
+    /** §9.8 v1.4 Phase 3：提交方幂等键；同租户内唯一，重复提交返回既有 Run。 */
+    idempotencyKey?: string;
+}
+
+/** §9.8 v1.4 Phase 3：可重试失败的重试策略。maxAttempts 含首次执行。 */
+export interface RunRetryOptions {
+    maxAttempts: number;
+    baseDelayMs: number;
+    maxDelayMs: number;
 }
 
 export interface ResumeRunInput {
@@ -89,10 +100,27 @@ export class RunService{
         private readonly eventBridge = new RuntimeEventBridge(),
         private readonly outputStore?: RunOutputStore,
         private readonly workspaceResults?: RunWorkspaceResultCoordinator,
+        private readonly toolExecutions?: ToolExecutionStore,
+        private readonly retryOptions?: RunRetryOptions,
     ) {}
 
     // 创建并持久化Queued Run
+    findByTenantIdempotencyKey(tenantId: string, idempotencyKey: string): AgentRun | null {
+        return this.store.findByTenantIdempotencyKey(tenantId, idempotencyKey);
+    }
+
     createQueuedRun(input : StartRunInput) : AgentRun {
+        // §9.8 v1.4 Phase 3：幂等键命中时直接返回既有 Run，不再创建新 Run。
+        if (input.idempotencyKey !== undefined && input.idempotencyKey.length > 0) {
+            const existing = this.store.findByTenantIdempotencyKey(
+                input.tenantId,
+                input.idempotencyKey,
+            );
+            if (existing !== null) {
+                return existing;
+            }
+        }
+
         const runId = crypto.randomUUID(); 
         const timestamp = new Date().toISOString();
         // 创建真实的 AgentRun
@@ -111,6 +139,11 @@ export class RunService{
             failureReason:null,
             thinkingLevel: input.thinkingLevel ?? "off",
             priority: input.priority ?? 0,
+            retryCount: 0,
+            retryAt: null,
+            ...(input.idempotencyKey === undefined
+                ? {}
+                : { idempotencyKey: input.idempotencyKey }),
             ...(input.runPolicy === undefined
                 ? {}
                 : { runPolicy: input.runPolicy }),
@@ -127,8 +160,22 @@ export class RunService{
             payload:{},
         };
 
-        // 将 run 与 event 对应的存储起来
-        this.store.create(run,createdEvent);
+        // 将 run 与 event 对应的存储起来。并发提交同一幂等键时，唯一索引会
+        // 拒绝第二个 INSERT；此时回查并返回既有 Run，保持幂等语义。
+        try {
+            this.store.create(run,createdEvent);
+        } catch (error) {
+            if (input.idempotencyKey !== undefined && input.idempotencyKey.length > 0) {
+                const existing = this.store.findByTenantIdempotencyKey(
+                    input.tenantId,
+                    input.idempotencyKey,
+                );
+                if (existing !== null) {
+                    return existing;
+                }
+            }
+            throw error;
+        }
 
         return run;
     }
@@ -375,12 +422,21 @@ export class RunService{
         try {
             await options.invoke();
         } catch (error) {
-            this.markRuntimeInvocationFailureInterrupted(
+            // §9.8 v1.4 Phase 3：无副作用证据的可重试失败先排入退避重试；
+            // 排入成功后 Run 是 QUEUED，不再向调度器抛错（等待下次 drain）。
+            const retryScheduled = this.tryScheduleRetry(
                 runId,
                 error,
                 options.invocationFailureReason,
             );
-            throw error;
+            if (retryScheduled === false) {
+                this.markRuntimeInvocationFailureInterrupted(
+                    runId,
+                    error,
+                    options.invocationFailureReason,
+                );
+                throw error;
+            }
         }
         finally {
             unsubscribe();
@@ -388,8 +444,21 @@ export class RunService{
             // resume 时 The original BEFORE snapshot remains durable, so resumed work updates one whole-Run diff.
             await this.workspaceResults?.captureAfter(runId, run.workspacePath);
             const current = this.store.get(runId);
-            if (current?.status === "COMPLETED" || current?.status === "FAILED") {
-                await this.workspaceResults?.captureArtifacts(runId, run.workspacePath);
+            if (
+                (current?.status === "COMPLETED" || current?.status === "FAILED")
+                && this.workspaceResults !== undefined
+            ) {
+                const artifacts = await this.workspaceResults.captureArtifacts(
+                    runId,
+                    run.workspacePath,
+                );
+                // §9.8 v1.4 Phase 3：Run 终态可能先于 artifacts 落盘可见。
+                // 追加就绪事件，客户端应等待 RUN_ARTIFACTS_READY 再读 artifacts。
+                this.store.appendEvent(
+                    this.runEvent(runId, "RUN_ARTIFACTS_READY", new Date().toISOString(), {
+                        artifactCount: artifacts.length,
+                    }),
+                );
             }
         }
 
@@ -583,6 +652,76 @@ export class RunService{
                 );
             }
         });
+    }
+
+    /**
+     * §9.8 v1.4 Phase 3：可重试失败自动回到 QUEUED 等待退避重试。
+     *
+     * 只在“没有任何已准备工具副作用”时自动重试，避免重放副作用；
+     * 有副作用证据的失败保持 INTERRUPTED，交给恢复/人工复核。
+     * 返回 true 表示已排入重试（Run 现在是 QUEUED）。
+     */
+    private tryScheduleRetry(
+        runId: string,
+        error: unknown,
+        reason: "START_FAILED" | "RESUME_FAILED" | "LEASE_EXPIRED",
+    ): boolean {
+        if (this.retryOptions === undefined || this.toolExecutions === undefined) {
+            return false;
+        }
+        // 确定性策略拒绝必须 fail-closed，不能退避重试。
+        if (error instanceof PolicyRejectionError) {
+            return false;
+        }
+        const before = this.store.get(runId);
+        if (before === null) {
+            return false;
+        }
+        // 只有本次调用确实把 RUNNING/WAITING_TOOL 失败落成 INTERRUPTED 时才重试；
+        // 已被并发中断/终态化的 Run 不能被重新排队。
+        if (before.status !== "RUNNING" && before.status !== "WAITING_TOOL") {
+            return false;
+        }
+        const retryCount = before.retryCount ?? 0;
+        if (retryCount + 1 >= this.retryOptions.maxAttempts) {
+            return false;
+        }
+        const prepared = this.toolExecutions.listPreparedForRun(runId);
+        if (prepared.length > 0) {
+            return false;
+        }
+
+        this.markRuntimeInvocationFailureInterrupted(runId, error, reason);
+
+        const interrupted = this.store.get(runId);
+        if (interrupted === null || interrupted.status !== "INTERRUPTED") {
+            return false;
+        }
+        const nextRetryCount = retryCount + 1;
+        const delayMs = Math.min(
+            this.retryOptions.baseDelayMs * 2 ** (nextRetryCount - 1),
+            this.retryOptions.maxDelayMs,
+        );
+        const timestamp = new Date().toISOString();
+        const retryAt = new Date(Date.now() + delayMs).toISOString();
+        const queued: AgentRun = {
+            ...interrupted,
+            status: "QUEUED",
+            updatedAt: timestamp,
+            retryCount: nextRetryCount,
+            retryAt,
+        };
+        this.store.update(
+            queued,
+            this.runEvent(runId, "RUN_QUEUED", timestamp, {
+                reason: "RETRY",
+                retryCount: nextRetryCount,
+                retryAt,
+                previousFailureReason: reason,
+                message: error instanceof Error ? error.message : String(error),
+            }),
+        );
+        return true;
     }
 
     /**

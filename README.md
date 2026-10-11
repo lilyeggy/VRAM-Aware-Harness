@@ -103,10 +103,11 @@ src/
 bun test ./tests
 ```
 
-当前测试基线：`544 pass / 7 skip / 0 fail`。
+当前测试基线：`558 pass / 7 skip / 0 fail`。
 
 生产级 VM 生命周期基准（Phase 1，§9.8 v1.4）见 `docs/vm-lifecycle-benchmark.zh-CN.md`，运行脚本为 `scripts/vm-lifecycle-benchmark.ts`。
 队列优先级 / 深度 backpressure / RunAttempt 租约心跳（Phase 2，§9.8 v1.4）见 `.env.example` 的 `HARNESS_MAX_QUEUED_RUNS*` 与 `HARNESS_RUN_LEASE_*`。
+Durable Execution / 重试 / Run 幂等键（Phase 3，§9.8 v1.4）见 `.env.example` 的 `HARNESS_RUN_MAX_ATTEMPTS`、`HARNESS_RUN_RETRY_*`；提交 `POST /runs` 或会话消息时可带 `idempotencyKey`，终态后以 `RUN_ARTIFACTS_READY` 事件标记 artifacts 可读。
 
 最小可观测性：`GET /metrics` 返回 Prometheus 文本，需要 `metrics:read` scope（bootstrap key 的 `*` 可读），包含 `harness_runs{status}`、`harness_runs_queued`、`harness_sandbox_acquisitions_total{warm}`、`harness_http_requests_total{status}` 等。
 

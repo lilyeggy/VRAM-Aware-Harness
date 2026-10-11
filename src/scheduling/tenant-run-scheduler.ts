@@ -137,6 +137,10 @@ export class TenantRunScheduler {
         return queuedRun;
     }
 
+    isQueued(runId: string): boolean {
+        return this.queuedRunByRunId.has(runId);
+    }
+
     private findQueuedRun(runId: string): QueuedRun | null {
         return this.queuedRunByRunId.get(runId) ?? null;
     }

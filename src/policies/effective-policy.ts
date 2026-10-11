@@ -161,12 +161,24 @@ function intersectRoots(
  * `runPolicy.allowNetwork=true` 会被平台层的 `allowNetwork=false` 吞掉；
  * 若不在执行前显式拒绝，Provider 只会看到 effective=false 并正常创建 VM。
  */
+/**
+ * §9.8 v1.4 Phase 3：确定性的策略拒绝（不是可重试的瞬时故障）。
+ * RunService 的重试器必须把这类错误排除在退避重试之外，否则策略违规
+ * 会被反复重试而不是 fail-closed 到 INTERRUPTED。
+ */
+export class PolicyRejectionError extends Error {
+    constructor(message: string) {
+        super(message);
+        this.name = "PolicyRejectionError";
+    }
+}
+
 export function assertNetworkRequestAllowed(
     requested: PolicyConstraints | undefined,
     effective: Pick<EffectivePolicySnapshot, "allowNetwork">,
 ): void {
     if (requested?.allowNetwork === true && effective.allowNetwork === false) {
-        throw new Error(
+        throw new PolicyRejectionError(
             "allowNetwork=true 被平台策略拒绝：本部署 microVM 不提供网卡服务，"
             + "请将 runPolicy.allowNetwork 设为 false。",
         );

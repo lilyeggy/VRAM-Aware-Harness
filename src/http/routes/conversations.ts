@@ -168,11 +168,16 @@ async function sendConversationMessage(
         principal.tenantId,
     );
     const body = await readJsonObject(request);
+    const idempotencyKey = optionalString(body, "idempotencyKey");
+    if (idempotencyKey !== null && idempotencyKey.length > 200) {
+        throw new HttpError(400, "idempotencyKey 长度不能超过 200");
+    }
     const run = ctx.application.submitRun({
         tenantId: principal.tenantId,
         harnessSessionId: conversation.id,
         userInput: requireUserInput(body, ctx.limits?.maxUserInputChars),
         thinkingLevel: parseThinkingLevel(body),
+        ...(idempotencyKey === null ? {} : { idempotencyKey }),
         workspacePath: workspace.rootPath,
     });
     ctx.application.touchConversation?.(conversation.id, principal.tenantId);

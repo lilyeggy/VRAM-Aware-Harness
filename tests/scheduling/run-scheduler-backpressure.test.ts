@@ -114,3 +114,50 @@ test("单租户排队深度超限时 submit 抛错，其他租户不受影响", 
         db.close();
     }
 });
+
+test("Phase 3：同一幂等键重复 submit 返回既有 Run，不重复入队", () => {
+    const { db, coordinator } = createCoordinator({});
+    try {
+        const first = coordinator.submit({
+            tenantId: "tenant-a",
+            harnessSessionId: "session-a",
+            userInput: "幂等任务",
+            workspacePath: "/tmp/a",
+            idempotencyKey: "same-key",
+        });
+        const second = coordinator.submit({
+            tenantId: "tenant-a",
+            harnessSessionId: "session-a",
+            userInput: "幂等任务",
+            workspacePath: "/tmp/a",
+            idempotencyKey: "same-key",
+        });
+
+        expect(second.id).toBe(first.id);
+    } finally {
+        db.close();
+    }
+});
+
+test("Phase 3：幂等重放不触发队列深度 backpressure", () => {
+    const { db, coordinator } = createCoordinator({ maxQueuedRuns: 1 });
+    try {
+        const first = coordinator.submit({
+            tenantId: "tenant-a",
+            harnessSessionId: "session-a",
+            userInput: "幂等任务",
+            workspacePath: "/tmp/a",
+            idempotencyKey: "same-key",
+        });
+        const second = coordinator.submit({
+            tenantId: "tenant-a",
+            harnessSessionId: "session-a",
+            userInput: "幂等任务",
+            workspacePath: "/tmp/a",
+            idempotencyKey: "same-key",
+        });
+        expect(second.id).toBe(first.id);
+    } finally {
+        db.close();
+    }
+});

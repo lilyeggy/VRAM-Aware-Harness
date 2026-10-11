@@ -49,6 +49,15 @@ export interface AgentRun{
 
     /** §9.8 v1.4 Phase 2：调度优先级（越大越先调度），缺省 0。 */
     priority?: number;
+
+    /** §9.8 v1.4 Phase 3：提交方幂等键；同租户内唯一。 */
+    idempotencyKey?: string;
+
+    /** §9.8 v1.4 Phase 3：已消耗的可重试失败次数，缺省 0。 */
+    retryCount?: number;
+
+    /** §9.8 v1.4 Phase 3：下次允许重试的时间（ISO）；null/缺省表示立即可调度。 */
+    retryAt?: string | null;
 }
 // 这个就是对于一个任务，我们一定要区分这个任务的来源、这个任务属于的 session等等
 
@@ -68,6 +77,8 @@ export type RunEventType =
     | "RUN_INTERRUPTED"
     | "RUN_COMPLETED"
     | "RUN_FAILED"
+    // §9.8 v1.4 Phase 3：终态后 artifacts 落盘完成，消除读取一致性窗口。
+    | "RUN_ARTIFACTS_READY"
     | "MODEL_STARTED"
     | "MODEL_FIRST_TOKEN"
     | "MODEL_COMPLETED"

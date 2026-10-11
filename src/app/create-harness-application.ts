@@ -288,6 +288,8 @@ export async function createHarnessApplication(
     // B1：WAITING_TOOL 接线——RunService 在 baseRuntime 之后创建，
     // 通过晚绑定引用把工具执行阶段回调接到状态机。
     let runServiceRef: RunService | undefined;
+    let recoveryServiceRef: RecoveryService | undefined;
+    let recoveryExecutorRef: RecoveryExecutor | undefined;
     const notifyToolExecutionPhase = (
         runId: string,
         phase: "STARTED" | "ENDED",
@@ -374,6 +376,13 @@ export async function createHarnessApplication(
     const runService = new RunService(
         runStore, runtime, undefined, runOutputStore,
         workspaceResultCoordinator,
+        // §9.8 v1.4 Phase 3：幂等键 + 无副作用失败退避重试。
+        toolExecutionStore,
+        {
+            maxAttempts: config.runMaxAttempts,
+            baseDelayMs: config.runRetryBaseMs,
+            maxDelayMs: config.runRetryMaxMs,
+        },
     );
     runServiceRef = runService;
     const scheduler = new TenantRunScheduler({
@@ -430,6 +439,19 @@ export async function createHarnessApplication(
             console.error("[Harness] 租约过期回退 Run 失败:", error);
         }
         coordinator.releaseLease(attempt.runId);
+        // §9.8 v1.4 Phase 3：进程不重启也要恢复——为刚被标记 INTERRUPTED
+        // 的 Run 建立计划并交给 RecoveryExecutor（AUTO_RESUME 续跑，
+        // 否则 MANUAL_REVIEW 落审计证据）。
+        try {
+            const plan = recoveryServiceRef?.planForInterruptedRun(attempt.runId);
+            if (plan !== undefined && plan !== null && recoveryExecutorRef !== undefined) {
+                void recoveryExecutorRef.execute([plan]).catch((error) => {
+                    console.error("[Harness] 租约过期恢复执行失败:", error);
+                });
+            }
+        } catch (error) {
+            console.error("[Harness] 租约过期恢复计划失败:", error);
+        }
     });
     const queuePump = coordinator;
     // N18：**仅在我们自己装配真实 Pi 运行时**（未注入 runtime）时注入会话引用
@@ -477,6 +499,9 @@ export async function createHarnessApplication(
         },
         isSessionRefReachable,
     );
+    recoveryServiceRef = recoveryService;
+    recoveryExecutorRef = recoveryExecutor;
+
     const rawSandboxReconciler = new SandboxStartupReconciler(
         sandboxStore,
         sandboxProvider,

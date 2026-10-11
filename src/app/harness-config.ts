@@ -118,6 +118,12 @@ export interface HarnessConfig {
     runLeaseHeartbeatMs:number;
     /** §9.8 v1.4 Phase 2：本实例 ID，用于租约 owner 区分。 */
     instanceId:string;
+    /** §9.8 v1.4 Phase 3：可重试失败的最大尝试次数（含首次）。 */
+    runMaxAttempts:number;
+    /** §9.8 v1.4 Phase 3：重试退避基数（ms）。 */
+    runRetryBaseMs:number;
+    /** §9.8 v1.4 Phase 3：重试退避上限（ms）。 */
+    runRetryMaxMs:number;
     /** F9：workspace 快照最多扫描文件数，超限 fail-closed。 */
     workspaceSnapshotMaxFiles:number;
     /** F9：workspace 快照最大递归深度，超限 fail-closed。 */
@@ -233,6 +239,9 @@ export function loadHarnessConfig(
     }
     const instanceId = environment.HARNESS_INSTANCE_ID?.trim()
         || `harness-${process.pid}`;
+    const runMaxAttempts = posInt("HARNESS_RUN_MAX_ATTEMPTS", 3);
+    const runRetryBaseMs = posInt("HARNESS_RUN_RETRY_BASE_MS", 1_000);
+    const runRetryMaxMs = posInt("HARNESS_RUN_RETRY_MAX_MS", 30_000);
     const workspaceSnapshotMaxFiles = posInt("HARNESS_WORKSPACE_SNAPSHOT_MAX_FILES", 20_000);
     const workspaceSnapshotMaxDepth = posInt("HARNESS_WORKSPACE_SNAPSHOT_MAX_DEPTH", 32);
     const artifactMaxFilesPerRun = posInt("HARNESS_ARTIFACT_MAX_FILES_PER_RUN", 200);
@@ -433,6 +442,9 @@ export function loadHarnessConfig(
         runLeaseTtlMs,
         runLeaseHeartbeatMs,
         instanceId,
+        runMaxAttempts,
+        runRetryBaseMs,
+        runRetryMaxMs,
         workspaceSnapshotMaxFiles,
         workspaceSnapshotMaxDepth,
         artifactMaxFilesPerRun,

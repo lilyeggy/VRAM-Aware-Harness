@@ -53,6 +53,9 @@ interface AgentRunRow {
     runPolicyJson?: string | null;
     thinkingLevel: "off" | "minimal" | "low" | "medium" | "high";
     priority: number;
+    idempotencyKey: string | null;
+    retryCount: number;
+    retryAt: string | null;
 }
 
 export type DeduplicatedRunEvent = RunEvent & {
@@ -73,7 +76,10 @@ const RUN_LIST_COLUMNS = `
     checkpoint_id AS checkpointId,
     run_policy_json AS runPolicyJson,
     thinking_level AS thinkingLevel,
-    priority
+    priority,
+    idempotency_key AS idempotencyKey,
+    retry_count AS retryCount,
+    retry_at AS retryAt
 `;
 
 const RUN_DETAIL_COLUMNS = `
@@ -91,7 +97,10 @@ const RUN_DETAIL_COLUMNS = `
     failure_reason AS failureReason,
     run_policy_json AS runPolicyJson,
     thinking_level AS thinkingLevel,
-    priority
+    priority,
+    idempotency_key AS idempotencyKey,
+    retry_count AS retryCount,
+    retry_at AS retryAt
 `;
 
 
@@ -132,7 +141,10 @@ export class RunStore {
                         failure_reason,
                         run_policy_json,
                         thinking_level,
-                        priority
+                        priority,
+                        idempotency_key,
+                        retry_count,
+                        retry_at
                     )
                     VALUES (
                         $id,
@@ -149,7 +161,10 @@ export class RunStore {
                         $failureReason,
                         $runPolicyJson,
                         $thinkingLevel,
-                        $priority
+                        $priority,
+                        $idempotencyKey,
+                        $retryCount,
+                        $retryAt
                     );
                 `)
                 .run(parameters);
@@ -243,6 +258,26 @@ export class RunStore {
      * 进程重启后重建内存调度队列。
      * SQLite 保存 QUEUED 事实，Scheduler 只保存当前进程的公平轮转状态。
      */
+    /**
+     * §9.8 v1.4 Phase 3：按租户 + 幂等键查既有 Run。
+     * 幂等键在租户内唯一（部分唯一索引），用于重复提交返回既有 Run。
+     */
+    findByTenantIdempotencyKey(
+        tenantId: string,
+        idempotencyKey: string,
+    ): AgentRun | null {
+        const row = this.db
+            .query<AgentRunRow, [string, string]>(`
+                SELECT ${RUN_DETAIL_COLUMNS}
+                FROM agent_runs
+                WHERE tenant_id = ?
+                  AND idempotency_key = ?
+                LIMIT 1;
+            `)
+            .get(tenantId, idempotencyKey);
+        return row === null ? null : this.runFromRow(row);
+    }
+
     listQueuedRuns(): AgentRun[] {
         return this.db
             .query<AgentRunRow, []>(`
@@ -353,7 +388,10 @@ export class RunStore {
                         checkpoint_id = $checkpointId,
                         failure_reason = $failureReason,
                         run_policy_json = $runPolicyJson,
-                        thinking_level = $thinkingLevel
+                        thinking_level = $thinkingLevel,
+                        idempotency_key = $idempotencyKey,
+                        retry_count = $retryCount,
+                        retry_at = $retryAt
                     WHERE id = $id
                       AND status = $previousStatus;
                 `)
@@ -388,6 +426,9 @@ export class RunStore {
                 : JSON.stringify(run.runPolicy),
             thinkingLevel: run.thinkingLevel ?? "off",
             priority: run.priority ?? 0,
+            idempotencyKey: run.idempotencyKey ?? null,
+            retryCount: run.retryCount ?? 0,
+            retryAt: run.retryAt ?? null,
         };
     }
 
@@ -407,6 +448,9 @@ export class RunStore {
             failureReason: row.failureReason,
             thinkingLevel: row.thinkingLevel,
             priority: row.priority,
+            ...(row.idempotencyKey === null ? {} : { idempotencyKey: row.idempotencyKey }),
+            retryCount: row.retryCount,
+            retryAt: row.retryAt,
         };
         if (typeof row.runPolicyJson === "string") {
             run.runPolicy = JSON.parse(row.runPolicyJson) as AgentRun["runPolicy"];

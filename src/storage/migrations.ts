@@ -56,6 +56,24 @@ ALTER TABLE run_attempts ADD COLUMN lease_expires_at TEXT;
 ALTER TABLE run_attempts ADD COLUMN heartbeat_at TEXT;
 `;
 
+/**
+ * v4：§9.8 v1.4 Phase 3（Durable Execution / Retry / 幂等）。
+ *
+ * - agent_runs.idempotency_key：提交方可选的幂等键；同一租户内唯一，
+ *   重复提交返回既有 Run，避免弱网重试造成重复执行/重复计费。
+ * - agent_runs.retry_count / retry_at：可重试失败的次数与下次重试时间；
+ *   只有副作用安全的失败才会回到 QUEUED 等待重试。
+ */
+const runIdempotencyAndRetry = `
+ALTER TABLE agent_runs ADD COLUMN idempotency_key TEXT;
+ALTER TABLE agent_runs ADD COLUMN retry_count INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE agent_runs ADD COLUMN retry_at TEXT;
+
+CREATE UNIQUE INDEX agent_runs_tenant_idempotency_key
+    ON agent_runs(tenant_id, idempotency_key)
+    WHERE idempotency_key IS NOT NULL;
+`;
+
 export const migrations: readonly SchemaMigration[] = [
     {
         version: 1,
@@ -71,5 +89,10 @@ export const migrations: readonly SchemaMigration[] = [
         version: 3,
         name: "queue_priority_and_run_lease",
         up: queueLeaseFields,
+    },
+    {
+        version: 4,
+        name: "run_idempotency_and_retry",
+        up: runIdempotencyAndRetry,
     },
 ];
