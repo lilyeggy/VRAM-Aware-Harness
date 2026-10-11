@@ -83,8 +83,10 @@ WORKER_TASKS_MAX=256
 WORKER_RW_PATHS=/var/lib/harness-worker
 UNIT_PREFIX=harness-worker
 # 控制面 egress ACL（§9.7 v1.3 第 3 项）：Worker 默认只允许 loopback。
-# 访问外部模型服务时必须显式放行；opencode.ai 在 Cloudflare，可加 172.64.0.0/13。
-WORKER_EGRESS_ALLOW=127.0.0.0/8,172.64.0.0/13
+# 访问外部模型服务时必须显式放行；opencode.ai 在 Cloudflare，
+# IPv4 段 172.64.0.0/13、IPv6 段 2606:4700:78::/48（Worker 双栈均启用）。
+# 只放行 IPv4 时，若宿主 IPv4 出站到 Cloudflare 不可用，模型调用会一直挂起。
+WORKER_EGRESS_ALLOW=127.0.0.0/8,172.64.0.0/13,2606:4700:78::/48
 ```
 
 只允许 Master 账号免密调用该 helper：
@@ -260,7 +262,7 @@ WantedBy=multi-user.target
 - `HARNESS_WORKER_ISOLATION=systemd` 时，每次 Run 由 launcher 创建 `harness-worker-<runId>` 瞬时单元，Worker 使用 `harness-worker` UID、`MemoryMax`、`CPUQuota`、`TasksMax`、`NoNewPrivileges`、`PrivateDevices`、`ProtectSystem=strict`、`ProtectHome=read-only`、`ProtectKernelTunables/Modules/ControlGroups/Clock/Hostname`、`ProtectProc=invisible`、`ProcSubset=pid`、`RestrictRealtime`、`RestrictSUIDSGID`、`RemoveIPC`、`LockPersonality`。
 - Worker 还启用 seccomp 白名单与 Landlock：`SystemCallFilter=@system-service` 并显式放行 `landlock_create_ruleset` / `landlock_add_rule` / `landlock_restrict_self`，`SystemCallErrorNumber=EPERM`；Worker 进程内以 `HARNESS_WORKER_LANDLOCK=required` 应用 Landlock，失败即退出 78（fail-closed）。
 - Worker 只读宿主、只写 `/var/lib/harness-worker`、`/tmp`、`/run/harness`（Broker socket）与 `/dev/null` 等设备文件；模型凭据只存在于 `/var/lib/harness-worker`。
-- 控制面 egress ACL（§9.7 v1.3 第 3 项）：Broker 单元 `IPAddressDeny=any`；Master 单元 `IPAddressDeny=any` + `IPAddressAllow=127.0.0.0/8`；Worker 默认只允许 loopback，访问外部模型服务时通过 `WORKER_EGRESS_ALLOW` 放行模型服务 CIDR（如 opencode.ai 的 Cloudflare 段 `172.64.0.0/13`）。Worker 的 `RestrictAddressFamilies=AF_UNIX AF_INET`，不创建 IPv6 套接字；未配置 `WORKER_EGRESS_ALLOW` 时 Worker 无法访问外部模型服务，属 fail-closed。
+- 控制面 egress ACL（§9.7 v1.3 第 3 项）：Broker 单元 `IPAddressDeny=any`；Master 单元 `IPAddressDeny=any` + `IPAddressAllow=127.0.0.0/8`；Worker 默认只允许 loopback，访问外部模型服务时通过 `WORKER_EGRESS_ALLOW` 放行模型服务 CIDR（如 opencode.ai 的 Cloudflare 段 `172.64.0.0/13`）。Worker 的 `RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6`（双栈；早期版本仅 IPv4，遇到「IPv4 出站不可用但 IPv6 正常」时会挂起模型调用，故恢复 IPv6 并要求同时放行模型服务的 IPv6 前缀）；未配置 `WORKER_EGRESS_ALLOW` 时 Worker 无法访问外部模型服务，属 fail-closed。
 - 不可变审计存储（§9.7 v1.3 第 4 项）：`access_audit_events` 采用只追加 + SHA-256 hash 链；migration v2 增加 `prev_hash`/`hash` 列与 `BEFORE UPDATE`/`BEFORE DELETE` 触发器，正常路径无法改写或删除审计事实；`AccessAuditStore.verifyChain()` 能检测绕过触发器的内容篡改或中间行删除。验证命令：
   ```bash
   cd /srv/VRAM-Aware-Harness
@@ -344,7 +346,7 @@ systemctl show harness-master -p IPAddressDeny -p IPAddressAllow
 ## 8. 安全与运维边界
 
 - Agent 无网络：microVM 无网卡；`allowNetwork=true` 在平台侧被拒绝；不要给 Broker/Worker 添加 NAT/代理。
-- 控制面 egress：Broker 禁 IP 出站；Master 默认只允许 loopback，若在可信内网直接暴露 3100 需把实验室网段加入 `IPAddressAllow`；Worker 默认只允许 loopback，仅 `WORKER_EGRESS_ALLOW` 放行的模型服务 CIDR 可达。
+- 控制面 egress：Broker 禁 IP 出站；Master 默认只允许 loopback，若在可信内网直接暴露 3100 需把实验室网段加入 `IPAddressAllow`；Worker 默认只允许 loopback，仅 `WORKER_EGRESS_ALLOW` 放行的模型服务 CIDR（IPv4/IPv6）可达。
 - Broker 只暴露 `create/execute/terminate`；control token 只存在于 root 可读文件与 Master 进程，Worker 只拿自己 sandbox 的 capability token；`HARNESS_SANDBOX_BROKER_MASTER_UID` / `HARNESS_SANDBOX_BROKER_WORKER_UID` 再把操作绑定到进程 UID。
 - Master 应只监听内网/本机，前置反向代理时自行加 TLS 与访问控制；平台只做 API Key/租户级授权。
 - 快照池、VM runtime、workspaces 都属于 Broker/Master 的本地数据目录；不要手工修改正在使用的磁盘。生产建议用 systemd timer 定时执行 `harness-ops.ts backup` 与 `cleanup`（cleanup 先 dry-run 观察）。

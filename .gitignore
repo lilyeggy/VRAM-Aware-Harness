@@ -75,3 +75,8 @@ interview-prep/
 
 # guest agent / microvm images (compiled artifacts)
 build/
+
+# manim/媒体渲染产物与本地工具状态（不属于仓库）
+media/
+scripts/__pycache__/
+.freebuff/

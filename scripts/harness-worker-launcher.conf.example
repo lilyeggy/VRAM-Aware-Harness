@@ -14,5 +14,6 @@ WORKER_RW_PATHS=/var/lib/harness-worker
 UNIT_PREFIX=harness-worker
 # 控制面 egress ACL（§9.7 v1.3 第 3 项）：Worker 默认只允许 loopback（127.0.0.0/8）。
 # 需要访问外部模型服务时，显式放行模型服务 CIDR；opencode.ai 在 Cloudflare，
-# 可加 172.64.0.0/13。多个 CIDR 用逗号分隔。
-WORKER_EGRESS_ALLOW=127.0.0.0/8
+# IPv4 可加 172.64.0.0/13，IPv6 可加 2606:4700:78::/48（双栈均启用）。
+# 多个 CIDR 用逗号分隔；若只放行 IPv4 而宿主 IPv4 出站不可用，模型调用会挂起。
+WORKER_EGRESS_ALLOW=127.0.0.0/8,172.64.0.0/13,2606:4700:78::/48

@@ -27,13 +27,13 @@ describe("控制面 egress ACL（§9.7 v1.3 第 3 项）", () => {
     expect(launcher).toContain('IPAddressDeny=any');
     expect(launcher).toContain('IPAddressAllow=$EGRESS_ALLOW');
     expect(launcher).toContain('${WORKER_EGRESS_ALLOW:-127.0.0.0/8}');
-    expect(launcher).toContain('RestrictAddressFamilies=AF_UNIX AF_INET');
-    expect(launcher).not.toContain('AF_INET6');
+    expect(launcher).toContain('RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6');
+    expect(launcher).toContain('AF_INET6');
   });
 
   test("launcher 配置示例给出模型服务放行位", () => {
     const conf = read("scripts/harness-worker-launcher.conf.example");
-    expect(conf).toContain("WORKER_EGRESS_ALLOW=127.0.0.0/8");
+    expect(conf).toContain("WORKER_EGRESS_ALLOW=127.0.0.0/8,172.64.0.0/13,2606:4700:78::/48");
     expect(conf).toContain("172.64.0.0/13");
   });
 });
