@@ -8,6 +8,7 @@
  *   HARNESS_SMOKE_POLL_INTERVAL_MS（默认 500）
  *   HARNESS_SMOKE_CONCURRENCY（默认 2，最小 2）
  *   HARNESS_SMOKE_USER_INPUT（默认 请使用 bash 工具执行 echo SMOKE-OK，只回答 SMOKE-OK）
+ *   HARNESS_SMOKE_INVITE_CODE（注册模式为 invite 时必填，随 /auth/register 一起发送）
  *
  * 成功时输出最后一行：P0_E2E_SMOKE_OK
  */
@@ -19,6 +20,7 @@ const concurrency = Math.max(2, positiveInt(process.env.HARNESS_SMOKE_CONCURRENC
 const label = process.env.HARNESS_SMOKE_LABEL ?? crypto.randomUUID().slice(0, 8);
 const userInput = process.env.HARNESS_SMOKE_USER_INPUT
     ?? "请使用 bash 工具执行 echo SMOKE-OK，并只回答 SMOKE-OK。";
+const inviteCode = process.env.HARNESS_SMOKE_INVITE_CODE;
 
 type Principal = { tenantId: string; token: string; email: string };
 type RunView = { id: string; status: string };
@@ -61,7 +63,11 @@ async function registerSmokeTenant(prefix: string): Promise<Principal> {
     const registration = await requestJson("/auth/register", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ email, password }),
+        body: JSON.stringify({
+            email,
+            password,
+            ...(inviteCode === undefined ? {} : { inviteCode }),
+        }),
     });
     if (registration.response.status !== 201) {
         throw new Error("注册失败 HTTP " + registration.response.status + ": " + JSON.stringify(registration.payload));
