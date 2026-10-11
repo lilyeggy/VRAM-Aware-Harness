@@ -103,7 +103,7 @@ src/
 bun test ./tests
 ```
 
-当前测试基线：`585 pass / 7 skip / 0 fail`。
+当前测试基线：`589 pass / 7 skip / 0 fail`。
 
 生产级 VM 生命周期基准（Phase 1，§9.8 v1.4）见 `docs/vm-lifecycle-benchmark.zh-CN.md`，运行脚本为 `scripts/vm-lifecycle-benchmark.ts`。
 队列优先级 / 深度 backpressure / RunAttempt 租约心跳（Phase 2，§9.8 v1.4）见 `.env.example` 的 `HARNESS_MAX_QUEUED_RUNS*` 与 `HARNESS_RUN_LEASE_*`。
@@ -112,7 +112,7 @@ MCP 工具接入（Phase 4，§9.8 v1.4）见 `.env.example` 的 `HARNESS_MCP_SE
 
 最小可观测性：`GET /metrics` 返回 Prometheus 文本，需要 `metrics:read` scope（bootstrap key 的 `*` 可读），包含 `harness_runs{status}`、`harness_runs_queued`、`harness_sandbox_acquisitions_total{warm}`、`harness_http_requests_total{status}` 等。
 
-面试向的架构讲解：`docs/interview-architecture.zh-CN.html`（文字版）与 `docs/interview-architecture-visual.zh-CN.html`（动态图版：全链路数据流动画 + 13 个模块内部流转 + 模块实现速查）。
+面试向的架构讲解：`docs/interview-architecture.zh-CN.html`（文字版）与 `docs/interview-architecture-visual.zh-CN.html`（动态图版：全链路数据流动画 + 13 个模块内部流转 + 模块实现速查 + 虚拟机技术专区（Firecracker / jailer / vsock / 快照 / 磁盘与快照池，面向只有 Docker 基础的人））。
 
 实验室/他人接入前的最小运维：
 

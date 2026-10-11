@@ -162,6 +162,20 @@ g.node.on rect.box{animation:nodepulse 1.7s ease-in-out infinite}
 .stat .v{background:var(--grad);-webkit-background-clip:text;background-clip:text;color:transparent}
 ::selection{background:rgba(79,140,255,.35)}
 
+.vmGrid{display:grid;grid-template-columns:minmax(0,1.28fr) minmax(0,1fr);gap:14px}
+@media(max-width:1000px){.vmGrid{grid-template-columns:1fr}}
+.vmStage{padding:10px;background:radial-gradient(600px 320px at 50% 0%, rgba(20,184,166,.07), transparent 70%)}
+svg.vmSvg{display:block;width:100%;height:auto}
+.vmCap{padding:10px 14px;border-top:1px solid var(--line);font-size:13px;color:var(--tx2)}
+.vmCap b{color:#fff;font-weight:600}
+.analog{display:inline-flex;gap:7px;align-items:center;background:linear-gradient(135deg,rgba(20,184,166,.22),rgba(79,140,255,.16));border:1px solid rgba(20,184,166,.5);border-radius:999px;padding:4px 11px;font-size:11.5px;color:#c8fff4;margin:8px 0 2px}
+.vmWarn{background:rgba(239,68,68,.12);border:1px solid rgba(239,68,68,.45);border-radius:10px;padding:8px 11px;font-size:12px;color:#ffd7d2;margin:8px 0 2px}
+.vmOk{background:rgba(34,197,94,.12);border:1px solid rgba(34,197,94,.42);border-radius:10px;padding:8px 11px;font-size:12px;color:#d6ffe6;margin:8px 0 2px}
+table.glo{width:100%;border-collapse:collapse;font-size:12px}
+table.glo th,table.glo td{text-align:left;padding:7px 9px;border-bottom:1px solid var(--line);vertical-align:top}
+table.glo th{color:var(--tx3);font-weight:500;font-size:11.5px}
+table.glo td.k{color:#cfe0ff;font-family:ui-monospace,Menlo,monospace;white-space:nowrap}
+
 </style>
 </head>
 <body>
@@ -171,6 +185,7 @@ g.node.on rect.box{animation:nodepulse 1.7s ease-in-out infinite}
     <button data-view="v1" class="on">① 全系统数据流</button>
     <button data-view="v2">② 模块内部流转</button>
     <button data-view="v3">③ 模块实现</button>
+    <button data-view="v4">④ 虚拟机技术（Docker 视角）</button>
   </div>
 </header>
 
@@ -220,6 +235,18 @@ g.node.on rect.box{animation:nodepulse 1.7s ease-in-out infinite}
       </div>
     </div>
     <div class="card modBody" id="mDetail"></div>
+  </div>
+</section>
+
+<section id="v4" class="view">
+  <div class="mods" id="vmTabs"></div>
+  <div class="vmGrid">
+    <div class="card">
+      <div class="modHead"><h3 id="vmTitle"></h3><p id="vmSub"></p></div>
+      <div class="vmStage"><svg class="vmSvg" id="vmSvg" viewBox="0 0 940 430" preserveAspectRatio="xMidYMid meet"></svg></div>
+      <div class="vmCap" id="vmCap"></div>
+    </div>
+    <div class="card modBody" id="vmDetail"></div>
   </div>
 </section>
 
@@ -552,8 +579,10 @@ $$('.tabs button').forEach(function(b){
     b.classList.add('on');
     $$('section.view').forEach(function(v){ v.classList.remove('on'); });
     $('#' + b.getAttribute('data-view')).classList.add('on');
-    if (b.getAttribute('data-view') === 'v2') { selectMod(curMod); } else { stopMini(); }
-    if (b.getAttribute('data-view') === 'v3') { renderTimeline(); }
+    var vw = b.getAttribute('data-view');
+    if (vw === 'v2') { selectMod(curMod); } else { stopMini(); }
+    if (vw === 'v3') { renderTimeline(); }
+    if (vw === 'v4') { selectVm(vmIdx); } else { stopVmLoop(); }
   });
 });
 
@@ -1006,6 +1035,201 @@ function renderTimeline(){
   setTimeout(function(){ $$('#tl .fill').forEach(function(f){ f.style.width = f.getAttribute('data-w') + '%'; }); }, 40);
 }
 
+
+/* ---------- ④ 虚拟机技术（Docker 视角） ---------- */
+function vmN(id,x,y,w,h,zone,label,sub,icon){ var o={id:id,x:x,y:y,w:w,h:h,zone:zone,label:label}; if(sub){o.sub=sub;} if(icon){o.icon=icon;} return o; }
+function vmE(id,from,fs,to,ts,label,dash){ var o={id:id,from:from,fromSide:fs,to:to,toSide:ts}; if(label){o.label=label;} if(dash){o.dash=true;} return o; }
+function vmB(x,y,w,h,zone,icon,label){ return {x:x,y:y,w:w,h:h,zone:zone,icon:icon,label:label}; }
+var VM_TOPICS = [
+{id:'compare', icon:'⚖️', title:'Docker 容器 vs microVM：边界到底在哪', sub:'容器共享宿主内核；microVM 每台任务一个 guest 内核',
+ vb:'0 0 940 430', chip:'容器 / VM 对比',
+ spec:{bands:[vmB(20,20,430,250,'ctl','🐳','DOCKER 容器：共享宿主内核'), vmB(490,20,430,250,'vm','📦','MICROVM：每台一个 guest 内核'), vmB(20,290,900,120,'plain','🔎','差别只有一件事：内核是谁的')],
+  nodes:[vmN('c1',50,70,370,46,'ctl','应用进程 / shell','namespace + cgroup 关起来'), vmN('c2',50,140,370,46,'ctl','syscall 直达宿主内核','seccomp / LSM / capabilities 过滤'), vmN('c3',50,210,370,46,'ctl','宿主内核 6.8.0-136','逃逸 = 命中宿主内核漏洞'),
+   vmN('v1',520,70,370,46,'vm','应用进程 + guest agent','VM 内是 root，但只在这台 VM 里'), vmN('v2',520,140,370,46,'vm','guest 内核 4.14.174','独立内核，不碰宿主内核'), vmN('v3',520,210,370,46,'vm','KVM（VT-x / AMD-V）','CPU 硬件虚拟化边界'),
+   vmN('t1',50,320,370,70,'plain','相同点','同一台宿主机 / cgroup 限资源 / 磁盘都在宿主文件系统上'), vmN('t2',520,320,370,70,'plain','不同点','容器共享内核；microVM 越权只到 guest 内部')],
+  edges:[vmE('c1c2','c1','b','c2','t'), vmE('c2c3','c2','b','c3','t'), vmE('v1v2','v1','b','v2','t'), vmE('v2v3','v2','b','v3','t')]},
+ cap:'容器把进程关进一个"房间"，但门锁是宿主内核装的；microVM 给每个任务发一台<b>带自己内核的小电脑</b>，越权最多把这台小电脑弄坏。',
+ analog:'容器 ≈ 共享内核的沙箱；microVM ≈ 每任务一台小电脑',
+ rows:[['我们的默认档','container provider：runsc（gVisor，用户态内核，仍是 syscall 拦截层）'],['我们的严格档','microvm provider：Firecracker + jailer（生产只走这条）'],['为什么 fail-closed','策略守卫要求 provider 如实声明 filesystemIsolation / processIsolation；声明不具备就直接拒绝工具执行'],['真机证据','guest 内 uname -r = 4.14.174，宿主是 6.8.0-136 → 证明命令不在宿主内核里跑']],
+ bullets:['Docker 里你熟的是「镜像层 + 可写层 + namespace」；microVM 里对应的是 rootfs.ext4 + workspace.ext4 + KVM 边界','容器镜像层共享宿主 page cache；microVM 的 rootfs 是块设备，用 reflink 复制，VM 内看不到宿主文件系统','两条路都留着：按 sandbox profile 选，strict profile 只允许 microVM']},
+
+{id:'lifecycle', icon:'⏱️', title:'一次 Run 的虚拟机生命周期：冷启动 vs 快照恢复', sub:'同样的磁盘，两条完全不同的启动路径',
+ vb:'0 0 940 470', chip:'生命周期',
+ spec:{bands:[vmB(20,20,900,130,'ctl','❄️','冷启动（快照池为空）：实测 1477 ms'), vmB(20,160,900,130,'ext','📸','首次 create：冷启动 + 制作快照 = 2866 ms'), vmB(20,300,900,150,'wrk','⚡','快照恢复（热启动）：实测 513 ms')],
+  nodes:[vmN('s1',40,70,140,54,'ctl','reflink 磁盘','rootfs + workspace'), vmN('s2',185,70,140,54,'ctl','spawn firecracker','--api-sock 建 socket'), vmN('s3',330,70,140,54,'ctl','等 socket 就绪','≤1500ms，20ms 轮询'), vmN('s4',475,70,140,54,'ctl','PUT 4 个 API','boot / drives / config'), vmN('s5',620,70,140,54,'ctl','InstanceStart','guest 内核开始启动'), vmN('s6',765,70,140,54,'ctl','guest agent 握手','vsock 连通即 ready'),
+   vmN('f1',40,210,210,54,'ext','/boot-source + /drives','内核 + rootfs + workspace 两块盘'), vmN('f2',265,210,210,54,'ext','/machine-config','vCPU / 内存大小'), vmN('f3',490,210,210,54,'ext','/actions/InstanceStart'), vmN('f4',715,210,210,54,'ext','/snapshot/create','写 vm.snap + mem.snap'),
+   vmN('w1',40,350,210,58,'wrk','reflink 复制磁盘','新 Run 自己的目录'), vmN('w2',265,350,210,58,'wrk','spawn + /snapshot/load','resume_vm 直接恢复内存'), vmN('w3',490,350,210,58,'wrk','vsock_override','把通道指回本次 run 目录'), vmN('w4',715,350,210,58,'wrk','guest agent 握手','约 500ms 内可用')],
+  edges:[vmE('s1s2','s1','r','s2','l'), vmE('s2s3','s2','r','s3','l'), vmE('s3s4','s3','r','s4','l'), vmE('s4s5','s4','r','s5','l'), vmE('s5s6','s5','r','s6','l'),
+   vmE('f1f2','f1','r','f2','l'), vmE('f2f3','f2','r','f3','l'), vmE('f3f4','f3','r','f4','l'),
+   vmE('w1w2','w1','r','w2','l'), vmE('w2w3','w2','r','w3','l'), vmE('w3w4','w3','r','w4','l'),
+   vmE('f4w2','f4','b','w2','t','下次 Run 命中快照池',true)]},
+ cap:'冷启动 = 从零开机（<b>1477 ms</b>，含磁盘复制 + 内核启动 + agent 握手）；第一次跑完顺手拍一张快照（<b>2866 ms</b>）；之后每个 Run 直接<b>恢复内存镜像</b>（<b>513 ms</b>），恢复后一条 guest 命令只要 <b>11.6 ms</b>。',
+ analog:'快照 ≈ docker checkpoint / CRIU，但快照的是整台 VM（内存 + 设备状态）',
+ rows:[['冷启动 median','1477 ms（n=5，p95 1485）'],['首次 create（含制作快照）','2866 ms'],['快照恢复 median','513 ms（n=10，p95 538）→ 比冷启动快约 2.9×'],['恢复后执行一条 guest 命令','median 11.6 ms，p95 12.4 ms'],['并发热恢复墙钟','N=1 595 ms / N=2 611 / N=4 651 / N=8 690 / N=10 766 ms'],['并发冷启动','N=1…10 都在 2855–2967 ms，且 warmHit=0（同批次不会复用刚做出的快照）']],
+ bullets:['快照池按 templateHash 分目录：换内核 / rootfs / agent 版本会自动失效重建','恢复路径没有 boot、没有 init 重启，所以快——代价是快照里冻结了设备路径（见「快照陷阱」）','warmHit 现在是如实上报的：SANDBOX_ACQUIRED 事件里能直接看到这次是冷是热']},
+
+{id:'jailer', icon:'🔒', title:'jailer 模式：连"虚拟机管理程序"一起关起来', sub:'jailer = 给 Firecracker 自己套上 chroot + mount namespace + 专用 UID + cgroup',
+ vb:'0 0 940 470', chip:'jailer 分层',
+ spec:{bands:[vmB(20,20,900,330,'plain','🖥️','宿主 · Ubuntu 22.04 · /dev/kvm'), vmB(60,60,620,270,'brk','🔒','jailer jail：chroot + mount namespace'), vmB(100,150,300,150,'vm','📦','guest microVM（KVM）'), vmB(20,370,900,90,'plain','🔑','为什么生产必须 root 起 Broker')],
+  nodes:[vmN('j1',100,95,540,44,'brk','firecracker 进程（VMM）','在 jail 内以专用 UID/GID 运行'),
+   vmN('g1',120,185,260,48,'vm','你的命令 / 代码','guest 内是 root，但只在这台 VM 里'), vmN('g2',120,245,260,44,'vm','guest 内核 4.14.174'),
+   vmN('r1',710,60,190,58,'ctl','专用 UID/GID','降权运行，不是宿主 root'), vmN('r2',710,140,190,58,'ctl','cgroup v2','cpu.max / memory.max'), vmN('r3',710,220,190,58,'ctl','bind mount 白名单','只挂内核、两块盘、api.sock'),
+   vmN('b1',50,395,840,50,'plain','API socket 建在 jail 的 mount namespace 里 → 宿主非 root 进程连不上','所以只有 Broker（root）能操作沙箱，Master/Worker 都是非特权')],
+  edges:[vmE('j1r1','j1','r','r1','l'), vmE('j1r2','j1','r','r2','l',null,true), vmE('j1r3','j1','r','r3','l',null,true), vmE('j1g1','j1','b','g1','t')]},
+ cap:'非 jailer 时，Firecracker 就是个普通宿主进程，出问题直接落在宿主上；jailer 把它<b>关进自己的 chroot + 命名空间 + 降权 UID + cgroup</b>，于是有两层防护：jailer 管住 VMM，KVM 管住 guest。',
+ analog:'jailer ≈ Docker 的 namespace + cgroup + userns-remap + 只读挂载，但作用对象是 VMM 进程',
+ rows:[['非 jailer','Firecracker 以当前用户跑；无 chroot / 无 mount namespace / 无降权 / 无 cgroup；部署门槛低（在 kvm 组即可）'],['jailer','专用 UID/GID、chroot、独立 mount namespace、cgroup v2（cpu.max / memory.max）；快照路径安全'],['代价','整个 Harness 需要 root（API socket 在 jail 的命名空间里）'],['我们线上怎么跑','Broker 以 root 常驻（systemd），Master 以 cxr、Worker 以 harness-worker(998) 非特权']],
+ bullets:['安全上的意义：Firecracker 自身只有约 5 万行 Rust、设备面极小，但它仍是宿主进程；jailer 是它的第二道笼子','jailer 不是功能前提（非 jailer 也能跑 VM），但生产 / 多租户 / 快照场景必须开','开发也可以在 Linux+KVM 上用 jailer；只有 macOS 无 KVM 时才退回 Mock 或 managed-local']},
+
+{id:'snaptrap', icon:'🕳️', title:'快照陷阱：为什么"快照必须配 jailer"', sub:'一次真机事故：非 jailer + 快照导致多台恢复 VM 共用同一块工作区磁盘',
+ vb:'0 0 940 470', chip:'快照路径固化',
+ spec:{bands:[vmB(20,20,440,300,'vm','❌','非 jailer + 快照（危险组合）'), vmB(480,20,440,300,'wrk','✅','jailer + 快照（生产唯一安全组合）'), vmB(20,340,900,120,'plain','🛡️','构造期就拦下，不允许"先跑起来再说"')],
+  nodes:[vmN('l1',45,60,390,48,'vm','黄金 VM 制作 vm.snap','快照里固化的是宿主绝对路径'), vmN('l2',45,135,390,48,'vm','tenant-01 恢复 VM'), vmN('l3',45,200,390,48,'vm','tenant-02 恢复 VM'), vmN('l4',45,262,390,48,'vm','两块 VM 指向同一个 workspace.ext4','跨租户串写 · 产物导出为空'),
+   vmN('r1',505,60,390,48,'wrk','黄金 VM 制作 vm.snap','chroot 内路径恒为 /workspace.ext4'), vmN('r2',505,135,390,48,'wrk','tenant-01 恢复 VM'), vmN('r3',505,200,390,48,'wrk','tenant-02 恢复 VM'), vmN('r4',505,262,390,48,'wrk','各自 jail 内各挂自己的盘','隔离成立 · 产物可正常导出'),
+   vmN('b1',50,365,840,66,'plain','驱动构造期门禁：snapshotsEnabled 且 useJailer=false → 直接抛错','原因：Firecracker /snapshot/load 只支持 snapshot_path / mem_file_path / enable_diff_snapshots / resume_vm / vsock_override，无法覆盖块设备路径')],
+  edges:[vmE('l1l2','l1','b','l2','t'), vmE('l1l3','l1','b','l3','t',null,true), vmE('l2l4','l2','b','l4','t'), vmE('l3l4','l3','b','l4','t'),
+   vmE('r1r2','r1','b','r2','t'), vmE('r1r3','r1','b','r3','t',null,true), vmE('r2r4','r2','b','r4','t'), vmE('r3r4','r3','b','r4','t')]},
+ cap:'快照会把"磁盘在宿主上的绝对路径"一起冻结。非 jailer 时每条 Run 的路径都带自己的 sandboxId，于是恢复出来的 VM 全都指向<b>黄金 VM 那块盘</b>；jailer 的 chroot 里路径永远叫 <b>/workspace.ext4</b>，每台各自挂载，才安全。',
+ analog:'像把 docker run -v /abs/path 的绝对路径写进了镜像',
+ warn:'真机现象：第二轮快照恢复 10 并发时，启动很快（P95 313 ms），但「产物导出到各自宿主工作区」0/10 通过 —— 因为产物都写进了黄金 VM 的那块盘。',
+ rows:[['修复方式','构造函数里加门禁（fail-closed）：非 jailer + snapshots=true 直接抛错，提示改用 HARNESS_USE_JAILER=true 或关闭快照'],['回归测试','microvm-snapshot-mode-guard.test.ts：非 jailer+快照必抛错、非 jailer 关快照可构造、jailer+快照可构造'],['文档','docs/microvm-live-validation.md §3.1.1 与 .env.example 都写明「快照加速必须搭配 jailer」'],['真机复验','非 jailer 开快照：启动即报错（fail-closed）；jailer+快照两轮 24/24 通过，恢复 P95 437 ms']],
+ bullets:['教训：快照不是"更快的冷启动"，它是"把设备路径也一起冻住"的机制，必须让路径在恢复后仍然唯一','这类问题的可怕之处在于：VM 能起来、命令能跑、只有隔离和产物是错的 —— 所以要用跨租户检查项去抓']},
+
+{id:'disks', icon:'💽', title:'磁盘与快照池：VM 的文件都从哪来', sub:'rootfs.ext4 / workspace.ext4 / run 目录 / 快照池，一张图看清',
+ vb:'0 0 940 470', chip:'磁盘布局',
+ spec:{bands:[vmB(20,20,290,220,'plain','🧱','模板（只读）'), vmB(330,20,320,220,'ctl','📁','每 Run 一个目录（mode 0700）'), vmB(670,20,250,220,'ext','📸','快照池'), vmB(20,260,900,190,'sto','🔄','宿主工作区 ↔ VM 工作区磁盘')],
+  nodes:[vmN('t1',40,60,250,48,'plain','vmlinux（guest 内核）','4.14.174'), vmN('t2',40,120,250,48,'plain','rootfs.ext4 256 MB','基础系统 + guest agent'), vmN('t3',40,180,250,48,'plain','workspace-template.ext4 128 MB','空 ext4，只有 lost+found'),
+   vmN('d1',350,60,280,48,'ctl','<sandboxId>/','runtimeRoot 下，run 结束删除'), vmN('d2',350,120,280,48,'ctl','rootfs.ext4（reflink 复制）'), vmN('d3',350,180,280,48,'ctl','workspace.ext4（reflink 复制）'),
+   vmN('p1',690,60,210,48,'ext','vm.snap + mem.snap'), vmN('p2',690,120,210,108,'ext','templateHash 目录','sha256(内核 + rootfs 元数据 + agent 版本)'),
+   vmN('w1',50,300,400,60,'sto','run 开始：reflink 复制模板','写时复制，不整块拷数据，所以快'), vmN('w2',490,300,400,60,'sto','run 结束：导出 workspace 磁盘','guest 内 /workspace → 宿主工作区目录，供 diff / artifact'),
+   vmN('w3',50,380,840,54,'plain','清理：孤儿 reaper 扫 vm-runtime；harness-ops cleanup 可清快照池','已知缺口：快照池没有 LRU / 容量上限，需要运维脚本兜')],
+  edges:[vmE('t2d2','t2','r','d2','l','reflink'), vmE('t3d3','t3','r','d3','l','reflink'), vmE('d2p1','d2','r','p1','l','/snapshot/create',true), vmE('p2d2','p2','l','d2','r','命中即恢复',true), vmE('w1w2','w1','r','w2','l','Run 生命周期')]},
+ cap:'一次 Run 会得到自己的目录：两块盘都是 reflink 复制（写时复制，秒级）；VM 里的 <b>/workspace</b> 就是 workspace.ext4，Run 结束时整块盘导出回宿主工作区，这样才能算 diff、收 artifact。',
+ analog:'rootfs.ext4 ≈ 只读镜像层；workspace.ext4 ≈ 可写层，但它是独立块设备并且要回写宿主',
+ rows:[['模板','/home/cxr/microvm-test/images/rootfs.ext4（256 MB）、workspace-template.ext4（128 MB）、bin/vmlinux'],['每 Run 目录','<runtimeRoot>/<sandboxId>/{rootfs.ext4, workspace.ext4, firecracker.socket}；目录名校验 ^[a-zA-Z0-9-]{1,64}$'],['快照池','<poolDir>/<templateHash>/{vm.snap, mem.snap}；线上放 /data/harness/snapshots-mt'],['数据根','线上用 /data（2.5T 可用），不用根盘（3.5T 已用 97%）']],
+ bullets:['为什么用块设备而不是目录挂载：VM 需要真正的"一块盘"，宿主只通过导出/回写这一条窄通道与 VM 交换文件','模板一旦改动（换内核 / rootfs / agent 版本），templateHash 变化，旧快照自动不再被使用','孤儿 reaper 与 run 目录清理保证异常退出也不留垃圾（实测终止后 0 进程 / 0 残留目录）']},
+
+{id:'vsock', icon:'🔌', title:'通信：没有网卡，VM 怎么和宿主说话', sub:'只有 virtio-vsock：一条 host↔guest 的点对点通道，没有 IP 栈',
+ vb:'0 0 940 430', chip:'vsock 通道',
+ spec:{bands:[vmB(20,20,380,250,'ctl','🖥️','宿主：Broker + vsock bridge'), vmB(540,20,380,250,'vm','📦','guest microVM（没有网卡）'), vmB(20,300,900,110,'plain','🚫','为什么 Agent 拿不到网络')],
+  nodes:[vmN('h1',45,70,330,52,'ctl','Broker.execute 收到命令','capability token + tenantId 校验'), vmN('h2',45,140,330,52,'ctl','firecracker-vsock-bridge','宿主侧唯一的通道'), vmN('h3',45,210,330,48,'ctl','帧协议（JSON + base64 分块）','exec / exec_output / exec_result'),
+   vmN('g1',565,70,330,52,'vm','guest agent','VM 内唯一的常驻服务'), vmN('g2',565,140,330,52,'vm','fork / exec 子进程','就是 bash / python / 你的代码'), vmN('g3',565,210,330,48,'vm','stdout / stderr 分块回传','base64 编码，逐块送'),
+   vmN('x1',50,330,400,64,'plain','guest 里没有 IP 栈','virtio-vsock 是点对点通道，不经过网络协议栈'), vmN('x2',500,330,400,64,'plain','没有 NIC = 没有 egress','即使命令里 curl 公网也没有网络设备可用')],
+  edges:[vmE('h1h2','h1','b','h2','t'), vmE('h2h3','h2','b','h3','t'), vmE('h2g1','h2','r','g1','l','exec 帧（vsock 端口）'), vmE('g1g2','g1','b','g2','t'), vmE('g2g3','g2','b','g3','t'), vmE('g3h3','g3','l','h3','r','exec_output / exec_result')]},
+ cap:'宿主与 guest 之间只有一条 vsock 通道，没有网络。命令走帧协议进去，输出分块回传，宿主侧按 <b>maxOutputBytes</b> 硬截断（超限标 truncated）——因为 guest 是不可信面，不能靠它自觉。',
+ analog:'vsock ≈ docker exec 的通道，但没有网络栈，也没有 IP',
+ rows:[['为什么用 vsock','不用配网络、不引入 IP 栈、没有路由/防火墙就能连；Firecracker 原生支持 virtio-vsock'],['宿主侧截断','F4 修复：宿主按 maxOutputBytes 截断并置 truncated: true，不再信任 guest 自我截断'],['与工具策略的关系','工具执行必须走 SANDBOX 边界；provider 声明不具备隔离能力时直接拒绝（fail-closed）'],['输出上限与配额','workspace 快照 maxFiles / maxDepth、每 Run artifact maxFiles / maxTotalBytes']],
+ bullets:['安全收益：Agent 没有网络权限，所以模型只能通过平台自己的模型调用出去，命令层面无法外联','代价：guest 内也不能自己下依赖，镜像里有什么就用什么（对我们这种任务型 Agent 够用）']},
+
+{id:'toolrun', icon:'🧰', title:'一次工具执行在 VM 里到底发生了什么', sub:'从工具网关到 guest 子进程，再回到记账与审计',
+ vb:'0 0 940 470', chip:'工具执行时序',
+ spec:{bands:[vmB(20,20,900,150,'ctl','🛡️','宿主侧（可信控制面 + Broker）'), vmB(20,190,900,150,'vm','📦','guest 侧（不可信执行面）'), vmB(20,360,900,90,'sto','🗄️','记账 / 审计 / 产物')],
+  nodes:[vmN('s1',45,60,200,60,'ctl','ToolGateway.prepare','副作用先记账（PREPARED）'), vmN('s2',270,60,200,60,'ctl','策略判定（工具效果）','READ_ONLY / UNKNOWN_EFFECT'), vmN('s3',495,60,200,60,'ctl','Broker.execute','capability token + tenantId'), vmN('s4',720,60,200,60,'ctl','vsock 发帧','exec + maxOutputBytes'),
+   vmN('g1',45,230,200,60,'vm','guest agent','VM 内是 root'), vmN('g2',270,230,200,60,'vm','fork / exec uname -r','实测 median 11.6 ms'), vmN('g3',495,230,200,60,'vm','stdout 分块 base64'), vmN('g4',720,230,200,60,'vm','宿主聚合 + 硬截断','超限置 truncated: true'),
+   vmN('b1',45,390,280,48,'sto','tool_executions SUCCEEDED','记账闭合，可审计'), vmN('b2',330,390,280,48,'sto','run_events + checkpoint','可恢复 / 可重放判定'), vmN('b3',615,390,280,48,'sto','artifact 导出 + RUN_ARTIFACTS_READY')],
+  edges:[vmE('s1s2','s1','r','s2','l'), vmE('s2s3','s2','r','s3','l'), vmE('s3s4','s3','r','s4','l'), vmE('s4g1','s4','b','g1','t','exec 帧'), vmE('g1g2','g1','r','g2','l'), vmE('g2g3','g2','r','g3','l'), vmE('g3g4','g3','r','g4','l'), vmE('g4b1','g4','b','b1','t','exec_result'), vmE('b1b2','b1','r','b2','l'), vmE('b2b3','b2','r','b3','l')]},
+ cap:'顺序是"<b>先记账、再执行</b>"：工具网关先落 PREPARED，再由 Broker 把命令送进 VM；输出回来后才闭合记账并落事件与产物。这样崩溃时平台知道"这一步可能已经发生了"。',
+ analog:'≈ 在容器里 docker exec，但执行前先写一条 WAL',
+ rows:[['工具效果分类','READ_ONLY（可自动重放）/ IDEMPOTENT_WRITE / UNKNOWN_EFFECT（需人工确认）'],['可自动重放的条件','canAutomaticallyReplay(status, effect)：只有 PREPARED + READ_ONLY 返回 true，其余 fail-closed'],['中断与超时','SupervisedAgentRuntime：executionTimeoutMs → 优雅中断 → 宽限期后 SIGKILL → terminate'],['真机证据','TOOL_STARTED → TOOL_COMPLETED 4.14.174；中断后无 firecracker / jailer / worker 残留']],
+ bullets:['这一层是"可解释、可审计、可恢复"的关键：模型想干什么、平台允不允许、实际执行了什么、结果如何，四件事都在事件流里','UNKNOWN_EFFECT 的工具在崩溃恢复时不会被自动重放，会转成人工复核']},
+
+{id:'recycle', icon:'🧹', title:'回收与兜底：异常退出也不留垃圾', sub:'terminate 的正常路径 + 三类兜底机制',
+ vb:'0 0 940 470', chip:'回收兜底',
+ spec:{bands:[vmB(20,20,900,170,'wrk','🧹','正常回收：Run 结束（含中断 / 失败）'), vmB(20,210,900,240,'plain','🛟','兜底：宿主崩了、进程被杀、并发抢快照')],
+  nodes:[vmN('r1',45,60,200,64,'wrk','sandbox.terminate','在 finally 里一定执行'), vmN('r2',270,60,200,64,'wrk','杀 firecracker 进程','jailer 模式同时释放 cgroup'), vmN('r3',495,60,200,64,'wrk','导出 workspace 磁盘','→ 宿主工作区（diff / artifact）'), vmN('r4',720,60,200,64,'wrk','删 run 目录','runtimeRoot/<sandboxId>'),
+   vmN('o1',45,250,270,64,'plain','孤儿 reaper','启动 / 定时扫 vm-runtime，回收残留目录与进程'), vmN('o2',335,250,270,64,'plain','快照池按 templateHash 失效','换内核 / rootfs / agent 版本即自动重建'), vmN('o3',625,250,270,64,'plain','并发冷启动 warmHit=0','同批次不会复用刚做出的快照（实测发现）'),
+   vmN('o4',45,340,850,64,'plain','实测：终止后 0 个 firecracker 进程 / 0 个残留目录；jailer + 快照第二轮恢复 P95 437 ms','中断 Run 后同样无残留；vm-runtime 为空')],
+  edges:[vmE('r1r2','r1','r','r2','l'), vmE('r2r3','r2','r','r3','l'), vmE('r3r4','r3','r','r4','l')]},
+ cap:'回收是"<b>finally 里一定执行</b>"的：先杀进程、释放 cgroup，再把 VM 里的工作区磁盘导出回宿主，最后删目录；万一宿主或进程异常，还有孤儿 reaper 与快照池失效机制兜底。',
+ analog:'≈ 容器停止 + 卷导出 + 目录清理，但多了快照池的版本失效',
+ rows:[['终止动作','sandbox.terminate → 杀进程 → 释放 cgroup → 导出 workspace 磁盘 → 删 run 目录'],['孤儿兜底','vm-orphan-reaper.ts 扫 vm-runtime，回收宿主重启 / 崩溃遗留的目录与进程'],['快照兜底','templateHash 变化即失效；harness-ops cleanup 可清理快照池与旧 artifact'],['已知缺口','快照池没有 LRU / 容量上限（个人项目可接受，靠运维脚本兜）']],
+ bullets:['为什么必须"导出"：VM 的 /workspace 是块设备，不导出宿主就看不到产物，diff 与 artifact 都依赖这一步','终止动作失败不会吞掉：走 onError 记录，reaper 下一轮继续收']},
+
+{id:'glossary', icon:'📖', title:'名词速查表（拿 Docker 类比）', sub:'这一节出现的所有虚拟机名词，一句话对应到 Docker 世界',
+ vb:'0 0 940 470', chip:'名词对照',
+ spec:null,
+ cap:'左表可以当成"看不懂某张图时回来查"的字典；右边是三条最常被问到的差异。',
+ analog:'整节的速查入口',
+ table:[['名词','一句话解释','Docker 类比'],
+  ['Firecracker','AWS 开源的 VMM（虚拟机监视器），约 5 万行 Rust，设备面极小','runc / containerd-shim 的角色，但它启动的是一台 VM'],
+  ['jailer','把 Firecracker 关进 chroot + mount namespace + 专用 UID/GID + cgroup 的启动器','namespace + cgroup + userns-remap + 只读挂载，但作用对象是 VMM'],
+  ['rootfs.ext4','VM 的系统盘（256 MB），reflink 自模板','只读镜像层，但它是块设备'],
+  ['workspace.ext4','VM 的工作区盘（128 MB），挂到 guest 的 /workspace，Run 结束导出回宿主','可写层，但要回写宿主才能看到文件'],
+  ['vmlinux','guest 内核镜像（4.14.174）','镜像里的内核？不 —— 容器根本不带内核'],
+  ['vsock','宿主↔guest 的点对点通道（virtio-vsock），没有 IP 栈','docker exec 的通道，但没有网络'],
+  ['guest agent','VM 内的常驻服务：收命令、fork/exec、回传输出','容器里的 exec 服务'],
+  ['快照（vm.snap / mem.snap）','整机状态：内存镜像 + 设备状态，恢复即续跑','docker checkpoint / CRIO，但快照整台 VM'],
+  ['templateHash','内核 + rootfs 大小/mtime + agent 版本的 sha256，快照池的目录名','镜像 digest'],
+  ['capability token','Broker 发给某次执行的短期令牌，绑定 sandbox + tenant','类似短期 scoped token，替代"谁能连 docker.sock"'],
+  ['SO_PEERCRED','Unix socket 对端凭据（pid/uid/gid），Broker 用它做连接级白名单','类似 Docker socket 的组权限，但更细']],
+ bullets:['容器共享内核 → 逃逸面是宿主内核；microVM 有独立内核 → 逃逸面是那台 VM','容器没有"启动时间"概念（进程即起）；microVM 要开机（冷 1477 ms / 快照 513 ms）','容器磁盘是目录挂载；microVM 磁盘是块设备，必须靠导出通道与宿主交换文件']}
+];
+
+
+/* ---------- ④ 渲染 ---------- */
+var vmIdx = 0, vmD = null, vmRaf = 0, vmT0 = 0;
+function vmTableDiv(){
+  var st = document.querySelector('#v4 .vmStage');
+  var d = document.getElementById('vmTable');
+  if (d === null) { d = document.createElement('div'); d.id = 'vmTable'; d.style.padding = '4px 6px'; st.appendChild(d); }
+  return d;
+}
+function renderVmTabs(){
+  var box = $('#vmTabs'); box.innerHTML = '';
+  VM_TOPICS.forEach(function(t, i){
+    var b = document.createElement('button');
+    b.innerHTML = t.icon + ' ' + t.title.split('：')[0];
+    b.addEventListener('click', function(){ selectVm(i); });
+    box.appendChild(b);
+  });
+}
+function selectVm(i){
+  vmIdx = i;
+  var t = VM_TOPICS[i];
+  $$('#vmTabs button').forEach(function(b, k){ b.classList.toggle('on', k === i); });
+  $('#vmTitle').textContent = t.icon + ' ' + t.title;
+  $('#vmSub').textContent = t.sub;
+  $('#vmCap').innerHTML = t.cap;
+  var svg = $('#vmSvg');
+  var td = document.getElementById('vmTable');
+  if (t.spec === null) {
+    svg.style.display = 'none';
+    stopVmLoop();
+    var d = vmTableDiv(); d.style.display = 'block';
+    var th = '<table class="glo"><tr>';
+    t.table[0].forEach(function(h){ th += '<th>' + h + '</th>'; });
+    th += '</tr>';
+    for (var r = 1; r < t.table.length; r++) {
+      th += '<tr><td class="k">' + t.table[r][0] + '</td><td>' + t.table[r][1] + '</td><td>' + t.table[r][2] + '</td></tr>';
+    }
+    d.innerHTML = th + '</table>';
+  } else {
+    svg.style.display = 'block';
+    if (td) { td.style.display = 'none'; }
+    svg.setAttribute('viewBox', t.vb);
+    vmD = buildDiagram(svg, t.spec, {});
+    vmT0 = performance.now();
+    stopVmLoop();
+    vmLoop();
+  }
+  var html = '';
+  if (t.analog) { html += '<div class="analog">🧩 ' + t.analog + '</div>'; }
+  if (t.warn) { html += '<div class="vmWarn">⚠️ ' + t.warn + '</div>'; }
+  if (t.ok) { html += '<div class="vmOk">✅ ' + t.ok + '</div>'; }
+  html += '<h5 style="color:#e8eeff;font-size:12px;margin:12px 0 4px">关键事实</h5><dl class="kv">';
+  t.rows.forEach(function(r){ html += '<dt>' + r[0] + '</dt><dd>' + r[1] + '</dd>'; });
+  html += '</dl><h5 style="color:#e8eeff;font-size:12px;margin:12px 0 4px">补充说明</h5><ul>';
+  t.bullets.forEach(function(b){ html += '<li>' + b + '</li>'; });
+  html += '</ul>';
+  $('#vmDetail').innerHTML = html;
+}
+function vmLoop(){
+  if (vmD === null) { return; }
+  animatePackets(vmD, Object.keys(vmD.edges), vmT0, VM_TOPICS[vmIdx].chip);
+  vmRaf = requestAnimationFrame(vmLoop);
+}
+function stopVmLoop(){ if (vmRaf) { cancelAnimationFrame(vmRaf); vmRaf = 0; } }
+
 /* ---------- 启动 ---------- */
 goTo(0);
 $('#detail').innerHTML = '<h4>点击图中任意节点</h4><div class="path mono">或点左侧步骤，查看该模块的职责 / 输入输出 / 读写表 / 关键取舍</div><ul><li>按 <kbd>空格</kbd> 播放或暂停</li><li>按 <kbd>←</kbd> <kbd>→</kbd> 单步推进</li><li>点节点会把动画暂停在该模块</li></ul>';
@@ -1015,11 +1239,23 @@ stopMini();
 renderDomains();
 renderStats();
 renderCards();
+renderVmTabs();
+selectVm(0);
 loop();
 play();
-var hv = (location.hash || '').replace('#', '');
-if (hv === 'v2' || hv === 'v3') { var hb = document.querySelector('.tabs button[data-view="' + hv + '"]'); if (hb) { hb.click(); } }
-window.addEventListener('hashchange', function(){ var h2 = (location.hash || '').replace('#', ''); var b2 = document.querySelector('.tabs button[data-view="' + h2 + '"]'); if (b2) { b2.click(); } });
+function applyHash(){
+  var hp = (location.hash || '').replace('#', '').split('-');
+  var base = hp[0];
+  var idx = parseInt(hp[1], 10);
+  if (base === 'v1' || base === 'v2' || base === 'v3' || base === 'v4') {
+    var b = document.querySelector('.tabs button[data-view="' + base + '"]');
+    if (b) { b.click(); }
+  }
+  if (base === 'v2' && idx >= 0) { selectMod(idx); }
+  if (base === 'v4' && idx >= 0) { selectVm(idx); }
+}
+applyHash();
+window.addEventListener('hashchange', applyHash);
 
 </script>
 </body>
