@@ -268,3 +268,22 @@ HTTP API ──> Master (调度/审计/策略/LLM网关)
   - 真机 172.17.43.193 验证：master 重启后 migration v2 生效；`scripts/p0-e2e-smoke.ts` 通过 `P0_E2E_SMOKE_OK label=f6a94cd4`（serial maxActive=1、concurrent maxActive=2 overlap=true、跨租户 404）。`bun run scripts/audit-chain-smoke.ts` 输出 `AUDIT_CHAIN_SMOKE_OK`（updateRejected=true、deleteRejected=true、tamperDetected=true）；对 live `data/live-full-flow/harness.sqlite` 运行 `bun run scripts/audit-chain-smoke.ts --database data/live-full-flow/harness.sqlite` 输出 `{"ok":true,"checked":95,"legacy":1591}` 与 `AUDIT_CHAIN_VERIFY_OK`。直连 live 库探针确认触发器 `access_audit_events_no_update`/`access_audit_events_no_delete` 存在，`UPDATE`/`DELETE` 分别被拒绝为 `access_audit_events 是只追加审计存储，禁止 UPDATE` / `...禁止 DELETE`。
   - 5) 租户成本账单：已实现。新增 `src/billing/tenant-billing.ts`：`TenantBillingStore.summarize(tenantId)` 只读聚合 `run_events`（`MODEL_COMPLETED` 的 `usage.inputTokens`/`outputTokens`/`totalTokens`/`cost.total`）、`sandboxes`（`TERMINATED`/`LOST`/`FAILED` 的 `julianday` 时长）与 `tool_executions`（`SUCCEEDED`/`FAILED` 计数），默认金额等于 Provider 上报成本，不凭空定价；平台可用 `HARNESS_BILLING_CURRENCY`、`HARNESS_BILLING_MODEL_INPUT_PER_MTOK`、`HARNESS_BILLING_MODEL_OUTPUT_PER_MTOK`、`HARNESS_BILLING_SANDBOX_SECOND`、`HARNESS_BILLING_TOOL_CALL` 叠加 token/沙箱秒/工具调用费用。`GET /billing` 要求 `billing:read`，按 Principal Tenant 收口，未装配时返回 501。`tests/billing/tenant-billing.test.ts` 覆盖租户隔离、金额、token 单价、空租户与非法环境变量；`tests/http/tenant-boundary.test.ts` 覆盖 `GET /billing` 的租户收口与 scope 拒绝；`scripts/tenant-billing-smoke.ts` 支持内存自检与 `--database <path> [--tenant <id>]` 校验真实库。
   - 真机 172.17.43.193 验证：master 重启 pid 2202461；`bun run scripts/tenant-billing-smoke.ts` 输出 `TENANT_BILLING_SMOKE_OK`；`bun run scripts/tenant-billing-smoke.ts --database data/live-full-flow/harness.sqlite` 输出前 5 个租户账单（providerCost 0.00036~0.00068、sandboxSeconds 8.635~287.65、toolCalls 2）与 `TENANT_BILLING_VERIFY_OK`；`curl -H "Authorization: Bearer live-flow-key-2026" http://127.0.0.1:3100/billing` 返回 200 与 `tenantId=bootstrap` 账单；`scripts/p0-e2e-smoke.ts` 通过 `P0_E2E_SMOKE_OK label=00453468`（serial maxActive=1、concurrent maxActive=2 overlap=true、跨租户 404）。
+
+### 9.8 解冻决策：v1.4（2026-10-11）
+
+- 决策：用户要求把项目从“可运行的个人 Agent 平台”推进到“面试可讲的生产级 Agent 基础设施”，并明确 12 项 agent infra 的取舍：
+  - 做：8 Sandbox 与执行环境（项目核心，继续深化）；3 任务队列与 Worker；5 Durable Execution；6 Retry/Timeout/幂等；9 工具基础设施与 MCP。
+  - 不做：1 Agent Runtime（Pi Agent 已提供）；2 上下文与状态管理（Pi Agent 已提供）；4 多 Agent 编排；7 分布式状态与一致性；10 权限/安全/Secrets（已有）；12 Evaluation 与 Replay。
+  - 11 可观测性不作为独立方向，但降级为 3/5/6 的验证工具：最小 `/metrics`、结构化日志与 traceId，用于证明 lease/recovery/retry 生效。
+- 理由：项目已具备 microVM/jailer/快照、Broker capability token + SO_PEERCRED、systemd worker + seccomp/Landlock、egress ACL、审计 hash 链、限流、单机部署等基础；继续补队列/持久执行/重试/MCP，能让面试叙事从“会写 sandbox”扩展到“会做生产级 Agent 基础设施”。不做 1/2 是因为 Pi Agent 已提供，重复造轮子收益低；不做 4/7/12 是因为单机个人项目没有分布式/评测的规模与需求。
+- 边界影响：上述 3/5/6/8/9 与“最小可观测性”不再按 §9.3 默认拒绝；§9.3 其余条目仍默认不做。
+- 验收要求：每一项必须有单元/集成测试；涉及真机能力的（队列/恢复/重试/MCP）需在 172.17.43.193 留下验证记录；未完成前该项仍视为暂缓。
+- 代码引用：涉及代码/文档变更必须在提交信息或注释中引用“§9.8 v1.4”。
+- 实施顺序：
+  - Phase 1：8 的生产级 benchmark（`scripts/vm-lifecycle-benchmark.ts` + `docs/vm-lifecycle-benchmark.zh-CN.md`）+ 最小 `/metrics`；
+  - Phase 2：3 的 lease/heartbeat/优先级/backpressure；
+  - Phase 3：5 的崩溃恢复 + 6 的 retry/backoff/Run 幂等键 + artifact 一致性窗口；
+  - Phase 4：9 的 MCP 接入。
+- 进度（2026-10-11）：
+  - Phase 1 VM benchmark 已完成：真机 172.17.43.193（jailer + Firecracker v1.17.0）冷启动 median 1477ms、快照热恢复 median 513ms、10 并发热恢复墙钟 766ms；同时修复 `warmHit` 恒 false 的可观测性缺陷（`src/sandbox/microvm/*`）。本地 `bun test ./tests` = 533 pass / 7 skip / 0 fail，typecheck 保持既有 9 条基线错误。
+  - 提交：`aab6b10`（warmHit + VM benchmark）、`5b3b83c`（并发矩阵脚本）。
