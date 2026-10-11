@@ -178,6 +178,8 @@ export class MicrovmSandboxProvider implements SandboxProvider, SandboxCommandEx
 
         this.workspacePaths.set(input.id, input.workspacePath);
 
+        let warmHit = false;
+
         try {
             const cpuCores = input.policy.resourceLimits.cpuCores ?? 2;
             const memoryMb = input.policy.resourceLimits.memoryMiB ?? 256;
@@ -191,6 +193,7 @@ export class MicrovmSandboxProvider implements SandboxProvider, SandboxCommandEx
                 environment: resolvedSecrets,
             });
             this.instanceIds.set(input.id, instance.id);
+            warmHit = instance.warmHit ?? false;
 
             // P1 修复：以驱动回传的真实磁盘路径登记导出源；
             // 硬件隔离驱动必须回传，否则拒绝（防止静默导出空盘）。
@@ -251,7 +254,7 @@ export class MicrovmSandboxProvider implements SandboxProvider, SandboxCommandEx
             },
             acquisition: {
                 durationMs: Math.round(performance.now() - acquisitionStartedAt),
-                warmHit: false,
+                warmHit,
             },
         };
     }

@@ -27,6 +27,7 @@ export class MockMicrovmDriver implements MicrovmDriver {
 
     private customHandler?: MockExecutionHandler;
     private available = true;
+    private warmHit = false;
 
     setAvailable(available: boolean): void {
         this.available = available;
@@ -34,6 +35,11 @@ export class MockMicrovmDriver implements MicrovmDriver {
 
     setExecutionHandler(handler: MockExecutionHandler): void {
         this.customHandler = handler;
+    }
+
+    /** 测试用：模拟本次 create 命中快照恢复。 */
+    setWarmHit(warmHit: boolean): void {
+        this.warmHit = warmHit;
     }
 
     async isAvailable(): Promise<boolean> {
@@ -62,6 +68,7 @@ export class MockMicrovmDriver implements MicrovmDriver {
             guestCid: 3,
             ipAddress: instance.ipAddress,
             workspacePath: instance.workspacePath,
+            warmHit: this.warmHit,
             createdAt: instance.createdAt,
         };
     }

@@ -308,3 +308,29 @@ test("产品边界：allowNetwork=true 一律被拒绝（MicroVM 不提供网卡
     expect(store.get("sbx-net-rejected")).toBeNull();
     expect(store.listActive()).toHaveLength(0);
 });
+
+
+test("MicrovmSandboxProvider 如实回传 warmHit（冷启动 false / 快照恢复 true）", async () => {
+    const store = new MemorySandboxStore();
+    const mockDriver = new MockMicrovmDriver();
+    const provider = new MicrovmSandboxProvider(store as unknown as SandboxStore, mockSecrets, {
+        driver: mockDriver,
+    });
+
+    const cold = await provider.create({
+        id: "sbx-cold-warm-flag",
+        runId: "run-cold-warm-flag",
+        workspacePath: "/workspace",
+        policy: strictPolicy(),
+    });
+    expect(cold.acquisition?.warmHit).toBe(false);
+
+    mockDriver.setWarmHit(true);
+    const warm = await provider.create({
+        id: "sbx-warm-flag",
+        runId: "run-warm-flag",
+        workspacePath: "/workspace",
+        policy: strictPolicy(),
+    });
+    expect(warm.acquisition?.warmHit).toBe(true);
+});

@@ -737,6 +737,7 @@ export class FirecrackerSandboxDriver implements MicrovmDriver {
                 guestCid,
                 workspacePath: options.workspacePath,
                 workspaceDiskHostPath,
+                warmHit: canRestore,
                 createdAt: new Date().toISOString(),
             };
         } catch (error) {

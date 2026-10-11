@@ -27,6 +27,11 @@ export interface MicrovmInstance {
      */
     readonly workspaceDiskHostPath?: string;
     readonly createdAt: string;
+    /**
+     * 本次 create 是否命中快照快速恢复路径（warm restore）。
+     * 由驱动如实回传；Provider 写入 acquisition 供审计/可观测性使用。
+     */
+    readonly warmHit?: boolean;
 }
 
 export interface MicrovmCreateOptions {
