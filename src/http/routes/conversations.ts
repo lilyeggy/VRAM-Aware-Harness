@@ -104,12 +104,11 @@ function createConversationResponse(
     workspaceId: string,
     title: string | null,
 ): Response {
-    const createConversation = ctx.application.createConversation;
-    if (createConversation === undefined) {
+    if (ctx.application.createConversation === undefined) {
         throw new HttpError(501, "对话服务未启用");
     }
     return jsonResponse({
-        conversation: createConversation({
+        conversation: ctx.application.createConversation({
             tenantId,
             workspaceId,
             ...(title == null ? {} : { title }),

@@ -173,3 +173,42 @@ test("显式指定工作区仍走归属校验，拿不到别人的工作区", as
     // 失败的请求不应该偷偷再建一个工作区
     expect(workspaces.created).toHaveLength(1);
 });
+
+test("建会话路由必须保留 application 的 this 绑定（N26 回归）", async () => {
+    // 真实 HarnessApplication.createConversation 依赖 this.conversationStore；
+    // 路由若解构方法再调用，this 会变成 undefined，导致 500。
+    class ThisBoundApplication {
+        readonly store = new Map<string, unknown>();
+        isStarted() { return true; }
+        createConversation(input: { tenantId: string; workspaceId: string; title?: string }) {
+            const id = `conv-this-${this.store.size + 1}`;
+            const conversation = {
+                id,
+                tenantId: input.tenantId,
+                workspaceId: input.workspaceId,
+                createdAt: timestamp,
+                updatedAt: timestamp,
+            };
+            this.store.set(id, conversation);
+            return conversation;
+        }
+        getConversation() { return null; }
+    }
+
+    const application = new ThisBoundApplication() as unknown as HarnessHttpApplication;
+    const accessControl = {
+        authenticate: () => ({ tenantId: "tenant-a", scopes: ["*"] }),
+        workspaceService: memoryWorkspaceService(),
+    } as unknown as HttpAccessControl;
+    const api = new HarnessHttpApi(application, { get: () => null }, accessControl);
+
+    const response = await api.fetch(new Request("http://h/conversations", {
+        method: "POST",
+        headers: { "content-type": "application/json", authorization: "Bearer good-key" },
+        body: JSON.stringify({}),
+    }));
+
+    expect(response.status).toBe(201);
+    const body = await response.json() as { conversation: { id: string } };
+    expect(body.conversation.id).toBe("conv-this-1");
+});
