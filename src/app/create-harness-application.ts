@@ -9,6 +9,7 @@ import {
 
 import { HarnessHttpApi } from "../http/harness-http-api.ts";
 import { RateLimiter } from "../http/rate-limiter.ts";
+import { McpToolRegistry } from "../mcp/mcp-tool-registry.ts";
 import { ApiCredentialStore } from "../auth/api-credential-store.ts";
 import { assertRegistrationAllowed } from "../auth/registration-policy.ts";
 import { AccessAuditStore } from "../audit/access-audit-store.ts";
@@ -127,6 +128,8 @@ export interface HarnessComposition {
     sandboxProvider:SandboxProvider;
     toolExecutionStore:ToolExecutionStore;
     toolGateway:ToolGateway;
+    /** §9.8 v1.4 Phase 4：MCP server 注册表（未配置时为 undefined）。 */
+    mcpRegistry:McpToolRegistry | undefined;
     runOutputStore:RunOutputStore;
     workspaceResultStore:RunWorkspaceResultStore;
     artifactStore:RunArtifactStore;
@@ -302,6 +305,19 @@ export async function createHarnessApplication(
         }
     };
 
+    // §9.8 v1.4 Phase 4：MCP server 注册表。
+    // - in-process：Master 进程直接持有连接，供 PiAdapter 暴露 mcp__ 工具；
+    // - process/systemd：Master 只把配置下发给 worker，由 worker 各自连接，
+    //   避免同一 MCP server 被 Master 与每个 Worker 重复拉起。
+    const usesInProcessPiRuntime = dependencies.runtime === undefined
+        && config.workerIsolation === "in-process";
+    const mcpRegistry = usesInProcessPiRuntime && config.mcpServers.length > 0
+        ? new McpToolRegistry(config.mcpServers)
+        : undefined;
+    if (mcpRegistry !== undefined) {
+        await mcpRegistry.start();
+    }
+
     const baseRuntime = dependencies.runtime
         ?? (config.workerIsolation !== "in-process"
             ? new WorkerProcessAgentRuntime({
@@ -329,6 +345,9 @@ export async function createHarnessApplication(
                     containerImage: config.containerImage,
                     containerUserId: config.containerUserId,
                     piCompaction: piCompactionConfig(config),
+                    ...(config.mcpServers.length === 0
+                        ? {}
+                        : { mcpServers: config.mcpServers }),
                 },
                 orphanSandboxCleaner: async (sandboxId: string) => {
                     await (sandboxProvider as SandboxProvider).terminate(sandboxId).catch(() => undefined);
@@ -345,6 +364,7 @@ export async function createHarnessApplication(
                 toolGateway,
                 runStore,
                 sandboxProvider as Partial<SandboxCommandExecutor>,
+                mcpRegistry,
             ));
     const supervisedRuntime = new SupervisedAgentRuntime(
         baseRuntime,
@@ -628,6 +648,7 @@ export async function createHarnessApplication(
         sandboxProvider,
         toolExecutionStore,
         toolGateway,
+        mcpRegistry,
         runOutputStore,
         workspaceResultStore,
         artifactStore,
@@ -650,6 +671,7 @@ export async function createHarnessApplication(
             }
 
             await application.stop();
+            await mcpRegistry?.close();
             llmHealthMonitor?.stop();
             resourceMetrics.stop();
             await (sandboxProvider as SandboxProvider).close?.();
@@ -804,6 +826,7 @@ async function createPiRuntime(
     toolGateway:ToolGateway,
     runStore:RunStore,
     sandboxProvider?: Partial<SandboxCommandExecutor>,
+    mcpRegistry?: McpToolRegistry,
 ):Promise<PiAdapter> {
     const modelRuntime = injectedModelRuntime
         ?? await ModelRuntime.create({
@@ -829,6 +852,14 @@ async function createPiRuntime(
         modelId:config.piModelId,
         tools:config.piTools,
         compaction: piCompactionConfig(config),
+        ...(mcpRegistry === undefined
+            ? {}
+            : {
+                mcpTools: {
+                    descriptors: mcpRegistry.listTools(),
+                    registry: mcpRegistry,
+                },
+            }),
     }, {
         gateway:toolGateway,
         getLastEventSequence(runId) {

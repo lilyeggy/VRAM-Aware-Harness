@@ -197,6 +197,30 @@ PI_AUTH_PATH=/var/lib/harness-worker/auth.json
 
 生产环境启动时会校验：`HARNESS_ENV=production` 时必须 `HARNESS_USE_JAILER=true`、`HARNESS_SANDBOX_PROVIDER=microvm`，并设置 Broker socket 与 control token。
 
+### MCP 工具（可选，§9.8 v1.4 Phase 4）
+
+Master 按 `HARNESS_MCP_SERVERS`（JSON 数组）连接 stdio MCP server，把工具以
+`mcp__<server>__<tool>` 暴露给 Agent；调用仍经过 ToolGateway 的策略守卫、PREPARED
+记账与审计，`annotations.readOnlyHint=true` 的工具按 `READ_ONLY` 分类。
+
+生产 `HARNESS_WORKER_ISOLATION=systemd` 时，Master 只把该配置随 Run 下发给 Worker，
+由 Worker 进程拉起 MCP server；因此 MCP server 继承 Worker 的 `SystemCallFilter`、
+Landlock、`IPAddressDeny=any` + `IPAddressAllow` egress ACL，不能联网，也不能写
+`WORKER_RW_PATHS` 之外。需要额外文件或网络权限时改 `/etc/harness/worker-launcher.conf`，
+不要放宽 Master。
+
+```sh
+HARNESS_MCP_SERVERS='[{"name":"fs","command":"npx","args":["-y","@modelcontextprotocol/server-filesystem","/var/lib/harness-worker/mcp-data"]}]'
+```
+
+烟测（无真实模型，只验证 MCP 全链路）：
+
+```bash
+cd /srv/VRAM-Aware-Harness
+HARNESS_MCP_SERVERS="$HARNESS_MCP_SERVERS" bun run scripts/mcp-smoke.ts
+# 期望输出：MCP_SMOKE_OK servers=... tools=... call=...
+```
+
 创建 `/etc/systemd/system/harness-master.service`：
 
 ```ini

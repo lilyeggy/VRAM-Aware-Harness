@@ -11,6 +11,7 @@ import type {
     RuntimeStartRequest,
 } from "../runtime/agent-runtime.ts";
 import type { PiCompactionConfig } from "../runtime/pi-adapter.ts";
+import type { McpServerConfig } from "../mcp/mcp-protocol.ts";
 import type { SandboxProfile } from "../sandbox/sandbox-profile.ts";
 import type { ExecuteToolInput } from "../tools/tool-gateway.ts";
 
@@ -72,6 +73,11 @@ export interface WorkerRuntimeConfig {
      * 占绝大多数的执行路径。
      */
     readonly piCompaction?: PiCompactionConfig;
+    /**
+     * §9.8 v1.4 Phase 4：MCP server 列表。随 workerConfig 下发到 worker，
+     * 由 worker 进程内的 MCP 客户端连接。空/缺省 = 不启用 MCP。
+     */
+    readonly mcpServers?: readonly McpServerConfig[];
 }
 
 // ============================================================================

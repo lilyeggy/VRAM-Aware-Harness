@@ -28,6 +28,9 @@ import {
     createGatewayPiTools,
     type ToolGatewayExecutor,
 } from "./pi-tool-gateway.ts";
+import { createMcpPiTools } from "../mcp/mcp-pi-tools.ts";
+import type { McpToolDescriptor } from "../mcp/mcp-protocol.ts";
+import type { McpToolRegistry } from "../mcp/mcp-tool-registry.ts";
 import {
     createFileSessionRefReachability,
 } from "./session-ref-reachability.ts";
@@ -82,6 +85,14 @@ export interface PiAdapterConfig{
      * 只覆盖 compaction 子树，不影响部署方写在 settings.json 里的其它项。
      */
     compaction?: PiCompactionConfig;
+    /**
+     * §9.8 v1.4 Phase 4：MCP 工具（已发现 + 注册表），与内置工具一起作为 Pi
+     * customTools 注入。不传 = 不启用 MCP。
+     */
+    mcpTools?: {
+        descriptors: readonly McpToolDescriptor[];
+        registry: Pick<McpToolRegistry, "callTool">;
+    };
 }
 
 /**
@@ -216,7 +227,7 @@ export class PiAdapter implements AgentRuntime{
             cwd:request.run.workspacePath,
             modelRuntime:this.modelRuntime,
             model,
-            tools:[...config.tools],
+            tools:[...new Set([...config.tools, ...customTools.map((tool) => tool.name)])],
             customTools,
             sessionManager,
             settingsManager:this.createSessionSettingsManager(
@@ -349,7 +360,7 @@ export class PiAdapter implements AgentRuntime{
             cwd:request.run.workspacePath,
             modelRuntime:this.modelRuntime,
             model,
-            tools:[...config.tools],
+            tools:[...new Set([...config.tools, ...customTools.map((tool) => tool.name)])],
             customTools,
             sessionManager,
             settingsManager:this.createSessionSettingsManager(
@@ -627,7 +638,7 @@ export class PiAdapter implements AgentRuntime{
         sandboxMountRoot?: string,
         sandboxWorkdir?: string,
     ) {
-        return createGatewayPiTools(
+        const gatewayTools = createGatewayPiTools(
             toolNames,
             workspacePath,
             this.toolGatewayBinding.gateway,
@@ -656,6 +667,44 @@ export class PiAdapter implements AgentRuntime{
             this.toolGatewayBinding.sandboxExecutor,
             sandboxMountRoot,
             sandboxWorkdir,
+        );
+        return [...gatewayTools, ...this.createMcpTools(runId, workspacePath, runtimeSessionRefHolder)];
+    }
+
+    /**
+     * §9.8 v1.4 Phase 4：MCP 工具与内置工具共用同一个 ToolGateway 包装。
+     */
+    private createMcpTools(
+        runId: string,
+        workspacePath: string,
+        runtimeSessionRefHolder: {
+            current: string | null;
+        },
+    ) {
+        const binding = this.config.mcpTools;
+        if (binding === undefined) {
+            return [];
+        }
+        if (binding.descriptors.length === 0) {
+            return [];
+        }
+        return createMcpPiTools(
+            binding.descriptors,
+            binding.registry,
+            this.toolGatewayBinding.gateway,
+            {
+                runId,
+                workspacePath,
+                getRuntimeSessionRef: () => {
+                    const runtimeSessionRef = runtimeSessionRefHolder.current;
+                    if (runtimeSessionRef === null) {
+                        throw new Error(`Pi Session 尚未准备好：${runId}`);
+                    }
+                    return runtimeSessionRef;
+                },
+                getLastEventSequence: () =>
+                    this.toolGatewayBinding.getLastEventSequence(runId),
+            },
         );
     }
 

@@ -33,6 +33,7 @@ import {
     DEFAULT_PI_TOOLS,
 } from "../app/harness-config.ts";
 import { applyWorkerLandlock, resolveWorkerLandlockMode } from "./worker-landlock.ts";
+import { McpToolRegistry } from "../mcp/mcp-tool-registry.ts";
 
 // 1. Redirect standard logging to stderr to prevent corrupting IPC on stdout
 console.log = (...args: unknown[]) => console.error(...args);
@@ -179,6 +180,14 @@ async function setupRuntime(
         ...(config.piAuthPath ? { authPath: config.piAuthPath } : {}),
     });
 
+    // §9.8 v1.4 Phase 4：MCP server 随 workerConfig 下发，由 worker 进程连接。
+    // 单个 server 失败只跳过，不影响本 Run 的内置工具执行。
+    let mcpRegistry: McpToolRegistry | undefined;
+    if (config.mcpServers !== undefined && config.mcpServers.length > 0) {
+        mcpRegistry = new McpToolRegistry(config.mcpServers);
+        await mcpRegistry.start();
+    }
+
     const piAdapter = new PiAdapter(
         modelRuntime,
         {
@@ -189,6 +198,14 @@ async function setupRuntime(
             // N28 主机制：worker 进程内的 Pi 会话同样要拿到 Harness 下发的
             // 压缩参数，否则长会话在这条路径上仍会静默退化。
             ...(config.piCompaction ? { compaction: config.piCompaction } : {}),
+            ...(mcpRegistry === undefined
+                ? {}
+                : {
+                    mcpTools: {
+                        descriptors: mcpRegistry.listTools(),
+                        registry: mcpRegistry,
+                    },
+                }),
         },
         {
             gateway: toolGateway,
@@ -198,7 +215,7 @@ async function setupRuntime(
         },
     );
 
-    return { piAdapter, containerProvider, brokerProvider };
+    return { piAdapter, containerProvider, brokerProvider, mcpRegistry };
 }
 
 // 5. IPC Message Handler
@@ -259,15 +276,18 @@ async function executeRunMessage(msg: RunRequestMessage): Promise<void> {
     }
 
     const setupLabel = isStart ? "setup" : "resume setup";
+    let mcpRegistry: McpToolRegistry | undefined;
     try {
         const config = msg.workerConfig ?? defaultWorkerConfig();
-        const { piAdapter } = await setupRuntime(
+        const setup = await setupRuntime(
             config,
             msg.request.execution?.sandboxId,
             msg.request.run.thinkingLevel,
             msg.request.run.tenantId,
             msg.request.execution?.sandboxToken,
         );
+        const piAdapter = setup.piAdapter;
+        mcpRegistry = setup.mcpRegistry;
 
         // Gate 2: Check if interrupted during asynchronous setupRuntime.
         if (pendingInterruptRunIds.has(runId)) {
@@ -306,6 +326,9 @@ async function executeRunMessage(msg: RunRequestMessage): Promise<void> {
     } finally {
         activeRunId = null;
         currentPiAdapter = null;
+        if (mcpRegistry !== undefined) {
+            await mcpRegistry.close();
+        }
         setTimeout(() => process.exit(0), 10);
     }
 }

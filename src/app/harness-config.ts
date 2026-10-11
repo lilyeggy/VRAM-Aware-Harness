@@ -1,5 +1,6 @@
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
+import { parseMcpServers, type McpServerConfig } from "../mcp/mcp-protocol.ts";
 
 import type {
     ResourceThresholds,
@@ -124,6 +125,11 @@ export interface HarnessConfig {
     runRetryBaseMs:number;
     /** §9.8 v1.4 Phase 3：重试退避上限（ms）。 */
     runRetryMaxMs:number;
+    /**
+     * §9.8 v1.4 Phase 4：MCP server 列表（stdio）。空数组 = 不启用 MCP。
+     * 解析自 HARNESS_MCP_SERVERS（JSON 数组）。
+     */
+    mcpServers:McpServerConfig[];
     /** F9：workspace 快照最多扫描文件数，超限 fail-closed。 */
     workspaceSnapshotMaxFiles:number;
     /** F9：workspace 快照最大递归深度，超限 fail-closed。 */
@@ -242,6 +248,7 @@ export function loadHarnessConfig(
     const runMaxAttempts = posInt("HARNESS_RUN_MAX_ATTEMPTS", 3);
     const runRetryBaseMs = posInt("HARNESS_RUN_RETRY_BASE_MS", 1_000);
     const runRetryMaxMs = posInt("HARNESS_RUN_RETRY_MAX_MS", 30_000);
+    const mcpServers = parseMcpServers(environment.HARNESS_MCP_SERVERS);
     const workspaceSnapshotMaxFiles = posInt("HARNESS_WORKSPACE_SNAPSHOT_MAX_FILES", 20_000);
     const workspaceSnapshotMaxDepth = posInt("HARNESS_WORKSPACE_SNAPSHOT_MAX_DEPTH", 32);
     const artifactMaxFilesPerRun = posInt("HARNESS_ARTIFACT_MAX_FILES_PER_RUN", 200);
@@ -445,6 +452,7 @@ export function loadHarnessConfig(
         runMaxAttempts,
         runRetryBaseMs,
         runRetryMaxMs,
+        mcpServers,
         workspaceSnapshotMaxFiles,
         workspaceSnapshotMaxDepth,
         artifactMaxFilesPerRun,

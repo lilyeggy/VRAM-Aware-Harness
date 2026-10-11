@@ -154,3 +154,47 @@ test("B2：runPolicy.allowNetwork=true 在 strict 平台策略下 fail-closed，
         await composition.close();
     }
 });
+
+test("in-process 路径启动 MCP server，并把工具暴露给 PiAdapter", async () => {
+    const resourceObserver = new FakeResourceObserver({
+        ok:true,
+        snapshot:normalSnapshot,
+    });
+    const mcpFixturePath = new URL(
+        "../mcp/fixtures/echo-mcp-server.ts",
+        import.meta.url,
+    ).pathname;
+    const config = loadHarnessConfig({
+        VLLM_MODEL_ID:"fake-model",
+        ...tempWorkspaceEnv(),
+        HARNESS_DATABASE_PATH:":memory:",
+        HARNESS_PUMP_INTERVAL_MS:"60000",
+        HARNESS_WORKER_ISOLATION:"in-process",
+        HARNESS_MCP_SERVERS:JSON.stringify([
+            {
+                name:"echo",
+                command:process.execPath,
+                args:[mcpFixturePath],
+                requestTimeoutMs:5_000,
+            },
+        ]),
+    });
+    const composition = await createHarnessApplication(config, {
+        // PiAdapter 构造只保存 ModelRuntime 引用；本用例不启动 Run，无需真实模型，
+        // 但 createPiRuntime 会校验 getModel 返回非 undefined。
+        modelRuntime:{ getModel:() => ({}) } as never,
+        resourceObserver,
+    });
+
+    try {
+        await composition.application.start();
+        expect(composition.mcpRegistry?.configuredServerCount).toBe(1);
+        expect(composition.mcpRegistry?.connectedServerCount).toBe(1);
+        const names = composition.mcpRegistry?.listTools()
+            .map((descriptor: { name: string }) => descriptor.name)
+            .sort();
+        expect(names).toEqual(["echo", "write_note"]);
+    } finally {
+        await composition.close();
+    }
+});
