@@ -1,0 +1,863 @@
+!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Harness 架构动态图 · 面试版</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#080d1a; --bg2:#0d1424; --panel:#111a2e; --panel2:#16203a;
+  --line:#243050; --line2:#2f3d63; --tx:#e8eeff; --tx2:#9fb0d4; --tx3:#6b7cA0;
+  --ctl:#4f8cff; --brk:#ff9f43; --wrk:#22c55e; --vm:#ef4444; --sto:#a855f7; --ext:#14b8a6;
+}
+html,body{background:var(--bg);color:var(--tx);font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;-webkit-font-smoothing:antialiased}
+.mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+a{color:var(--ctl)}
+header.top{position:sticky;top:0;z-index:50;background:rgba(8,13,26,.92);backdrop-filter:blur(8px);border-bottom:1px solid var(--line);padding:10px 18px;display:flex;gap:16px;align-items:center;flex-wrap:wrap}
+header.top h1{font-size:15px;font-weight:650;letter-spacing:.2px}
+header.top h1 span{color:var(--tx3);font-weight:400;margin-left:8px;font-size:12px}
+.tabs{display:flex;gap:6px;margin-left:auto;flex-wrap:wrap}
+.tabs button{background:var(--panel);color:var(--tx2);border:1px solid var(--line);border-radius:8px;padding:6px 12px;font-size:12.5px;cursor:pointer;transition:.15s}
+.tabs button:hover{color:var(--tx);border-color:var(--line2)}
+.tabs button.on{background:linear-gradient(180deg,#1c2c52,#152a4e);color:#fff;border-color:var(--ctl);box-shadow:0 0 0 1px rgba(79,140,255,.35),0 4px 16px rgba(79,140,255,.18)}
+main{padding:16px 18px 60px;max-width:1500px;margin:0 auto}
+section.view{display:none}
+section.view.on{display:block}
+.legend{display:flex;gap:14px;flex-wrap:wrap;align-items:center;margin:2px 0 12px;font-size:12px;color:var(--tx2)}
+.legend i{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:6px;vertical-align:middle}
+.legend .lg{display:flex;align-items:center}
+.player{display:grid;grid-template-columns:250px minmax(0,1fr) 320px;gap:14px;align-items:start}
+@media(max-width:1150px){.player{grid-template-columns:1fr}.stepList{max-height:180px}}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:12px}
+.stepList{overflow:auto;max-height:660px;padding:8px}
+.stepList h3{font-size:11px;letter-spacing:.14em;color:var(--tx3);text-transform:uppercase;padding:6px 8px}
+.stepList ol{list-style:none}
+.stepList li{display:flex;gap:9px;padding:7px 8px;border-radius:8px;cursor:pointer;color:var(--tx2);font-size:12.5px;line-height:1.35;border:1px solid transparent}
+.stepList li:hover{background:var(--panel2);color:var(--tx)}
+.stepList li.on{background:linear-gradient(90deg,rgba(79,140,255,.18),transparent);border-color:rgba(79,140,255,.4);color:#fff}
+.stepList li .n{flex:0 0 20px;height:20px;border-radius:6px;background:#1b2745;color:var(--tx2);font-size:11px;display:grid;place-items:center;font-weight:600}
+.stepList li.on .n{background:var(--ctl);color:#fff}
+.stage{padding:10px;position:relative;overflow:hidden}
+svg#flow{display:block;width:100%;height:auto}
+.controls{display:flex;gap:8px;align-items:center;padding:10px 12px;border-top:1px solid var(--line);flex-wrap:wrap}
+.controls button{background:var(--panel2);color:var(--tx);border:1px solid var(--line2);border-radius:8px;padding:6px 11px;font-size:12.5px;cursor:pointer;transition:.15s}
+.controls button:hover{border-color:var(--ctl);color:#fff}
+.controls .sp{margin-left:auto;display:flex;gap:6px;align-items:center;color:var(--tx3);font-size:12px}
+.bar{height:3px;background:#1b2745;border-radius:2px;overflow:hidden;margin:0 12px}
+.bar i{display:block;height:100%;width:0;background:linear-gradient(90deg,var(--ctl),var(--wrk));transition:width .2s linear}
+.caption{padding:10px 14px;border-top:1px solid var(--line);font-size:13.5px;min-height:46px;display:flex;gap:10px;align-items:flex-start}
+.caption b{color:#fff;font-weight:600}
+.caption .badge{flex:0 0 auto;background:var(--ctl);color:#fff;border-radius:6px;font-size:11px;padding:2px 7px;font-weight:600;margin-top:2px}
+.detail{padding:12px 14px;min-height:200px}
+.detail h4{font-size:13.5px;margin-bottom:4px}
+.detail .path{font-size:11.5px;color:var(--tx3);margin-bottom:10px;word-break:break-all}
+.detail dl{display:grid;grid-template-columns:auto 1fr;gap:4px 10px;font-size:12px;margin-bottom:10px}
+.detail dt{color:var(--tx3)}
+.detail dd{color:var(--tx)}
+.detail ul{list-style:none;font-size:12px;color:var(--tx2)}
+.detail ul li{padding:3px 0 3px 12px;position:relative}
+.detail ul li::before{content:"";position:absolute;left:0;top:10px;width:5px;height:5px;border-radius:2px;background:var(--ctl)}
+.hint{color:var(--tx3);font-size:12px}
+.mods{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px}
+.mods button{background:var(--panel);border:1px solid var(--line);color:var(--tx2);border-radius:999px;padding:5px 12px;font-size:12px;cursor:pointer}
+.mods button.on{background:var(--ctl);border-color:var(--ctl);color:#fff}
+.modGrid{display:grid;grid-template-columns:minmax(0,1.15fr) minmax(0,1fr);gap:14px}
+@media(max-width:1000px){.modGrid{grid-template-columns:1fr}}
+.modHead{padding:12px 14px;border-bottom:1px solid var(--line)}
+.modHead h3{font-size:15px;margin-bottom:3px}
+.modHead p{color:var(--tx3);font-size:12px}
+.modBody{padding:12px 14px}
+.mini{background:#0a1020;border:1px solid var(--line);border-radius:10px;padding:8px}
+svg.miniSvg{display:block;width:100%;height:auto}
+.kv{display:grid;grid-template-columns:auto 1fr;gap:5px 12px;font-size:12px;margin:10px 0}
+.kv dt{color:var(--tx3)}
+.kv dd{color:var(--tx)}
+.chips{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px}
+.chip{background:#101a30;border:1px solid var(--line);border-radius:6px;padding:2px 8px;font-size:11.5px;color:var(--tx2)}
+.chip.on{background:rgba(34,197,94,.15);border-color:rgba(34,197,94,.5);color:#b9f6cd}
+.cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(330px,1fr));gap:12px}
+.mcard{background:var(--panel);border:1px solid var(--line);border-radius:12px;overflow:hidden}
+.mcard>button{width:100%;text-align:left;background:none;border:0;color:inherit;padding:12px 14px;cursor:pointer;display:flex;gap:10px;align-items:flex-start}
+.mcard>button:hover{background:var(--panel2)}
+.mcard .t{display:block;font-size:13.5px;font-weight:600}
+.mcard .s{display:block;font-size:11.5px;color:var(--tx3);margin-top:2px}
+.mcard .x{color:var(--tx3);font-size:12px;margin-left:auto}
+.mcard .body{display:none;padding:0 14px 14px;font-size:12px;color:var(--tx2);border-top:1px solid var(--line)}
+.mcard.open .body{display:block}
+.mcard.open .x{transform:rotate(90deg)}
+.mcard .body h5{color:var(--tx);font-size:12px;margin:10px 0 4px;letter-spacing:.04em}
+.mcard .body ul{list-style:none}
+.mcard .body li{padding:3px 0 3px 12px;position:relative}
+.mcard .body li::before{content:"";position:absolute;left:0;top:9px;width:5px;height:5px;border-radius:2px;background:var(--ctl)}
+.stat{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin:10px 0}
+.stat .s1{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:10px 12px}
+.stat .v{font-size:20px;font-weight:650;color:#fff}
+.stat .k{font-size:11.5px;color:var(--tx3);margin-top:2px}
+table.t{width:100%;border-collapse:collapse;font-size:12px}
+table.t th,table.t td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--line)}
+table.t th{color:var(--tx3);font-weight:500;font-size:11.5px}
+table.t td.mono{font-size:11.5px;color:var(--tx2)}
+.flowRow{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:8px 0}
+.node rect{transition:fill .2s,stroke .2s,opacity .2s}
+.zoneBand{opacity:.55}
+.edgePath{fill:none;stroke:var(--line2);stroke-width:1.6;transition:stroke .2s,stroke-width .2s,opacity .2s}
+.edgePath.on{stroke:var(--ctl);stroke-width:2.6}
+.edgePath.dash{stroke-dasharray:5 5}
+.edgeLabel{fill:var(--tx3);font-size:10.5px;font-family:ui-monospace,Menlo,monospace}
+.nodeLabel{fill:var(--tx);font-size:12.5px;font-weight:600}
+.nodeSub{fill:var(--tx3);font-size:10px;font-family:ui-monospace,Menlo,monospace}
+.node.on rect.box{stroke:#fff;stroke-width:2;filter:url(#glow)}
+.packet{fill:#fff;filter:url(#glow)}
+.zoneTitle{fill:var(--tx3);font-size:11px;letter-spacing:.16em}
+kbd{background:#101a30;border:1px solid var(--line2);border-radius:5px;padding:1px 5px;font-size:11px;font-family:ui-monospace,Menlo,monospace}
+footer{color:var(--tx3);font-size:12px;padding:24px 18px 40px;max-width:1500px;margin:0 auto}
+</style>
+</head>
+<body>
+<header class="top">
+  <h1>Harness 架构动态图<span>多租户 Agent 平台 · 面试版</span></h1>
+  <div class="tabs">
+    <button data-view="v1" class="on">① 全系统数据流</button>
+    <button data-view="v2">② 模块内部流转</button>
+    <button data-view="v3">③ 模块实现</button>
+  </div>
+</header>
+
+<main>
+<section id="v1" class="view on">
+  <div class="legend">
+    <span class="lg"><i style="background:#4f8cff"></i>非特权控制面 Master</span>
+    <span class="lg"><i style="background:#ff9f43"></i>特权最小 Broker (root)</span>
+    <span class="lg"><i style="background:#22c55e"></i>非特权 Worker（每 Run 一个）</span>
+    <span class="lg"><i style="background:#ef4444"></i>不可信 microVM</span>
+    <span class="lg"><i style="background:#a855f7"></i>SQLite（单机持久化）</span>
+    <span class="lg"><i style="background:#14b8a6"></i>外部模型服务</span>
+    <span class="hint">点击左侧步骤或图中节点 · <kbd>空格</kbd>播放/暂停 · <kbd>←</kbd><kbd>→</kbd>单步</span>
+  </div>
+  <div class="player">
+    <div class="card stepList"><h3>执行步骤</h3><ol id="stepList"></ol></div>
+    <div class="card">
+      <div class="stage"><svg id="flow" viewBox="0 0 1240 880" preserveAspectRatio="xMidYMid meet"></svg></div>
+      <div class="bar"><i id="bar"></i></div>
+      <div class="caption"><span class="badge" id="capN">1</span><div id="capT"></div></div>
+      <div class="controls">
+        <button id="btnPlay">▶ 播放</button>
+        <button id="btnPrev">‹ 上一步</button>
+        <button id="btnNext">下一步 ›</button>
+        <button id="btnReset">↻ 重播</button>
+        <span class="sp">速度
+          <button data-sp="0.5">0.5×</button>
+          <button data-sp="1" class="on">1×</button>
+          <button data-sp="2">2×</button>
+        </span>
+      </div>
+    </div>
+    <div class="card detail" id="detail"></div>
+  </div>
+</section>
+
+<section id="v2" class="view">
+  <div class="mods" id="modTabs"></div>
+  <div class="modGrid">
+    <div class="card">
+      <div class="modHead"><h3 id="mTitle"></h3><p id="mSub"></p></div>
+      <div class="modBody">
+        <div class="mini"><svg class="miniSvg" id="miniSvg" viewBox="0 0 560 300" preserveAspectRatio="xMidYMid meet"></svg></div>
+        <div class="flowRow" id="mSteps"></div>
+      </div>
+    </div>
+    <div class="card modBody" id="mDetail"></div>
+  </div>
+</section>
+
+<section id="v3" class="view">
+  <div class="stat" id="stats"></div>
+  <div class="cards" id="cards"></div>
+</section>
+</main>
+
+<footer>
+  <div>真机环境：172.17.43.193 · Ubuntu 22.04 / kernel 6.8.0-136 · Firecracker v1.17.0 + jailer · systemd 瞬时 Worker 单元 · 外部模型服务 opencode-go。</div>
+  <div style="margin-top:6px">文字详版见 <span class="mono">docs/interview-architecture.zh-CN.html</span>；边界与验收记录见 <span class="mono">docs/platform-boundary.md</span> §9.7–§9.9。</div>
+</footer>
+<script>
+
+/* ---------- 迷你绘图引擎 ---------- */
+var SVGNS = 'http://www.w3.org/2000/svg';
+function $(s, r){ return (r || document).querySelector(s); }
+function $$(s, r){ return Array.prototype.slice.call((r || document).querySelectorAll(s)); }
+function el(tag, attrs, parent){
+  var e = document.createElementNS(SVGNS, tag);
+  if (attrs) { for (var k in attrs) { e.setAttribute(k, attrs[k]); } }
+  if (parent) { parent.appendChild(e); }
+  return e;
+}
+var ZONE = {
+  ctl: {fill:'rgba(79,140,255,.10)',  stroke:'#4f8cff', dot:'#4f8cff'},
+  brk: {fill:'rgba(255,159,67,.10)',  stroke:'#ff9f43', dot:'#ff9f43'},
+  wrk: {fill:'rgba(34,197,94,.10)',   stroke:'#22c55e', dot:'#22c55e'},
+  vm:  {fill:'rgba(239,68,68,.12)',   stroke:'#ef4444', dot:'#ef4444'},
+  sto: {fill:'rgba(168,85,247,.10)',  stroke:'#a855f7', dot:'#a855f7'},
+  ext: {fill:'rgba(20,184,166,.12)',  stroke:'#14b8a6', dot:'#14b8a6'},
+  plain:{fill:'rgba(120,140,180,.10)',stroke:'#2f3d63', dot:'#9fb0d4'}
+};
+function anchor(n, side){
+  if (side === 't') { return {x:n.x + n.w/2, y:n.y}; }
+  if (side === 'b') { return {x:n.x + n.w/2, y:n.y + n.h}; }
+  if (side === 'l') { return {x:n.x, y:n.y + n.h/2}; }
+  return {x:n.x + n.w, y:n.y + n.h/2};
+}
+function autoPath(a, b){
+  var s = anchor(a.n, a.side), t = anchor(b.n, b.side);
+  if (a.side === 'b' && b.side === 't') {
+    var c = Math.max(28, (t.y - s.y) / 2.4);
+    return 'M' + s.x + ',' + s.y + ' C' + s.x + ',' + (s.y + c) + ' ' + t.x + ',' + (t.y - c) + ' ' + t.x + ',' + t.y;
+  }
+  if (a.side === 'r' && b.side === 'l') {
+    var c2 = Math.max(30, (t.x - s.x) / 2.4);
+    return 'M' + s.x + ',' + s.y + ' C' + (s.x + c2) + ',' + s.y + ' ' + (t.x - c2) + ',' + t.y + ' ' + t.x + ',' + t.y;
+  }
+  if (a.side === 't' && b.side === 'b') {
+    var c3 = Math.max(28, (s.y - t.y) / 2.4);
+    return 'M' + s.x + ',' + s.y + ' C' + s.x + ',' + (s.y - c3) + ' ' + t.x + ',' + (t.y + c3) + ' ' + t.x + ',' + t.y;
+  }
+  if (a.side === 'l' && b.side === 'r') {
+    var c4 = Math.max(30, (s.x - t.x) / 2.4);
+    return 'M' + s.x + ',' + s.y + ' C' + (s.x - c4) + ',' + s.y + ' ' + (t.x + c4) + ',' + t.y + ' ' + t.x + ',' + t.y;
+  }
+  return 'M' + s.x + ',' + s.y + ' L' + t.x + ',' + t.y;
+}
+function buildDiagram(svg, spec, opts){
+  var o = opts || {};
+  while (svg.firstChild) { svg.removeChild(svg.firstChild); }
+  var defs = el('defs', null, svg);
+  var glow = el('filter', {id:'glow', x:'-70%', y:'-70%', width:'240%', height:'240%'}, defs);
+  el('feGaussianBlur', {stdDeviation:'3.4', result:'bl'}, glow);
+  var mk = el('marker', {id:'arw', viewBox:'0 0 10 10', refX:'9', refY:'5', markerWidth:'6', markerHeight:'6', orient:'auto-start-reverse'}, defs);
+  el('path', {d:'M0,1 L9,5 L0,9 z', fill:'#3b4c78'}, mk);
+  var mg = el('feMerge', null, glow);
+  el('feMergeNode', {in:'bl'}, mg); el('feMergeNode', {in:'SourceGraphic'}, mg);
+  var nodeMap = {};
+  (spec.nodes || []).forEach(function(n){ nodeMap[n.id] = n; });
+  var gBands = el('g', null, svg), gEdges = el('g', null, svg), gNodes = el('g', null, svg), gPack = el('g', null, svg);
+  (spec.bands || []).forEach(function(b){
+    var z = ZONE[b.zone] || ZONE.plain;
+    var r = el('rect', {x:b.x, y:b.y, width:b.w, height:b.h, rx:14, fill:z.fill, stroke:z.stroke, 'stroke-width':1,
+                        'stroke-dasharray':'4 5', 'stroke-opacity':.45, class:'zoneBand'}, gBands);
+    var t = el('text', {x:b.x + 12, y:b.y + 18, class:'zoneTitle', fill:z.stroke}, gBands);
+    t.textContent = b.label;
+  });
+  var edgeMap = {};
+  (spec.edges || []).forEach(function(e){
+    var a = {n:nodeMap[e.from], side:e.fromSide || 'b'};
+    var b = {n:nodeMap[e.to], side:e.toSide || 't'};
+    var d = e.d ? e.d : autoPath(a, b);
+    var p = el('path', {d:d, class:'edgePath' + (e.dash ? ' dash' : ''), 'marker-end':'url(#arw)'}, gEdges);
+    p.setAttribute('data-edge', e.id);
+    edgeMap[e.id] = p;
+    if (e.label) {
+      var L = p.getTotalLength();
+      var mid = p.getPointAtLength(L * 0.5);
+      var attrs = {x:mid.x + (e.ldx === undefined ? 4 : e.ldx), y:mid.y + (e.ldy === undefined ? -5 : e.ldy), class:'edgeLabel'};
+      if (e.la) { attrs['text-anchor'] = e.la; }
+      var tx = el('text', attrs, gEdges);
+      tx.textContent = e.label;
+    }
+  });
+  (spec.nodes || []).forEach(function(n){
+    var z = ZONE[n.zone] || ZONE.plain;
+    var g = el('g', {class:'node', 'data-node':n.id}, gNodes);
+    el('rect', {x:n.x, y:n.y, width:n.w, height:n.h, rx:10, class:'box', fill:z.fill, stroke:z.stroke, 'stroke-width':1.4}, g);
+    var t1 = el('text', {x:n.x + 12, y:n.y + (n.sub ? 22 : n.h/2 + 5), class:'nodeLabel', fill:'#e8eeff'}, g);
+    t1.textContent = n.label;
+    if (n.sub) {
+      var t2 = el('text', {x:n.x + 12, y:n.y + 38, class:'nodeSub'}, g);
+      t2.textContent = n.sub;
+    }
+    g.addEventListener('click', function(){
+      if (o.onNode) { o.onNode(n.id); }
+    });
+    g.style.cursor = 'pointer';
+  });
+  var packets = [];
+  for (var i = 0; i < 8; i++) { packets.push(el('circle', {r:4, class:'packet', opacity:0}, gPack)); }
+  return {nodes:nodeMap, edges:edgeMap, packets:packets, svg:svg, spec:spec};
+}
+function setFocus(d, step){
+  for (var id in d.edges) { d.edges[id].classList.remove('on'); }
+  $$('g.node', d.svg).forEach(function(g){ g.classList.remove('on'); });
+  (step.e || []).forEach(function(e){ if (d.edges[e]) { d.edges[e].classList.add('on'); } });
+  (step.n || []).forEach(function(n){
+    var g = d.svg.querySelector('g.node[data-node="' + n + '"]');
+    if (g) { g.classList.add('on'); }
+  });
+}
+function animatePackets(d, active, t0){
+  var now = performance.now();
+  active.forEach(function(id, idx){
+    var p = d.edges[id];
+    var c = d.packets[idx];
+    if (p === undefined || c === undefined) { return; }
+    var L = p.getTotalLength();
+    var k = ((now - t0) / 1500) % 1;
+    var pt = p.getPointAtLength(L * k);
+    c.setAttribute('cx', pt.x); c.setAttribute('cy', pt.y);
+    c.setAttribute('fill', (ZONE[(d.spec.zoneOf || {})[id]] || ZONE.ctl).dot);
+    c.setAttribute('opacity', '0.95');
+  });
+  for (var j = active.length; j < d.packets.length; j++) { d.packets[j].setAttribute('opacity', 0); }
+}
+
+/* ---------- ① 全系统数据流 ---------- */
+var FLOW = {
+  bands: [
+    {x:34,  y:24,  w:282, h:572, zone:'ctl', label:'非特权控制面 MASTER'},
+    {x:414, y:506, w:282, h:216, zone:'brk', label:'特权最小 BROKER（root）'},
+    {x:824, y:330, w:332, h:268, zone:'wrk', label:'非特权 WORKER（每 Run 一个）'},
+    {x:34,  y:740, w:1172, h:122, zone:'sto', label:'SQLite 单机持久化 · 观测'}
+  ],
+  nodes: [
+    {id:'client', x:50,  y:36,  w:250, h:52, zone:'ctl', label:'浏览器 /app', sub:'web/app.js · harness-user-console.ts'},
+    {id:'http',   x:50,  y:126, w:250, h:58, zone:'ctl', label:'HTTP 接入层', sub:'限流 → 鉴权 → 路由 → 审计'},
+    {id:'app',    x:50,  y:228, w:250, h:52, zone:'ctl', label:'应用门面 HarnessApplication', sub:'submitRun · queuePump · interrupt'},
+    {id:'sched',  x:50,  y:318, w:250, h:56, zone:'ctl', label:'调度器 RunScheduler', sub:'TenantRunScheduler · 资源准入'},
+    {id:'exec',   x:50,  y:418, w:250, h:58, zone:'ctl', label:'RunExecutor', sub:'策略快照 · Attempt · 租约'},
+    {id:'router', x:50,  y:528, w:250, h:52, zone:'ctl', label:'SandboxProviderRouter', sub:'microvm / container / managed-local'},
+    {id:'broker', x:430, y:528, w:250, h:52, zone:'brk', label:'Sandbox Broker（root）', sub:'Unix socket · capability token'},
+    {id:'microvm',x:430, y:640, w:250, h:66, zone:'vm',  label:'jailer + Firecracker microVM', sub:'chroot/cgroup · vsock · 无网卡 · guest agent'},
+    {id:'worker', x:840, y:418, w:300, h:70, zone:'wrk', label:'Worker 进程（systemd 瞬时单元）', sub:'PiAdapter · seccomp/Landlock · 只读 rootfs'},
+    {id:'tools',  x:840, y:528, w:300, h:52, zone:'wrk', label:'工具网关 ToolGateway', sub:'PREPARED 记账 → Broker.execute'},
+    {id:'model',  x:840, y:250, w:300, h:56, zone:'ext', label:'外部模型服务 opencode-go', sub:'Worker 唯一出站 · egress ACL 放行'},
+    {id:'store',  x:50,  y:762, w:1140, h:86, zone:'sto', label:'SQLite · 20 张表', sub:'agent_runs · run_events · tool_executions · checkpoints · sandboxes · access_audit_events（hash 链）'}
+  ],
+  edges: [
+    {id:'e1',  from:'client', fromSide:'b', to:'http',   toSide:'t', label:'POST /runs'},
+    {id:'e2',  from:'http',   fromSide:'b', to:'app',    toSide:'t', label:'principal + 限流通过'},
+    {id:'e3',  from:'app',    fromSide:'b', to:'sched',  toSide:'t', label:'enqueue + kick'},
+    {id:'e4',  from:'sched',  fromSide:'b', to:'exec',   toSide:'t', label:'claim + START'},
+    {id:'e5',  from:'exec',   fromSide:'b', to:'router', toSide:'t', label:'sandbox.create'},
+    {id:'e6',  from:'router', fromSide:'r', to:'broker', toSide:'l', label:'create / exec / term', la:'middle', ldx:0, ldy:-6},
+    {id:'e7',  from:'broker', fromSide:'b', to:'microvm',toSide:'t', label:'jailer + Firecracker'},
+    {id:'e8',  from:'exec',   fromSide:'r', to:'worker', toSide:'l', d:'M300,440 C520,398 640,398 840,440', label:'runtime.start'},
+    {id:'e9',  from:'worker', fromSide:'t', to:'model',  toSide:'b', label:'LLM 请求'},
+    {id:'e10', from:'worker', fromSide:'b', to:'tools',  toSide:'t', label:'工具调用'},
+    {id:'e11', from:'tools',  fromSide:'l', to:'broker', toSide:'r', label:'Broker.execute', la:'middle', ldx:0, ldy:-6},
+    {id:'e12', from:'microvm',fromSide:'l', to:'exec',   toSide:'b', d:'M430,673 C378,673 356,650 356,610 L356,540 C356,508 300,476 175,476', dash:true, label:'SANDBOX_ACQUIRED'},
+    {id:'e13', from:'worker', fromSide:'l', to:'exec',   toSide:'r', d:'M840,470 C640,516 520,516 300,470', dash:true, label:'事件回传'},
+    {id:'e14', from:'exec',   fromSide:'r', to:'store',  toSide:'t', d:'M300,462 C348,462 348,720 214,762', dash:true, label:'run_events / artifacts'},
+    {id:'e15', from:'http',   fromSide:'l', to:'store',  toSide:'t', d:'M50,155 C16,240 16,700 62,762', dash:true, label:'审计 hash 链'},
+    {id:'e16', from:'store',  fromSide:'t', to:'client', toSide:'l', d:'M24,762 C2,600 2,120 50,62', dash:true, label:'轮询 /runs/:id/events'}
+  ],
+  steps: [
+    {n:['client','http'], e:['e1'], cap:'① 用户在 /app 提交任务：POST /runs { workspaceId, userInput, idempotencyKey, priority }'},
+    {n:['http'], e:['e2','e15'], cap:'② 入口治理：IP 限流 → Bearer 鉴权（principal.tenantId）→ 租户限流 → 审计（只追加 + hash 链）'},
+    {n:['app'], e:['e2'], cap:'③ 应用门面：幂等键查重（命中直接返回既有 Run）→ 事务写 agent_runs + RUN_CREATED 事件'},
+    {n:['sched'], e:['e3'], cap:'④ 入队 + kick：租户队列按 priority desc / enqueuedAt asc / aging 插队；kick 独立抢 slot，不等 drain 批次'},
+    {n:['sched'], e:['e4'], cap:'⑤ 资源准入：ResourceObserver → 分类 NORMAL/BUSY/CRITICAL → PolicyDecision START / QUEUE / DENY'},
+    {n:['exec'], e:['e4'], cap:'⑥ Attempt + 租约：createRunAttempt → acquire（lease_owner / lease_expires_at）→ 心跳续租'},
+    {n:['exec'], e:['e5'], cap:'⑦ 五层策略交集（platform / tenant / template / workspace / run，deny wins）+ 联网请求 fail-closed'},
+    {n:['router','broker'], e:['e5','e6'], cap:'⑧ sandbox.create → Broker.create：capability token 绑定 sandboxId + tenantId'},
+    {n:['broker','microvm'], e:['e7'], cap:'⑨ jailer 建 chroot / cgroup / mount namespace → Firecracker 冷启动或快照恢复 → vsock 就绪'},
+    {n:['microvm','exec'], e:['e12'], cap:'⑩ SANDBOX_ACQUIRED 事件（durationMs + warmHit）→ SandboxRecord 落库'},
+    {n:['exec','worker'], e:['e8'], cap:'⑪ runtime.start → worker-protocol v2 → systemd 瞬时 Worker（专用 UID、seccomp、Landlock、只读 rootfs）'},
+    {n:['worker','model'], e:['e9'], cap:'⑫ 模型推理：Pi ModelRuntime → 外部模型服务；Worker 唯一出站，egress ACL 只放行模型 CIDR'},
+    {n:['worker','tools','broker','microvm'], e:['e10','e11','e7'], cap:'⑬ 工具调用：PREPARED 记账 → Broker.execute（tenantId + token 校验）→ guest 执行 → SUCCEEDED → checkpoint'},
+    {n:['store','client'], e:['e14','e16'], cap:'⑭ 事件流：run_events / run_output_chunks → 前端轮询 /runs/:id/events 增量渲染'},
+    {n:['exec','store'], e:['e14'], cap:'⑮ 终态：workspace 快照 + diff + artifacts → RUN_ARTIFACTS_READY → RUN_COMPLETED；finally 释放租约 → sandbox.terminate'},
+    {n:['broker','microvm','store'], e:['e7','e14'], cap:'⑯ 回收：VM 销毁 + workspace 导出；孤儿 reaper 清理 vm-runtime；租约过期 → AUTO_RESUME / MANUAL_REVIEW'}
+  ]
+};
+
+var NODE_INFO = {
+  client:   {t:'浏览器 /app', p:'web/app.js · web/app.css · src/http/harness-user-console.ts', rows:[['职责','同源静态控制台：登录/注册、会话、composer、事件轮询'],['输入','用户输入 + 思考深度'],['输出','POST /conversations/:id/messages 或 POST /runs'],['读','GET /runs/:id/events、/output、/workspace-diff、/artifacts']], b:['无框架、无构建步骤，单文件 HTML + 原生 JS','Markdown 渲染自带（含表格/代码块），暗色主题','轮询而非 SSE：Run 事件增量拉取，断线可续']},
+  http:     {t:'HTTP 接入层', p:'src/http/harness-http-api.ts:245 · rate-limiter.ts:88 · routes/*.ts:856', rows:[['职责','限流 → 鉴权 → 路由分发 → 审计 → 调应用门面'],['输入','Bun.serve Request + clientIp'],['输出','JSON 响应 / 202 Run / 429 + Retry-After'],['写表','access_audit_events（每次鉴权与工具尝试）']], b:['两级固定窗口限流：IP 桶 120/min、租户桶 600/min（可配）','未捕获异常统一 500 + requestId，不泄漏内部错误信息','注册支持 open / invite / closed 三态，邀请码 SHA-256 + timingSafeEqual 比较']},
+  app:      {t:'应用门面 HarnessApplication', p:'src/app/harness-application.ts:394', rows:[['职责','对外唯一门面：submitRun / resume / interrupt / 队列泵'],['输入','已鉴权的 tenantId + 请求体'],['输出','Run 记录 / 队列决策 / 中断结果'],['写表','agent_runs（经 RunStore）、run_events']], b:['幂等键命中直接返回既有 Run（并发重放只创建 1 个）','submit 后 kick 独立抢 slot：避免 drain 批次把后提交的 Run 串行化','queuePump 抽象：tick 兜底重试，kick 立即推进']},
+  sched:    {t:'调度器 RunScheduler + TenantRunScheduler', p:'src/scheduling/run-scheduler.ts:822 · tenant-run-scheduler.ts:610', rows:[['职责','选谁跑（公平/优先级）+ 谁去跑（资源准入）'],['输入','QueuedRun（runId/tenantId/priority/enqueuedAt）'],['输出','START / QUEUE(reasonCode) / DENY 决策'],['写表','policy_decisions、resource_snapshots']], b:['租户队列内 priority desc → enqueuedAt asc；agingMs 让等太久的租户插队','会话串行化：同一 harness_session 同时只跑一个 Run','backpressure：HARNESS_MAX_QUEUED_RUNS / _PER_TENANT 超限抛 429','retryAt 未到点的 QUEUED Run 会被 reconcile 跳过']},
+  exec:     {t:'RunExecutor', p:'src/runtime/run-executor.ts:340', rows:[['职责','把 Attempt / 策略 / 沙箱 / Runtime 串成一次执行'],['输入','Run + 租户 + workspace 路径'],['输出','事件流 + 终态 + 产物'],['写表','run_attempts、effective_policy_snapshots、sandboxes、run_workspace_*']], b:['执行前写策略快照，事后可审计「当时按什么策略跑的」','sandbox 创建后立刻上报 SANDBOX_ACQUIRED（含 warmHit）','finally：释放租约 → 终止沙箱 → 不留孤儿']},
+  router:   {t:'SandboxProviderRouter', p:'src/sandbox/sandbox-provider-router.ts:106', rows:[['职责','按 profile 选后端，并声明能力边界'],['输入','SandboxCreateInput（policy + workspace + 资源限额）'],['输出','SandboxHandle + enforcement 能力声明'],['读','HARNESS_SANDBOX_PROVIDER / PROFILE / RUNTIME']], b:['microvm=strict、container=runsc、managed-local=开发降级','provider 必须如实声明 filesystemIsolation / networkIsolation 等能力','策略守卫读这份声明：声明不具备隔离能力时直接拒绝工具执行（fail-closed）']},
+  broker:   {t:'Sandbox Broker（root）', p:'src/sandbox/broker/*.ts:1075', rows:[['职责','唯一的特权沙箱管理面：create / execute / terminate'],['输入','Unix socket 上的 BrokerRequest（含 tenantId + token）'],['输出','SandboxHandle / 执行结果'],['写表','sandboxes（Master 侧 SandboxStore）']], b:['窄接口：只暴露三个操作，不暴露任意 shell','三重校验：controlToken（Master）+ capabilityToken（绑定 sandbox）+ tenantId 归属','SO_PEERCRED 校验对端 UID：create/terminate 只收 Master UID，execute 只收 Worker UID','非 jailer + 快照组合在构造期直接抛错（快照会固化宿主绝对路径 → 跨租户串盘）']},
+  microvm:  {t:'jailer + Firecracker microVM', p:'src/sandbox/microvm/*.ts:3136', rows:[['职责','不可信执行面：跑 shell / 代码 / 文件操作'],['输入','rootfs 模板 + workspace 磁盘模板 + 资源限额'],['输出','guest agent 执行结果（vsock）'],['读','快照池 vm.snap / mem.snap']], b:['jailer：专用 UID/GID、chroot、独立 mount namespace、cgroup v2 cpu.max / memory.max','无网卡：网络隔离由「不给设备」实现，而不是靠防火墙规则','快照恢复 median 513ms，冷启动 median 1477ms（真机 jailer）','终止后 vm-runtime 目录清空，孤儿 reaper 兜底']},
+  worker:   {t:'Worker 进程（每 Run 一个）', p:'src/worker/*.ts:1538 · scripts/harness-worker-run.sh', rows:[['职责','跑 Pi Agent Loop：模型推理 + 工具编排'],['输入','worker-protocol v2 的 START / RESUME 消息'],['输出','模型/工具事件 + 最终回答'],['隔离','systemd 瞬时单元 + 专用 UID + seccomp + Landlock']], b:['只读 rootfs：可写路径仅 /var/lib/harness-worker（Landlock 白名单）','egress ACL：IPAddressDeny=any + 只放行模型服务 CIDR','不继承宿主全量 env：只传白名单变量','崩溃即单元退出，Master 侧由租约/监督两条路径收尾']},
+  tools:    {t:'工具网关 ToolGateway', p:'src/tools/tool-gateway.ts:180 · src/runtime/pi-tool-gateway.ts:367', rows:[['职责','所有工具副作用先记账后执行'],['输入','Pi 工具调用（name + args）'],['输出','执行结果 / 拒绝原因'],['写表','tool_executions、tool_policy_decisions、checkpoints']], b:['effect 分类：READ_ONLY / IDEMPOTENT_WRITE / UNKNOWN_EFFECT','执行前写 PREPARED 行：崩溃后能知道「可能已产生副作用」','只有 PREPARED + READ_ONLY 才允许自动重放；UNKNOWN_EFFECT 一律人工复核','MCP 工具按 readOnlyHint 映射到同一套 effect 模型']},
+  model:    {t:'外部模型服务（opencode-go）', p:'Pi ModelRuntime · PI_PROVIDER / VLLM_MODEL_ID / PI_AUTH_PATH', rows:[['职责','纯推理，不属于平台内部组件'],['输入','Worker 的 LLM 请求（带 Pi 归因头）'],['输出','流式 token + 工具调用'],['凭据','仅 Worker 环境可见，不进仓库/日志']], b:['模型服务与平台解耦：平台只做准入与审计，不做模型路由','HARNESS_MODEL_SERVICE_MODE=external 时资源准入走 ExternalModelServiceResourceObserver（不伪造 GPU 指标）','真机踩坑：Worker 出口曾被钉死 IPv4，模型服务 IPv4 段不可达导致整片 Run 挂起']},
+  store:    {t:'SQLite（单机持久化）', p:'src/storage/schema.sql · database.ts:158 · migrations.ts:98', rows:[['职责','全部状态：Run / 事件 / 工具 / 检查点 / 审计 / 策略'],['输入','各 store 的事务写入'],['输出','查询 + 恢复扫描'],['关键','WAL + busy_timeout=5000、migration v1–v4']], b:['20 张表、21 个索引；审计表用触发器禁止 UPDATE/DELETE，并维护 hash 链','migration v3：队列优先级 + RunAttempt 租约；v4：幂等键 + 重试计数','备份用 VACUUM INTO：Run 执行中也能拿到一致快照（WAL 下不阻塞）']}
+};
+
+var flowD = buildDiagram($('#flow'), FLOW, {onNode: function(id){
+  var info = NODE_INFO[id];
+  if (info) { renderDetail(info); pause(); }
+}});
+var STEP_MS = 2600;
+var stepIdx = 0, playing = false, speed = 1, stepStart = performance.now(), rafId = null;
+
+function renderStepList(){
+  var ol = $('#stepList');
+  ol.innerHTML = '';
+  FLOW.steps.forEach(function(s, i){
+    var li = document.createElement('li');
+    if (i === stepIdx) { li.className = 'on'; }
+    li.innerHTML = '<span class="n">' + (i + 1) + '</span><span>' + s.cap.replace(/^[①-⑯]\s*/, '') + '</span>';
+    li.addEventListener('click', function(){ goTo(i); pause(); });
+    ol.appendChild(li);
+  });
+  var cur = ol.children[stepIdx];
+  if (cur && cur.scrollIntoView) { cur.scrollIntoView({block:'nearest'}); }
+}
+function renderDetail(info){
+  var html = '<h4>' + info.t + '</h4><div class="path mono">' + info.p + '</div><dl>';
+  info.rows.forEach(function(r){ html += '<dt>' + r[0] + '</dt><dd>' + r[1] + '</dd>'; });
+  html += '</dl><ul>';
+  info.b.forEach(function(x){ html += '<li>' + x + '</li>'; });
+  html += '</ul>';
+  $('#detail').innerHTML = html;
+}
+function goTo(i){
+  stepIdx = (i + FLOW.steps.length) % FLOW.steps.length;
+  stepStart = performance.now();
+  var s = FLOW.steps[stepIdx];
+  setFocus(flowD, s);
+  $('#capN').textContent = String(stepIdx + 1);
+  $('#capT').innerHTML = s.cap;
+  $('#bar').style.width = '0%';
+  renderStepList();
+}
+function advance(){ goTo(stepIdx + 1); }
+function loop(){
+  var now = performance.now();
+  var dur = STEP_MS / speed;
+  var frac = (now - stepStart) / dur;
+  if (frac > 1) { frac = 1; }
+  $('#bar').style.width = (frac * 100).toFixed(1) + '%';
+  if (playing) {
+    animatePackets(flowD, FLOW.steps[stepIdx].e || [], stepStart);
+    if (frac >= 1) { advance(); }
+  } else {
+    flowD.packets.forEach(function(c){ c.setAttribute('opacity', 0); });
+  }
+  rafId = requestAnimationFrame(loop);
+}
+function play(){
+  playing = true; stepStart = performance.now();
+  $('#btnPlay').textContent = '⏸ 暂停';
+}
+function pause(){
+  playing = false;
+  $('#btnPlay').textContent = '▶ 播放';
+}
+$('#btnPlay').addEventListener('click', function(){ if (playing) { pause(); } else { play(); } });
+$('#btnPrev').addEventListener('click', function(){ pause(); goTo(stepIdx - 1); });
+$('#btnNext').addEventListener('click', function(){ pause(); goTo(stepIdx + 1); });
+$('#btnReset').addEventListener('click', function(){ goTo(0); play(); });
+$$('.controls [data-sp]').forEach(function(b){
+  b.addEventListener('click', function(){
+    $$('.controls [data-sp]').forEach(function(x){ x.classList.remove('on'); });
+    b.classList.add('on');
+    speed = parseFloat(b.getAttribute('data-sp'));
+  });
+});
+document.addEventListener('keydown', function(ev){
+  if (ev.target && /INPUT|TEXTAREA/.test(ev.target.tagName)) { return; }
+  if (ev.key === ' ') { ev.preventDefault(); if (playing) { pause(); } else { play(); } }
+  if (ev.key === 'ArrowRight') { pause(); goTo(stepIdx + 1); }
+  if (ev.key === 'ArrowLeft') { pause(); goTo(stepIdx - 1); }
+});
+$$('.tabs button').forEach(function(b){
+  b.addEventListener('click', function(){
+    $$('.tabs button').forEach(function(x){ x.classList.remove('on'); });
+    b.classList.add('on');
+    $$('section.view').forEach(function(v){ v.classList.remove('on'); });
+    $('#' + b.getAttribute('data-view')).classList.add('on');
+    if (b.getAttribute('data-view') === 'v2') { selectMod(curMod); } else { stopMini(); }
+  });
+});
+
+/* ---------- ② 模块内部流转 ---------- */
+function chainSpec(items){
+  var nodes = [], edges = [];
+  items.forEach(function(it, i){
+    var col = i % 3, row = Math.floor(i / 3);
+    nodes.push({id:'n' + i, x:18 + col * 182, y:26 + row * 108, w:166, h:56, zone:it.zone || 'ctl', label:it.label, sub:it.sub});
+    if (i > 0) {
+      var prev = i - 1;
+      var sameRow = (Math.floor(prev / 3) === row);
+      edges.push({id:'e' + prev, from:'n' + prev, fromSide: sameRow ? 'r' : 'b', to:'n' + i, toSide: sameRow ? 'l' : 't'});
+    }
+  });
+  return {nodes:nodes, edges:edges};
+}
+function mod(id, title, sub, items, steps, kv, bullets, impl){
+  var spec = chainSpec(items);
+  return {id:id, title:title, sub:sub, spec:spec, steps:steps, kv:kv, bullets:bullets, impl:impl};
+}
+var MODULES = [
+  mod('http', 'HTTP 接入层', '限流 → 鉴权 → 路由 → 审计（每个请求都走这条链）',
+    [{label:'HTTP 请求', sub:'Bun.serve + requestIP', zone:'ctl'}, {label:'IP 限流桶', sub:'120/min 固定窗口', zone:'ctl'},
+     {label:'Bearer 鉴权', sub:'principal.tenantId + scopes', zone:'ctl'}, {label:'租户限流桶', sub:'600/min 固定窗口', zone:'ctl'},
+     {label:'审计写入', sub:'access_audit_events + hash 链', zone:'sto'}, {label:'路由 → 应用门面', sub:'runs / conversations / system', zone:'ctl'}],
+    [{n:[0,1], e:['e0'], cap:'每个请求先过 IP 桶：超限直接 429 + Retry-After'},
+     {n:[1,2], e:['e1'], cap:'鉴权：Bearer → ApiCredentialStore → principal（tenantId + scopes）'},
+     {n:[2,3], e:['e2'], cap:'鉴权成功后再过租户桶，避免单租户打爆全站'},
+     {n:[3,4,5], e:['e3','e4'], cap:'审计落库后交给应用门面；未知异常统一 500 + requestId'}],
+    [['关键文件','harness-http-api.ts:245 · rate-limiter.ts:88 · routes/runs.ts:276'],['写表','access_audit_events'],['测试','rate-limiter / rate-limit.e2e / tenant-boundary / registration-mode']],
+    ['两级限流桶：IP 与租户独立计数，任一超限即 429 并回 Retry-After','/health 与 /ready 不参与限流（探活不能被限流影响）','HARNESS_TRUST_PROXY=true 时按 X-Forwarded-For 首跳限流','审计先于业务：鉴权结果（ALLOW/DENY）都留痕'],
+    {files:[['src/http/harness-http-api.ts:245','fetch → 限流 → requirePrincipal → 路由'],['src/http/rate-limiter.ts:88','RateLimiter：consumeTenant / consumeIp / prune'],['src/http/routes/runs.ts:276','POST /runs：priority + idempotencyKey 解析，backpressure → 429']], types:['HttpError(status, message, headers?)','RateLimitDecision{allowed,limit,remaining,retryAfterSeconds}','optionalNonNegativeInteger(body, field)'], tests:['tests/http/rate-limiter.test.ts','tests/http/rate-limit.e2e.test.ts','tests/http/run-backpressure.e2e.test.ts']}),
+
+  mod('app', '应用门面 + 队列泵', '对外唯一入口，内部把「落库 / 入队 / 推进」拆开',
+    [{label:'submitRun', sub:'幂等键查重', zone:'ctl'}, {label:'RunStore.create', sub:'事务：Run + RUN_CREATED', zone:'sto'},
+     {label:'scheduler.submit', sub:'backpressure 检查', zone:'ctl'}, {label:'requestPump.kick', sub:'立即抢 slot', zone:'ctl'},
+     {label:'queuePump.tick', sub:'兜底重试（1s）', zone:'ctl'}],
+    [{n:[0], e:['e0'], cap:'幂等键命中：直接返回既有 Run，不重复入队、不重复计费'},
+     {n:[1], e:['e1'], cap:'未命中：事务写 agent_runs + RUN_CREATED 事件'},
+     {n:[2,3], e:['e2','e3'], cap:'kick：新提交的 Run 独立抢 slot，不被 drain 批次串行化'},
+     {n:[4], e:[], cap:'tick：定期兜底，处理 DEFERRED / 恢复 / 租约回收'}],
+    [['关键文件','harness-application.ts:394 · create-harness-application.ts:872'],['写表','agent_runs · run_events'],['测试','create-harness-application.test.ts · run-scheduler.test.ts']],
+    ['幂等键唯一索引在 (tenant_id, idempotency_key)：并发重放只落一个 Run','kick 与 tick 分工：kick 抢实时性，tick 保最终一致','中断/恢复都经门面，保证状态机与事件一致'],
+    {files:[['src/app/harness-application.ts:394','submitRun / resumeRun / interrupt / requestPump'],['src/app/create-harness-application.ts:872','组合根：装配所有 store / provider / runtime'],['src/app/harness-config.ts:768','loadHarnessConfig：全部 env 的唯一入口']], types:['QueuePump{kick?(), tick()}','HarnessConfig（含 60+ 配置项）'], tests:['tests/app/create-harness-application.test.ts','tests/integration/blast-radius-isolation.e2e.test.ts']}),
+
+  mod('sched', '调度器：选谁跑 + 谁去跑', '租户公平、优先级、会话串行、资源准入、backpressure',
+    [{label:'enqueue', sub:'租户队列 + reasonCode', zone:'ctl'}, {label:'claimNext', sub:'aging 插队 / priority', zone:'ctl'},
+     {label:'canClaim', sub:'全局 / 租户 / 会话串行', zone:'ctl'}, {label:'资源准入', sub:'ResourceObserver → 决策', zone:'ctl'},
+     {label:'executeQueuedRun', sub:'成功后 release', zone:'ctl'}, {label:'reaper', sub:'租约过期回收', zone:'ctl'}],
+    [{n:[0], e:['e0'], cap:'入队：QueuedRun{runId,tenantId,priority,enqueuedAt,sessionId}'},
+     {n:[1,2], e:['e1'], cap:'选择顺序：aging 超时租户插队 → priority desc → 轮转 → 会话串行检查'},
+     {n:[3], e:['e2'], cap:'资源准入：START / QUEUE(reasonCode) / DENY，决策落库可审计'},
+     {n:[4,5], e:['e3','e4'], cap:'执行完 release；租约过期由 reaper 回收并触发恢复'}],
+    [['关键文件','run-scheduler.ts:822 · tenant-run-scheduler.ts:610'],['写表','policy_decisions · resource_snapshots'],['测试','run-scheduler / tenant-run-scheduler-priority / backpressure / retry-at']],
+    ['QueueReasonCode 有 10 种：全局/租户并发、会话串行、资源忙、预算超限等','backpressure：队列深度超限直接 429，被拒请求不落库','retryAt 未到点不重新入队，退避重试不会空转'],
+    {files:[['src/scheduling/run-scheduler.ts:822','drain / kick / reconcileQueuedRuns / reapExpired'],['src/scheduling/tenant-run-scheduler.ts:610','queuesByTenant / claimAged / canClaim / isActive / isQueued']], types:['SchedulerDrainResult = EMPTY | DEFERRED | EXECUTED','QueueBackpressureError','RunLeaseManager(attempts, {owner, leaseTtlMs, heartbeatIntervalMs})'], tests:['tests/scheduling/run-scheduler.test.ts','tests/scheduling/tenant-run-scheduler-priority.test.ts','tests/scheduling/run-scheduler-backpressure.test.ts']}),
+
+  mod('runs', 'Run 生命周期与状态机', '六态 + 租约 + 幂等键 + 退避重试',
+    [{label:'QUEUED', sub:'入队等待', zone:'ctl'}, {label:'RUNNING', sub:'租约持有中', zone:'ctl'},
+     {label:'WAITING_TOOL', sub:'工具执行中', zone:'ctl'}, {label:'COMPLETED', sub:'终态 + artifacts', zone:'wrk'},
+     {label:'INTERRUPTED', sub:'可恢复：AUTO/MANUAL', zone:'brk'}, {label:'FAILED', sub:'终态', zone:'vm'}],
+    [{n:[0,1], e:['e0'], cap:'QUEUED → RUNNING：claim + attempt + 租约'},
+     {n:[1,2], e:['e1'], cap:'RUNNING ↔ WAITING_TOOL：工具阶段标记，副作用已记账'},
+     {n:[1,3], e:['e2'], cap:'RUNNING → COMPLETED：收尾快照 + diff + artifacts + RUN_ARTIFACTS_READY'},
+     {n:[1,4,0], e:['e3','e4'], cap:'失败且无副作用：INTERRUPTED → QUEUED（退避重试）；有副作用 → 人工复核'}],
+    [['关键文件','run-service.ts:877 · runstore.ts:655 · run-state-machine.ts:54'],['写表','agent_runs · run_attempts'],['测试','run-service-retry / runstore / lease-expiry-recovery']],
+    ['状态机白名单：非法迁移直接抛错（含断言测试）','retry_at 记录下次可重试时间；重试次数上限 HARNESS_RUN_MAX_ATTEMPTS=3','租约过期 → INTERRUPTED（LEASE_EXPIRED），由恢复服务决定后续'],
+    {files:[['src/runs/run-service.ts:877','createQueuedRun / executeRunLifecycle / tryScheduleRetry / markLeaseExpired'],['src/runs/runstore.ts:655','findByTenantIdempotencyKey / listQueuedRuns(priority) / countByStatus'],['src/runs/run-lease-manager.ts:165','acquire / startHeartbeat / release / reapExpired']], types:['StartRunInput{tenantId,harnessSessionId,userInput,workspacePath,runPolicy?,priority?,idempotencyKey?}','RunRetryOptions{maxAttempts,baseDelayMs,maxDelayMs}','RunAttempt{...leaseOwner,leaseExpiresAt,heartbeatAt}'], tests:['tests/runs/run-service-retry.test.ts','tests/recovery/lease-expiry-recovery.test.ts','tests/runs/run-lease-manager.test.ts']}),
+
+  mod('executor', 'RunExecutor', '一次执行的编排者：策略 → Attempt → 沙箱 → Runtime → 终态',
+    [{label:'策略快照', sub:'五层交集 + fail-closed', zone:'ctl'}, {label:'Attempt + 租约', sub:'run_attempts', zone:'sto'},
+     {label:'sandbox.create', sub:'Broker → microVM', zone:'brk'}, {label:'runtime.start', sub:'worker-protocol v2', zone:'wrk'},
+     {label:'事件桥', sub:'MODEL_* / TOOL_* / SANDBOX_*', zone:'ctl'}, {label:'finally 收尾', sub:'释放租约 + 终止沙箱', zone:'vm'}],
+    [{n:[0], e:['e0'], cap:'执行前写策略快照：事后可回答「当时按什么策略跑的」'},
+     {n:[1], e:['e1'], cap:'Attempt 落库并获取租约；心跳周期续租，崩溃后自动过期'},
+     {n:[2,3], e:['e2','e3'], cap:'沙箱就绪后上报 SANDBOX_ACQUIRED（含 warmHit），再启动 Runtime'},
+     {n:[4,5], e:['e4','e5'], cap:'事件实时回传；无论成功失败都走 finally 清理，不留孤儿'}],
+    [['关键文件','run-executor.ts:340 · supervised-agent-runtime.ts:126'],['写表','effective_policy_snapshots · run_attempts · sandboxes'],['测试','broker-unreachable / run-executor / create-harness-application（B2 fail-closed）']],
+    ['联网请求在创建沙箱之前就 fail-closed，绝不「先建 VM 再拒绝」','监督器：执行超时 + 优雅中断 + 宽限期后 SIGKILL','沙箱创建失败 → Run INTERRUPTED，sandbox 记录保持 unsettled 供对账'],
+    {files:[['src/runtime/run-executor.ts:340','execute()：policy → attempt → sandbox → runtime → finally'],['src/runtime/supervised-agent-runtime.ts:126','ExecutionSupervisorConfig{executionTimeoutMs,interruptGraceMs}']], types:['RuntimeStartRequest / RuntimeResumeRequest','RuntimeExecutionTimeoutError'], tests:['tests/runtime/broker-unreachable.test.ts','tests/app/create-harness-application.test.ts']}),
+
+  mod('sandbox', '沙箱路由与 Provider 契约', '一个接口三种后端，能力必须如实声明',
+    [{label:'SandboxProviderRouter', sub:'按 profile 选后端', zone:'ctl'}, {label:'microvm（strict）', sub:'jailer + Firecracker', zone:'vm'},
+     {label:'container（runsc）', sub:'gVisor', zone:'brk'}, {label:'managed-local（开发）', sub:'宿主直接执行，无隔离', zone:'wrk'},
+     {label:'能力声明', sub:'enforcement capabilities', zone:'ctl'}, {label:'策略守卫', sub:'不具备隔离 → 拒绝工具', zone:'ctl'}],
+    [{n:[0], e:['e0'], cap:'HARNESS_SANDBOX_PROVIDER=microvm → profile=strict → runtime=firecracker'},
+     {n:[1,2,3], e:['e1','e2'], cap:'三种后端的隔离强度不同，开发降级必须显式开启'},
+     {n:[4], e:['e3'], cap:'Provider 返回 enforcement：filesystemIsolation / networkIsolation 等'},
+     {n:[5], e:['e4'], cap:'工具策略守卫读能力声明：声明不具备隔离能力 → fail-closed 拒绝执行'}],
+    [['关键文件','sandbox-provider.ts:113 · sandbox-provider-router.ts:106'],['配置','HARNESS_SANDBOX_PROVIDER / PROFILE / RUNTIME'],['测试','sandbox-provider-router / managed-local / tool-policy-guard']],
+    ['「声明不具备隔离能力就拒绝执行」比「默认信任」安全得多','provider=microvm 但未显式选 driver 时会落到 Mock：能力声明为 false，于是拒绝工具（暴露而非掩盖）','managed-local 仅用于开发机（macOS 无 KVM）'],
+    {files:[['src/sandbox/sandbox-provider.ts:113','SandboxProvider / SandboxHandle / SandboxEnforcementCapabilities'],['src/sandbox/sandbox-provider-router.ts:106','按 profile 构造并返回 provider'],['src/policies/tool-policy-guard.ts:100','读能力声明决定工具能否执行']], types:['SandboxCreateInput{id,runId,workspacePath,cpuCount,memoryMb,allowNetwork}','SandboxEnforcementCapabilities{filesystemIsolation,networkIsolation,...}'], tests:['tests/sandbox/sandbox-provider-router.test.ts','tests/policies/tool-policy-guard.test.ts']}),
+
+  mod('broker', 'Broker 协议与安全', '特权面只开三个操作，三重校验',
+    [{label:'BrokerSandboxProvider', sub:'Master/Worker 侧客户端', zone:'ctl'}, {label:'Unix socket', sub:'/run/harness/sandbox-broker.sock', zone:'brk'},
+     {label:'controlToken', sub:'Master 专用', zone:'brk'}, {label:'capabilityToken', sub:'绑定 sandboxId', zone:'brk'},
+     {label:'tenantId 归属校验', sub:'assertTenant', zone:'brk'}, {label:'SO_PEERCRED', sub:'对端 UID 白名单', zone:'brk'}],
+    [{n:[0,1], e:['e0'], cap:'Master 与 Worker 都通过同一个 Unix socket 访问 Broker'},
+     {n:[1,2,3], e:['e1','e2'], cap:'create/terminate 需 controlToken；execute 需 capabilityToken'},
+     {n:[4], e:['e3'], cap:'任何 execute/terminate 都校验 sandbox 归属租户，跨租户直接拒绝'},
+     {n:[5], e:['e4'], cap:'getsockopt(SO_PEERCRED) 取对端 pid/uid/gid：create 只收 Master UID，execute 只收 Worker UID'}],
+    [['关键文件','sandbox-broker-server.ts:356 · broker-sandbox-provider.ts:274 · peer-credentials.ts:96'],['协议','create / execute / terminate（含 tenantId 必填）'],['测试','sandbox-broker.test.ts（含跨租户拒绝、孤儿回收）']],
+    ['Broker 是唯一 root 组件，接口窄到只有三个操作','能力令牌与租户校验双保险：拿到 token 也不能跨租户','readRecord 失败时立即 terminate，避免不可寻址的孤儿 VM','非 jailer + 快照组合在构造期抛错（快照固化宿主绝对路径 → 跨租户串盘）'],
+    {files:[['src/sandbox/broker/sandbox-broker-server.ts:356','op 分发 + assertCapability + assertTenant + 孤儿回收'],['src/sandbox/broker/broker-protocol.ts:122','BrokerRequest 判别联合 + isBrokerRequest 校验'],['src/sandbox/broker/peer-credentials.ts:96','SO_PEERCRED 读取与 UID 白名单']], types:['BrokerRequest = create | execute | terminate','BrokerSandboxHandlePayload{id,workspacePath,enforcement,...}','allowedPeerUids / masterPeerUid / workerPeerUid'], tests:['tests/sandbox/sandbox-broker.test.ts','tests/deploy/control-plane-egress.test.ts']}),
+
+  mod('microvm', 'microVM 驱动与快照', '冷启动 1477ms / 快照恢复 513ms，无网卡',
+    [{label:'运行目录', sub:'vm-runtime/<sandboxId>', zone:'vm'}, {label:'磁盘准备', sub:'rootfs + workspace 复制', zone:'vm'},
+     {label:'spawn Firecracker', sub:'--api-sock', zone:'vm'}, {label:'API socket', sub:'超时保护 10s/60s', zone:'vm'},
+     {label:'vsock + guest agent', sub:'执行命令 / 读写文件', zone:'vm'}, {label:'快照池', sub:'vm.snap / mem.snap + warmHit', zone:'vm'}],
+    [{n:[0,1], e:['e0'], cap:'每个 sandbox 独立运行目录，权限 0700，终止即清理'},
+     {n:[2,3], e:['e1','e2'], cap:'spawn 后等 API socket 就绪（1500ms 内），putSocket 带超时防止无限挂起'},
+     {n:[4], e:['e3'], cap:'vsock 桥接：guest agent 分块回传，宿主侧按 maxOutputBytes 硬截断'},
+     {n:[5], e:['e4'], cap:'快照恢复 median 513ms；warmHit 如实上报，便于观测命中率'}],
+    [['关键文件','firecracker-sandbox-driver.ts:874 · microvm-sandbox-provider.ts:369 · vm-snapshot-manager.ts:181'],['基准','scripts/vm-lifecycle-benchmark.ts + docs/vm-lifecycle-benchmark.zh-CN.md'],['测试','microvm-sandbox-provider / snapshot-mode-guard / firecracker-api-timeout']],
+    ['无网卡 = 网络隔离，不依赖防火墙规则正确性','并发冷启动时不做「首个完成的快照复用」（warmHit=0），是已知可优化点','孤儿 reaper 清理 vm-runtime 残留；UID/CID 分配器避免冲突'],
+    {files:[['src/sandbox/microvm/firecracker-sandbox-driver.ts:874','create/execute/terminate + 快照 create/load + API 超时'],['src/sandbox/microvm/vm-snapshot-manager.ts:181','computeTemplateHash / hasSnapshot / getSnapshotPaths'],['src/sandbox/microvm/vm-orphan-reaper.ts:323','启动期对账与清理']], types:['MicrovmInstance{warmHit?}','FirecrackerDriverConfig{binaryPath,kernelPath,rootfsPath,workspaceTemplatePath,jailerPath,...}','hasSnapshot(templateHash): boolean'], tests:['tests/sandbox/microvm-sandbox-provider.test.ts','tests/sandbox/microvm-snapshot-mode-guard.test.ts','tests/deploy/vm-lifecycle-benchmark.test.ts']}),
+
+  mod('worker', 'Worker 进程（每 Run 一个）', '专用 UID + seccomp + Landlock + 只读 rootfs + egress ACL',
+    [{label:'sudo launcher', sub:'/usr/local/sbin/harness-worker-run', zone:'wrk'}, {label:'systemd 瞬时单元', sub:'harness-worker-<runId>', zone:'wrk'},
+     {label:'seccomp + Landlock', sub:'syscall 白名单 + 路径白名单', zone:'wrk'}, {label:'PiAdapter', sub:'Agent Loop + 工具编排', zone:'wrk'},
+     {label:'模型调用', sub:'唯一出站', zone:'ext'}, {label:'退出即回收', sub:'单元 + 可写目录清理', zone:'wrk'}],
+    [{n:[0,1], e:['e0'], cap:'Master 以非特权用户经 sudo 调 launcher，启动一次性单元'},
+     {n:[2], e:['e1'], cap:'SystemCallFilter 白名单 + Landlock 只允许写 /var/lib/harness-worker'},
+     {n:[3,4], e:['e2','e3'], cap:'Agent Loop 跑在 Worker 内；只有模型调用需要出站（egress ACL 放行模型 CIDR）'},
+     {n:[5], e:['e4'], cap:'Run 结束即单元退出；崩溃由监督路径或租约路径收尾'}],
+    [['关键文件','worker-main.ts:415 · worker-protocol.ts:500 · worker-landlock.ts:264 · scripts/harness-worker-run.sh'],['隔离','UID 998 · CPUQuota · MemoryMax · TasksMax · NoNewPrivileges'],['测试','control-plane-egress / worker-* 部署守卫']],
+    ['Landlock 需显式加入 seccomp 白名单（否则 EPERM，实测踩过）','强制 IPv4 曾导致模型调用整片挂起 → 现恢复双栈并按 CIDR 放行','Worker 不继承宿主全量 env：只传白名单变量与模型凭据路径'],
+    {files:[['src/worker/worker-main.ts:415','setupRuntime / executeRunMessage / MCP 注册表生命周期'],['src/worker/worker-protocol.ts:500','WORKER_PROTOCOL_VERSION=2 消息联合'],['scripts/harness-worker-run.sh','systemd-run 属性：seccomp / Landlock / egress ACL / 只读 rootfs']], types:['WorkerRuntimeConfig{piProvider,piModelId,mcpServers?,...}','MasterToWorker / WorkerToMaster 判别联合'], tests:['tests/deploy/control-plane-egress.test.ts','tests/deploy/worker-isolation.test.ts']}),
+
+  mod('tools', '工具网关与 MCP', '副作用先记账后执行，UNKNOWN_EFFECT 绝不自动重放',
+    [{label:'Pi 工具调用', sub:'name + args + toolCallId', zone:'wrk'}, {label:'effect 分类', sub:'READ_ONLY / IDEMPOTENT_WRITE / UNKNOWN_EFFECT', zone:'wrk'},
+     {label:'PREPARED 落库', sub:'tool_executions', zone:'sto'}, {label:'Broker.execute', sub:'token + tenantId', zone:'brk'},
+     {label:'SUCCEEDED / FAILED', sub:'结果 + 完成时间', zone:'sto'}, {label:'checkpoint', sub:'安全恢复点', zone:'sto'}],
+    [{n:[0,1], e:['e0'], cap:'工具调用先分类 effect：决定崩溃后能否自动重放'},
+     {n:[1,2], e:['e1'], cap:'执行前写 PREPARED 行：崩溃后能知道「可能已产生副作用」'},
+     {n:[3,4], e:['e2','e3'], cap:'经 Broker 在 microVM 内执行，结果写回 tool_executions'},
+     {n:[5], e:['e4'], cap:'READ_ONLY 成功后可写 checkpoint → 崩溃可 AUTO_RESUME'}],
+    [['关键文件','tool-gateway.ts:180 · tool-execution-store.ts:367 · pi-tool-gateway.ts:367 · src/mcp/*.ts:575'],['写表','tool_executions · tool_policy_decisions · checkpoints'],['测试','tool-gateway / tool-execution-store / mcp 4 文件 14 用例']],
+    ['canAutomaticallyReplay 只对 PREPARED + READ_ONLY 返回 true','MCP 工具按 readOnlyHint 映射到同一 effect 模型，命名 mcp__<server>__<tool>','Pi SDK 会按 allowedTools 过滤 customTools：必须把 MCP 工具名并入 tools 白名单（实测踩过）'],
+    {files:[['src/tools/tool-gateway.ts:180','prepare → execute → complete 三段式'],['src/tools/tool-execution.ts:56','ToolEffect / canAutomaticallyReplay'],['src/mcp/mcp-stdio-client.ts:205','stdio JSON-RPC 客户端 + initialize/tools/list/tools/call']], types:['ToolEffect = READ_ONLY | IDEMPOTENT_WRITE | UNKNOWN_EFFECT','ToolExecutionStatus = PREPARED | SUCCEEDED | FAILED','McpToolRegistry.listTools() / callTool(server, tool, args)'], tests:['tests/tools/tool-gateway.test.ts','tests/mcp/mcp-pi-tools.test.ts','tests/deploy/mcp-phase4.test.ts']}),
+
+  mod('recovery', 'Checkpoint 与崩溃恢复', '决定「能不能自动续跑」，而不是盲目重试',
+    [{label:'扫描 INTERRUPTED', sub:'scanInterruptedRuns', zone:'ctl'}, {label:'读 checkpoint', sub:'getValidCheckpoint', zone:'sto'},
+     {label:'decideRecovery', sub:'安全检查点判定', zone:'ctl'}, {label:'AUTO_RESUME', sub:'submitResume → QUEUED', zone:'wrk'},
+     {label:'MANUAL_REVIEW', sub:'审计 + 人工消解', zone:'brk'}],
+    [{n:[0,1], e:['e0','e1'], cap:'启动期 / 租约过期后扫描 INTERRUPTED Run 与其最新检查点'},
+     {n:[2], e:['e2'], cap:'判定：NO_CHECKPOINT / UNSAFE_TOOL_EFFECT / SESSION_REF_UNREACHABLE → 人工复核'},
+     {n:[3], e:['e3'], cap:'AUTO_RESUME：以检查点为起点续跑，不重放已完成的副作用'},
+     {n:[4], e:['e4'], cap:'MANUAL_REVIEW：写 RUN_INTERRUPTED + 阻塞的 toolExecutionId，等人处理'}],
+    [['关键文件','recovery-service.ts:170 · recovery-executor.ts:140 · recovery-decision.ts:134'],['写表','checkpoints · tool_executions · run_events'],['测试','lease-expiry-recovery（两条路径）+ checkpoints 单测']],
+    ['恢复执行前会再判一次（fail-closed），避免状态被改过之后误续跑','AUTO_RESUME 需要 checkpoint.runId 与 Run 一致，防止跨 Run 串用','租约过期 → markLeaseExpired → planForInterruptedRun → execute(plan) 全链路已真机验证'],
+    {files:[['src/checkpoints/recovery-service.ts:170','scanInterruptedRuns / planForInterruptedRun'],['src/checkpoints/recovery-decision.ts:134','decideRecovery(checkpointId, preparedExecution, sessionRef)'],['src/checkpoints/recovery-startup-coordinator.ts:50','recover()：对账 → 恢复队列 → 扫描 → 执行']], types:['RecoveryAction = AUTO_RESUME | MANUAL_REVIEW','RecoveryReason = SAFE_CHECKPOINT | NO_CHECKPOINT | UNSAFE_TOOL_EFFECT | SESSION_REF_UNREACHABLE'], tests:['tests/recovery/lease-expiry-recovery.test.ts','tests/checkpoints/recovery-decision.test.ts']}),
+
+  mod('ops', '审计 / 指标 / 账单 / 运维', '可审计、可观测、可维护',
+    [{label:'run_events', sub:'每次状态变化', zone:'sto'}, {label:'access_audit_events', sub:'鉴权与工具尝试', zone:'sto'},
+     {label:'hash 链 + 触发器', sub:'只追加，禁止 UPDATE/DELETE', zone:'sto'}, {label:'/metrics', sub:'Run/队列/沙箱采集', zone:'ctl'},
+     {label:'/billing', sub:'按租户聚合用量', zone:'ctl'}, {label:'harness-ops', sub:'backup / cleanup / disk-check', zone:'sto'}],
+    [{n:[0,1], e:['e0'], cap:'Run 事件与访问审计分开存：一个面向过程，一个面向安全'},
+     {n:[2], e:['e1'], cap:'审计表加 BEFORE UPDATE/DELETE 触发器 + prev_hash/hash 链，篡改可检出'},
+     {n:[3,4], e:['e2','e3'], cap:'指标与账单都按租户聚合，供运营与对账使用'},
+     {n:[5], e:['e4'], cap:'运维脚本：VACUUM INTO 备份（Run 执行中也一致）、磁盘水位、产物/快照清理'}],
+    [['关键文件','access-audit-store.ts:208 · metrics.ts:81 · tenant-billing.ts:233 · harness-maintenance.ts:290'],['脚本','audit-chain-smoke / tenant-billing-smoke / harness-ops'],['测试','access-audit-store / metrics / backup-consistency / harness-maintenance']],
+    ['审计链校验：跳过链首 legacy 行，链开始后任何 NULL 或不匹配都判失败','备份用 VACUUM INTO + WAL，实测 Run 执行中备份不报 SQLITE_BUSY','指标端点走 metrics:read scope，与业务鉴权同一套'],
+    {files:[['src/audit/access-audit-store.ts:208','record（计算 hash 链）/ verifyChain() / lastHash()'],['src/ops/harness-maintenance.ts:290','backupSqliteDatabase / restoreSqliteDatabase / prune*'],['src/observability/metrics.ts:81','Run 状态分布 + 沙箱获取耗时统计']], types:['AuditChainVerification{ok,checked,legacy,brokenAt?,reason?}','backupSqliteDatabase({databasePath,backupDir,keep?})'], tests:['tests/audit/access-audit-store.test.ts','tests/ops/backup-consistency.test.ts','tests/observability/metrics.test.ts']})
+];
+
+/* ---------- ② 渲染 ---------- */
+var curMod = 0, miniD = null, miniIdx = 0, miniStart = performance.now(), miniTimer = null, miniRaf = null;
+function renderModTabs(){
+  var box = $('#modTabs');
+  box.innerHTML = '';
+  MODULES.forEach(function(m, i){
+    var b = document.createElement('button');
+    b.textContent = m.title;
+    if (i === curMod) { b.className = 'on'; }
+    b.addEventListener('click', function(){ selectMod(i); });
+    box.appendChild(b);
+  });
+}
+function renderImpl(m){
+  var html = '<h4>' + m.title + '</h4><div class="path mono">' + m.sub + '</div><dl class="kv">';
+  m.kv.forEach(function(r){ html += '<dt>' + r[0] + '</dt><dd>' + r[1] + '</dd>'; });
+  html += '</dl><ul>';
+  m.bullets.forEach(function(x){ html += '<li>' + x + '</li>'; });
+  html += '</ul><h5 style="color:#e8eeff;font-size:12px;margin:12px 0 4px">实现文件</h5><ul>';
+  m.impl.files.forEach(function(f){ html += '<li><span class="mono" style="color:#9fb0d4">' + f[0] + '</span> — ' + f[1] + '</li>'; });
+  html += '</ul><h5 style="color:#e8eeff;font-size:12px;margin:12px 0 4px">关键类型 / 函数</h5><div class="chips">';
+  m.impl.types.forEach(function(t){ html += '<span class="chip mono">' + t + '</span>'; });
+  html += '</div><h5 style="color:#e8eeff;font-size:12px;margin:12px 0 4px">测试</h5><div class="chips">';
+  m.impl.tests.forEach(function(t){ html += '<span class="chip on mono">' + t + '</span>'; });
+  html += '</div>';
+  $('#mDetail').innerHTML = html;
+}
+function applyMiniStep(){
+  var m = MODULES[curMod];
+  setFocus(miniD, m.steps[miniIdx]);
+  $$('#mSteps .chip').forEach(function(c, i){
+    if (i === miniIdx) { c.classList.add('on'); } else { c.classList.remove('on'); }
+  });
+}
+function selectMod(i){
+  curMod = i;
+  var m = MODULES[i];
+  $('#mTitle').textContent = m.title;
+  $('#mSub').textContent = m.sub;
+  miniD = buildDiagram($('#miniSvg'), m.spec, {});
+  renderImpl(m);
+  var box = $('#mSteps');
+  box.innerHTML = '';
+  m.steps.forEach(function(s, j){
+    var c = document.createElement('span');
+    c.className = 'chip mono';
+    c.textContent = s.cap.length > 30 ? s.cap.slice(0, 30) + '…' : s.cap;
+    c.title = s.cap;
+    c.addEventListener('click', function(){ miniIdx = j; miniStart = performance.now(); applyMiniStep(); });
+    box.appendChild(c);
+  });
+  miniIdx = 0;
+  miniStart = performance.now();
+  applyMiniStep();
+  renderModTabs();
+  startMini();
+}
+function miniLoop(){
+  var m = MODULES[curMod];
+  animatePackets(miniD, m.steps[miniIdx].e || [], miniStart);
+  miniRaf = requestAnimationFrame(miniLoop);
+}
+function startMini(){
+  stopMini();
+  miniStart = performance.now();
+  miniTimer = setInterval(function(){
+    miniIdx = (miniIdx + 1) % MODULES[curMod].steps.length;
+    miniStart = performance.now();
+    applyMiniStep();
+  }, 2400);
+  miniRaf = requestAnimationFrame(miniLoop);
+}
+function stopMini(){
+  if (miniTimer) { clearInterval(miniTimer); miniTimer = null; }
+  if (miniRaf) { cancelAnimationFrame(miniRaf); miniRaf = null; }
+}
+
+/* ---------- ③ 模块实现 ---------- */
+var STATS = [
+  ['23,682', 'TypeScript 行数 / 123 文件'],
+  ['592', '测试通过 / 126 个测试文件'],
+  ['20', 'SQLite 表 / migration v1–v4'],
+  ['1477 ms', 'microVM 冷启动 median（jailer）'],
+  ['513 ms', '快照恢复 median'],
+  ['11.6 ms', 'guest 命令 median（恢复后）']
+];
+var EXTRA_CARDS = [
+  {t:'数据模型：20 张表', s:'SQLite + WAL · migration v1–v4', b:[
+    'migration v2：审计表加 prev_hash/hash + 禁止 UPDATE/DELETE 触发器',
+    'migration v3：队列优先级 + RunAttempt 租约三列',
+    'migration v4：Run 幂等键（唯一索引）+ 重试计数/时间'
+  ], rows:[
+    ['agent_runs', 'Run 主表：状态 / 策略 / 优先级 / 幂等键 / 重试'],
+    ['run_attempts', '每次尝试：kind(START|RESUME) / 状态 / 租约三列'],
+    ['run_events', '事件流（去重键唯一索引），UI 轮询数据源'],
+    ['tool_executions', '工具副作用记账：PREPARED → SUCCEEDED / FAILED'],
+    ['checkpoints', '安全恢复点（绑定 runId + toolExecutionId）'],
+    ['sandboxes', '沙箱生命周期与 enforcement 能力'],
+    ['effective_policy_snapshots', '五层策略交集快照（事后可审计）'],
+    ['policy_decisions / resource_snapshots', '准入决策与资源观测'],
+    ['access_audit_events', '访问审计 + hash 链（只追加）'],
+    ['workspaces / run_artifacts / run_workspace_*', '工作区、产物与前后快照 diff']
+  ]},
+  {t:'关键配置（env）', s:'全部经 loadHarnessConfig 单一入口', b:['生产模式强制：HARNESS_ENV=production 要求 jailer + microvm + broker socket'], rows:[
+    ['沙箱', 'HARNESS_SANDBOX_PROVIDER / _PROFILE / _RUNTIME / HARNESS_MICROVM_DRIVER / HARNESS_USE_JAILER / HARNESS_VM_SNAPSHOTS_ENABLED'],
+    ['资源与准入', 'HARNESS_MAX_ACTIVE_RUNS / _PER_TENANT / HARNESS_MAX_QUEUED_RUNS / _PER_TENANT / HARNESS_SCHEDULER_AGING_MS'],
+    ['可靠性', 'HARNESS_RUN_LEASE_TTL_MS / _HEARTBEAT_MS / HARNESS_RUN_MAX_ATTEMPTS / _RETRY_BASE_MS / _RETRY_MAX_MS'],
+    ['限额', 'HARNESS_MAX_USER_INPUT_CHARS / HARNESS_WORKSPACE_SNAPSHOT_MAX_FILES / _MAX_DEPTH / HARNESS_ARTIFACT_MAX_*'],
+    ['入口', 'HARNESS_RATE_LIMIT_* / HARNESS_TRUST_PROXY / HARNESS_REGISTRATION_MODE / _INVITE_CODE'],
+    ['模型', 'PI_PROVIDER / VLLM_MODEL_ID / PI_AUTH_PATH / PI_MODELS_PATH / PI_COMPACTION_* / HARNESS_MODEL_SERVICE_MODE'],
+    ['Broker', 'HARNESS_SANDBOX_BROKER_SOCKET / _CONTROL_TOKEN / _PEER_UIDS / _MASTER_UID / _WORKER_UID']
+  ]},
+  {t:'部署拓扑（单机 systemd）', s:'真机 172.17.43.193 · 三个单元', b:[
+    'Broker 以 root 跑，Master 与 Worker 都不需要 root',
+    'Master 单元不要设 NoNewPrivileges（会挡住 sudo launcher）',
+    'Master 用 Wants= 而非 Requires=：Broker 故障时 Master 仍可 fail-closed 响应'
+  ], rows:[
+    ['harness-broker.service', 'root · jailer + 快照 · IPAddressDeny=any · RuntimeDirectory=harness'],
+    ['harness.service', 'User=cxr · IPAddressAllow 内网 · 只监听 127.0.0.1 或内网地址'],
+    ['harness-worker-<runId>.service', '瞬时单元 · UID 998 · seccomp + Landlock + 只读 rootfs + egress ACL'],
+    ['harness-maintenance.timer', '每日 backup + cleanup + disk-check'],
+    ['数据目录', '/data/harness（独立 NVMe）：DB / workspaces / vm-runtime / snapshots / backups']
+  ]},
+  {t:'实测性能（真机 jailer）', s:'Firecracker v1.17.0 · 192 vCPU / 251GB · n=5~20', b:[
+    '并发热恢复墙钟：N=1 595ms → N=10 766ms（近似线性，无雪崩）',
+    '并发冷启动约 2.9s 且 warmHit=0：未复用「首个完成的快照」，是已知优化点',
+    '多租户审计：非 jailer 10 并发 28/28 · 1593ms；jailer + 快照恢复 24/24 · P95 437ms'
+  ], rows:[
+    ['冷启动 create', 'min 1476 / median 1477 / p95 1485 ms'],
+    ['首次（冷启动 + 制作快照）', '2866 ms'],
+    ['热恢复 create', 'min 486 / median 513 / p95 538 ms'],
+    ['恢复后 guest 命令', 'median 11.6 / p95 12.4 ms'],
+    ['宿主观测', '最大同时 Firecracker = N · MemAvailable ~231GB · load ~2.1']
+  ]},
+  {t:'测试与质量基线', s:'126 文件 · 592 通过 · 0 失败', b:[
+    'typecheck 仅剩 9 条历史基线错误（脚本与 serial-bridge），主源码零错误',
+    '故障注入 F1–F7 有独立测试 + 真机编排脚本',
+    '真机复验：p0 e2e smoke（串行/并发/跨租户 404）+ 审计链 + 账单 + 备份一致性'
+  ], rows:[
+    ['tests/sandbox（21）', '驱动 / 快照 / 超时 / 能力声明 / 孤儿回收'],
+    ['tests/runs + scheduling（23）', '状态机 / 幂等 / 租约 / 优先级 / backpressure / retryAt'],
+    ['tests/http（12）', '限流 / 租户边界 / 注册模式 / 幂等并发 / 故障隔离'],
+    ['tests/recovery + checkpoints（6+）', '租约过期两条路径 / 决策表'],
+    ['tests/mcp（4）', '协议 / stdio 客户端 / 注册表 / Pi 工具适配'],
+    ['scripts/*-smoke.ts', 'p0-e2e / audit-chain / tenant-billing / mcp / phase5 故障注入']
+  ]},
+  {t:'面试追问：我踩过的坑', s:'真实问题与设计取舍（每条都有真机证据）', b:[
+    '为什么 Broker 要 root 而 Master 不要：特权面越小越好，Broker 只开三个操作',
+    '非 jailer + 快照为什么必须 fail-closed：快照固化宿主绝对路径 → 多台恢复 VM 共用工作区磁盘 → 跨租户串写',
+    '为什么 UNKNOWN_EFFECT 不自动重放：重放可能重复扣款/重复发消息，宁可人工复核',
+    '为什么 kick 而不只 tick：drain 批次屏障会把后提交的 Run 串行化',
+    '最难的真实 bug：Worker egress 被钉死 IPv4，模型服务 IPv4 段不可达 → 整片 Run 挂起（已恢复双栈 + 按 CIDR 放行）',
+    '模型服务黑洞时没有快速失败：只能等执行超时（建议 30min → 5min + 健康探测）'
+  ], rows:[
+    ['隔离怎么证明', '跨租户 GET/中断/提交全部 404 + 终止后 0 进程 0 目录 + 产物导出校验'],
+    ['为什么单机 SQLite', '个人/实验室规模够用；WAL + busy_timeout 已解决并发与备份冲突'],
+    ['要分布式先改什么', 'RunAttempt 租约与心跳已经是分布式原语：换成 DB 锁 + 多 Master 即可起步'],
+    ['上下文压缩', 'Pi SDK 自带（compaction 子系统），平台只负责下发参数与观测']
+  ]}
+];
+
+function renderStats(){
+  var box = $('#stats');
+  box.innerHTML = '';
+  STATS.forEach(function(s){
+    var d = document.createElement('div');
+    d.className = 's1';
+    d.innerHTML = '<div class="v">' + s[0] + '</div><div class="k">' + s[1] + '</div>';
+    box.appendChild(d);
+  });
+}
+function renderCards(){
+  var box = $('#cards');
+  box.innerHTML = '';
+  var all = MODULES.map(function(m){
+    return {t:m.title, s:m.sub, b:m.bullets, rows:m.impl.files.map(function(f){ return [f[0], f[1]]; }),
+            chips:m.impl.types.concat(m.impl.tests)};
+  }).concat(EXTRA_CARDS);
+  all.forEach(function(c){
+    var d = document.createElement('div');
+    d.className = 'mcard';
+    var head = document.createElement('button');
+    head.innerHTML = '<span><span class="t">' + c.t + '</span><span class="s">' + c.s + '</span></span><span class="x">›</span>';
+    var body = document.createElement('div');
+    body.className = 'body';
+    var html = '';
+    if (c.b) {
+      html += '<h5>要点</h5><ul>';
+      c.b.forEach(function(x){ html += '<li>' + x + '</li>'; });
+      html += '</ul>';
+    }
+    if (c.rows) {
+      html += '<h5>细节</h5><table class="t"><tbody>';
+      c.rows.forEach(function(r){ html += '<tr><td class="mono">' + r[0] + '</td><td>' + r[1] + '</td></tr>'; });
+      html += '</tbody></table>';
+    }
+    if (c.chips) {
+      html += '<h5>类型与测试</h5><div class="chips">';
+      c.chips.forEach(function(x){ html += '<span class="chip mono">' + x + '</span>'; });
+      html += '</div>';
+    }
+    body.innerHTML = html;
+    head.addEventListener('click', function(){ d.classList.toggle('open'); });
+    d.appendChild(head); d.appendChild(body);
+    box.appendChild(d);
+  });
+}
+
+/* ---------- 启动 ---------- */
+goTo(0);
+$('#detail').innerHTML = '<h4>点击图中任意节点</h4><div class="path mono">或点左侧步骤，查看该模块的职责 / 输入输出 / 读写表 / 关键取舍</div><ul><li>按 <kbd>空格</kbd> 播放或暂停</li><li>按 <kbd>←</kbd> <kbd>→</kbd> 单步推进</li><li>点节点会把动画暂停在该模块</li></ul>';
+renderModTabs();
+selectMod(0);
+stopMini();
+renderStats();
+renderCards();
+loop();
+play();
+var hv = (location.hash || '').replace('#', '');
+if (hv === 'v2' || hv === 'v3') { var hb = document.querySelector('.tabs button[data-view="' + hv + '"]'); if (hb) { hb.click(); } }
+window.addEventListener('hashchange', function(){ var h2 = (location.hash || '').replace('#', ''); var b2 = document.querySelector('.tabs button[data-view="' + h2 + '"]'); if (b2) { b2.click(); } });
+
+</script>
+</body>
+</html>

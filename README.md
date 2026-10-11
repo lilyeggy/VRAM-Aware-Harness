@@ -112,6 +112,8 @@ MCP 工具接入（Phase 4，§9.8 v1.4）见 `.env.example` 的 `HARNESS_MCP_SE
 
 最小可观测性：`GET /metrics` 返回 Prometheus 文本，需要 `metrics:read` scope（bootstrap key 的 `*` 可读），包含 `harness_runs{status}`、`harness_runs_queued`、`harness_sandbox_acquisitions_total{warm}`、`harness_http_requests_total{status}` 等。
 
+面试向的架构讲解：`docs/interview-architecture.zh-CN.html`（文字版）与 `docs/interview-architecture-visual.zh-CN.html`（动态图版：全链路数据流动画 + 13 个模块内部流转 + 模块实现速查）。
+
 实验室/他人接入前的最小运维：
 
 ```bash
