@@ -2,7 +2,7 @@
 # 完整步骤见 docs/deployment-single-node-systemd.zh-CN.md。
 [Unit]
 Description=Harness Master (non-root)
-Requires=harness-broker.service
+Wants=harness-broker.service
 After=harness-broker.service network-online.target
 Wants=network-online.target
 

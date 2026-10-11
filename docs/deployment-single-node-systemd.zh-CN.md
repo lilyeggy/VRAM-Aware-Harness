@@ -228,7 +228,7 @@ HARNESS_MCP_SERVERS="$HARNESS_MCP_SERVERS" bun run scripts/mcp-smoke.ts
 ```ini
 [Unit]
 Description=Harness Master (non-root)
-Requires=harness-broker.service
+Wants=harness-broker.service
 After=harness-broker.service network-online.target
 Wants=network-online.target
 
@@ -263,6 +263,7 @@ WantedBy=multi-user.target
 - Worker 还启用 seccomp 白名单与 Landlock：`SystemCallFilter=@system-service` 并显式放行 `landlock_create_ruleset` / `landlock_add_rule` / `landlock_restrict_self`，`SystemCallErrorNumber=EPERM`；Worker 进程内以 `HARNESS_WORKER_LANDLOCK=required` 应用 Landlock，失败即退出 78（fail-closed）。
 - Worker 只读宿主、只写 `/var/lib/harness-worker`、`/tmp`、`/run/harness`（Broker socket）与 `/dev/null` 等设备文件；模型凭据只存在于 `/var/lib/harness-worker`。
 - 控制面 egress ACL（§9.7 v1.3 第 3 项）：Broker 单元 `IPAddressDeny=any`；Master 单元 `IPAddressDeny=any` + `IPAddressAllow=127.0.0.0/8`；Worker 默认只允许 loopback，访问外部模型服务时通过 `WORKER_EGRESS_ALLOW` 放行模型服务 CIDR（如 opencode.ai 的 Cloudflare 段 `172.64.0.0/13`）。Worker 的 `RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6`（双栈；早期版本仅 IPv4，遇到「IPv4 出站不可用但 IPv6 正常」时会挂起模型调用，故恢复 IPv6 并要求同时放行模型服务的 IPv6 前缀）；未配置 `WORKER_EGRESS_ALLOW` 时 Worker 无法访问外部模型服务，属 fail-closed。
+- Broker 故障隔离（§9.9 v1.5 F2）：Master 单元用 `Wants=harness-broker.service` 而不是 `Requires=`——Broker 停止/重启不会连带杀死 Master。Broker 不可达时新 Run 走 fail-closed（`INTERRUPTED`，`START_FAILED`），Broker 恢复后新 Run 正常；真机验证见 §9.9。
 - 不可变审计存储（§9.7 v1.3 第 4 项）：`access_audit_events` 采用只追加 + SHA-256 hash 链；migration v2 增加 `prev_hash`/`hash` 列与 `BEFORE UPDATE`/`BEFORE DELETE` 触发器，正常路径无法改写或删除审计事实；`AccessAuditStore.verifyChain()` 能检测绕过触发器的内容篡改或中间行删除。验证命令：
   ```bash
   cd /srv/VRAM-Aware-Harness

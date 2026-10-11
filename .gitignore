@@ -80,3 +80,5 @@ build/
 media/
 scripts/__pycache__/
 .freebuff/
+scripts/*_manim.py
+scripts/philosophy_sisyphus_long.py

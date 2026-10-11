@@ -219,27 +219,39 @@ async function faultInjectionF1(owner: Principal, other: Principal, workspaceId:
         throw new Error("F1 kill worker 失败：" + killed.stderr);
     }
 
-    const interrupted = await waitForStatus(
+    const terminalStatus = await waitForStatus(
         owner,
         runId,
         (status) => TERMINAL.has(status),
         timeoutMs,
     );
-    if (interrupted !== "INTERRUPTED") {
-        throw new Error("F1 期望 INTERRUPTED，实际 " + interrupted);
-    }
 
     const list = await events(owner, runId);
-    const leaseExpired = list.some((event) =>
-        event.type === "RUN_INTERRUPTED" && payloadText(event.payload).includes("LEASE_EXPIRED"));
-    if (leaseExpired === false) {
-        throw new Error("F1 未观察到 LEASE_EXPIRED 事件：" + JSON.stringify(list.map((event) => event.type)));
-    }
-    const recovered = list.some((event) =>
-        payloadText(event.payload).includes("MANUAL_REVIEW_REQUIRED")
-        || payloadText(event.payload).includes("AUTO_RECOVERY"));
-    if (recovered === false) {
-        throw new Error("F1 未观察到恢复决策（MANUAL_REVIEW / AUTO_RESUME）");
+    // 两条真实路径（2026-10-11 真机观察）：
+    //   lease       —— Master 观察不到 Worker 之死（例如 Master 自身重启），租约过期由 reaper 回收为 INTERRUPTED + 恢复决策；
+    //   supervisor  —— Master 能观察到 Worker 进程退出（systemd/process 隔离），立即以 WORKER_CRASHED 收尾为 FAILED。
+    let crashPath: string;
+    if (terminalStatus === "INTERRUPTED") {
+        const leaseExpired = list.some((event) =>
+            event.type === "RUN_INTERRUPTED" && payloadText(event.payload).includes("LEASE_EXPIRED"));
+        if (leaseExpired === false) {
+            throw new Error("F1 观察到 INTERRUPTED 但缺少 LEASE_EXPIRED 事件：" + JSON.stringify(list.map((event) => event.type)));
+        }
+        const recovered = list.some((event) =>
+            payloadText(event.payload).includes("MANUAL_REVIEW_REQUIRED")
+            || payloadText(event.payload).includes("AUTO_RECOVERY"));
+        if (recovered === false) {
+            throw new Error("F1 未观察到恢复决策（MANUAL_REVIEW / AUTO_RESUME）");
+        }
+        crashPath = "lease";
+    } else if (terminalStatus === "FAILED") {
+        const crashed = list.some((event) => payloadText(event.payload).includes("WORKER_CRASHED"));
+        if (crashed === false) {
+            throw new Error("F1 期望 FAILED 带 WORKER_CRASHED，实际事件：" + JSON.stringify(list.map((event) => event.type)));
+        }
+        crashPath = "supervisor";
+    } else {
+        throw new Error("F1 期望 INTERRUPTED（租约回收）或 FAILED（WORKER_CRASHED），实际 " + terminalStatus);
     }
 
     await assertCrossTenantHidden(other, runId);
@@ -255,7 +267,7 @@ async function faultInjectionF1(owner: Principal, other: Principal, workspaceId:
         throw new Error("F1 残留 Firecracker 进程：" + firecracker + " > baseline " + baselineFirecracker);
     }
 
-    return "unit=" + unit + " run=" + runId;
+    return "path=" + crashPath + " unit=" + unit + " run=" + runId;
 }
 
 async function faultInjectionF2(owner: Principal, workspaceId: string): Promise<string> {
