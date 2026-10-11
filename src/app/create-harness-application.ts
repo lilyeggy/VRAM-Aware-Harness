@@ -172,6 +172,9 @@ export async function createHarnessApplication(
     const policyRegistry = dependencies.policyRegistry ?? new PolicyRegistry();
     const sandboxStore = new SandboxStore(database);
     const credentialStore = new ApiCredentialStore(database);
+    // F12：启动时清一次过期会话与超过 7 天保留期的已撤销会话，
+    // 避免 user_sessions 随每次登录无限增长。
+    credentialStore.pruneSessions();
     const accessAuditStore = new AccessAuditStore(database);
     const tenantBillingStore = new TenantBillingStore(database);
     const workspaceStore = new WorkspaceStore(database);

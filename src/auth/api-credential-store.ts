@@ -130,6 +130,21 @@ export class ApiCredentialStore {
     }
 
     /**
+     * F12：清理过期会话与超过保留期的已撤销会话，避免 user_sessions 无限增长。
+     * 已撤销会话保留 7 天，便于审计归因；返回删除行数。
+     */
+    pruneSessions(now = Date.now()): number {
+        const cutoff = new Date(now).toISOString();
+        const revokedCutoff = new Date(now - 7 * 24 * 60 * 60 * 1000).toISOString();
+        const result = this.db.query(`
+            DELETE FROM user_sessions
+            WHERE expires_at <= $cutoff
+               OR (revoked_at IS NOT NULL AND revoked_at <= $revokedCutoff)
+        `).run({ cutoff, revokedCutoff });
+        return result.changes;
+    }
+
+    /**
      * D7：撤销某用户的全部活跃会话（"退出所有设备"）。
      * 返回撤销的会话数量。
      */

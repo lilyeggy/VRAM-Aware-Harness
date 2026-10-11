@@ -137,3 +137,29 @@ test("D7：revokeAllSessions 撤销当前用户全部活跃会话", async () => 
         db.close();
     }
 });
+
+test("F12：pruneSessions 清理过期会话，已撤销会话保留 7 天后清理", async () => {
+    const db = openHarnessDatabase(":memory:");
+
+    try {
+        const store = new ApiCredentialStore(db);
+        await store.registerUser("prune@example.com", "super-secret-password");
+        const session = await store.loginUser("prune@example.com", "super-secret-password");
+        if (session === null) throw new Error("login failed");
+
+        // 未过期且未撤销：不清理。
+        expect(store.pruneSessions()).toBe(0);
+        expect(store.authenticate(session.token)).not.toBeNull();
+
+        // 刚撤销：仍在 7 天保留期内，不清理。
+        store.revokeSession(session.token);
+        expect(store.pruneSessions()).toBe(0);
+
+        // now 推到 8 天后：过期/已撤销会话被清理。
+        const future = Date.now() + 8 * 24 * 60 * 60 * 1000;
+        expect(store.pruneSessions(future)).toBe(1);
+        expect(store.authenticate(session.token)).toBeNull();
+    } finally {
+        db.close();
+    }
+});

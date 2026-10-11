@@ -96,6 +96,24 @@ test("审计 API 按 Principal Tenant 收口，并要求 audits:read", async () 
         const body = await response.json() as { events: Array<{ tenantId: string }> };
         expect(body.events.some((event) => event.tenantId === "tenant-a")).toBe(true);
         expect(body.events.every((event) => event.tenantId === "tenant-a")).toBe(true);
+
+        // F12：非法分页参数返回 400，而不是静默使用默认值。
+        const badLimit = await api.fetch(new Request("http://h/audit?limit=abc", {
+            headers: { authorization: "Bearer key-a" },
+        }));
+        expect(badLimit.status).toBe(400);
+        const negativeOffset = await api.fetch(new Request("http://h/audit?offset=-1", {
+            headers: { authorization: "Bearer key-a" },
+        }));
+        expect(negativeOffset.status).toBe(400);
+        const hugeLimit = await api.fetch(new Request("http://h/audit?limit=100000", {
+            headers: { authorization: "Bearer key-a" },
+        }));
+        expect(hugeLimit.status).toBe(400);
+        const validPage = await api.fetch(new Request("http://h/audit?limit=1&offset=0", {
+            headers: { authorization: "Bearer key-a" },
+        }));
+        expect(validPage.status).toBe(200);
     } finally {
         db.close();
     }

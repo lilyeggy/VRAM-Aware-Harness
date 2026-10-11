@@ -2,6 +2,27 @@ import { HttpError, jsonResponse } from "../http-utils.ts";
 import { userConsoleResponse } from "../harness-user-console.ts";
 import type { HttpRouteContext } from "./route-context.ts";
 
+
+/**
+ * 读取并校验分页查询参数；非法值返回 400，而不是静默退回默认值。
+ */
+function readPageParam(
+    url: URL,
+    name: string,
+    min: number,
+    max: number,
+): number | undefined {
+    const raw = url.searchParams.get(name);
+    if (raw === null || raw.trim() === "") {
+        return undefined;
+    }
+    const value = Number(raw);
+    if (!Number.isInteger(value) || value < min || value > max) {
+        throw new HttpError(400, `${name} 必须是 ${min}..${max} 的整数`);
+    }
+    return value;
+}
+
 export async function handleSystemRoute(
     request: Request,
     segments: readonly string[],
@@ -53,12 +74,13 @@ export async function handleSystemRoute(
                     throw new HttpError(501, "未配置访问审计服务");
                 }
                 const url = new URL(request.url);
-                const limitParam = Number(url.searchParams.get("limit") ?? undefined);
-                const offsetParam = Number(url.searchParams.get("offset") ?? undefined);
+                // F12：分页参数显式校验，拒绝 NaN/负数/超大值，避免无效 OFFSET 扫描。
+                const limit = readPageParam(url, "limit", 1, 500);
+                const offset = readPageParam(url, "offset", 0, 1_000_000);
                 return jsonResponse({
                     events: ctx.accessControl.auditStore.listForTenant(principal.tenantId, {
-                        ...(Number.isFinite(limitParam) ? { limit: limitParam } : {}),
-                        ...(Number.isFinite(offsetParam) ? { offset: offsetParam } : {}),
+                        ...(limit === undefined ? {} : { limit }),
+                        ...(offset === undefined ? {} : { offset }),
                     }),
                 });
             }

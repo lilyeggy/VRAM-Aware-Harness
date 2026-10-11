@@ -224,7 +224,8 @@ HTTP API ──> Master (调度/审计/策略/LLM网关)
   - F3 SQLite WAL/busy_timeout：`src/storage/database.ts` 的 `configureDatabase` 增加 `PRAGMA journal_mode = WAL` 与 `PRAGMA busy_timeout = 5000`，让 `harness-maintenance.ts` 的跨进程 `VACUUM INTO` 备份与 Master 写入不再互斥；新增数据库 PRAGMA 回归测试。
   - F6 Broker create 孤儿回收：`src/sandbox/broker/sandbox-broker-server.ts` 在 create 后 `readRecord` 为 null 时先 `provider.terminate(handle.id)` 再抛错，避免产生不可寻址孤儿 VM；新增 Broker 回归测试。
   - F10 HTTP 内部错误收口：`src/http/harness-http-api.ts` catch-all 由 409 + 原始 message 改为 500 + 通用文案 + requestId，原始异常只进服务端日志；`src/http/routes/auth.ts` 重复邮箱映射为 409 “该邮箱已被注册”，已知输入校验错误映射为 400；新增 HTTP/注册回归测试。
-  - 本地 `bun test ./tests` = 523 pass / 7 skip / 0 fail；typecheck 保持既有 9 条基线错误。
+  - F12 三项小修：`src/auth/api-credential-store.ts` 新增 `pruneSessions`（启动时清理过期会话与超过 7 天保留期的已撤销会话）；`src/sandbox/broker/sandbox-broker-server.ts` control token / capability token 改为 SHA-256 + `timingSafeEqual` 恒时比较；`src/http/routes/system.ts` 审计分页 `limit`/`offset` 显式校验（1..500 / 0..1,000,000），非法值返回 400。
+  - 本地 `bun test ./tests` = 524 pass / 7 skip / 0 fail；typecheck 保持既有 9 条基线错误。
 - 以上均属 §9.6 允许的 bug/安全修复、测试与文档维护、部署兼容性修复，不改变 §9.2/§9.3 的范围划分。
 
 暂缓的增强（不在当前边界内）：
