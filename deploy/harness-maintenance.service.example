@@ -1,0 +1,12 @@
+# 单机 systemd 部署示例：每日备份 + 清理 + 磁盘水位。
+# 完整步骤见 docs/deployment-single-node-systemd.zh-CN.md §11。
+[Unit]
+Description=Harness daily maintenance (backup + cleanup + disk check)
+After=harness.service
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+WorkingDirectory=/srv/VRAM-Aware-Harness
+ExecStart=/usr/local/sbin/harness-maintenance

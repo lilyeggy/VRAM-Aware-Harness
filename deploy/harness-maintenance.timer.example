@@ -1,0 +1,11 @@
+# 单机 systemd 部署示例：每日触发 harness-maintenance.service。
+[Unit]
+Description=Run Harness maintenance daily
+
+[Timer]
+OnCalendar=*-*-* 04:30:00
+Persistent=true
+RandomizedDelaySec=15m
+
+[Install]
+WantedBy=timers.target

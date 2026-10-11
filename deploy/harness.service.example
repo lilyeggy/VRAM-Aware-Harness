@@ -16,7 +16,8 @@ EnvironmentFile=/etc/harness/master.env
 ExecStart=/usr/local/bin/bun run src/main.ts
 Restart=on-failure
 RestartSec=3
-NoNewPrivileges=true
+# 不要设置 NoNewPrivileges=true：Master 通过 sudo 调用 harness-worker-run 启动 Worker，
+# no_new_privs 会让 sudo 拒绝提权，Worker 启动失败（WORKER_CRASHED）。
 PrivateTmp=true
 # 控制面 egress ACL（§9.7 v1.3 第 3 项）：Master 只监听/访问 loopback；
 # 如需从局域网访问 API，把入口地址加入 IPAddressAllow。

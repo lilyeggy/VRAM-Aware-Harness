@@ -40,7 +40,7 @@ ${USER_CONSOLE_CSS}
     <div class="authbrand">
       <div class="mark"><svg viewBox="0 0 24 24" fill="none"><g stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><line x1="12" y1="2.2" x2="12" y2="7.4"/><line x1="12" y1="16.6" x2="12" y2="21.8"/><line x1="2.2" y1="12" x2="7.4" y2="12"/><line x1="16.6" y1="12" x2="21.8" y2="12"/><line x1="5.1" y1="5.1" x2="8.7" y2="8.7"/><line x1="15.3" y1="15.3" x2="18.9" y2="18.9"/><line x1="5.1" y1="18.9" x2="8.7" y2="15.3"/><line x1="15.3" y1="8.7" x2="18.9" y2="5.1"/></g></svg></div>
       <h1>VRAM-Aware Harness</h1>
-      <p>把任务交给 Agent，在团队共享的本地模型上完成。</p>
+      <p>把任务交给 Agent，在隔离沙箱中执行，由外部模型服务完成推理。</p>
     </div>
     <div class="authtabs">
       <button id="tabLogin" class="on" type="button">登录</button>
@@ -108,7 +108,7 @@ ${USER_CONSOLE_CSS}
             </div>
           </div>
         </div>
-        <p class="disclaimer">Agent 在按 Run 隔离的沙箱中执行 · 工具副作用先记账后执行 · 共享 GPU 公平调度，资源紧张时任务会排队</p>
+        <p class="disclaimer">Agent 在按 Run 隔离的沙箱中执行 · 工具副作用先记账后执行 · 外部模型服务，资源紧张时任务会排队</p>
       </div>
       <div class="hero" id="suggestZone" style="flex:0 0 auto;padding-top:0">
         <div class="herospace" style="margin:0">

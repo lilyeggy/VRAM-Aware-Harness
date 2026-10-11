@@ -216,9 +216,13 @@ EnvironmentFile=/etc/harness/master.env
 ExecStart=/usr/local/bin/bun run src/main.ts
 Restart=on-failure
 RestartSec=3
-NoNewPrivileges=true
+# 注意：不要设置 NoNewPrivileges=true。Master 通过 sudo 调用
+# /usr/local/sbin/harness-worker-run 启动 Worker；no_new_privs 会让 sudo
+# 拒绝提权，Worker 启动失败（WORKER_CRASHED: sudo: The "no new privileges"
+# flag is set, which prevents sudo from running as root.）。
 PrivateTmp=true
-# 控制面 egress ACL（§9.7 v1.3 第 3 项）：Master 只监听/访问 loopback。
+# 控制面 egress ACL（§9.7 v1.3 第 3 项）：Master 默认只允许 loopback。
+# 若在可信内网直接暴露 3100，把实验室网段加入 IPAddressAllow。
 IPAddressDeny=any
 IPAddressAllow=127.0.0.0/8
 
@@ -228,6 +232,7 @@ WantedBy=multi-user.target
 
 说明：
 - Master 只依赖 Broker socket，不需要 Firecracker 资产路径，也不应加入 `kvm` 组。
+- Master 若使用 `HARNESS_WORKER_ISOLATION=systemd`，必须保留 sudo 调用 `/usr/local/sbin/harness-worker-run` 的路径，因此 unit 不能设置 `NoNewPrivileges=true`；Broker unit 仍保留该项。
 - `HARNESS_WORKER_ISOLATION=systemd` 时，每次 Run 由 launcher 创建 `harness-worker-<runId>` 瞬时单元，Worker 使用 `harness-worker` UID、`MemoryMax`、`CPUQuota`、`TasksMax`、`NoNewPrivileges`、`PrivateDevices`、`ProtectSystem=strict`、`ProtectHome=read-only`、`ProtectKernelTunables/Modules/ControlGroups/Clock/Hostname`、`ProtectProc=invisible`、`ProcSubset=pid`、`RestrictRealtime`、`RestrictSUIDSGID`、`RemoveIPC`、`LockPersonality`。
 - Worker 还启用 seccomp 白名单与 Landlock：`SystemCallFilter=@system-service` 并显式放行 `landlock_create_ruleset` / `landlock_add_rule` / `landlock_restrict_self`，`SystemCallErrorNumber=EPERM`；Worker 进程内以 `HARNESS_WORKER_LANDLOCK=required` 应用 Landlock，失败即退出 78（fail-closed）。
 - Worker 只读宿主、只写 `/var/lib/harness-worker`、`/tmp`、`/run/harness`（Broker socket）与 `/dev/null` 等设备文件；模型凭据只存在于 `/var/lib/harness-worker`。
@@ -309,7 +314,7 @@ systemctl show harness-master -p IPAddressDeny -p IPAddressAllow
 ## 8. 安全与运维边界
 
 - Agent 无网络：microVM 无网卡；`allowNetwork=true` 在平台侧被拒绝；不要给 Broker/Worker 添加 NAT/代理。
-- 控制面 egress：Broker 禁 IP 出站；Master 只允许 loopback；Worker 默认只允许 loopback，仅 `WORKER_EGRESS_ALLOW` 放行的模型服务 CIDR 可达。
+- 控制面 egress：Broker 禁 IP 出站；Master 默认只允许 loopback，若在可信内网直接暴露 3100 需把实验室网段加入 `IPAddressAllow`；Worker 默认只允许 loopback，仅 `WORKER_EGRESS_ALLOW` 放行的模型服务 CIDR 可达。
 - Broker 只暴露 `create/execute/terminate`；control token 只存在于 root 可读文件与 Master 进程，Worker 只拿自己 sandbox 的 capability token；`HARNESS_SANDBOX_BROKER_MASTER_UID` / `HARNESS_SANDBOX_BROKER_WORKER_UID` 再把操作绑定到进程 UID。
 - Master 应只监听内网/本机，前置反向代理时自行加 TLS 与访问控制；平台只做 API Key/租户级授权。
 - 快照池、VM runtime、workspaces 都属于 Broker/Master 的本地数据目录；不要手工修改正在使用的磁盘。生产建议用 systemd timer 定时执行 `harness-ops.ts backup` 与 `cleanup`（cleanup 先 dry-run 观察）。
@@ -318,7 +323,9 @@ systemctl show harness-master -p IPAddressDeny -p IPAddressAllow
 
 ## 9. TLS / 反向代理
 
-Master 只监听 loopback（`HARNESS_HOST` 默认 `127.0.0.1`，unit 里 `IPAddressAllow=127.0.0.0/8`）。需要从实验室机器访问时，用 Caddy/Nginx 终止 TLS 并反代到 `127.0.0.1:3100`，不要直接暴露 3100。
+Master 默认只监听 loopback（`HARNESS_HOST` 默认 `127.0.0.1`，unit 里 `IPAddressAllow=127.0.0.0/8`）。需要从实验室机器访问时，优先用 Caddy/Nginx 终止 TLS 并反代到 `127.0.0.1:3100`。
+
+可信内网也可以直接暴露：设置 `HARNESS_HOST=0.0.0.0`，并把实验室网段加入 Master unit 的 `IPAddressAllow`（例如 `10.0.0.0/8 172.16.0.0/12`）。代价是明文 HTTP，密码与 token 不加密；只建议在受控实验室内网使用。
 
 - Caddy 示例：`deploy/harness-caddy.example`
 - Nginx 示例：`deploy/harness-nginx.example`
@@ -330,3 +337,68 @@ Master 只监听 loopback（`HARNESS_HOST` 默认 `127.0.0.1`，unit 里 `IPAddr
 
 - `docs/upgrade-rollback-runbook.zh-CN.md`
 - 日志文件轮转示例：`deploy/harness-logrotate.example`
+
+
+## 11. 定时备份 / 清理（systemd timer）
+
+示例文件：`deploy/harness-maintenance.sh.example`、`deploy/harness-maintenance.service.example`、`deploy/harness-maintenance.timer.example`。
+
+在 `/data/harness` 数据盘上建议每天执行一次 SQLite 备份、VM runtime 与快照池清理，并顺带打印磁盘水位。
+
+创建 `/usr/local/sbin/harness-maintenance`（root:root 0755）：
+
+```sh
+#!/bin/sh
+set -eu
+cd /srv/VRAM-Aware-Harness
+BUN=/usr/local/bin/bun
+DB=/data/harness/live-full-flow/harness.sqlite
+BACKUP_DIR=/data/harness/backups
+VM_RUNTIME=/data/harness/live-full-flow/vm-runtime
+SNAPSHOT_POOL=/data/harness/snapshots-mt
+
+$BUN run scripts/harness-ops.ts disk-check --path /data --warn 80 --critical 90 || true
+$BUN run scripts/harness-ops.ts disk-check --path / --warn 80 --critical 90 || true
+$BUN run scripts/harness-ops.ts backup --database "$DB" --backup-dir "$BACKUP_DIR" --keep 7
+$BUN run scripts/harness-ops.ts cleanup --vm-runtime "$VM_RUNTIME" --snapshot-pool "$SNAPSHOT_POOL" --max-age-hours 72 --max-snapshots 8 --apply
+```
+
+创建 `/etc/systemd/system/harness-maintenance.service`：
+
+```ini
+[Unit]
+Description=Harness daily maintenance (backup + cleanup + disk check)
+After=harness.service
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+WorkingDirectory=/srv/VRAM-Aware-Harness
+ExecStart=/usr/local/sbin/harness-maintenance
+```
+
+创建 `/etc/systemd/system/harness-maintenance.timer`：
+
+```ini
+[Unit]
+Description=Run Harness maintenance daily
+
+[Timer]
+OnCalendar=*-*-* 04:30:00
+Persistent=true
+RandomizedDelaySec=15m
+
+[Install]
+WantedBy=timers.target
+```
+
+启用并手动验证一次：
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable --now harness-maintenance.timer
+sudo systemctl start harness-maintenance.service
+systemctl list-timers | grep harness-maintenance
+ls -la /data/harness/backups/
+```

@@ -1,0 +1,15 @@
+#!/bin/sh
+# 安装到 /usr/local/sbin/harness-maintenance（root:root 0755）。
+# 数据目录按实际部署替换；172.17.43.193 使用 /data/harness。
+set -eu
+cd /srv/VRAM-Aware-Harness
+BUN=/usr/local/bin/bun
+DB=/data/harness/live-full-flow/harness.sqlite
+BACKUP_DIR=/data/harness/backups
+VM_RUNTIME=/data/harness/live-full-flow/vm-runtime
+SNAPSHOT_POOL=/data/harness/snapshots-mt
+
+$BUN run scripts/harness-ops.ts disk-check --path /data --warn 80 --critical 90 || true
+$BUN run scripts/harness-ops.ts disk-check --path / --warn 80 --critical 90 || true
+$BUN run scripts/harness-ops.ts backup --database "$DB" --backup-dir "$BACKUP_DIR" --keep 7
+$BUN run scripts/harness-ops.ts cleanup --vm-runtime "$VM_RUNTIME" --snapshot-pool "$SNAPSHOT_POOL" --max-age-hours 72 --max-snapshots 8 --apply
