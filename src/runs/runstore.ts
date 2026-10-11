@@ -49,7 +49,8 @@ interface AgentRunRow {
     finishedAt: string | null;
     checkpointId: string | null;
     failureReason: string | null;
-    runPolicyJson: string | null;
+    /** 列表查询可以省略该列；缺失时按无策略处理，绝不能 JSON.parse(undefined)。 */
+    runPolicyJson?: string | null;
     thinkingLevel: "off" | "minimal" | "low" | "medium" | "high";
 }
 
@@ -69,6 +70,7 @@ const RUN_LIST_COLUMNS = `
     started_at AS startedAt,
     finished_at AS finishedAt,
     checkpoint_id AS checkpointId,
+    run_policy_json AS runPolicyJson,
     thinking_level AS thinkingLevel
 `;
 
@@ -341,7 +343,7 @@ export class RunStore {
             failureReason: row.failureReason,
             thinkingLevel: row.thinkingLevel,
         };
-        if (row.runPolicyJson !== null) {
+        if (typeof row.runPolicyJson === "string") {
             run.runPolicy = JSON.parse(row.runPolicyJson) as AgentRun["runPolicy"];
         }
         return run;

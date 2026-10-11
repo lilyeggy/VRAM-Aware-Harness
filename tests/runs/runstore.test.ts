@@ -225,3 +225,44 @@ test("appendEventIfNew 只忽略相同 dedupe key 的重复事实", () => {
         db.close();
     }
 });
+
+
+test("listForTenant/listForSession 返回无 runPolicy 的 Run，不抛 JSON.parse(undefined)（N27 回归）", () => {
+    const db = openHarnessDatabase(":memory:");
+    const store = new RunStore(db);
+
+    try {
+        const run = createQueuedRun("run-list-1");
+        store.create(run, createEvent(run.id, 1, "RUN_CREATED"));
+
+        const listed = store.listForTenant("tenant-1");
+        expect(listed).toHaveLength(1);
+        expect(listed[0]?.id).toBe("run-list-1");
+        expect(listed[0]?.runPolicy).toBeUndefined();
+
+        const session = store.listForSession("tenant-1", "session-1");
+        expect(session).toHaveLength(1);
+        expect(session[0]?.id).toBe("run-list-1");
+    } finally {
+        db.close();
+    }
+});
+
+test("listForTenant 保留 runPolicy（N27 回归）", () => {
+    const db = openHarnessDatabase(":memory:");
+    const store = new RunStore(db);
+
+    try {
+        const run = {
+            ...createQueuedRun("run-list-2"),
+            runPolicy: { allowNetwork: false } as AgentRun["runPolicy"],
+        };
+        store.create(run, createEvent(run.id, 1, "RUN_CREATED"));
+
+        const listed = store.listForTenant("tenant-1");
+        expect(listed).toHaveLength(1);
+        expect(listed[0]?.runPolicy).toMatchObject({ allowNetwork: false });
+    } finally {
+        db.close();
+    }
+});
