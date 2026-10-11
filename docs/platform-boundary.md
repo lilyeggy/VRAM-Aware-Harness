@@ -226,6 +226,7 @@ HTTP API ──> Master (调度/审计/策略/LLM网关)
   - F10 HTTP 内部错误收口：`src/http/harness-http-api.ts` catch-all 由 409 + 原始 message 改为 500 + 通用文案 + requestId，原始异常只进服务端日志；`src/http/routes/auth.ts` 重复邮箱映射为 409 “该邮箱已被注册”，已知输入校验错误映射为 400；新增 HTTP/注册回归测试。
   - F12 三项小修：`src/auth/api-credential-store.ts` 新增 `pruneSessions`（启动时清理过期会话与超过 7 天保留期的已撤销会话）；`src/sandbox/broker/sandbox-broker-server.ts` control token / capability token 改为 SHA-256 + `timingSafeEqual` 恒时比较；`src/http/routes/system.ts` 审计分页 `limit`/`offset` 显式校验（1..500 / 0..1,000,000），非法值返回 400。
   - 本地 `bun test ./tests` = 524 pass / 7 skip / 0 fail；typecheck 保持既有 9 条基线错误。
+  - 真机验证（2026-10-11，172.17.43.193）：rsync 后远程 `bun test ./tests` = 531 pass / 0 fail；重启 `harness-broker.service`/`harness.service` 后 `/health` 200；`/data/harness/live-full-flow/harness.sqlite-wal`/`-shm` 出现；重复注册 `lab@demo.local` 返回 409 “该邮箱已被注册”；`/audit?limit=abc` 与 `/audit?offset=-1` 返回 400、`/audit?limit=1&offset=0` 返回 200；`scripts/p0-e2e-smoke.ts` 带 `HARNESS_SMOKE_INVITE_CODE=lab-harness-2026` 通过 `P0_E2E_SMOKE_OK label=61c8ab85`（serial maxActive=1、concurrent maxActive=2 overlap=true、跨租户 404）。
 - 以上均属 §9.6 允许的 bug/安全修复、测试与文档维护、部署兼容性修复，不改变 §9.2/§9.3 的范围划分。
 
 暂缓的增强（不在当前边界内）：
