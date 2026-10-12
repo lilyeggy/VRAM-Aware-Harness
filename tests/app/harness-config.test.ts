@@ -100,7 +100,7 @@ test("限流默认开启，可显式配置窗口与上限", () => {
     expect(defaults.rateLimitEnabled).toBe(true);
     expect(defaults.rateLimitWindowMs).toBe(60_000);
     expect(defaults.rateLimitMaxPerTenant).toBe(600);
-    expect(defaults.rateLimitMaxPerIp).toBe(120);
+    expect(defaults.rateLimitMaxPerIp).toBe(1200);
     expect(defaults.trustProxy).toBe(false);
 
     const custom = loadHarnessConfig({

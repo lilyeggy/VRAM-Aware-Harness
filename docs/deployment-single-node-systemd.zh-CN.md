@@ -186,7 +186,7 @@ HARNESS_REGISTRATION_MODE=invite
 HARNESS_REGISTRATION_INVITE_CODE=replace-with-lab-invite-code
 # HTTP 入口限流（默认开启；实验室可按人数/习惯调整）
 HARNESS_RATE_LIMIT_MAX_PER_TENANT=600
-HARNESS_RATE_LIMIT_MAX_PER_IP=120
+HARNESS_RATE_LIMIT_MAX_PER_IP=1200
 # 仅当 Master 只监听 loopback、前面是可信 Caddy/Nginx 时才开启。
 #HARNESS_TRUST_PROXY=true
 
@@ -288,7 +288,7 @@ WantedBy=multi-user.target
   ```
   期望 `TENANT_BILLING_SMOKE_OK` 与 `TENANT_BILLING_VERIFY_OK`。
 - 注册收口（实验室接入）：`HARNESS_REGISTRATION_MODE=open|invite|closed` 默认 `open` 保持旧部署兼容；`invite` 必须同时设置 `HARNESS_REGISTRATION_INVITE_CODE`，服务端用 timing-safe 比较；策略拒绝返回 403（不是账号冲突的 409）。交给实验室或他人使用前建议显式设为 `invite` 或 `closed`。
-- HTTP 入口限流：默认开启；固定窗口 `HARNESS_RATE_LIMIT_WINDOW_MS`（默认 60000）内每租户 `HARNESS_RATE_LIMIT_MAX_PER_TENANT`（默认 600）、每 IP `HARNESS_RATE_LIMIT_MAX_PER_IP`（默认 120）；超限返回 429 + `Retry-After`；`/health`、`/ready` 不参与限流。`HARNESS_TRUST_PROXY=true` 只在 Master 只监听 loopback、前面是可信 Caddy/Nginx 时开启；直接暴露时开启会让客户端伪造 `X-Forwarded-For` 绕过限流。
+- HTTP 入口限流：默认开启；固定窗口 `HARNESS_RATE_LIMIT_WINDOW_MS`（默认 60000）内每租户 `HARNESS_RATE_LIMIT_MAX_PER_TENANT`（默认 600）、每 IP `HARNESS_RATE_LIMIT_MAX_PER_IP`（默认 1200；实验室常共用一个 NAT 出口 IP，调低会让所有人的正常 UI 轮询一起 429）；超限返回 429 + `Retry-After`；`/health`、`/ready` 不参与限流。`HARNESS_TRUST_PROXY=true` 只在 Master 只监听 loopback、前面是可信 Caddy/Nginx 时开启；直接暴露时开启会让客户端伪造 `X-Forwarded-For` 绕过限流。
 - 验证：Run 执行期间 `systemctl show 'harness-worker-<runId>.service' -p SystemCallFilter -p ProtectSystem -p ReadWritePaths -p IPAddressDeny -p IPAddressAllow` 应看到上述属性；Worker stderr 会打印 `[worker] landlock=on abi=<n>`。
 - 最小可观测性（§9.8 v1.4）：`GET /metrics` 返回 Prometheus 文本，需要 `metrics:read` scope（bootstrap key 的 `*` 可读）。包含 `harness_up`、`harness_uptime_seconds`、`harness_runs_queued`、`harness_runs{status}`、`harness_sandbox_acquisitions_total{warm}`、`harness_sandbox_acquire_duration_ms_sum`、`harness_http_requests_total{status}`。验证：
   ```bash

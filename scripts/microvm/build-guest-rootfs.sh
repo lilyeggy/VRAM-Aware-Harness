@@ -140,10 +140,17 @@ echo "[OK] socat installed into rootfs staging"
 # 否则 agent 的 cwd=/workspace 落在 rootfs 副本上，产物无法随工作区盘导出。
 # /proc 与 /sys 也必须显式挂载（busybox init 不会自动挂），
 # 否则 mdev 报错、cat /proc/1/cmdline 等诊断命令全部失败（真机验证发现）。
+# /tmp、/run、/var/tmp 挂 tmpfs：开启 HARNESS_VM_SHARE_ROOTFS 后 rootfs 是只读的
+# （多台 VM 硬链接同一 inode），没有这些 tmpfs 时 `sh: can't create /tmp/x:
+# Read-only file system`（真机实测），常见工具链（pip/编译器/临时文件）会直接失败。
 cat << 'EOF' > "${ROOT_STAGING}/etc/inittab"
 ::sysinit:/bin/mount -t proc proc /proc
 ::sysinit:/bin/mount -t sysfs sysfs /sys
 ::sysinit:/sbin/mdev -s
+::sysinit:/bin/mkdir -p /tmp /run /var/tmp
+::sysinit:/bin/mount -t tmpfs -o mode=1777,size=64m tmpfs /tmp
+::sysinit:/bin/mount -t tmpfs -o mode=755,size=16m tmpfs /run
+::sysinit:/bin/mount -t tmpfs -o mode=1777,size=32m tmpfs /var/tmp
 ::sysinit:/bin/mount -t ext4 -o noatime /dev/vdb /workspace
 ::respawn:/usr/bin/socat VSOCK-LISTEN:5000,fork EXEC:/agent/main
 ::ctrlaltdel:/sbin/reboot

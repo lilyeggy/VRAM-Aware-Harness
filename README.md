@@ -129,7 +129,7 @@ HARNESS_REGISTRATION_INVITE_CODE=change-me
 
 # HTTP 入口限流（默认开启；可按实验室人数调整）
 HARNESS_RATE_LIMIT_MAX_PER_TENANT=600
-HARNESS_RATE_LIMIT_MAX_PER_IP=120
+HARNESS_RATE_LIMIT_MAX_PER_IP=1200
 
 # 磁盘水位、SQLite 备份/恢复、VM 与快照清理
 bun run scripts/harness-ops.ts disk-check --path / --warn 80 --critical 90

@@ -264,7 +264,10 @@ export function loadHarnessConfig(
     const rateLimitEnabled = boolValue(environment, "HARNESS_RATE_LIMIT_ENABLED", true);
     const rateLimitWindowMs = positiveInteger(environment, "HARNESS_RATE_LIMIT_WINDOW_MS", 60_000);
     const rateLimitMaxPerTenant = positiveInteger(environment, "HARNESS_RATE_LIMIT_MAX_PER_TENANT", 600);
-    const rateLimitMaxPerIp = positiveInteger(environment, "HARNESS_RATE_LIMIT_MAX_PER_IP", 120);
+    // 默认放宽 per-IP 桶：实验室内十几个人通常共用一个 NAT 出口 IP（同一个 IP 会
+    // 承载所有人的 UI 轮询 + 提交），120/min 会在正常使用下直接 429。per-tenant 桶
+    // （默认 600/min）才是真正的租户配额；per-IP 桶只用于挡住未认证洪水与注册爆破。
+    const rateLimitMaxPerIp = positiveInteger(environment, "HARNESS_RATE_LIMIT_MAX_PER_IP", 1200);
     const trustProxy = boolValue(environment, "HARNESS_TRUST_PROXY", false);
 
     if (maxActiveRunsPerTenant > maxActiveRuns) {

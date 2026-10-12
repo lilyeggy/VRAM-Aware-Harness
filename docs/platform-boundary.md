@@ -214,7 +214,8 @@ HTTP API ──> Master (调度/审计/策略/LLM网关)
 
 - 注册收口（安全加固）：`HARNESS_REGISTRATION_MODE=open|invite|closed` 默认 `open` 保持旧部署兼容；`invite` 必须配置 `HARNESS_REGISTRATION_INVITE_CODE`，比较走 SHA-256 + `timingSafeEqual`；策略拒绝返回 403。交给实验室/他人使用前应显式设为 `invite` 或 `closed`。
 - 单机运维脚本（部署兼容）：`src/ops/harness-maintenance.ts` + `scripts/harness-ops.ts` 提供 `disk-check`、`backup`（SQLite `VACUUM INTO`，保留最近 N 份）、`restore`（清理旧 WAL/SHM，覆盖需 `--force`）、`cleanup`（VM runtime 与快照池按年龄/条目数清理，默认 dry-run）。
-- HTTP 入口限流（安全加固）：`src/http/rate-limiter.ts` + `HarnessHttpApi` 固定窗口限流；默认开启，每租户 600/分钟、每 IP 120/分钟（`HARNESS_RATE_LIMIT_*` 可调），超限 429 + `Retry-After`；`/health`、`/ready` 不参与；`HARNESS_TRUST_PROXY` 仅在可信反向代理后开启。
+- HTTP 入口限流（安全加固）：`src/http/rate-limiter.ts` + `HarnessHttpApi` 固定窗口限流；默认开启，每租户 600/分钟、每 IP 1200/分钟（`HARNESS_RATE_LIMIT_*` 可调），超限 429 + `Retry-After`；`/health`、`/ready` 不参与；`HARNESS_TRUST_PROXY` 仅在可信反向代理后开启。
+  - 2026-10-12 修正：per-IP 默认值由 120 提到 **1200**。真机复验时 `scripts/p0-e2e-smoke.ts` 被 429 拦住，根因是实验室内十几个人（含烟测脚本自身的 Run 轮询）共用同一个 NAT 出口 IP，全部记在同一个 per-IP 桶上；per-IP 桶的职责是挡未认证洪水与注册爆破，租户配额由 per-tenant 桶负责。
 - 用户控制台美化（产品打磨）：`src/http/harness-user-console.ts` + `web/app.js` / `web/app.css` 保持 same-origin 无构建；本轮增加注册邀请码入口与样式改进。
 - TLS / 反向代理（部署安全）：`docs/tls-reverse-proxy.zh-CN.md` + `deploy/harness-caddy.example` + `deploy/harness-nginx.example`；Master 继续只监听 loopback，外部入口由 Caddy/Nginx 终止 TLS，只放行 443（可选 80），不放行 3100。无 Caddy/Nginx 时可用 `scripts/dev-tls-proxy.ts` 做临时验证。
 - 真机 HTTPS 全链路验证（2026-10-10）：在 172.17.43.193 用 `scripts/dev-tls-proxy.ts`（自签证书）反代 Master，`NODE_EXTRA_CA_CERTS=... HARNESS_BASE_URL=https://127.0.0.1:8443 bun run scripts/p0-e2e-smoke.ts` 通过 `P0_E2E_SMOKE_OK label=f3ac25a8`（serial maxActive=1、concurrent maxActive=2 overlap=true、跨租户 404）；随后清理 broker/master/proxy、`data/live-full-flow`、`snapshots-mt`、`/run/harness` 与 `/tmp/harness-tls`，无残留。
