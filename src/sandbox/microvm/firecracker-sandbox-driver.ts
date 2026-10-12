@@ -124,6 +124,16 @@ export interface FirecrackerDriverConfig {
      */
     readonly snapshotSyncFiles?: boolean;
     /**
+     * 快照类型（默认 `Full`，`HARNESS_VM_SNAPSHOT_TYPE=Diff` 切 Diff）。
+     *
+     * `Full` 会把整份 guest 内存逐页写盘（256MiB 实测约 750ms，见
+     * docs/vm-startup-optimizations.zh-CN.md O7）；`Diff` 走脏页/`mincore` 近似，
+     * 只写"可能非零"的页，生成稀疏文件（官方文档：**刚启动过的 VM 的 diff
+     * 快照可以直接 resume**，从快照恢复过的 VM 的 diff 才需要先与 base 合并）。
+     * 我们的黄金快照恰好是"刚完整启动并握手成功的 VM"，符合可直接 resume 的前提。
+     */
+    readonly snapshotType?: "Full" | "Diff";
+    /**
      * 共享只读基础文件（默认开启，`HARNESS_VM_SHARE_BASE_FILES=0` 关闭）。
      *
      * 开启后内核与快照文件（vm.snap / mem.snap）不再逐 VM 拷进 chroot，
@@ -212,6 +222,7 @@ export class FirecrackerSandboxDriver implements MicrovmDriver {
     private readonly serialLogDir: string | null;
     private readonly extraBootArgs: string;
     private readonly snapshotSyncFiles: boolean;
+    private readonly snapshotType: "Full" | "Diff";
     private serialLogDirReady = false;
     /**
      * guest 串口（内核启动日志）尾巴，按 sandbox 存最近 8KB。
@@ -286,6 +297,8 @@ export class FirecrackerSandboxDriver implements MicrovmDriver {
         this.extraBootArgs = (config.extraBootArgs ?? process.env.HARNESS_VM_EXTRA_BOOT_ARGS ?? "").trim();
         this.snapshotSyncFiles = config.snapshotSyncFiles
             ?? (process.env.HARNESS_VM_SNAPSHOT_SYNC_FILES === "0" ? false : true);
+        this.snapshotType = config.snapshotType
+            ?? (process.env.HARNESS_VM_SNAPSHOT_TYPE === "Diff" ? "Diff" : "Full");
         this.snapshotManager = new VmSnapshotManager({
             ...(config.snapshotPoolDir !== undefined || process.env.HARNESS_VM_SNAPSHOT_POOL_DIR !== undefined
                 ? { snapshotPoolDir: config.snapshotPoolDir ?? process.env.HARNESS_VM_SNAPSHOT_POOL_DIR }
@@ -968,7 +981,7 @@ export class FirecrackerSandboxDriver implements MicrovmDriver {
                             await this.setVmState(apiSocketOnHost, "Paused");
                             paused = true;
                             await this.putSocket(apiSocketOnHost, "/snapshot/create", {
-                                snapshot_type: "Full",
+                                snapshot_type: this.snapshotType,
                                 snapshot_path: snapForApi,
                                 mem_file_path: memForApi,
                                 sync_snapshot_files: this.snapshotSyncFiles,

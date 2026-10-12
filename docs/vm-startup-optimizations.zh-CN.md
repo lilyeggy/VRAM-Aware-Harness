@@ -176,6 +176,21 @@ Run 准入(policy/RESOURCE) → sandbox.create
   2. 快照先写 tmpfs（RAM 速度）、后台再搬到 /data：前台只剩内存拷贝，但需要给 jailer chroot 内造 tmpfs 路径 + 发布前 gate（未发布前其他 VM 不能读到半份文件）。代价是每模板多占 256MiB RAM。
 - **提交**：见 O7 对应 commit（含 `tests/sandbox/vm-snapshot-sync-files.test.ts` 4 用例）。
 
+### O8 冷启动剩余耗时的归属：guest agent 二进制加载（2026-10-12，实测）
+
+- **背景**：O6 把纯冷启动从 1338ms 降到 539ms 之后，剩余时间此前被记成"socat 启动→监听 ~340ms"与"agent 加载 ~75ms"。用三组真机实验重新归因，**其中两条旧结论被推翻**。
+- **实验 1：socat 是不是 340ms 的来源 → 否**。写了一个 2KB 的极简 vsock 监听器（`socket(AF_VSOCK)`/`bind`/`listen`/`accept` + `fork` + `dup2` + `execl /agent/main`，静态编译 890KB），替换 inittab 里的 `socat VSOCK-LISTEN:5000,fork EXEC:/agent/main`，同参数真机对比：静态监听器 **523~542ms** vs socat **539ms** —— 差异在噪声量级（~16ms）。**"socat 启动占 340ms"作废**；实验文件未进仓库。
+- **实验 2：agent 二进制才是大头 → 是**。把 `/agent/main`（`bun build --compile` 产物，**96,352,640 字节**）换成 900KB 的静态 C ping 应答器，其余（内核、inittab、socat、共享只读基础文件）完全不变：`vsock-connect-ok` 153~156ms 之后 **pong 只晚 3ms**、冷启动 `total` **208~228ms**；同参数下原 96MB agent 是 pong 391~395ms、`total` 442ms。⇒ **冷启动剩下的 ~230ms 是那个 96MB Bun 二进制被读入内存并初始化**，"agent 只值 75ms"作废。
+- **实验 3：预读 agent 到 page cache → 无效**。在 inittab 的 respawn 之前插一步 `cat /agent/main > /dev/null`：`total` 344/407/443ms（中位 407），与不预读的 442ms 同量级。96MB 的读取只是被提前，并没有被消除（256MB guest 也留不住它）。
+- **被否证的调参（重要）**：把 vsock 握手改成"30ms 单次超时 + 20ms 间隔"（原 100/300）会让**冷启动**看起来更快，但**热恢复严重回归**：恢复出来的 guest 里 socat 会为每个连接 fork 一个 agent，密集重试在 256MB guest 里连续开出 ~50 个连接 → 反复 fork 96MB agent → 热恢复 **97ms → 229~653ms**（一次恢复里 `vsock-connect-ok` 出现 50 次）。已回滚为 `connectWithRetry(20000, 100, 300)`：**单次尝试超时必须大于 agent 加载时间**，否则"重试"会把等待变成进程风暴。
+- **首次快照用 `snapshot_type:"Diff"`（新增旋钮 `HARNESS_VM_SNAPSHOT_TYPE`，默认仍是 `Full`）**：`mem.snap` 实际占用 **256MiB → 74.6MiB**（`st_blocks` 524288 → 152896，稀疏），`firstCreateMs` **1301 → 1140ms**，热恢复 96.9 → 96.2ms，恢复后 exec 11.0 → 10.2ms；**5/5 次恢复 + exec 探针全部成功**，证实官方"刚启动过的 VM 的 diff 快照可以直接 resume"对我们成立（我们的黄金快照正是"刚完整启动并握手成功的 VM"）。收益只有 ~160ms（dump 虽稀疏化 3.4×，但首次 create 还包含内核启动 + agent 加载），且 diff 仍是官方 developer preview，因此**默认保持 `Full`**，只在需要更小池文件、更低宿主 page cache 压力时显式开启。
+- **冷启动 539ms 的当前构成**：内核→init ~60ms、init 链 + socat 进入监听 ~90ms（其中 socat 本体 ~16ms）、**96MB agent 加载 ~240ms**、其余 ~30ms；池空后另有 `make-snapshot` ~750ms。
+- **下一步（按收益排序，未实施）**：
+  1. **把 guest agent 换成小体积静态二进制**（C/Go/Rust）：预期冷启动 539 → ~300ms、首建 1293 → ~1050ms。移植面就是现有 `guest/agent/main.ts`（181 行：JSON-RPC `ping`/`exec`、base64 64KB 分片、1MiB 截断、`timeoutMs` 到点 SIGTERM→2s→SIGKILL）。远程宿主只有 gcc（无 go/rustc），C 是唯一现成路径。
+  2. 配合 1 把 guest RAM 从 256MiB 下调（agent 变小后 256MiB 内存镜像的写量可以线性下降）。
+  3. 保持服务启动预热（O5），让用户路径始终命中热恢复，而不是去追冷启动的绝对数字。
+- **提交**：见 O8 对应 commit（含 `tests/sandbox/vm-snapshot-type.test.ts`）。
+
 ## 3. 待评估 / 未采用
 
 | 候选 | 预期收益 | 现状 |
@@ -190,14 +205,14 @@ Run 准入(policy/RESOURCE) → sandbox.create
 | UFFD diff snapshot / 懒加载（CodeSandbox 式） | 内存镜像不再整块写 | 未采用：需自写 `UFFDIO_COPY` handler，复杂度高 |
 | 预热池（Daytona/Modal/Fly 式常驻待命 VM） | 交接 ~10~50ms | 未采用：内存常驻成本、租户隔离与回收复杂度 |
 | 关闭 guest 内核 i8042/PS-2 探测（`i8042.noaux i8042.nomux i8042.nopnp i8042.dumbkbd`） | 冷启动 1338 → ~540ms | **已实施（O6）**：实测 539ms；建快照首台 2235 → 1452ms；热恢复不变 |
-| 用静态小监听器替换 `socat`（socat 启动→监听占冷启动 340ms） | 冷启动再减 ~300ms | 待做：正在调研业界做法（`docs/research/cold-start-guest-init.md`） |
+| 用静态小监听器替换 `socat` | 期望冷启动再减 ~300ms | **已否证（O8）**：同参数实测 523~542ms vs socat 539ms，只值 ~16ms；340ms 不来自 socat |
 | jailer 下把 chroot 内快照**硬链接**进 staging（替代 `cp --reflink=auto` 的全量复制） | `make-snapshot` 少一遍 256MiB 读+写 | **已实施（O7）**：908 → 753ms；首建 1452 → 1293ms |
 | `/snapshot/create` 带 `sync_snapshot_files:false`（不等 fsync） | 期望 -200~400ms | **实测无收益**：753 vs 756ms（dump 本身 ~750ms，期间后台回写已完成）→ 默认恢复持久 |
 | 快照先写 tmpfs（RAM）再后台搬到 /data | 前台只剩内存拷贝（~150ms） | 未实施：需给 jailer chroot 造 tmpfs 路径 + 发布前 gate；每模板多占 256MiB RAM |
-| `snapshot_type:"Diff"` 首次快照只写脏页 | 写量降 2~4×（[推测] 750 → 200~350ms） | 未实施：官方 developer preview；孔洞语义只对"刚 boot 的 VM 的 diff"成立，需先验证多 VM 加载的正确性 |
+| `snapshot_type:"Diff"` 首次快照只写脏页 | 写量降 3.4× → 首建 -160ms | **已实测（O8）**：256MiB→74.6MiB、firstCreate 1301→1140ms、5/5 恢复+exec 探针通过；旋钮 `HARNESS_VM_SNAPSHOT_TYPE=Diff`，默认仍 `Full`（官方 developer preview） |
 | 预读/缓存 `mem.snap` 到 page cache（预热后首次 load 更快） | `snapshot-load` 5~6ms → ~2ms | 未做（收益小） |
 
-| 更小的 guest agent 二进制 / 精简 inittab | ~~冷启动 1.28s 中的大部分~~ **已量化** | agent 只值 ~75ms、init 链 ~10ms；1.2s 的大头是内核 PS/2 探测（O6 已修）与 socat 启动 |
+| 更小的 guest agent 二进制（静态 C/Go/Rust 替代 96MB Bun 产物） | **冷启动 -230ms**（O8 实测：静态应答器 208ms vs Bun 442ms） | 待做（下一步首要项）；inittab/init 链只占 ~10ms |
 
 
 
@@ -208,7 +223,7 @@ Run 准入(policy/RESOURCE) → sandbox.create
 | 段 | 实测 | 说明 |
 | --- | --- | --- |
 | Firecracker 进程 + 内核 console 起来 | **15ms**（`serial-first-line`） | 进程启动与 API socket 就绪很快（`spawn-process` 1~3ms、`api-socket-wait` 20ms 是 20ms 轮询粒度） |
-| guest 用户态就绪（agent 可握手） | **~1281ms** | 占纯冷启动 1.33s 的 96%：busybox init 链 + `socat VSOCK-LISTEN` + agent 二进制加载 |
+| guest 用户态就绪（agent 可握手） | **~1281ms**（O6 前）/ **~390ms**（O6 后） | O6 关掉 i8042 探测后剩 ~390ms：内核→init ~60ms + init 链与 socat 进入监听 ~90ms + **96MB agent 加载 ~240ms**（O8 三组实验拆解） |
 | 建快照（把 256MB 内存镜像写盘） | **908~918ms** | 只在"池空后的第一次 create"发生 |
 
 结论：
@@ -217,7 +232,7 @@ Run 准入(policy/RESOURCE) → sandbox.create
 2. **池空后的第一次 create（≈2.2s）无法靠调参消掉**：1.28s 是 guest 用户态，0.9s 是内存镜像写盘。
 3. 因此对用户可见的解法是"改谁付这一笔"：**服务启动预热**（O5）后，用户遇到的第一个 Run 也是热恢复（实测 166ms / warmHit=true）。
 4. 并发场景不会线性放大：N=10 并发冷启动只写 1 次快照，其余复用（O5 埋点）。
-5. 要进一步压缩冷启动本身，方向是更小的 guest agent/精简 init 链，或 COW 文件系统；两者都未实测（见 §3）。
+5. O8 已把剩下的 390ms 拆开：init 链 ~90ms、**96MB agent 加载 ~240ms**、其余 ~60ms。要进一步压缩冷启动，首要项是把 guest agent 换成小体积静态二进制（预期 -230ms）；COW 文件系统仍未实测（见 §3）。
 
 ## 5. 复现命令
 
