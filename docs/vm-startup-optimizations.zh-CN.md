@@ -247,6 +247,25 @@ microsandbox `agentd`、E2B `envd`）无一例外都是"静态单二进制 + `in
 **代价 / 未做**：镜像里的 socat 与那几个动态库**没有删除**（只删了引用），镜像体积暂时没降；
 `init=<agent>`（连 init 链一起去掉，业界 3/3 采用）未做，留待下一步。
 
+**生产验证（172.17.43.193，systemd + jailer，2026-10-12 19:07~19:11）**：
+
+- 给生产镜像 `/data/harness/images/rootfs.ext4` 打 C agent 补丁（`PATCH_C_AGENT_OK ... agentBytes=974536`，
+  备份 `rootfs.ext4.bak-cagent`），`/etc/harness/broker.env` 设 `HARNESS_GUEST_AGENT_VERSION=2.0.0`，
+  清空快照池并重启 Broker。
+- 清池后第一个 Run `1a09587f`：`SANDBOX_ACQUIRED {"durationMs":916,"warmHit":false}`（冷启动 ~260ms
+  + 制作快照 ~650ms），工具在 guest 内执行 `uname -r` 返回 `4.14.174` —— **C agent 的 exec 链路
+  在生产可用**；同配置在 socat+Bun 时代是 1507ms。
+- 之后的 Run（含 p0 smoke 的串行/并发）：`49ms / 54ms / 76ms / 76ms / 77ms`，全部 `warmHit=true`；
+  同配置在 socat+Bun 时代是 128ms。
+- 维护脚本的 GC 豁免在生产验证：`cleanup --snapshot-pool ... --max-age-hours 0 --max-snapshots 0`
+  （dry-run，等效"删掉一切"）输出 `snapshotPoolRemoved=0 snapshotPoolProtected=1` +
+  `HARNESS_OPS_CLEANUP_PROTECTED 54b4cce787cc…`，即当前模板快照被正确豁免。
+- `harness-vm-prewarm.service` 手动触发：`VM_PREWARM_SKIP template=54b4cce787cc… reason=snapshot-present`。
+- `scripts/p0-e2e-smoke.ts` → `P0_E2E_SMOKE_OK label=e893796f`（串行 maxActive=1、并发 maxActive=2
+  overlap=true、跨租户 run/events/output/interrupt/对方 workspace 提交全部 404）。
+
+**生产验证（GC 豁免）**：见上一段最后两条（`snapshotPoolProtected=1` / `VM_PREWARM_SKIP`）。
+
 ### O11 让"池里永远有匹配的快照"：GC 豁免当前模板（2026-10-12）
 
 **问题**：`pruneSnapshotPool` 按目录 mtime 降序做"年龄 TTL + 条数上限"双条件删除，而**当前在用**
