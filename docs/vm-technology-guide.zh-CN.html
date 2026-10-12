@@ -1,0 +1,626 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VRAM-Aware Harness · 虚拟机技术讲解（面向 Agent 工程师）</title>
+<style>
+  :root {
+    --bg: #0f1419; --panel: #171e26; --panel2: #1e2731; --line: #2a3644;
+    --text: #e6edf3; --muted: #8b98a5; --accent: #5ac8fa; --green: #3ddc97;
+    --amber: #ffb547; --red: #ff6b6b; --purple: #b28dff;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 15px/1.7 -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  }
+  a { color: var(--accent); }
+  header.hero {
+    padding: 56px 24px 40px; background: linear-gradient(135deg, #132033, #0f1419 60%);
+    border-bottom: 1px solid var(--line);
+  }
+  .wrap { max-width: 1080px; margin: 0 auto; padding: 0 24px; }
+  h1 { font-size: 30px; margin: 0 0 10px; }
+  h2 { font-size: 22px; margin: 48px 0 14px; padding-top: 8px; border-top: 1px solid var(--line); }
+  h3 { font-size: 17px; margin: 24px 0 8px; color: var(--accent); }
+  p { margin: 8px 0; }
+  .lead { color: var(--muted); font-size: 16px; max-width: 820px; }
+  nav.toc { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 22px; }
+  nav.toc a {
+    text-decoration: none; color: var(--text); background: var(--panel2);
+    border: 1px solid var(--line); padding: 6px 12px; border-radius: 999px; font-size: 13px;
+  }
+  .card {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
+    padding: 18px 20px; margin: 12px 0;
+  }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .grid3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+  @media (max-width: 800px) { .grid2, .grid3 { grid-template-columns: 1fr; } }
+  .tag {
+    display: inline-block; font-size: 12px; padding: 2px 8px; border-radius: 6px;
+    background: var(--panel2); border: 1px solid var(--line); color: var(--muted); margin-right: 4px;
+  }
+  .tag.g { color: var(--green); border-color: #245a45; }
+  .tag.a { color: var(--amber); border-color: #5a4520; }
+  .tag.r { color: var(--red); border-color: #5a2a2a; }
+  .tag.p { color: var(--purple); border-color: #3e3360; }
+  code, .mono { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 13px; }
+  code { background: var(--panel2); padding: 1px 6px; border-radius: 4px; color: #cfe8ff; }
+  pre {
+    background: #0b0f14; border: 1px solid var(--line); border-radius: 8px;
+    padding: 12px 14px; overflow-x: auto; font: 13px/1.6 ui-monospace, Menlo, Consolas, monospace; color: #c9d6e3;
+  }
+  table { width: 100%; border-collapse: collapse; margin: 10px 0; font-size: 14px; }
+  th, td { border: 1px solid var(--line); padding: 8px 10px; text-align: left; vertical-align: top; }
+  th { background: var(--panel2); color: var(--muted); font-weight: 600; }
+  .callout {
+    border-left: 3px solid var(--accent); background: #142232; padding: 10px 14px;
+    border-radius: 0 8px 8px 0; margin: 12px 0; color: #cfe3f5;
+  }
+  .callout.warn { border-color: var(--amber); background: #2a2216; color: #f3dfb8; }
+  .callout.ok { border-color: var(--green); background: #12261f; color: #cdeedd; }
+  .kv { color: var(--muted); }
+  .num { font-size: 26px; font-weight: 700; color: var(--green); }
+  .stat { text-align: center; }
+  .stat .lbl { color: var(--muted); font-size: 13px; }
+  .stat .big { font-size: 28px; font-weight: 700; }
+
+  /* 分层图 */
+  .layers { display: flex; flex-direction: column; gap: 6px; }
+  .layer {
+    display: grid; grid-template-columns: 170px 1fr; gap: 12px; align-items: stretch;
+  }
+  .layer .name {
+    background: var(--panel2); border: 1px solid var(--line); border-radius: 8px;
+    padding: 10px; font-weight: 600; font-size: 14px;
+  }
+  .layer .boxes { display: flex; flex-wrap: wrap; gap: 8px; }
+  .box {
+    flex: 1 1 200px; background: var(--panel); border: 1px solid var(--line);
+    border-radius: 8px; padding: 9px 11px; font-size: 13px;
+  }
+  .box b { display: block; color: var(--text); font-size: 14px; }
+  .box span { color: var(--muted); }
+  .boundary {
+    margin: 4px 0 4px 0; padding: 4px 10px; font-size: 12px; color: var(--amber);
+    border: 1px dashed #5a4520; border-radius: 6px; text-align: center;
+  }
+  @media (max-width: 800px) { .layer { grid-template-columns: 1fr; } }
+
+  /* 时间线 */
+  ol.steps { list-style: none; padding: 0; margin: 0; counter-reset: s; }
+  ol.steps > li {
+    counter-increment: s; position: relative; padding: 10px 14px 10px 56px;
+    border-left: 2px solid var(--line); margin-left: 16px; margin-bottom: 6px;
+  }
+  ol.steps > li::before {
+    content: counter(s); position: absolute; left: -17px; top: 10px; width: 30px; height: 30px;
+    border-radius: 50%; background: var(--accent); color: #06121c; font-weight: 700;
+    display: flex; align-items: center; justify-content: center; font-size: 13px;
+  }
+  ol.steps > li.phase-cold::before { background: var(--amber); }
+  ol.steps > li.phase-exec::before { background: var(--green); }
+  ol.steps > li.phase-end::before { background: var(--purple); }
+  ol.steps .who { color: var(--muted); font-size: 13px; }
+
+  /* 条形图 */
+  .bar-row { display: grid; grid-template-columns: 210px 1fr 90px; gap: 10px; align-items: center; margin: 6px 0; font-size: 14px; }
+  .bar { height: 14px; background: var(--panel2); border-radius: 4px; overflow: hidden; border: 1px solid var(--line); }
+  .bar > i { display: block; height: 100%; background: linear-gradient(90deg, var(--accent), var(--green)); }
+  .bar.hot > i { background: linear-gradient(90deg, var(--amber), var(--red)); }
+  @media (max-width: 800px) { .bar-row { grid-template-columns: 1fr; } }
+
+  footer { color: var(--muted); font-size: 13px; padding: 30px 0 60px; }
+</style>
+</head>
+<body>
+
+<header class="hero">
+  <div class="wrap">
+    <div class="tag g">面向 Agent 工程师 · 不要求操作系统背景</div>
+    <h1>VRAM-Aware Harness 的虚拟机技术讲解</h1>
+    <p class="lead">
+      这个项目里，每一次 Agent 执行"不可信的命令"（比如跑 shell、改文件），都不在宿主机上直接执行，
+      而是在一台<b>用完即毁的小型虚拟机</b>里执行。这页讲清楚：这台虚拟机是怎么造出来的、它由哪几块拼成、
+      这几块怎么配合把"开机 → 执行 → 导出产物 → 销毁"跑通。
+    </p>
+    <nav class="toc">
+      <a href="#s0">0. 先用 Agent 的语言理解</a>
+      <a href="#s1">1. 做了什么：8 个模块</a>
+      <a href="#s2">2. 每个模块的技术路线</a>
+      <a href="#s3">3. 模块如何组装</a>
+      <a href="#s4">4. 真机数据</a>
+      <a href="#s5">5. 边界与未做的事</a>
+      <a href="#s6">6. 术语速查</a>
+    </nav>
+  </div>
+</header>
+
+<main class="wrap">
+
+<!-- ============ 0 ============ -->
+<h2 id="s0">0. 先用 Agent 的语言理解</h2>
+<p>把它类比成你熟悉的东西：</p>
+<div class="grid2">
+  <div class="card">
+    <h3>你的 Agent 视角</h3>
+    <p>一次 <b>Run</b> = 一次任务执行。Run 里 Agent 会调用工具：<code>bash</code>、读写文件。</p>
+    <p>问题是：这些工具调用<b>不可信</b>。模型可能被提示注入，可能跑出 <code>rm -rf</code>，可能读别人的文件。</p>
+    <p>所以要给每个 Run 配一个<b>沙箱（Sandbox）</b>：工具调用只能在沙箱里发生，沙箱出事不能殃及宿主和其他租户。</p>
+  </div>
+  <div class="card">
+    <h3>沙箱的三种档位</h3>
+    <table>
+      <tr><th>档位</th><th>隔离靠什么</th><th>本项目用途</th></tr>
+      <tr><td>容器（runc）</td><td>共享宿主内核，靠命名空间划线</td><td>已弃用</td></tr>
+      <tr><td>runsc（gVisor）</td><td>用户态"翻译层"拦截系统调用</td><td>开发 / 默认档</td></tr>
+      <tr><td><b>microVM（Firecracker）</b></td><td><b>CPU 硬件虚拟化</b>，每个 Run 一个独立内核</td><td><b>strict 档（生产）</b></td></tr>
+    </table>
+  </div>
+</div>
+<div class="callout">
+  <b>本文只讲最右边那一行：microVM。</b> 它的核心特点是：Run 里的命令跑在一个<b>有自己内核的小电脑</b>里，
+  这台"小电脑"由宿主机上的 KVM（Linux 的硬件虚拟化接口）和 Firecracker（一个极简的虚拟机程序）造出来。
+  对 Agent 来说，它的接口长这样：
+</div>
+<pre>sandbox = create(run, workspace, policy)     # 开一台 VM，挂上这个 Run 的工作区
+result  = execute(sandbox, ["sh","-c","ls"]) # 在 VM 里执行一条命令，拿回 stdout/stderr/exitCode
+          terminate(sandbox)                  # 停机、把工作区产物导出到宿主、销毁 VM</pre>
+<p>后面所有内容，都是在回答"这三行 Agent 看到的调用，背后要拼哪些零件"。</p>
+
+<!-- ============ 1 ============ -->
+<h2 id="s1">1. 我们的虚拟机技术做了什么：8 个模块</h2>
+<p>整个虚拟机能力可以拆成 8 个模块。它们分三层：<b>底座</b>（让 VM 跑起来）、<b>通道</b>（让宿主和 VM 说话）、<b>管理</b>（让 VM 能被安全地创建、复用、回收）。</p>
+
+<div class="layers">
+  <div class="layer">
+    <div class="name">接入层<br><span class="kv" style="font-weight:400">上层怎么用</span></div>
+    <div class="boxes">
+      <div class="box"><b>M8 · 统一接口与路由</b><span>SandboxProvider / Router / MicrovmSandboxProvider。上层只看到 create / execute / terminate。</span></div>
+    </div>
+  </div>
+  <div class="layer">
+    <div class="name">管理层<br><span class="kv" style="font-weight:400">怎么安全地造、用、收</span></div>
+    <div class="boxes">
+      <div class="box"><b>M3 · 私有目录与分配器</b><span>每台 VM 一个 0700 目录；分配唯一 UID、唯一 vsock CID。</span></div>
+      <div class="box"><b>M5 · 工作区磁盘</b><span>每 Run 一份 ext4 副本挂进 VM；结束时导出回宿主。</span></div>
+      <div class="box"><b>M6 · 快照加速</b><span>"黄金快照"+ 秒级恢复；按模板指纹复用。</span></div>
+      <div class="box"><b>M7 · 生命周期与孤儿回收</b><span>先停进程再删目录；崩溃后按 pidfile 回收。</span></div>
+    </div>
+  </div>
+  <div class="boundary">▲ 宿主机（Harness 进程）　｜　▼ 硬件隔离边界（KVM）　｜　下面是 VM 里面</div>
+  <div class="layer">
+    <div class="name">通道层<br><span class="kv" style="font-weight:400">宿主 ↔ VM 怎么对话</span></div>
+    <div class="boxes">
+      <div class="box"><b>M4 · vsock 命令通道</b><span>结构化 JSON 帧，代替"往串口打字"。宿主侧桥 + guest agent 两端。</span></div>
+    </div>
+  </div>
+  <div class="layer">
+    <div class="name">底座层<br><span class="kv" style="font-weight:400">VM 本体</span></div>
+    <div class="boxes">
+      <div class="box"><b>M1 · Firecracker microVM + Guest 镜像</b><span>KVM 硬件虚拟化出的小电脑；内核 + Alpine rootfs + socat + agent。</span></div>
+      <div class="box"><b>M2 · jailer 宿主加固</b><span>给 Firecracker 进程降权、chroot 关进小笼子、cgroup 限 CPU/内存。</span></div>
+    </div>
+  </div>
+</div>
+
+<div class="card">
+  <h3>各模块一句话职责</h3>
+  <table>
+    <tr><th>模块</th><th>一句话</th><th>主要代码</th></tr>
+    <tr><td>M1 Firecracker + Guest 镜像</td><td>造出有独立内核的 VM，并准备它的操作系统镜像</td><td><code>firecracker-sandbox-driver.ts</code>、<code>scripts/microvm/build-guest-rootfs.sh</code>、<code>guest/agent/main.ts</code></td></tr>
+    <tr><td>M2 jailer</td><td>让 Firecracker 这个宿主进程本身"上锁"</td><td><code>firecracker-sandbox-driver.ts</code>（jailer 分支）、<code>jailer-prereq-check.ts</code>、<code>buildJailerCgroupArgs</code></td></tr>
+    <tr><td>M3 私有目录与分配器</td><td>每台 VM 独占的目录、UID、CID</td><td><code>vm-run-directory.ts</code>、<code>vm-uid-allocator.ts</code>、<code>vm-cid-allocator.ts</code></td></tr>
+    <tr><td>M4 vsock 通道</td><td>宿主向 VM 发结构化命令、收结构化结果</td><td><code>firecracker-vsock-bridge.ts</code></td></tr>
+    <tr><td>M5 工作区磁盘</td><td>让 VM 里的改动能回到宿主工作区</td><td><code>workspace-disk-exporter.ts</code>、<code>vm-run-directory.ts</code></td></tr>
+    <tr><td>M6 快照加速</td><td>把"开好机的 VM"存档，下次秒级恢复</td><td><code>vm-snapshot-manager.ts</code>、<code>vm-concurrency-gate.ts</code></td></tr>
+    <tr><td>M7 生命周期与回收</td><td>创建/销毁的顺序、崩溃后清理孤儿进程</td><td><code>microvm-sandbox-provider.ts</code>、<code>vm-orphan-reaper.ts</code></td></tr>
+    <tr><td>M8 接入层</td><td>把 VM 包装成 Harness 统一的 Sandbox 接口</td><td><code>microvm-sandbox-provider.ts</code>、<code>sandbox-provider-router.ts</code>、<code>microvm-types.ts</code></td></tr>
+  </table>
+</div>
+
+<!-- ============ 2 ============ -->
+<h2 id="s2">2. 每个模块的技术路线与具体实现</h2>
+<p class="kv">每个模块按同一个结构讲：<b>它解决什么问题 → 技术选型 → 我们怎么实现 → 踩过的坑（这些坑解释了为什么代码长成现在这样）</b>。</p>
+
+<!-- M1 -->
+<div class="card">
+  <h3>M1 · Firecracker microVM 与 Guest 镜像</h3>
+  <p><b>要解决的问题：</b>我们需要一台"独立内核、可以随便执行命令、用完就扔"的机器，启动要快，资源占用要小。</p>
+  <p><b>技术选型：</b></p>
+  <ul>
+    <li><b>KVM</b>：Linux 内核自带的硬件虚拟化接口（依赖 CPU 的 VT-x/AMD-V）。它让一个进程能"隔出"一台假电脑，CPU 指令直接在硬件上跑，只在敏感操作时才陷入宿主。访问入口是 <code>/dev/kvm</code>。</li>
+    <li><b>Firecracker</b>：AWS 为 Lambda 做的极简 VMM（虚拟机监视器）。它只模拟很少的设备（串口、块设备、vsock），所以启动快（官方口径约 125ms 裸启动）。Firecracker 本身是一个普通的宿主进程，它通过一个 HTTP API（Unix socket）接收配置。</li>
+  </ul>
+  <p><b>我们怎么实现：</b></p>
+  <ul>
+    <li>驱动 <code>FirecrackerSandboxDriver</code> 用 HTTP 调 Firecracker API 完成配置：<code>/boot-source</code>（内核与启动参数）→ <code>/drives/rootfs</code>（系统盘）→ <code>/drives/workspace</code>（工作区盘）→ <code>/vsock</code>（通道）→ <code>/machine-config</code>（CPU/内存）→ <code>InstanceStart</code>（开机）。</li>
+    <li><b>Guest 镜像</b>由 <code>build-guest-rootfs.sh</code> 生成：下载固定版本的 Alpine Linux（3.20.3，带 sha256 校验）作为 rootfs，装入 <code>socat</code>（vsock 桥接工具）和我们自己的 <code>guest/agent</code>，并写 <code>/etc/inittab</code> 让它开机自启。</li>
+    <li>启动参数里 <code>init=/sbin/init</code>，<code>console=ttyS0</code>（串口保留给内核日志，不再用于命令）。</li>
+    <li>硬约束：<b>VM 没有网卡</b>。策略里 <code>allowNetwork=true</code> 会被 fail-closed 直接拒绝（三层都有检查：Provider、驱动、产品边界）。</li>
+  </ul>
+  <div class="callout warn"><b>坑 · 为什么不能直接跑 firecracker 命令？</b> 早期做法是直接 spawn firecracker，socket 放在共享的 <code>/tmp</code>。问题是：Firecracker 的 API 没有鉴权，同机其他用户可以抢先连上它、下发任意磁盘路径。这直接催生了 M2。</div>
+</div>
+
+<!-- M2 -->
+<div class="card">
+  <h3>M2 · jailer：给 Firecracker 进程上锁</h3>
+  <p><b>要解决的问题：</b>VM 里的 root 被 KVM 关着，无害；但 <b>Firecracker 进程本身</b>是宿主上的普通进程。如果它被攻破，攻击者拿到的是宿主上的一个进程，而不是一台虚拟机。</p>
+  <p><b>技术选型：</b>Firecracker 官方随包提供的 <code>jailer</code>，这也是 AWS Lambda 的生产姿势。它做四件事：</p>
+  <div class="grid2">
+    <div class="box"><b>降权</b><span>每台 VM 分到一个专属 UID/GID（我们的范围 20000–29999）。</span></div>
+    <div class="box"><b>chroot</b><span>把 Firecracker 关进只含必要文件的目录，看不见宿主其他文件。</span></div>
+    <div class="box"><b>cgroup 限额</b><span>内核级限制 CPU 配额与内存上限，由宿主强制，VM 内 root 改不了。</span></div>
+    <div class="box"><b>私有目录</b><span>socket、磁盘副本都放在 chroot 内，路径随机，不再暴露在 /tmp。</span></div>
+  </div>
+  <p><b>我们怎么实现：</b></p>
+  <ul>
+    <li>分支 <code>useJailer</code>：创建前先跑 <code>checkJailerPrereqs</code>（jailer / firecracker 二进制存在、KVM 可访问），不通过直接报错。</li>
+    <li>把内核、rootfs、工作区盘<b>复制进 chroot</b>，再 <code>chown -R uid:gid</code>，让降权后的 Firecracker 能读写。</li>
+    <li>cgroup 参数由纯函数 <code>buildJailerCgroupArgs(vcpu, memMb)</code> 生成：<code>cpu.max = vcpu×100000 100000</code>；<code>memory.max = (guest内存 + 64MiB VMM底噪)</code>。</li>
+  </ul>
+  <div class="callout warn"><b>坑 · 为什么内存限额要多加 64MiB？</b> Firecracker 自己也要占一点内存。如果 cgroup 上限 = guest 内存，Firecracker 会被自己的 cgroup OOM 掉。所以 cgroup 必须严格大于 guest 内存。</div>
+  <div class="callout warn"><b>坑 · jailer 的 /run 是独立 tmpfs。</b> 把 socket 或快照放在 chroot 的 <code>/run</code> 下，宿主侧完全访问不到。所以所有需要跨边界访问的文件都放 chroot <b>根目录</b>。</div>
+</div>
+
+<!-- M3 -->
+<div class="card">
+  <h3>M3 · 私有目录与分配器（UID / CID / 运行目录）</h3>
+  <p><b>要解决的问题：</b>多台 VM 同时存在，每台要有自己的"身份证件"，互不冲突、互不可见。</p>
+  <table>
+    <tr><th>资源</th><th>实现</th><th>作用</th></tr>
+    <tr><td>运行目录</td><td><code>VmRunDirectoryManager</code>：<code>&lt;runtimeRoot&gt;/&lt;sandboxId&gt;</code>，权限 0700；sandboxId 只允许 <code>[a-zA-Z0-9-]</code> 且 ≤64 字符</td><td>放 pidfile、磁盘副本、socket；别的用户进不来</td></tr>
+    <tr><td>UID/GID</td><td><code>VmUidAllocator</code>：20000–29999 中取最小未用值</td><td>每台 VM 的 Firecracker 进程用不同 UID 跑，同机 VM 之间也互相隔离文件权限</td></tr>
+    <tr><td>vsock CID</td><td><code>VmCidAllocator</code>：从 3 起，0–2 为系统保留</td><td>vsock 用 CID 寻址 guest，每台 VM 必须唯一</td></tr>
+    <tr><td>socket 路径</td><td>非 jailer 模式下放独立短根目录，用 sandboxId 的 SHA-256 前 16 位做子目录</td><td>避开 Unix socket 路径 108 字节上限</td></tr>
+  </table>
+  <div class="callout warn"><b>坑 · SUN_LEN 限制。</b> Unix domain socket 的路径最长 108 字节。运行目录一旦嵌套得深，Firecracker 启动即报 <code>path must be shorter than SUN_LEN</code>。解决办法是把 socket 放在短路径根下。</div>
+</div>
+
+<!-- M4 -->
+<div class="card">
+  <h3>M4 · vsock 命令通道：宿主和 VM 的"对讲机"</h3>
+  <p><b>要解决的问题：</b>宿主要把命令送进 VM、拿回结果。</p>
+  <p><b>技术选型：</b><b>virtio-vsock</b>。这是 host 与 guest 之间专用的 socket 通道，比网络更安全（它不走 IP，没有网卡也能用）。Firecracker 把它映射成宿主上的一个 Unix socket（<code>vsock.sock</code>）。</p>
+  <p><b>两端分工：</b></p>
+  <div class="grid2">
+    <div class="box"><b>宿主侧：FirecrackerVsockBridge</b><span>连接 <code>vsock.sock</code>，发 <code>CONNECT 5000</code>，等 <code>OK</code>，然后用 ping/pong 确认 agent 活着。之后把每条命令包成一个 JSON 帧发出去，用 <code>id</code> 把返回的输出对应到请求上。</span></div>
+    <div class="box"><b>Guest 侧：socat + agent</b><span>开机后 inittab 启动 <code>socat VSOCK-LISTEN:5000,fork EXEC:/agent/main</code>，每个连接 fork 一个 agent。agent 用 <code>child_process.spawn</code> 执行 argv，把 stdout/stderr 切块回传。</span></div>
+  </div>
+  <p><b>协议（JSON 逐行，每行一帧）：</b></p>
+<pre>宿主 → agent:  {"v":1,"type":"exec","id":"…","argv":["sh","-c","ls"],"cwd":"/workspace","env":{…},"timeoutMs":…,"maxOutputBytes":…}
+agent → 宿主:  {"v":1,"type":"exec_output","id":"…","stream":"stdout","data":"&lt;base64&gt;"}
+agent → 宿主:  {"v":1,"type":"exec_result","id":"…","exitCode":0,"timedOut":false,"truncated":false}</pre>
+  <ul>
+    <li><b>命令不经过 shell 拼接</b>：argv 是数组，直接 spawn，没有注入面。</li>
+    <li><b>输出 base64 编码</b>：多字节字符和控制字符不会破坏帧结构。</li>
+    <li><b>超时双信号</b>：到时先 <code>SIGTERM</code>，2 秒后仍活则 <code>SIGKILL</code>，并在结果里标 <code>timedOut</code>，不吞掉。</li>
+    <li><b>宿主侧再截一次</b>：agent 属于不可信面，宿主按字节硬截断 <code>maxOutputBytes</code> 并标 <code>truncated</code>；单帧超过 1 MiB 直接报错。</li>
+    <li><b>同一桥串行执行</b>：<code>executionQueue</code> 保证同一 VM 的命令一条接一条。</li>
+  </ul>
+  <div class="callout ok"><b>为什么不用串口？</b> 串口是"往 VM 的终端打字、在输出里找哨兵字符串"。问题有四个：命令被 shell 二次解释（注入）；哨兵可被恶意进程伪造；stdout/stderr 混在一起；所有命令共享一个 root 会话、环境互相污染。vsock + 结构化帧把这四个问题都消掉了。串口现在只留给内核日志。</div>
+</div>
+
+<!-- M5 -->
+<div class="card">
+  <h3>M5 · 工作区磁盘：VM 看不见宿主目录，怎么传文件？</h3>
+  <p><b>要解决的问题：</b>Agent 的工作区（比如它改过的代码）要留下来，但 VM 有独立内核，它的世界里没有宿主目录。</p>
+  <p><b>技术选型：</b>不用共享文件系统（virtio-fs 会重新打开一条 guest 直达宿主文件系统的通道，扩大攻击面），而是<b>把工作区做成一块虚拟磁盘</b>，VM 启动时挂上，结束时把磁盘内容拷回来。</p>
+  <ol class="steps">
+    <li class="phase-cold"><b>准备：</b>模板 <code>workspace-template.ext4</code>（空白 ext4）→ 每 Run 复制一份 <code>workspace.ext4</code>（放在该 VM 的 chroot 或运行目录里）。</li>
+    <li class="phase-cold"><b>挂载：</b>作为 Firecracker 的第二块盘 <code>/dev/vdb</code>，guest 的 inittab 执行 <code>mount -t ext4 /dev/vdb /workspace</code>，agent 的工作目录就是 <code>/workspace</code>。</li>
+    <li class="phase-exec"><b>使用：</b>命令在 <code>/workspace</code> 里读写，实际写到的是那块盘。</li>
+    <li class="phase-end"><b>导出：</b>终止时<b>先停机</b>（确保 guest 不再写盘），再用 <code>debugfs rdump</code> 把 ext4 镜像里的文件整棵拷到宿主工作区，并做安全审计（清理指向外部的符号链接）。备选方案是 loop mount 只读挂载。</li>
+  </ol>
+  <div class="callout warn"><b>坑 · 为什么导出要在"停机之后"？</b> 如果 VM 还在写，宿主读到的 ext4 镜像可能是半新半旧的，文件会损坏。所以顺序是 <code>stopVm</code> → <code>export</code>。</div>
+  <div class="callout warn"><b>坑 · 为什么 agent 的 cwd 必须是挂载盘？</b> 如果 cwd 落在 rootfs 副本上，产物写进系统盘，导出时工作区是空的。这一点在 inittab 里有显式注释。</div>
+  <div class="callout">当前是<b>终止时一次性导出</b>。VM 运行期间，宿主侧看不到 VM 里的中间文件。</div>
+</div>
+
+<!-- M6 -->
+<div class="card">
+  <h3>M6 · 快照加速：把"开好机的 VM"存档</h3>
+  <p><b>要解决的问题：</b>冷启动一台 VM 要约 1.5 秒（内核启动 + init + agent 就绪）。Agent 每个 Run 都要一台，这个延迟不能每次都付。</p>
+  <p><b>技术选型：</b>Firecracker 的 <b>snapshot / restore</b>。思路类似"把一台已经开机、agent 已就绪的电脑连同内存一起冻结成文件"，下次不开机，直接把内存加载进去接着跑。</p>
+  <p><b>我们怎么实现：</b></p>
+  <ol class="steps">
+    <li class="phase-cold"><b>模板指纹：</b><code>computeTemplateHash = sha256(kernel 的 路径/大小/mtime + rootfs 的 路径/大小/mtime + agent 版本号)</code>。镜像或 agent 一变，指纹就变，旧快照自动失效。</li>
+    <li class="phase-cold"><b>黄金快照制作：</b>第一台冷启动并握手成功后，<code>PATCH /vm {"state":"Paused"}</code> → <code>PUT /snapshot/create</code>（生成 <code>vm.snap</code> 和 <code>mem.snap</code>）→ <code>Resumed</code>。存到快照池 <code>&lt;poolDir&gt;/&lt;templateHash&gt;/</code>。</li>
+    <li class="phase-exec"><b>快速恢复：</b>之后同模板的 VM 走 <code>PUT /snapshot/load</code>。加载前复制快照进 chroot，并通过 vsock override（<code>uds_path</code>）把快照里固化的 vsock socket 路径改成本 Run 自己的。</li>
+    <li class="phase-end"><b>单飞闸门：</b><code>KeyedSemaphore</code> 按模板指纹串行制作快照。同一模板只让一台制作，其余等它完成后复用。</li>
+  </ol>
+  <div class="callout warn"><b>坑 · snapshot/load 的顺序是硬约束。</b> Firecracker 要求 load 必须是"新进程里第一个操作"。如果先配了 drive 或 vsock 再 load，会报 <code>Loading a microVM snapshot not allowed after configuring boot-specific resources</code>。所以恢复路径里块设备和 vsock 全部来自快照本身。</div>
+  <div class="callout warn"><b>坑 · 快照制作会冻结 vCPU，vsock 连接会断。</b> 制作快照后，宿主侧已建立的 vsock 连接被对端关闭。只有<b>本 VM 真的做了 pause/create</b>，才需要重连；如果只是等闸门后复用了别人的快照，连接依然有效。</div>
+  <div class="callout warn"><b>坑 · 指纹必须含 agent 版本。</b> 否则改了 guest agent 代码却没改版本号，指纹不变，会静默复用含旧 agent 的快照，线上跑的是旧代码。</div>
+  <div class="callout warn"><b>坑 · 并发会竞态。</b> 10 台 VM 同时首次启动、模板相同，会并发写同一个快照文件，并各自 pause/resume，导致 vsock 超时。真机复现后，才加了这个单飞闸门。</div>
+</div>
+
+<!-- M7 -->
+<div class="card">
+  <h3>M7 · 生命周期与孤儿回收</h3>
+  <p><b>要解决的问题：</b>VM 的创建和销毁要按正确顺序做，任何一步失败都不能留下"吃内存却没人管"的 Firecracker 进程。</p>
+  <h3>销毁顺序（<code>MicrovmSandboxProvider.terminate</code>）</h3>
+  <ol class="steps">
+    <li class="phase-end"><b>flush</b>：让 guest 把文件系统缓存落盘（best-effort）。</li>
+    <li class="phase-end"><b>stopVm</b>：SIGKILL Firecracker 并<b>等它真的退出</b>；保留运行目录与磁盘。</li>
+    <li class="phase-end"><b>导出</b>：把工作区盘导出到宿主工作区。导出失败只记录，不抛出。</li>
+    <li class="phase-end"><b>terminate</b>：释放 CID、UID，删除 chroot 与运行目录。</li>
+    <li class="phase-end"><b>dispose</b>：<b>无论前面成功与否</b>都执行，清理不会被导出失败短路。</li>
+  </ol>
+  <div class="callout warn"><b>坑 · 必须先停进程，再删目录。</b> 目录里有 pidfile 和 socket，它们是寻址凭据。先删目录，进程就成了"找不到的孤儿"，会永久占内存，而容量准入完全看不见它。</div>
+  <h3>崩溃后的孤儿回收（<code>reapOrphanVms</code>）</h3>
+  <ul>
+    <li><b>落盘 pidfile</b>：每台 VM 启动时把 pid、进程名、sandboxId 写进 <code>vm.pid</code>。这是跨进程重启唯一的凭据。</li>
+    <li><b>启动时回收</b>：Harness 启动后、创建任何新 VM 之前，扫描所有运行目录，逐个 pidfile 验活 → 确认是 Firecracker 才 SIGKILL → 删目录。</li>
+    <li><b>验活而非盲杀</b>：先读 <code>/proc/&lt;pid&gt;/cmdline</code> 确认真是我们启动的 Firecracker。pid 可能已被系统复用给别人，盲杀会误伤。</li>
+  </ul>
+  <div class="callout">真机上曾经出现过 7 个孤儿 firecracker 进程，这是加这一层的直接原因。</div>
+</div>
+
+<!-- M8 -->
+<div class="card">
+  <h3>M8 · 接入层：把 VM 伪装成统一的 Sandbox</h3>
+  <p><b>要解决的问题：</b>上层（RunService、工具网关）不应该关心底下是 runsc 还是 Firecracker。</p>
+  <ul>
+    <li><b>统一接口</b>：<code>SandboxProvider</code> 定义 create / terminate / 生命周期事件；<code>SandboxCommandExecutor</code> 定义 execute。</li>
+    <li><b>Broker 进程（生产部署）</b>：Firecracker/jailer 需要 root，不能放在 Master 里。生产由独立的 <code>sandbox-broker</code> 进程持有 Firecracker 与租户 secret；Master 的 <code>BrokerSandboxProvider</code> 通过 Unix socket 调它。Broker 用 <code>SO_PEERCRED</code> 读取对端 uid、用控制 token 拒绝非 Master 的 create，并要求 root 才能启用 jailer。</li>
+    <li><b>按档位路由</b>：<code>SandboxProviderRouter</code> 按 profile 分发。<code>strict</code> 走 <code>MicrovmSandboxProvider</code>，<code>default</code> 走 runsc 容器。两条链路可以灰度并存，出问题可回退。</li>
+    <li><b>驱动可替换</b>：<code>MicrovmDriver</code> 是接口，实现有 <code>firecracker</code>（真实）、<code>mock</code>（测试桩）、<code>e2b</code>（未实现，声明为不提供硬件隔离）。</li>
+    <li><b>诚实的隔离证据</b>：驱动必须声明 <code>providesHardwareIsolation</code>。只有真实 Firecracker 才会把 <code>runtimeEvidence.verified</code> 置为 true；mock 永远是 false。这杜绝了"假隔离被报告为已验证"。</li>
+    <li><b>fail-closed</b>：模板不存在、驱动不可用、工作区盘没回传路径，都直接拒绝创建，不会降级成无隔离执行。</li>
+  </ul>
+</div>
+
+<!-- ============ 3 ============ -->
+<h2 id="s3">3. 模块如何组装：一次 Run 的完整旅程</h2>
+<p>下面按时间顺序，把 8 个模块串成一次完整执行。左侧标注的是主要参与模块。</p>
+
+<h3>3.0 真实部署拓扑：谁在哪个进程里</h3>
+<p>前面几节为了讲清原理，把 VM 管理画在一个进程里。<b>生产环境实际是三进程分工</b>（代码见 <code>create-harness-application.ts</code> 与 <code>broker-main.ts</code>）：</p>
+<div class="card">
+<pre>Agent 工具调用（Pi runtime，Worker 进程）
+   └─ pi-tool-gateway: 把 bash / 读写文件 转成 executor.execute(sandboxId, ["sh","-lc",cmd], {workdir:"/workspace"})
+         │
+         ▼
+Master 进程（非特权）：BrokerSandboxProvider      ──Unix socket（控制 token）──┐
+   · create / execute / terminate 转发给 Broker                                  │
+   · terminate 时反查 sandbox→run→tenant，Broker 做跨租户校验                     │
+                                                                                ▼
+Sandbox Broker 进程（root，唯一持有 Firecracker/jailer 与租户 secret）
+   · SO_PEERCRED 校验对端 uid；拒绝非 Master 的 create
+   · 启动时先回收孤儿 VM，再开始服务
+   · 内部：MicrovmSandboxProvider → FirecrackerSandboxDriver（即本文 M1–M7）
+                                                                                │
+                                                                                ▼
+                                                              microVM（vsock 命令通道 → guest agent）</pre>
+</div>
+<p class="kv">注意：Master 和 Worker <b>不直接持有 Firecracker</b>。这样即使 Master/Worker 被打穿，也拿不到 root 权限或其他租户的 secret。开发环境（非 broker 配置）则直接在同一进程内装配，并通过 <code>SandboxProviderRouter</code> 把 strict 与 default 两条链路并存。</p>
+
+<h3>3.1 组装总图</h3>
+<div class="card">
+<svg viewBox="0 0 980 470" width="100%" role="img" aria-label="模块组装图" style="font-family:-apple-system,'PingFang SC',sans-serif">
+  <defs>
+    <marker id="arr" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+      <path d="M0,0 L8,4 L0,8 z" fill="#5ac8fa"/>
+    </marker>
+    <marker id="arrg" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+      <path d="M0,0 L8,4 L0,8 z" fill="#3ddc97"/>
+    </marker>
+  </defs>
+
+  <!-- 宿主区 -->
+  <rect x="10" y="10" width="520" height="450" rx="12" fill="#121a23" stroke="#2a3644" stroke-dasharray="4 4"/>
+  <text x="26" y="34" fill="#8b98a5" font-size="13">宿主机：Master（非特权）+ Broker（root，持有 Firecracker）</text>
+
+  <rect x="30" y="50" width="200" height="60" rx="8" fill="#1e2731" stroke="#5ac8fa"/>
+  <text x="130" y="76" text-anchor="middle" fill="#e6edf3" font-size="14" font-weight="700">M8 Provider / Router</text>
+  <text x="130" y="96" text-anchor="middle" fill="#8b98a5" font-size="12">上层统一入口</text>
+
+  <rect x="30" y="140" width="200" height="60" rx="8" fill="#1e2731" stroke="#ffb547"/>
+  <text x="130" y="166" text-anchor="middle" fill="#e6edf3" font-size="14" font-weight="700">M3 私有目录 / UID / CID</text>
+  <text x="130" y="186" text-anchor="middle" fill="#8b98a5" font-size="12">每台 VM 的身份证件</text>
+
+  <rect x="30" y="230" width="200" height="60" rx="8" fill="#1e2731" stroke="#ffb547"/>
+  <text x="130" y="256" text-anchor="middle" fill="#e6edf3" font-size="14" font-weight="700">M6 快照池 + 闸门</text>
+  <text x="130" y="276" text-anchor="middle" fill="#8b98a5" font-size="12">黄金快照 vm.snap/mem.snap</text>
+
+  <rect x="30" y="320" width="200" height="60" rx="8" fill="#1e2731" stroke="#b28dff"/>
+  <text x="130" y="346" text-anchor="middle" fill="#e6edf3" font-size="14" font-weight="700">M7 pidfile / 回收</text>
+  <text x="130" y="366" text-anchor="middle" fill="#8b98a5" font-size="12">崩溃后按 pid 清理</text>
+
+  <rect x="280" y="140" width="230" height="60" rx="8" fill="#1e2731" stroke="#ffb547"/>
+  <text x="395" y="166" text-anchor="middle" fill="#e6edf3" font-size="14" font-weight="700">M5 工作区 ext4 副本</text>
+  <text x="395" y="186" text-anchor="middle" fill="#8b98a5" font-size="12">终止时 debugfs 导出</text>
+
+  <rect x="280" y="230" width="230" height="60" rx="8" fill="#1e2731" stroke="#5ac8fa"/>
+  <text x="395" y="256" text-anchor="middle" fill="#e6edf3" font-size="14" font-weight="700">M4 vsock 桥（宿主侧）</text>
+  <text x="395" y="276" text-anchor="middle" fill="#8b98a5" font-size="12">JSON 帧 · 按 id 配对</text>
+
+  <rect x="280" y="320" width="230" height="60" rx="8" fill="#1e2731" stroke="#b28dff"/>
+  <text x="395" y="346" text-anchor="middle" fill="#e6edf3" font-size="14" font-weight="700">M2 jailer + cgroup</text>
+  <text x="395" y="366" text-anchor="middle" fill="#8b98a5" font-size="12">降权 · chroot · 限额</text>
+
+  <!-- 硬件边界 -->
+  <line x1="540" y1="20" x2="540" y2="460" stroke="#ffb547" stroke-width="2" stroke-dasharray="8 6"/>
+  <text x="548" y="36" fill="#ffb547" font-size="12">KVM 硬件边界</text>
+
+  <!-- VM 区 -->
+  <rect x="560" y="10" width="410" height="450" rx="12" fill="#0f1e18" stroke="#245a45" stroke-dasharray="4 4"/>
+  <text x="576" y="34" fill="#8b98a5" font-size="13">microVM（Firecracker 进程托管的小电脑）</text>
+
+  <rect x="585" y="130" width="360" height="60" rx="8" fill="#1e2731" stroke="#5ac8fa"/>
+  <text x="765" y="156" text-anchor="middle" fill="#e6edf3" font-size="14" font-weight="700">M1 独立内核 + Alpine rootfs</text>
+  <text x="765" y="176" text-anchor="middle" fill="#8b98a5" font-size="12">inittab 开机启动 socat</text>
+
+  <rect x="585" y="220" width="360" height="60" rx="8" fill="#1e2731" stroke="#5ac8fa"/>
+  <text x="765" y="246" text-anchor="middle" fill="#e6edf3" font-size="14" font-weight="700">socat VSOCK-LISTEN:5000 → agent</text>
+  <text x="765" y="266" text-anchor="middle" fill="#8b98a5" font-size="12">guest agent：spawn argv · 回传输出</text>
+
+  <rect x="585" y="310" width="360" height="60" rx="8" fill="#1e2731" stroke="#ffb547"/>
+  <text x="765" y="336" text-anchor="middle" fill="#e6edf3" font-size="14" font-weight="700">/workspace = /dev/vdb（M5）</text>
+  <text x="765" y="356" text-anchor="middle" fill="#8b98a5" font-size="12">Agent 的命令在这里读写</text>
+
+  <rect x="585" y="40" width="360" height="60" rx="8" fill="#1e2731" stroke="#2a3644"/>
+  <text x="765" y="66" text-anchor="middle" fill="#8b98a5" font-size="13">无网卡（allowNetwork 恒为 false）</text>
+  <text x="765" y="86" text-anchor="middle" fill="#8b98a5" font-size="12">唯一出口：vsock 通道</text>
+
+  <!-- 连线：控制 -->
+  <line x1="230" y1="80" x2="280" y2="170" stroke="#5ac8fa" stroke-width="2" marker-end="url(#arr)"/>
+  <line x1="230" y1="170" x2="280" y2="170" stroke="#ffb547" stroke-width="2" marker-end="url(#arr)"/>
+  <line x1="510" y1="260" x2="585" y2="250" stroke="#5ac8fa" stroke-width="2" marker-end="url(#arr)"/>
+  <line x1="510" y1="350" x2="585" y2="150" stroke="#b28dff" stroke-width="2" stroke-dasharray="5 4" marker-end="url(#arr)"/>
+  <!-- 命令往返 -->
+  <line x1="380" y1="290" x2="585" y2="262" stroke="#3ddc97" stroke-width="2" marker-end="url(#arrg)" stroke-dasharray="0"/>
+  <text x="430" y="278" fill="#3ddc97" font-size="11">exec 帧 →</text>
+  <line x1="585" y1="282" x2="380" y2="304" stroke="#3ddc97" stroke-width="1.5" stroke-dasharray="5 4" marker-end="url(#arrg)"/>
+  <text x="446" y="314" fill="#3ddc97" font-size="11">← 输出/结果帧</text>
+  <!-- 快照 -->
+  <line x1="230" y1="260" x2="280" y2="260" stroke="#ffb547" stroke-width="1.5" stroke-dasharray="5 4"/>
+  <!-- 磁盘 -->
+  <line x1="395" y1="200" x2="700" y2="310" stroke="#ffb547" stroke-width="1.5" stroke-dasharray="5 4" marker-end="url(#arr)"/>
+  <text x="600" y="282" fill="#ffb547" font-size="11">挂载 /dev/vdb</text>
+
+  <text x="26" y="458" fill="#8b98a5" font-size="12">蓝线：控制流（谁调用谁） · 绿线：命令与结果 · 黄虚线：数据/文件 · 紫虚线：进程托管与回收</text>
+</svg>
+</div>
+
+<h3>3.2 一次 Run 的时间线</h3>
+<ol class="steps">
+  <li class="phase-cold"><b>上层请求沙箱</b> <span class="who">· M8</span><br>执行链路对 strict 档请求沙箱，Router 转给 Provider（生产为 <code>BrokerSandboxProvider</code>，由 Broker 转给 <code>MicrovmSandboxProvider.create</code>）。Provider 先检查：<code>allowNetwork</code> 必须为 false，模板文件必须存在。通过后解析 Secret（只放内存，入库只存名字），写一条 ACTIVE 记录。</li>
+  <li class="phase-cold"><b>分配身份</b> <span class="who">· M3</span><br>在 <code>&lt;runtimeRoot&gt;/&lt;id&gt;/</code> 建 0700 目录；分配 CID（vsock 地址）。</li>
+  <li class="phase-cold"><b>准备盘与 chroot</b> <span class="who">· M2 + M5</span><br>复制 rootfs 与工作区模板到 chroot；分配 UID/GID 并 <code>chown -R</code>。</li>
+  <li class="phase-cold"><b>启动 Firecracker</b> <span class="who">· M2 + M1</span><br>用 jailer 启动（降权、chroot、cgroup 限额）。进程 pid 立即写入 <code>vm.pid</code>（M7 的凭据）。等待 API socket 出现。</li>
+  <li class="phase-cold"><b>两条路径二选一</b> <span class="who">· M6</span><br>
+    <b>快速路径</b>：模板指纹命中 → 复制快照进 chroot → <code>/snapshot/load</code>（改写 vsock 路径）→ resume。实测约 0.5 秒。<br>
+    <b>冷启动路径</b>：配置内核、两块盘、vsock、机器规格 → <code>InstanceStart</code>。实测约 1.5 秒。首台冷启动握手成功后，经闸门制作黄金快照。</li>
+  <li class="phase-cold"><b>握手确认就绪</b> <span class="who">· M4</span><br>宿主桥连接 <code>vsock.sock</code>，发 <code>CONNECT 5000</code>，收到 <code>OK</code>，再发 ping 收 pong。失败会按 250ms 间隔重试，最长 20 秒。</li>
+  <li class="phase-exec"><b>执行命令</b> <span class="who">· M4 + M5 + M1</span><br>上层 <code>execute(sandbox, argv)</code> → 桥生成 id，发 exec 帧 → guest socat fork agent → agent 在 <code>/workspace</code> 下 spawn argv → 输出 base64 分块回传 → 宿主按 id 归并，按字节截断，拿到 exitCode / timedOut / truncated。</li>
+  <li class="phase-exec"><b>可以多次执行</b> <span class="who">· M4</span><br>同一个 VM 可以接收多条命令，桥内部串行，每条命令独立进程、独立退出码。</li>
+  <li class="phase-end"><b>终止：先停后导</b> <span class="who">· M7 + M6</span><br>flush → SIGKILL 并等待退出 → 此时 guest 不再写盘。</li>
+  <li class="phase-end"><b>导出产物</b> <span class="who">· M5</span><br><code>debugfs rdump</code> 把 workspace.ext4 的内容拷回宿主工作区，清理危险的符号链接。</li>
+  <li class="phase-end"><b>销毁</b> <span class="who">· M7 + M3 + M2</span><br>driver.terminate 释放 CID、UID，删除 chroot；dispose 删除运行目录；DB 状态改为 TERMINATED。<b>即使导出失败，清理依然执行。</b></li>
+</ol>
+
+<h3>3.3 三层隔离各自负责什么</h3>
+<div class="grid3">
+  <div class="card">
+    <h3>第 1 层：VM 边界（KVM）</h3>
+    <p>VM 里的代码即使是 root、即使打穿了 guest 内核，也只能影响它自己那台小电脑。</p>
+    <p class="kv">对应：M1</p>
+  </div>
+  <div class="card">
+    <h3>第 2 层：宿主进程边界（jailer）</h3>
+    <p>就算 Firecracker 进程本身被攻破，它也是个降权、被 chroot、被限额的低权限进程。</p>
+    <p class="kv">对应：M2、M3</p>
+  </div>
+  <div class="card">
+    <h3>第 3 层：通道与数据边界</h3>
+    <p>宿主和 VM 之间只有结构化帧，没有网络，没有共享目录。文件只通过"停机后导出"这一条路回到宿主。</p>
+    <p class="kv">对应：M4、M5</p>
+  </div>
+</div>
+
+<h3>3.4 为什么要这样"组装"：各模块互相依赖的关系</h3>
+<table>
+  <tr><th>依赖关系</th><th>原因</th></tr>
+  <tr><td>M4 依赖 M1（agent 必须先开机）</td><td>vsock 握手要等 guest 内核起来、socat 监听，所以握手有 20 秒重试窗口</td></tr>
+  <tr><td>M5 依赖 M7（导出必须在停机之后）</td><td>VM 还在写盘时导出会得到损坏镜像</td></tr>
+  <tr><td>M6 依赖 M4（快照制作后要重连 vsock）</td><td>快照会冻结 vCPU，宿主侧连接被断开</td></tr>
+  <tr><td>M6 依赖 M2（快照要拷进 chroot）</td><td>降权后的 Firecracker 只能访问 chroot 内的文件</td></tr>
+  <tr><td>M7 依赖 M3（回收靠运行目录里的 pidfile）</td><td>pidfile 是进程重启后唯一的寻址凭据</td></tr>
+  <tr><td>M1 的 Guest 镜像依赖 M5（工作区挂载）</td><td>inittab 里 <code>mount /dev/vdb /workspace</code> 与宿主侧的盘必须一一对应</td></tr>
+  <tr><td>M8 依赖所有模块的"诚实声明"</td><td>Provider 只根据驱动声明的 <code>providesHardwareIsolation</code> 决定是否宣称已隔离</td></tr>
+</table>
+
+<!-- ============ 4 ============ -->
+<h2 id="s4">4. 真机数据：这套东西到底多快</h2>
+<div class="callout warn">本节数字<b>不是我在本次整理中重新跑出来的</b>，而是从项目文档 <code>docs/vm-lifecycle-benchmark.zh-CN.md</code> 与 <code>docs/platform-boundary.md</code> 摘录的历史实测。代码无法证明这些数字仍然成立，换版本后需要重跑 <code>scripts/vm-lifecycle-benchmark.ts</code>。</div>
+<p class="kv">环境：Ubuntu 22.04 · 内核 6.8 · Firecracker v1.17.0 + jailer · guest 内核 4.14.174 · 2026-10-11 实测（单机，结果数字来自项目文档 <code>docs/vm-lifecycle-benchmark.zh-CN.md</code> 与 <code>platform-boundary.md</code>）。</p>
+
+<div class="grid3">
+  <div class="card stat"><div class="lbl">冷启动（无快照）</div><div class="big" style="color:var(--amber)">~1.48 s</div><div class="lbl">n=5，median 1477ms</div></div>
+  <div class="card stat"><div class="lbl">快照热恢复 create</div><div class="big" style="color:var(--green)">~0.51 s</div><div class="lbl">n=10，median 513ms，warmHit 10/10</div></div>
+  <div class="card stat"><div class="lbl">恢复后执行 uname -r</div><div class="big" style="color:var(--accent)">~12 ms</div><div class="lbl">median 11.6ms</div></div>
+</div>
+
+<h3>热恢复 490ms 里时间花在哪（分阶段埋点，<code>HARNESS_VM_PHASE_TRACE=1</code>）</h3>
+<div class="card">
+  <div class="bar-row"><span>copy-snapshot（拷快照进 chroot）</span><div class="bar hot"><i style="width:61%"></i></div><span>~298 ms · 61%</span></div>
+  <div class="bar-row"><span>copy-disks（拷内核/rootfs/工作区盘）</span><div class="bar hot"><i style="width:22%"></i></div><span>~110 ms · 22%</span></div>
+  <div class="bar-row"><span>vsock-handshake</span><div class="bar"><i style="width:11%"></i></div><span>53 ms</span></div>
+  <div class="bar-row"><span>api-socket-wait</span><div class="bar"><i style="width:4%"></i></div><span>20 ms</span></div>
+  <div class="bar-row"><span>snapshot-load（Firecracker 恢复本身）</span><div class="bar"><i style="width:1.3%"></i></div><span>6~7 ms</span></div>
+  <p class="kv">结论：Firecracker 恢复本身只要毫秒级；<b>端到端延迟主要花在 jailer 要求的"每 VM 私有文件拷贝"上</b>。这是下一步优化的重点。</p>
+</div>
+
+<h3>并发热恢复（墙钟时间）</h3>
+<table>
+  <tr><th>并发 N</th><th>墙钟</th><th>单 VM median</th><th>warmHit</th></tr>
+  <tr><td>1</td><td>595 ms</td><td>497 ms</td><td>1/1</td></tr>
+  <tr><td>4</td><td>651 ms</td><td>558 ms</td><td>4/4</td></tr>
+  <tr><td>10</td><td>766 ms</td><td>652 ms</td><td>10/10</td></tr>
+</table>
+<p class="kv">并发冷启动（快照池清空）时，10 台约 2.9 秒。首台完成并制作快照，其余仍按冷启动走，这是已知的优化点。</p>
+
+<!-- ============ 5 ============ -->
+<h2 id="s5">5. 边界与未做的事（诚实版）</h2>
+<p>文档里的历史方案（如"加密临时盘""出口网关"）有的已经被产品决策删除。下面以<b>当前代码</b>为准：</p>
+<table>
+  <tr><th>能力</th><th>状态</th><th>说明</th></tr>
+  <tr><td>硬件级 VM 隔离</td><td><span class="tag g">已实现</span></td><td>KVM + Firecracker + jailer，真机验证</td></tr>
+  <tr><td>vsock 结构化命令通道</td><td><span class="tag g">已实现</span></td><td>替代了早期的串口方案</td></tr>
+  <tr><td>快照加速</td><td><span class="tag g">已实现</span></td><td>黄金快照 + 单飞闸门 + 指纹校验</td></tr>
+  <tr><td>孤儿进程回收</td><td><span class="tag g">已实现</span></td><td>pidfile + /proc 验活</td></tr>
+  <tr><td>CPU / 内存限额</td><td><span class="tag g">已实现</span></td><td>由 jailer cgroup 在宿主侧强制</td></tr>
+  <tr><td>网络（出口网关）</td><td><span class="tag r">不做</span></td><td>产品决策：VM 一律无网卡，<code>allowNetwork=true</code> 直接拒绝。宿主能力必须走 vsock 受控通道</td></tr>
+  <tr><td>磁盘配额 / PID 上限</td><td><span class="tag a">未强制</span></td><td>Provider 的 enforcement 里 <code>diskLimitEnforced</code>、<code>pidLimitEnforced</code> 都是 false，不假装有</td></tr>
+  <tr><td>工作区实时同步</td><td><span class="tag a">否</span></td><td>只在终止时导出一次，运行中宿主看不到 VM 内的中间文件</td></tr>
+  <tr><td>加密临时盘（dm-crypt/LUKS）</td><td><span class="tag r">未实现</span></td><td>代码与脚本中无对应实现</td></tr>
+  <tr><td>microVM 预热池</td><td><span class="tag r">已删除</span></td><td>方案中的预热池被删，保留的是快照加速池</td></tr>
+  <tr><td>并发冷启动复用快照</td><td><span class="tag a">待优化</span></td><td>门控结束前就已判定 canRestore=false 的 VM 仍走冷启动</td></tr>
+  <tr><td>运行环境</td><td><span class="tag a">仅 Linux + KVM</span></td><td>macOS 开发机用 runsc 或 mock 驱动；生产 strict 档需要 Linux 服务器</td></tr>
+</table>
+
+<div class="callout">
+  <b>下一步优化方向（来自实测分析）：</b>只读文件用硬链接（约省 80ms）；在支持 reflink 的文件系统（xfs/btrfs）上让内存镜像拷贝近乎零成本（端到端估计 ~190ms）；
+  预热池（后台预恢复待命，交接只剩握手 ~50ms）；socket 轮询粒度从 20ms 收紧到 2ms；工作区模板从 128MB 缩到 32MB。
+</div>
+
+<!-- ============ 6 ============ -->
+<h2 id="s6">6. 术语速查（按 Agent 工程师能理解的方式）</h2>
+<table>
+  <tr><th>术语</th><th>白话</th><th>类比</th></tr>
+  <tr><td>VM（虚拟机）</td><td>一台有独立内核的电脑，由软件造出来</td><td>云服务器里的一台实例</td></tr>
+  <tr><td>KVM / /dev/kvm</td><td>Linux 内核给进程开的"硬件虚拟化门"</td><td>让 CPU 指令直接跑、又能隔开的执行许可</td></tr>
+  <tr><td>Firecracker</td><td>极简的 VM 管理程序，启动快、设备少</td><td>专为 Lambda 造的小型虚拟化引擎</td></tr>
+  <tr><td>VMM</td><td>管理 VM 的那个宿主进程</td><td>VM 的"管家进程"</td></tr>
+  <tr><td>Guest / Host</td><td>VM 内部 / 宿主机</td><td>容器里的世界 / 容器外的世界</td></tr>
+  <tr><td>jailer</td><td>给 Firecracker 降权、chroot、限额的官方工具</td><td>给管家进程戴上手铐和小笼子</td></tr>
+  <tr><td>chroot</td><td>把进程的根目录改成一个子目录，它看不见外面</td><td>把进程关进一个只含必需文件的文件夹</td></tr>
+  <tr><td>cgroup</td><td>内核的资源配额表（CPU、内存）</td><td>宿主给进程划的预算</td></tr>
+  <tr><td>UID / GID</td><td>Linux 用户/用户组编号，决定文件权限</td><td>每台 VM 一个员工工号</td></tr>
+  <tr><td>vsock</td><td>宿主与 VM 之间的专用 socket 通道，不走 IP</td><td>宿主和 VM 之间的内线电话</td></tr>
+  <tr><td>socat</td><td>一个"把 socket 接到程序 stdin/stdout"的小工具</td><td>接线员，把电话接到 agent</td></tr>
+  <tr><td>Guest agent</td><td>VM 内运行的小程序，负责接收并执行命令</td><td>VM 里的执行员</td></tr>
+  <tr><td>rootfs</td><td>VM 的系统盘（操作系统文件）</td><td>VM 的"系统分区"</td></tr>
+  <tr><td>ext4 镜像</td><td>一个装着文件系统的磁盘文件</td><td>一个 U 盘的文件版</td></tr>
+  <tr><td>debugfs rdump</td><td>不挂载、直接从 ext4 镜像里把文件拷出来</td><td>不插 U 盘，直接读它的目录</td></tr>
+  <tr><td>Snapshot / Restore</td><td>把已开机的 VM（含内存）存档，下次直接接着跑</td><td>游戏存档，而不是重新开一局</td></tr>
+  <tr><td>黄金快照</td><td>同一模板第一次做出来的那份存档，复用给后续 VM</td><td>母版存档</td></tr>
+  <tr><td>模板指纹</td><td>kernel + rootfs + agent 版本的哈希，变了就失效</td><td>母版的版本号</td></tr>
+  <tr><td>pidfile</td><td>记录 VM 进程 pid 的小文件，崩溃后用于找回进程</td><td>寄存在门口的钥匙登记表</td></tr>
+  <tr><td>SIGTERM / SIGKILL</td><td>请求进程退出 / 强制杀死</td><td>先请你下班，再强制清场</td></tr>
+  <tr><td>fail-closed</td><td>出错时拒绝执行，而不是降级成不安全的方式</td><td>门禁故障时默认关门</td></tr>
+</table>
+
+</main>
+
+<footer class="wrap">
+  <p>生成依据：本仓库 <code>src/sandbox/microvm/</code>、<code>src/sandbox/sandbox-provider-router.ts</code>、<code>guest/agent/main.ts</code>、<code>scripts/microvm/build-guest-rootfs.sh</code>，以及 <code>docs/vm-lifecycle-benchmark.zh-CN.md</code>、<code>docs/platform-boundary.md</code>。
+  数字为单机真机实测，换宿主、内核或 guest 后需重测。</p>
+</footer>
+
+</body>
+</html>
