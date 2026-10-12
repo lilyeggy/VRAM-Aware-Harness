@@ -109,22 +109,74 @@ Run 准入(policy/RESOURCE) → sandbox.create
   mmap，多 VM 共享 inode 会串写"。该结论**错误**，已被官方 `snapshot-support.md` 原文推翻，
   见 b332/`docs/agent-sandbox-landscape.zh-CN.md` §4。本条目保留更正痕迹。
 
+### O4 rootfs 共享 + guest tmpfs（2026-10-12，提交 `cb47f73`）
+
+- **背景**：热恢复里 `copy-disks` 仍有 87ms，全是 rootfs.ext4（256MB）的整块复制。
+- **机制**：`HARNESS_VM_SHARE_ROOTFS=1` 时 rootfs 也走硬链接共享（只读），`sharedRootfsReadOnly` 决定 `/drives/rootfs` 的 `is_read_only`。rootfs 只读后 guest 写 `/tmp` 会 EROFS，因此 guest 镜像的 `/etc/inittab` 在 sysinit 段加 `mkdir -p /tmp /run /var/tmp` + 三个 tmpfs 挂载（`/tmp` mode=1777,size=64m；`/run` mode=755,size=16m；`/var/tmp` mode=1777,size=32m）。构建脚本 `scripts/microvm/build-guest-rootfs.sh` 已带上这段；生产镜像 `/data/harness/images/rootfs.ext4` 用 debugfs 原地打补丁（备份 `/data/harness/images/rootfs.ext4.bak-tmpfs`）。
+- **实测**（172.17.43.193，jailer + Firecracker v1.17.0，256MB guest，共享开）：
+  - 热恢复（benchmark stageB，n=10）：median **101.3ms** / p95 118.7ms；`copy-disks` 102ms → **14ms**（只拷可写工作区盘）。
+  - guest 可写性：`bash -c "uname -r && df -h /tmp && cp result.txt /tmp/r.txt"` → `4.14.174` + `/tmp` 64MB tmpfs + 写成功；未打 tmpfs 补丁时同一命令报 `sh: can't create /tmp/harness-probe: Read-only file system`。
+  - 冷启动不受影响（首台 `SANDBOX_ACQUIRED.durationMs` 2375ms，与未共享时 2440ms 同量级）。
+- **代价 / 回退**：guest 除 `/workspace`、`/tmp`、`/run`、`/var/tmp` 外不可写（`pip install` 到 site-packages、编译缓存会 EROFS）。回退 = 去掉 `HARNESS_VM_SHARE_ROOTFS=1` 并**清空快照池**（只读语义固化在黄金 VM 的 drive 配置里，旧快照恢复出来仍是旧语义）。
+- **附带修复**：per-IP 限流默认值 120 → **1200**（`src/app/harness-config.ts`）。实验室 10-20 人共用一个 NAT 出口 IP 时，120/min 会把正常使用打成 429（真机 p0 smoke 首轮即 `注册失败 HTTP 429`）。
+
+### O5 首次冷启动拆解 + 服务启动预热（2026-10-12）
+
+- **背景**：O4 之后热恢复已 ~0.1s，用户问"首次冷启动能不能也快"。冷启动 = 池空时的第一次 create，≈2.2~2.4s（snapshot 模式，含建快照）；纯冷启动（不建快照）≈1.33s。
+- **机制 1：分段埋点**（`serial-first-line`、`snapshot-reuse`，配合 `HARNESS_VM_BOOT_VERBOSE`）
+  - 驱动 drain Firecracker stdout（内核 console，原来只挂 `proc.on("error")` 完全不读），记录**首个串口字节**的时刻，以及被抓取到的最后 8KB 串口输出（`HARNESS_VM_BOOT_VERBOSE=1` 时内核打印完整启动日志，否则 `quiet loglevel=3`）。
+  - `snapshot-reuse`：本 VM 没写快照、只是在并发门控里等到别人做好后复用；`make-snapshot` 只在真的写镜像时记录。
+- **机制 2：预热脚本**：`scripts/vm-snapshot-prewarm.ts`（内存自检 + 真机模式）：按模板哈希查快照，不存在就 create + terminate 一次以生成快照；已存在则 `VM_PREWARM_SKIP`。`deploy/harness-vm-prewarm.service.example`（`EnvironmentFile=/etc/harness/broker.env`，`IPAddressDeny=any`）+ `harness-vm-prewarm.timer.example`（`OnBootSec=20s`）。
+- **实测拆解**（172.17.43.193，jailer + fc117，256MB，共享开）：
+  - 纯冷启动（不建快照）n=3：median **1334ms** = `vsock-handshake` 1281 + `api-socket-wait` 20 + `copy-disks` 16 + `api-config-cold` 14 + `chown-chroot`/`spawn-process`/`share-base` ~5。
+  - `serial-first-line`：冷启动 **15ms**、热恢复 21ms —— 说明 Firecracker 进程与内核 console 是"立刻"起来的，**慢的 1.28s 全在 guest 用户态**（busybox init 链 + `socat VSOCK-LISTEN` + agent 二进制加载）。
+  - 建快照模式首台：total 2254~2416ms = 冷启动 1.28s + `make-snapshot` **908~918ms**（把 256MB 内存镜像写盘）。
+  - `quiet loglevel=3` 与 verbose 的时间**没有差别**（1334ms vs 1334ms）：串口日志不是瓶颈，保留 quiet 只为少写不消费的管道数据、降低阻塞风险。
+  - 并发冷启动 N=10（池空，同一模板）：总墙钟 2341~2472ms，单 VM median 1718~1852ms；`snapshot-reuse` **9 台**、真写快照 **1 台**（外加 1 次 warmup）→ 不是 10×2.4s。
+  - 预热后并发热恢复 N=10：总墙钟 206~222ms，单 VM median 104~117ms，warmHits 10/10。
+- **生产验证**（同机，`HARNESS_VM_SHARE_ROOTFS=1`）：清空 `/data/harness/snapshots-mt` 后以 root + `broker.env` 运行预热 → `VM_PREWARM_OK template=2d686647... firstCreateMs=2235 warmHit=false probe=4.14.174`；再跑一次 → `VM_PREWARM_SKIP reason=snapshot-present`；随后首个真实用户 Run `SANDBOX_ACQUIRED {"durationMs":166,"warmHit":true}`（预热前同一操作是 2440ms / warmHit=false）。
+- **结论**：首次冷启动的 2.2s 不能靠调参消掉（1.28s guest 用户态就绪 + 0.9s 写内存镜像）；能改的是**谁付这一笔**——预热把它从用户路径挪到服务启动。要真压缩冷启动本身，需要更小的 agent 二进制/精简 inittab（未实测）或 COW 文件系统让 `make-snapshot` 不再整块写。
+
 ## 3. 待评估 / 未采用
 
-| 候选 | 预期收益 | 现状与顾虑 |
+| 候选 | 预期收益 | 现状 |
 | --- | --- | --- |
-| rootfs 共享 + guest tmpfs（`/tmp`/`/run`/`/var/tmp`） | 热恢复 176 → ~100ms | **O4 实施中** |
-| 并发冷启动复用首个完成的快照 | 首次并发 N 台从 N×2.7s → 1×2.7s + (N-1)×0.2s | 已确认缺陷：`canRestore` 在并发门控之前计算（`docs/vm-lifecycle-benchmark.zh-CN.md` 并发冷启动一节） |
-| 服务启动时预热黄金快照 | 用户首个 Run 不再付 2.4s | 需 broker 侧一次性 create+terminate（或 systemd `ExecStartPost`） |
-| 工作区模板瘦身（128MB → 32MB） | `copy-disks` 14 → ~4ms | 需重做 workspace 模板与文档 |
-| socket 轮询粒度 20ms → 2ms | `api-socket-wait` 21 → ~3ms | 改驱动轮询常量，需回归 |
-| COW 文件系统（xfs reflink=1 / btrfs） | 可写盘拷贝近 0 | 远程无 `mkfs.xfs`/`mkfs.btrfs`，需换盘/装工具 |
-| UFFD diff snapshot / 懒加载（CodeSandbox 式） | 内存镜像不再整块写 | 需自写 `UFFDIO_COPY` handler，复杂度高 |
-| 预热池（Daytona/Modal/Fly 式常驻待命 VM） | 交接 ~10~50ms | 内存常驻成本、租户隔离与回收复杂度 |
+| rootfs 共享 + guest tmpfs（`/tmp`/`/run`/`/var/tmp`） | 热恢复 176 → ~100ms | **已实施（O4）**：实测 101.3ms |
+| 并发冷启动复用首个完成的快照 | 首次并发 N 台从 N×2.7s → 1×2.7s + (N-1)×0.2s | **已生效**：O5 埋点证实 N=10 时 9 台走 `snapshot-reuse`，只有 1 台真写快照（早先"`canRestore` 在门控前计算导致不复用"的判断**作废**——门控内会复查 `hasSnapshot`） |
+| 服务启动时预热黄金快照 | 用户首个 Run 不再付 2.4s | **已实施（O5）**：`scripts/vm-snapshot-prewarm.ts` + `deploy/harness-vm-prewarm.{service,timer}.example`；生产首个 Run `warmHit:true, 166ms` |
+| 工作区模板瘦身（128MB → 32MB） | `copy-disks` 14 → ~4ms | 待做（收益小） |
+| socket 轮询粒度 20ms → 2ms | `api-socket-wait` 20 → ~3ms | 待做（收益 ~17ms） |
+| `quiet loglevel=3` 启动参数 | 期望少写串口、间接加速 | **已实施但无时间收益**：实测 1334ms vs 1334ms；保留只为减少未消费的管道数据（`HARNESS_VM_BOOT_VERBOSE=1` 可打开详细日志） |
+| COW 文件系统（xfs reflink=1 / btrfs） | 可写盘拷贝近 0、`make-snapshot` 更快 | 未采用：远程无 `mkfs.xfs`/`mkfs.btrfs`，需换盘/装工具 |
+| UFFD diff snapshot / 懒加载（CodeSandbox 式） | 内存镜像不再整块写 | 未采用：需自写 `UFFDIO_COPY` handler，复杂度高 |
+| 预热池（Daytona/Modal/Fly 式常驻待命 VM） | 交接 ~10~50ms | 未采用：内存常驻成本、租户隔离与回收复杂度 |
+| 更小的 guest agent 二进制 / 精简 inittab | 冷启动 1.28s 中的一部分 | 未实测（guest 用户态就绪是大头） |
 
 ## 4. 冷启动分析
 
-（待实测补充：见 O5/O6。）
+以 256MB guest、jailer、共享基础文件开启为前提，真机实测把冷启动切成两段：
+
+| 段 | 实测 | 说明 |
+| --- | --- | --- |
+| Firecracker 进程 + 内核 console 起来 | **15ms**（`serial-first-line`） | 进程启动与 API socket 就绪很快（`spawn-process` 1~3ms、`api-socket-wait` 20ms 是 20ms 轮询粒度） |
+| guest 用户态就绪（agent 可握手） | **~1281ms** | 占纯冷启动 1.33s 的 96%：busybox init 链 + `socat VSOCK-LISTEN` + agent 二进制加载 |
+| 建快照（把 256MB 内存镜像写盘） | **908~918ms** | 只在"池空后的第一次 create"发生 |
+
+结论：
+
+1. **能靠配置消掉的已经消掉了**（热恢复 498ms → 101ms 靠共享只读基础文件与 `copy-disks` 瘦身）。
+2. **池空后的第一次 create（≈2.2s）无法靠调参消掉**：1.28s 是 guest 用户态，0.9s 是内存镜像写盘。
+3. 因此对用户可见的解法是"改谁付这一笔"：**服务启动预热**（O5）后，用户遇到的第一个 Run 也是热恢复（实测 166ms / warmHit=true）。
+4. 并发场景不会线性放大：N=10 并发冷启动只写 1 次快照，其余复用（O5 埋点）。
+5. 要进一步压缩冷启动本身，方向是更小的 guest agent/精简 init 链，或 COW 文件系统；两者都未实测（见 §3）。
+
+## 5. 复现命令
+
+```sh
+# 预热黄金快照（root，读 broker.env；幂等，已存在则 SKIP）
+set -a; . /etc/harness/broker.env; set +a
+bun run scripts/vm-snapshot-prewarm.ts
+```
 
 ## 5. 复现命令
 

@@ -75,13 +75,21 @@ export class FirecrackerVsockBridge {
      * 一次注定失败的尝试上——真机实测冷启动 3.5s 里约 3s 是白等的）。
      * 在 deadline 内按 interval 反复尝试，单次尝试用较短超时快速失败。
      */
-    async connectWithRetry(overallTimeoutMs = 20000, intervalMs = 150): Promise<void> {
+    async connectWithRetry(
+        overallTimeoutMs = 20000,
+        intervalMs = 150,
+        attemptTimeoutMs = 1000,
+    ): Promise<void> {
         const deadline = Date.now() + overallTimeoutMs;
         let lastError: unknown = null;
         while (Date.now() < deadline) {
             try {
-                // 单次尝试 1s：guest 通常 1~2s 就绪，短超时避免整段空等
-                await this.connect(1000);
+                // 冷启动时 guest 还没起 socat，这次连接**不可能**成功，等待的时长
+                // 完全是白等：旧实现单次超时 1000ms，实测冷启动 vsock-handshake
+                // 1325ms = 一次 1000ms 白等 + 250ms 间隔 + 真正握手 ~75ms。
+                // 因此把单次超时做成参数，冷启动路径用短超时 + 密重试：
+                // 握手本身是亚毫秒级，短超时不会误判，只是更快探测到 guest 就绪。
+                await this.connect(attemptTimeoutMs);
                 return;
             } catch (err) {
                 lastError = err;

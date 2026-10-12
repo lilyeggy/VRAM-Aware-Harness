@@ -103,14 +103,15 @@ src/
 bun test ./tests
 ```
 
-当前测试基线：`612 pass / 7 skip / 0 fail`。
+当前测试基线：`619 pass / 7 skip / 0 fail`。
 
 生产级 VM 生命周期基准（Phase 1，§9.8 v1.4）见 `docs/vm-lifecycle-benchmark.zh-CN.md`，运行脚本为 `scripts/vm-lifecycle-benchmark.ts`；
 启动加速的**持续台账**（每条优化的背景/机制/实测/代价/提交）见 `docs/vm-startup-optimizations.zh-CN.md`。
 热恢复默认走"共享只读基础文件"（内核/快照文件硬链接，`HARNESS_VM_SHARE_BASE_FILES`，
 设 `0` 关闭），实测 498ms → 176ms；再加 `HARNESS_VM_SHARE_ROOTFS=1` 可到 101ms，
 但 guest 内除 `/workspace` 外只读（详见该文档的 A/B 与踩坑小节）。
-VM 创建分阶段耗时埋点：设 `HARNESS_VM_PHASE_TRACE=1` 后每台 VM 会向 stderr 打 `[vm-phase] <sandboxId> <阶段> <ms>`（默认关闭零开销）。
+VM 创建分阶段耗时埋点：设 `HARNESS_VM_PHASE_TRACE=1` 后每台 VM 会向 stderr 打 `[vm-phase] <sandboxId> <阶段> <ms>`（默认关闭零开销）；`HARNESS_VM_BOOT_VERBOSE=1` 可打开内核启动日志并把 `serial-first-line` 纳入排障。
+首次冷启动（池空后的第一次 create，≈2.2s）已拆解为 guest 用户态就绪 ~1.28s + 写内存镜像 ~0.9s，**靠调参消不掉**；对用户可见的解法是服务启动预热：`scripts/vm-snapshot-prewarm.ts` + `deploy/harness-vm-prewarm.{service,timer}.example`，生产实测预热后首个 Run `warmHit:true` / 166ms。
 主流 Agent Sandbox 技术方案调研（E2B / Daytona / Modal / CubeSandbox / CodeSandbox / Firecracker 官方快照与 UFFD 等）见 `docs/agent-sandbox-landscape.zh-CN.md`。
 队列优先级 / 深度 backpressure / RunAttempt 租约心跳（Phase 2，§9.8 v1.4）见 `.env.example` 的 `HARNESS_MAX_QUEUED_RUNS*` 与 `HARNESS_RUN_LEASE_*`。
 Durable Execution / 重试 / Run 幂等键（Phase 3，§9.8 v1.4）见 `.env.example` 的 `HARNESS_RUN_MAX_ATTEMPTS`、`HARNESS_RUN_RETRY_*`；提交 `POST /runs` 或会话消息时可带 `idempotencyKey`，终态后以 `RUN_ARTIFACTS_READY` 事件标记 artifacts 可读。

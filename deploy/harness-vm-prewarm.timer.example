@@ -1,0 +1,14 @@
+# 单机 systemd 部署示例：开机后触发一次 microVM 黄金快照预热（O5）。
+#
+# 只在开机时跑一次；broker 重启 / 手动清空快照池之后再补一次：
+#   sudo systemctl start harness-vm-prewarm.service
+[Unit]
+Description=Prewarm Harness microVM golden snapshot after boot
+
+[Timer]
+OnBootSec=20s
+Persistent=false
+Unit=harness-vm-prewarm.service
+
+[Install]
+WantedBy=timers.target

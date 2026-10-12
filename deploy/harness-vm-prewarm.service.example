@@ -1,0 +1,25 @@
+# 单机 systemd 部署示例：microVM 黄金快照预热（冷启动优化 O5）。
+# 完整说明见 docs/deployment-single-node-systemd.zh-CN.md §12 与
+# docs/vm-startup-optimizations.zh-CN.md。
+#
+# 为什么需要：快照是"首次启动顺手做"的 best-effort 产物，服务重启或清空快照池后
+# 第一个用户 Run 必然冷启动（真机 ~2.4s）。开机后主动做一次，用户侧只剩热恢复。
+#
+# 与 broker 同环境（root + 同一份 /etc/harness/broker.env），否则算出的
+# templateHash 与 broker 不一致，预热出来的快照不会被 broker 命中。
+[Unit]
+Description=Harness microVM golden snapshot prewarm
+After=harness-broker.service
+Wants=harness-broker.service
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+WorkingDirectory=/srv/VRAM-Aware-Harness
+EnvironmentFile=/etc/harness/broker.env
+# 预热只在本机与 microVM 之间通信（vsock/UDS），不需要任何网络出站。
+IPAddressDeny=any
+ExecStart=/usr/local/bin/bun run /srv/VRAM-Aware-Harness/scripts/vm-snapshot-prewarm.ts
+TimeoutStartSec=120
+RemainAfterExit=false

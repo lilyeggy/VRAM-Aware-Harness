@@ -63,6 +63,16 @@ export interface FirecrackerDriverConfig {
      * socket 等待、快照文件复制、/snapshot/load、vsock 握手逐段拆开。
      */
     readonly phaseTrace?: boolean;
+
+    /**
+     * 冷启动内核日志开关（默认关）。
+     *
+     * 内核串口日志写到 Firecracker 进程的 stdout，而宿主侧并不消费它
+     * （驱动只接管 stderr，stdout 走 pipe 无人读），所以逐行启动日志是
+     * 纯粹的浪费。默认加 quiet loglevel=3 只压日志等级，panic 级别仍会
+     * 打印；排障时用 HARNESS_VM_BOOT_VERBOSE=1 或 config.verboseBoot 打开。
+     */
+    readonly verboseBoot?: boolean;
     /**
      * 共享只读基础文件（默认开启，`HARNESS_VM_SHARE_BASE_FILES=0` 关闭）。
      *
@@ -148,6 +158,14 @@ export class FirecrackerSandboxDriver implements MicrovmDriver {
     private readonly shareRootfs: boolean;
     private readonly guestAgentVersion: string;
     private readonly phaseTrace: boolean;
+    private readonly verboseBoot: boolean;
+    /**
+     * guest 串口（内核启动日志）尾巴，按 sandbox 存最近 8KB。
+     *
+     * 两个作用：① 诊断（冷启动/握手失败时能看到 guest 卡在哪）；② 必须**消费**
+     * stdout —— 它是 pipe，不读就会在 guest 打印较多时把 Firecracker 进程堵死。
+     */
+    private readonly serialTail = new Map<string, string>();
     private readonly snapshotManager: VmSnapshotManager;
     private readonly runDirManager: VmRunDirectoryManager;
     private readonly uidAllocator = new VmUidAllocator();
@@ -209,6 +227,7 @@ export class FirecrackerSandboxDriver implements MicrovmDriver {
             ?? process.env.HARNESS_GUEST_AGENT_VERSION
             ?? "1.0.0";
         this.phaseTrace = config.phaseTrace ?? (process.env.HARNESS_VM_PHASE_TRACE === "1");
+        this.verboseBoot = config.verboseBoot ?? (process.env.HARNESS_VM_BOOT_VERBOSE === "1");
         this.snapshotManager = new VmSnapshotManager({
             ...(config.snapshotPoolDir !== undefined || process.env.HARNESS_VM_SNAPSHOT_POOL_DIR !== undefined
                 ? { snapshotPoolDir: config.snapshotPoolDir ?? process.env.HARNESS_VM_SNAPSHOT_POOL_DIR }
@@ -385,6 +404,20 @@ export class FirecrackerSandboxDriver implements MicrovmDriver {
         });
     }
 
+    /**
+     * guest 串口输出：第一次拿到数据即"内核开始执行"，用它把冷启动的
+     * vsock-handshake（~1.3s）拆成"内核启动"与"guest 用户态 + agent 就绪"。
+     * 同时把 stdout 读掉（pipe 必须消费），并保留尾巴用于诊断。
+     */
+    private onSerialOutput(sandboxId: string, chunk: Buffer | string, spawnAtMs: number): void {
+        const existing = this.serialTail.get(sandboxId);
+        if (existing === undefined) {
+            this.tracePhase(sandboxId, "serial-first-line", spawnAtMs);
+        }
+        const text = existing === undefined ? chunk.toString() : existing + chunk.toString();
+        this.serialTail.set(sandboxId, text.slice(-8192));
+    }
+
     private tracePhase(sandboxId: string, phase: string, startedAt: number): void {
         if (this.phaseTrace === false) {
             return;
@@ -461,6 +494,7 @@ export class FirecrackerSandboxDriver implements MicrovmDriver {
 
         let proc: ChildProcess | undefined;
         let childStderr = "";
+        let spawnAtMs = 0;
         const createStartedAt = Date.now();
         try {
             let apiSocketOnHost: string;
@@ -617,6 +651,7 @@ export class FirecrackerSandboxDriver implements MicrovmDriver {
                 workspacePathForApi = dir.workspaceDiskPath();
 
                 phaseAt = Date.now();
+                spawnAtMs = phaseAt;
                 proc = spawn(this.binaryPath, ["--api-sock", apiSocketOnHost], {
                     stdio: ["ignore", "pipe", "pipe"],
                     detached: false,
@@ -626,6 +661,13 @@ export class FirecrackerSandboxDriver implements MicrovmDriver {
             this.processes.set(options.id, proc);
             proc.stderr?.on("data", (chunk: Buffer | string) => {
                 if (childStderr.length < 8192) childStderr += chunk.toString();
+            });
+            // spawnAt：jailer 与非 jailer 两条分支的 spawn 位置不同，只有其中一条会
+            // 提前设好 spawnAtMs；这里兜底取"进程已建立"的时刻，保证 serial-first-line
+            // 记的是"距离进程启动多久"，而不是一个没被赋值的 0（会打印出整个 epoch）。
+            const spawnAt = spawnAtMs === 0 ? Date.now() : spawnAtMs;
+            proc.stdout?.on("data", (chunk: Buffer | string) => {
+                this.onSerialOutput(options.id, chunk, spawnAt);
             });
             proc.on("error", (err) => {
                 console.error(`[Firecracker] Process error for sandbox ${options.id}:`, err);
@@ -740,7 +782,12 @@ export class FirecrackerSandboxDriver implements MicrovmDriver {
                 // 冷启动路径：完整配置再开机。
                 await this.putSocket(apiSocketOnHost, "/boot-source", {
                     kernel_image_path: kernelPathForApi,
-                    boot_args: "console=ttyS0 reboot=k panic=1 pci=off init=/sbin/init",
+                    // 默认 quiet：内核逐行启动日志写 Firecracker stdout，宿主不消费，
+                    // 纯浪费（真机冷启动 vsock-handshake 1.3s 里含内核启动+agent 就绪）。
+                    // HARNESS_VM_BOOT_VERBOSE=1 可恢复完整日志用于排障。
+                    boot_args: this.verboseBoot
+                        ? "console=ttyS0 reboot=k panic=1 pci=off init=/sbin/init"
+                        : "console=ttyS0 reboot=k panic=1 pci=off init=/sbin/init quiet loglevel=3",
                 });
 
                 await this.putSocket(apiSocketOnHost, "/drives/rootfs", {
@@ -778,7 +825,9 @@ export class FirecrackerSandboxDriver implements MicrovmDriver {
 
             // 8. 建立 vsock agent 连接并握手（带重试：等待 guest 内核启动 + socat 监听）
             const vsockBridge = new FirecrackerVsockBridge(vsockUdsOnHost, this.vsockPort);
-            await vsockBridge.connectWithRetry(20000, 250);
+            // 冷启动：短超时（300ms）+ 密重试（100ms）。握手本身亚毫秒级，
+            // 缩短单次超时只是把"等一个注定失败的连接"从 1000ms 降到 300ms。
+            await vsockBridge.connectWithRetry(20000, 100, 300);
             this.tracePhase(options.id, "vsock-handshake", phaseAt);
             phaseAt = Date.now();
             this.vsockBridges.set(options.id, vsockBridge);
@@ -793,6 +842,10 @@ export class FirecrackerSandboxDriver implements MicrovmDriver {
             //    未就绪"。这里用 KeyedSemaphore 按 templateHash 串行化：同一模板
             //    只让一台真正制作，其余等待后直接复用成果（既避免竞态，也省掉
             //    一次昂贵的 pause/resume + vsock 重连）。
+            // reusedSnapshot：本 VM 没做快照，只是在闸门里等到别人做好后复用（在 if 外声明，
+            // 因为后面的 make-snapshot 埋点要按它决定记不记时）。埋点必须区分“真的写了
+            // 256MB 内存镜像”和“只是等闸门”，否则并发冷启动看起来像每台都在写快照。
+            let reusedSnapshot = false;
             if (this.snapshotsEnabled && !canRestore && templateHash !== null) {
                 // madeByThisVm：本 VM 是否真的执行了 pause/create（决定要不要重连 vsock）
                 let madeByThisVm = false;
@@ -801,6 +854,8 @@ export class FirecrackerSandboxDriver implements MicrovmDriver {
                         // 等到闸门时，先复查：可能前一台已经把快照做出来了。
                         // 此时直接复用，无需再 pause/resume（也就无需 vsock 重连）。
                         if (this.snapshotManager.hasSnapshot(templateHash)) {
+                            reusedSnapshot = true;
+                            this.tracePhase(options.id, "snapshot-reuse", phaseAt);
                             return;
                         }
 
@@ -881,7 +936,9 @@ export class FirecrackerSandboxDriver implements MicrovmDriver {
                 }
             }
 
-            this.tracePhase(options.id, "make-snapshot", phaseAt);
+            if (reusedSnapshot === false) {
+                this.tracePhase(options.id, "make-snapshot", phaseAt);
+            }
             this.tracePhase(options.id, "total", createStartedAt);
             return {
                 id: options.id,

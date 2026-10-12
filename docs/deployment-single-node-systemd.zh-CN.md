@@ -130,6 +130,15 @@ HARNESS_VM_SHARE_BASE_FILES=1     # 默认开：内核 + 快照文件硬链接�
 > 硬链接共享要求 `FIRECRACKER_*` 资产与 `HARNESS_VM_RUNTIME_ROOT`、
 > `HARNESS_VM_SNAPSHOT_POOL_DIR` 在**同一文件系统**，否则退化为复制。建议把内核与磁盘模板
 > 放在数据盘上（172.17.43.193 为 `/data/harness/images/`）。
+```sh
+# 开机预热黄金快照（可选但推荐）：让用户遇到的第一个 Run 也是热恢复。见 §12。
+sudo systemctl enable --now harness-vm-prewarm.timer
+```
+
+> 开启 `HARNESS_VM_SHARE_ROOTFS=1` 前，guest 镜像必须带可写 tmpfs（`/tmp`/`/run`/`/var/tmp`）：
+> 构建脚本 `scripts/microvm/build-guest-rootfs.sh` 已包含（`inittab` 里 `mount -t tmpfs ...`）。
+> 老镜像直接用会让 guest 写 `/tmp` 报 `Read-only file system`（`TOOL_FAILED isError=true`）。
+
 > `HARNESS_VM_SHARE_ROOTFS` 的只读语义固化在黄金快照的 drive 配置里，切换开关后必须清空快照池，
 > 否则旧快照恢复出来的盘仍按旧语义运行。细节与实测数字见 `docs/vm-lifecycle-benchmark.zh-CN.md`。
 
@@ -446,3 +455,34 @@ sudo systemctl start harness-maintenance.service
 systemctl list-timers | grep harness-maintenance
 ls -la /data/harness/backups/
 ```
+
+## 12. microVM 黄金快照预热（可选，推荐）
+
+**为什么**：快照是"第一次启动顺手做"的 best-effort 产物（`snapshot` 模式首台 = 冷启动
+~1.3s + 写内存镜像 ~0.9s）。服务重启、清空快照池或改过 `FIRECRACKER_*` 之后，第一个用户
+Run 必然付这一笔（实测 `SANDBOX_ACQUIRED {durationMs: 2440, warmHit: false}`）。开机后主动
+预热一次，用户侧就只剩热恢复（实测 `{durationMs: 166, warmHit: true}`）。
+
+**单位与定时器**：`deploy/harness-vm-prewarm.service.example`（`Type=oneshot`、`User=root`、
+`EnvironmentFile=/etc/harness/broker.env`、`IPAddressDeny=any`）+
+`deploy/harness-vm-prewarm.timer.example`（`OnBootSec=20s`）。
+
+```bash
+sudo install -m 0644 deploy/harness-vm-prewarm.service.example /etc/systemd/system/harness-vm-prewarm.service
+sudo install -m 0644 deploy/harness-vm-prewarm.timer.example   /etc/systemd/system/harness-vm-prewarm.timer
+sudo systemctl daemon-reload
+sudo systemctl enable --now harness-vm-prewarm.timer
+
+# 立刻验证一次（幂等：已存在快照则输出 VM_PREWARM_SKIP）
+sudo systemctl start harness-vm-prewarm.service
+journalctl -u harness-vm-prewarm.service -n 20 --no-pager | grep -E "VM_PREWARM_(OK|SKIP|FAIL)"
+```
+
+**必须与 Broker 同环境**：预热要算出与 Broker 完全一致的 `templateHash`
+（`FIRECRACKER_KERNEL_PATH` / `FIRECRACKER_ROOTFS_PATH` / `HARNESS_GUEST_AGENT_VERSION`），
+所以用同一份 `/etc/harness/broker.env`，且同样以 root 运行（jailer 需要 root）。
+
+**只读 rootfs 的前置条件**：开 `HARNESS_VM_SHARE_ROOTFS=1` 要求 guest 镜像带 tmpfs 可写层
+（`/tmp`/`/run`/`/var/tmp`）。新镜像用 `scripts/microvm/build-guest-rootfs.sh` 构建；
+存量镜像可用 `scripts/microvm/patch-guest-rootfs-tmpfs.sh <rootfs.ext4>` 原地补丁（会留
+`<rootfs.ext4>.bak-tmpfs` 备份，幂等，已打过则输出 `PATCH_TMPFS_SKIP`）。
