@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+##!/usr/bin/env bash
 # 用法: build-guest-rootfs.sh <agentBinary> <outputRootfs.ext4> <outputWorkspaceTemplate.ext4>
 # 依赖: mkfs.ext4、debugfs 或挂载权限。禁止 sudo 交互——检测不到权限直接退出码 2。
 set -euo pipefail
@@ -143,15 +143,36 @@ echo "[OK] socat installed into rootfs staging"
 # /tmp、/run、/var/tmp 挂 tmpfs：开启 HARNESS_VM_SHARE_ROOTFS 后 rootfs 是只读的
 # （多台 VM 硬链接同一 inode），没有这些 tmpfs 时 `sh: can't create /tmp/x:
 # Read-only file system`（真机实测），常见工具链（pip/编译器/临时文件）会直接失败。
+# /etc/boot-mark：冷启动分段埋点。把"阶段完成时的 guest uptime"打到串口，
+# 回答"冷启动的 ~1.2s 到底花在 init 的哪一步"——宿主侧 [vm-phase] 只能看到
+# "内核首行"与"socat 监听"两个点，中间的 sysinit 链路是黑盒。
+# 只被 inittab 的 sysinit 调用；快照恢复不重跑 init，因此不影响热路径。
+cat << 'EOF' > "${ROOT_STAGING}/etc/boot-mark"
+#!/bin/sh
+phase="$1"
+up="unknown"
+if [ -r /proc/uptime ]; then
+    read up _rest < /proc/uptime
+fi
+echo "harness-boot ${phase} uptime=${up}" > /dev/console 2>/dev/null
+exit 0
+EOF
+chmod 755 "${ROOT_STAGING}/etc/boot-mark"
+
 cat << 'EOF' > "${ROOT_STAGING}/etc/inittab"
 ::sysinit:/bin/mount -t proc proc /proc
 ::sysinit:/bin/mount -t sysfs sysfs /sys
+::sysinit:/bin/sh /etc/boot-mark proc-sysfs
 ::sysinit:/sbin/mdev -s
+::sysinit:/bin/sh /etc/boot-mark mdev
 ::sysinit:/bin/mkdir -p /tmp /run /var/tmp
 ::sysinit:/bin/mount -t tmpfs -o mode=1777,size=64m tmpfs /tmp
 ::sysinit:/bin/mount -t tmpfs -o mode=755,size=16m tmpfs /run
 ::sysinit:/bin/mount -t tmpfs -o mode=1777,size=32m tmpfs /var/tmp
+::sysinit:/bin/sh /etc/boot-mark tmpfs
 ::sysinit:/bin/mount -t ext4 -o noatime /dev/vdb /workspace
+::sysinit:/bin/sh /etc/boot-mark workspace
+::sysinit:/bin/sh /etc/boot-mark before-socat
 ::respawn:/usr/bin/socat VSOCK-LISTEN:5000,fork EXEC:/agent/main
 ::ctrlaltdel:/sbin/reboot
 ::shutdown:/bin/umount -a -r

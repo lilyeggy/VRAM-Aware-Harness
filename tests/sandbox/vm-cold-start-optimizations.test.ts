@@ -39,7 +39,7 @@ describe("冷启动优化（O4 rootfs 共享 / O5 预热与握手快探测）", 
     test("内核启动日志默认 quiet，可显式打开排障", () => {
         const driver = read("src/sandbox/microvm/firecracker-sandbox-driver.ts");
         expect(driver).toContain("HARNESS_VM_BOOT_VERBOSE");
-        expect(driver).toContain("console=ttyS0 reboot=k panic=1 pci=off init=/sbin/init quiet loglevel=3");
+        expect(driver).toContain("${COLD_START_BOOT_ARGS} quiet loglevel=3 printk.time=1");
     });
 
     test("预热脚本幂等、以 broker 同套环境算出同一个 templateHash", () => {

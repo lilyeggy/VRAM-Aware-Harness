@@ -67,6 +67,13 @@ export class FirecrackerVsockBridge {
     constructor(
         private readonly udsPath: string,
         private readonly guestPort: number = 5000,
+        /**
+         * 握手分段观测（可选）。冷启动的 vsock 握手约 1.3s，其中
+         * 既包含 guest init + socat 进入监听态的等待，也包含 agent 二进制
+         * 加载。onPhase 在 "CONNECT 得到 OK"（socat 已监听）与
+         * "收到 pong"（agent 已加载并应答）两个时刻回调，用来把这段拆开。
+         */
+        private readonly onPhase?: (phase: string) => void,
     ) {}
 
     /**
@@ -184,6 +191,7 @@ export class FirecrackerVsockBridge {
 
                         if (line.startsWith("OK")) {
                             connectHandshakeDone = true;
+                            this.onPhase?.("vsock-connect-ok");
                             // Now send ping
                             const pingId = randomBytes(8).toString("hex");
                             const pingFrame = JSON.stringify({ v: 1, type: "ping", id: pingId }) + "\n";
@@ -218,6 +226,7 @@ export class FirecrackerVsockBridge {
                             resolved = true;
                             cleanup();
                             this.handshakeComplete = true;
+                            this.onPhase?.("vsock-pong");
                             this.socket?.removeListener("data", onHandshakeData);
                             // Transfer any leftover buffer to rawBuffer
                             this.rawBuffer = handshakeBuffer;

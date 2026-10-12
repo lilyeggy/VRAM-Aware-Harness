@@ -137,6 +137,32 @@ Run 准入(policy/RESOURCE) → sandbox.create
 - **生产验证**（同机，`HARNESS_VM_SHARE_ROOTFS=1`）：清空 `/data/harness/snapshots-mt` 后以 root + `broker.env` 运行预热 → `VM_PREWARM_OK template=2d686647... firstCreateMs=2235 warmHit=false probe=4.14.174`；再跑一次 → `VM_PREWARM_SKIP reason=snapshot-present`；随后首个真实用户 Run `SANDBOX_ACQUIRED {"durationMs":166,"warmHit":true}`（预热前同一操作是 2440ms / warmHit=false）。
 - **结论**：首次冷启动的 2.2s 不能靠调参消掉（1.28s guest 用户态就绪 + 0.9s 写内存镜像）；能改的是**谁付这一笔**——预热把它从用户路径挪到服务启动。要真压缩冷启动本身，需要更小的 agent 二进制/精简 inittab（未实测）或 COW 文件系统让 `make-snapshot` 不再整块写。
 
+### O6 关闭 guest 内核 i8042/PS-2 探测：冷启动 1338ms → 539ms（2026-10-12）
+
+- **背景**：O5 只能看到 `serial-first-line`（15ms）与 `vsock-handshake`（1281ms）两点，中间 1.2s 是黑盒。为定位补了两层观测：**guest 侧 boot marks**（`/etc/boot-mark` 读 `/proc/uptime` 打 `/dev/console`，inittab 的 sysinit 每步各一个 mark）＋ 内核 `printk.time=1` ＋ **Firecracker stdout 落盘**（`HARNESS_VM_SERIAL_LOG_DIR`）。结果：guest userspace（init）直到 uptime **0.85s** 才开始，而内核只用 ~60ms 就该到 init。
+- **根因**：内核时间线里有两段空白 —— `0.091s19 → 0.348s58`（257ms）与 `0.363s → 0.861s`（498ms），全部落在 `i8042`（PS/2 键盘控制器）探测上；Firecracker 侧日志同期有 `Failed to trigger i8042 kbd interrupt (disabled by guest OS)`。Firecracker 不提供 PS/2 设备，这两段是纯粹的等超时。
+- **机制**：
+  - `COLD_START_BOOT_ARGS` 常量（`src/sandbox/microvm/firecracker-sandbox-driver.ts`）在**默认与 verbose 两条** `boot_args` 分支都加上 `i8042.noaux i8042.nomux i8042.nopnp i8042.dumbkbd`。
+  - 新增 `extraBootArgs`（env `HARNESS_VM_EXTRA_BOOT_ARGS`）追加在命令行末尾，用于**不重编镜像**调内核参数。
+  - 新增 `serialLogDir`（env `HARNESS_VM_SERIAL_LOG_DIR`）：把 Firecracker stdout 落盘为 `<dir>/<sandboxId>.serial.log`，否则 guest boot marks 与内核时间线读不到（此前只保留 8KB 尾巴在内存里）。
+  - guest 埋点脚本：`scripts/microvm/build-guest-rootfs.sh`（新建镜像）与 `scripts/microvm/patch-guest-rootfs-bootmarks.sh`（给存量镜像原地补，幂等、先备份 `.bak-bootmarks`、拒绝改写含未知行的 inittab）。mark 阶段名：`proc-sysfs` / `mdev` / `tmpfs` / `workspace` / `before-socat`。
+- **真机实测**（172.17.43.193，jailer + Firecracker v1.17.0，256MB guest，共享只读基础文件开，`cold` 模式）：
+
+  | 配置 | 冷启动 total | guest init 时刻 | 宿主 connect-ok |
+  | --- | --- | --- | --- |
+  | 无额外参数（基线） | 1338ms | uptime 0.85s | 1206ms |
+  | 仅 `i8042.noaux` | 949ms | uptime 0.57s | 900ms |
+  | `i8042.noaux i8042.nomux i8042.nopnp i8042.dumbkbd` | **539ms** | **uptime 0.05~0.06s** | **404ms** |
+  | 再加 `i8042.nokbd` | 539ms（无进一步收益） | — | — |
+
+  加参数后的 539ms 构成：内核→init 50~60ms ＋ init 链（5 个 boot mark 之间）≤10ms ＋ **`socat` 启动→监听 ~340ms** ＋ agent 加载 ~75ms。
+  建快照模式首台：2235~2776ms → **1452ms**；热恢复不受影响：median **102.9ms**、warmHits 5/5、热恢复后执行 `uname -r` 10.9ms。
+- **被否证的两个假设**（记录以免重复走）：
+  1. "socat 在等熵"：追加 `random.trust_cpu=on` 后 539ms 不变，且 guest `crng` 初始化发生在 ~1.1s —— **晚于** socat 开始监听（0.4s），所以 340ms 不是等熵。
+  2. "socat 慢在宿主页缓存未热"：同一配置第二轮（宿主页缓存已热）数值与第一轮相同 → 不是宿主侧 I/O，是 socat 自身启动（动态链接 `socat + libssl3/libcrypto3`）。
+- **代价**：只影响 PS/2 输入设备探测；无头 guest 不需要键盘/鼠标。删除这几个参数即可回滚（`HARNESS_VM_EXTRA_BOOT_ARGS` 可临时覆盖）。
+- **提交**：见本节末尾 O6 对应 commit（含 boot-mark 脚本、`tests/sandbox/vm-boot-args.test.ts` 4 用例）。
+
 ## 3. 待评估 / 未采用
 
 | 候选 | 预期收益 | 现状 |
@@ -150,7 +176,12 @@ Run 准入(policy/RESOURCE) → sandbox.create
 | COW 文件系统（xfs reflink=1 / btrfs） | 可写盘拷贝近 0、`make-snapshot` 更快 | 未采用：远程无 `mkfs.xfs`/`mkfs.btrfs`，需换盘/装工具 |
 | UFFD diff snapshot / 懒加载（CodeSandbox 式） | 内存镜像不再整块写 | 未采用：需自写 `UFFDIO_COPY` handler，复杂度高 |
 | 预热池（Daytona/Modal/Fly 式常驻待命 VM） | 交接 ~10~50ms | 未采用：内存常驻成本、租户隔离与回收复杂度 |
-| 更小的 guest agent 二进制 / 精简 inittab | 冷启动 1.28s 中的一部分 | 未实测（guest 用户态就绪是大头） |
+| 关闭 guest 内核 i8042/PS-2 探测（`i8042.noaux i8042.nomux i8042.nopnp i8042.dumbkbd`） | 冷启动 1338 → ~540ms | **已实施（O6）**：实测 539ms；建快照首台 2235 → 1452ms；热恢复不变 |
+| 用静态小监听器替换 `socat`（socat 启动→监听占冷启动 340ms） | 冷启动再减 ~300ms | 待做：正在调研业界做法（`docs/research/cold-start-guest-init.md`） |
+| `make-snapshot` 落盘优化（tmpfs 快照池 / 差分快照 / 惰性解压） | 建快照首台 1452 → ~600ms | 待做：调研已落地（`docs/research/cold-start-snapshot-cost.md`） |
+| 更小的 guest agent 二进制 / 精简 inittab | ~~冷启动 1.28s 中的大部分~~ **已量化** | agent 只值 ~75ms、init 链 ~10ms；1.2s 的大头是内核 PS/2 探测（O6 已修）与 socat 启动 |
+
+
 
 ## 4. 冷启动分析
 
@@ -178,7 +209,7 @@ set -a; . /etc/harness/broker.env; set +a
 bun run scripts/vm-snapshot-prewarm.ts
 ```
 
-## 5. 复现命令
+## 6. 基准与预热复现命令
 
 ```sh
 # 真机：热恢复/冷启动 A/B（root，jailer + Firecracker）

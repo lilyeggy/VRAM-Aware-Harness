@@ -1,4 +1,4 @@
-import { accessSync, constants, existsSync, mkdirSync, rmSync } from "node:fs";
+import { accessSync, appendFileSync, constants, existsSync, mkdirSync, rmSync } from "node:fs";
 import { resolve, dirname, basename, join } from "node:path";
 import { tmpdir } from "node:os";
 import { createHash } from "node:crypto";
@@ -27,6 +27,23 @@ import {
     writePidFile,
     type ReapOrphansReport,
 } from "./vm-orphan-reaper.ts";
+
+/**
+ * guest 内核命令行里"与业务无关、纯粹为省冷启动时间"的部分。
+ *
+ * 真机实测（172.17.43.193 / jailer + fc117 / 256MB guest）：不加这些参数时冷启动
+ * 1338~1462ms，其中 ~850ms 花在内核 initcall 上——内核时间线里有两段空白：
+ * 0.091s→0.348s（257ms）与 0.363s→0.861s（498ms），都在 i8042（PS/2 键盘控制器）
+ * 探测上。Firecracker 不提供 PS/2 设备（宿主日志有 `Failed to trigger i8042 kbd
+ * interrupt (disabled by guest OS)`），这几段就是纯粹的等超时。
+ *
+ * 加上 `i8042.noaux i8042.nomux i8042.nopnp i8042.dumbkbd` 后：guest userspace
+ * 从 uptime 0.85s 提前到 0.05~0.06s，冷启动 1338ms → 539ms（-60%），
+ * 首次制作快照 2235ms → 1452ms。热恢复（快照）不受影响，仍 ~103ms。
+ *
+ * 这些参数只影响 PS/2 输入设备探测，无头 guest 不需要键盘/鼠标。
+ */
+export const COLD_START_BOOT_ARGS = "console=ttyS0 reboot=k panic=1 pci=off init=/sbin/init i8042.noaux i8042.nomux i8042.nopnp i8042.dumbkbd";
 
 export interface FirecrackerDriverConfig {
     readonly binaryPath?: string;
@@ -73,6 +90,27 @@ export interface FirecrackerDriverConfig {
      * 打印；排障时用 HARNESS_VM_BOOT_VERBOSE=1 或 config.verboseBoot 打开。
      */
     readonly verboseBoot?: boolean;
+
+    /**
+     * 可选：把 guest 串口输出追加到 `<dir>/<sandboxId>.serial.log`。
+     *
+     * 串口是观察冷启动的唯一窗口：guest 侧 /etc/boot-mark 会往 console 打
+     * `harness-boot <阶段> uptime=<秒>`，用来回答"冷启动 ~1.2s 花在 init 的哪一步"
+     * （宿主侧 [vm-phase] 只能看到内核首行与 socat 监听两个点，中间是黑盒）。
+     * serialTail 只是内存里最近 8KB、进程退出即丢，落盘才能事后分析。
+     * 默认关（生产不落盘），排障时用 HARNESS_VM_SERIAL_LOG_DIR 或 config.serialLogDir 打开。
+     */
+    readonly serialLogDir?: string;
+
+    /**
+     * 追加到 guest 内核命令行末尾的额外参数（默认取 `HARNESS_VM_EXTRA_BOOT_ARGS`）。
+     *
+     * 用来在不重编镜像的前提下调内核：真机实测冷启动 ~1.33s 里约 0.85s 花在
+     * 内核 initcall，其中 i8042（PS/2 键盘控制器）探测在 Firecracker 上纯属
+     * 白等超时（宿主日志里有 `Failed to trigger i8042 kbd interrupt`）。
+     * `i8042.noaux i8042.nomux i8042.nopnp i8042.dumbkbd` 可跳过这些探测。
+     */
+    readonly extraBootArgs?: string;
     /**
      * 共享只读基础文件（默认开启，`HARNESS_VM_SHARE_BASE_FILES=0` 关闭）。
      *
@@ -159,6 +197,9 @@ export class FirecrackerSandboxDriver implements MicrovmDriver {
     private readonly guestAgentVersion: string;
     private readonly phaseTrace: boolean;
     private readonly verboseBoot: boolean;
+    private readonly serialLogDir: string | null;
+    private readonly extraBootArgs: string;
+    private serialLogDirReady = false;
     /**
      * guest 串口（内核启动日志）尾巴，按 sandbox 存最近 8KB。
      *
@@ -228,6 +269,8 @@ export class FirecrackerSandboxDriver implements MicrovmDriver {
             ?? "1.0.0";
         this.phaseTrace = config.phaseTrace ?? (process.env.HARNESS_VM_PHASE_TRACE === "1");
         this.verboseBoot = config.verboseBoot ?? (process.env.HARNESS_VM_BOOT_VERBOSE === "1");
+        this.serialLogDir = config.serialLogDir ?? process.env.HARNESS_VM_SERIAL_LOG_DIR ?? null;
+        this.extraBootArgs = (config.extraBootArgs ?? process.env.HARNESS_VM_EXTRA_BOOT_ARGS ?? "").trim();
         this.snapshotManager = new VmSnapshotManager({
             ...(config.snapshotPoolDir !== undefined || process.env.HARNESS_VM_SNAPSHOT_POOL_DIR !== undefined
                 ? { snapshotPoolDir: config.snapshotPoolDir ?? process.env.HARNESS_VM_SNAPSHOT_POOL_DIR }
@@ -410,12 +453,38 @@ export class FirecrackerSandboxDriver implements MicrovmDriver {
      * 同时把 stdout 读掉（pipe 必须消费），并保留尾巴用于诊断。
      */
     private onSerialOutput(sandboxId: string, chunk: Buffer | string, spawnAtMs: number): void {
+        this.writeSerialLog(sandboxId, chunk);
         const existing = this.serialTail.get(sandboxId);
         if (existing === undefined) {
             this.tracePhase(sandboxId, "serial-first-line", spawnAtMs);
         }
         const text = existing === undefined ? chunk.toString() : existing + chunk.toString();
         this.serialTail.set(sandboxId, text.slice(-8192));
+    }
+
+    /**
+     * 把串口分片追加到 `<serialLogDir>/<sandboxId>.serial.log`（可选，默认关）。
+     * 写失败只告警：串口日志是排障手段，不能因为它把 VM 创建搞崩。
+     */
+    /** 把 HARNESS_VM_EXTRA_BOOT_ARGS 追加到内核命令行（空串则原样返回）。 */
+    private withExtraBootArgs(base: string): string {
+        return this.extraBootArgs.length === 0 ? base : `${base} ${this.extraBootArgs}`;
+    }
+
+    private writeSerialLog(sandboxId: string, chunk: Buffer | string): void {
+        const dir = this.serialLogDir;
+        if (dir === null) {
+            return;
+        }
+        try {
+            if (this.serialLogDirReady === false) {
+                mkdirSync(dir, { recursive: true });
+                this.serialLogDirReady = true;
+            }
+            appendFileSync(join(dir, `${sandboxId}.serial.log`), chunk);
+        } catch (error) {
+            console.error(`[Firecracker] 串口日志写入失败：${String(error)}`);
+        }
     }
 
     private tracePhase(sandboxId: string, phase: string, startedAt: number): void {
@@ -785,9 +854,11 @@ export class FirecrackerSandboxDriver implements MicrovmDriver {
                     // 默认 quiet：内核逐行启动日志写 Firecracker stdout，宿主不消费，
                     // 纯浪费（真机冷启动 vsock-handshake 1.3s 里含内核启动+agent 就绪）。
                     // HARNESS_VM_BOOT_VERBOSE=1 可恢复完整日志用于排障。
-                    boot_args: this.verboseBoot
-                        ? "console=ttyS0 reboot=k panic=1 pci=off init=/sbin/init"
-                        : "console=ttyS0 reboot=k panic=1 pci=off init=/sbin/init quiet loglevel=3",
+                    boot_args: this.withExtraBootArgs(
+                        this.verboseBoot
+                            ? `${COLD_START_BOOT_ARGS} printk.time=1 loglevel=7 initcall_debug`
+                            : `${COLD_START_BOOT_ARGS} quiet loglevel=3 printk.time=1`,
+                    ),
                 });
 
                 await this.putSocket(apiSocketOnHost, "/drives/rootfs", {
@@ -824,7 +895,9 @@ export class FirecrackerSandboxDriver implements MicrovmDriver {
             }
 
             // 8. 建立 vsock agent 连接并握手（带重试：等待 guest 内核启动 + socat 监听）
-            const vsockBridge = new FirecrackerVsockBridge(vsockUdsOnHost, this.vsockPort);
+            const vsockBridge = new FirecrackerVsockBridge(vsockUdsOnHost, this.vsockPort, (phase) =>
+                this.tracePhase(options.id, phase, phaseAt),
+            );
             // 冷启动：短超时（300ms）+ 密重试（100ms）。握手本身亚毫秒级，
             // 缩短单次超时只是把"等一个注定失败的连接"从 1000ms 降到 300ms。
             await vsockBridge.connectWithRetry(20000, 100, 300);
