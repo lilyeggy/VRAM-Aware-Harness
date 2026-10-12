@@ -223,11 +223,12 @@
 <pre>::sysinit:/bin/mount -t proc proc /proc      # 挂上进程信息目录
 ::sysinit:/bin/mount -t sysfs sysfs /sys     # 挂上设备信息目录
 ::sysinit:/bin/mount -t ext4 -o noatime /dev/vdb /workspace   # 把工作区盘挂成 /workspace
-::respawn:/usr/bin/socat VSOCK-LISTEN:5000,fork EXEC:/agent/main   # 在 vsock 5000 端口等待宿主机连接</pre>
+::respawn:/agent/main                        # 静态 C agent 自己监听 vsock 5000，每连接 fork</pre>
   <ul>
     <li><b>挂载</b>：磁盘本身只是一堆字节，要"挂载"到一个目录，程序才能用路径访问它。挂到 <code>/workspace</code> 之后，Agent 的命令就能在那里读写文件。</li>
-    <li><b>socat</b>：一个通用的"连接转接"工具。它在 vsock 5000 端口监听，每来一个连接，就 fork 一个 <code>/agent/main</code> 来处理。</li>
-    <li><b>respawn</b>：如果 socat 退出了，init 会自动把它重新拉起来。</li>
+    <li><b>agent 自己监听</b>：<code>guest/agent/agent.c</code> 编译成静态 ELF（974,536 字节）后直接 <code>respawn</code>，它自己 <code>socket(AF_VSOCK) + listen(5000)</code>，每来一个连接 fork 一个子进程——<b>不需要 socat，也不需要 96MB 的 Bun 运行时</b>。</li>
+    <li><b>为什么换掉 socat + Bun</b>：真机 A/B（台账 O9/O10）——早期 <code>socat VSOCK-LISTEN:5000,fork EXEC:/agent/main</code>（Bun 编译产物 96MB）时 guest 用户态就绪约 1281ms，换成静态 C agent 后约 130ms；socat 自己从 execve 到 listen 只要 5.3ms，慢的是 96MB 二进制的加载与重定位。旧路径仍可用 <code>HARNESS_GUEST_AGENT_IMPL=bun</code> 构建。</li>
+    <li><b>respawn</b>：如果 agent 退出了，init 会自动把它重新拉起来。</li>
   </ul>
 </div></div>
 
@@ -237,11 +238,12 @@
   <ol>
     <li>连接 <code>vsock.sock</code>（这是 Firecracker 为 vsock 开的宿主侧入口）。</li>
     <li>发送一行文本 <code>CONNECT 5000</code>，意思是"我要连 guest 的 5000 端口"。</li>
-    <li>收到 <code>OK</code>，说明 socat 接住了连接，转交给了 agent。</li>
-    <li>发一个 <code>ping</code> 帧，收到 <code>pong</code>，证明 agent 能正常回话。</li>
+    <li>收到 <code>OK 5000</code>：这一行<b>由 Firecracker 的 vsock 设备（VMM）回</b>，表示"通道已建立"，不是 guest 里的程序回的。</li>
+    <li>发一个 <code>ping</code> 帧，收到 <code>pong</code>，才证明 guest 里的 agent 正常回话。</li>
   </ol>
-  <p>冷启动时虚拟机内核要花一秒多时间启动，所以宿主机会<b>反复尝试</b>，每 100 毫秒一次，最多等 20 秒。</p>
-  <p class="muted">对应代码：<code>firecracker-vsock-bridge.ts</code> 的 <code>connectWithRetry</code>。</p>
+  <p>冷启动时虚拟机要从内核一路起到底，所以宿主机会<b>反复尝试</b>：每 50ms 重试一次、单次握手 300ms 超时、总窗口 20 秒（O10 之后对端提前关闭会被立即当成失败；修之前要白等满 300ms + 100ms 间隔，把实际 ~70ms 就绪的 guest 量化成 ~400ms，这也是"冷启动 539ms"里最长的一段假延迟）。</p>
+  <p>快照热恢复时 guest 已经就绪，这段握手实测只要 ~5.5ms；恢复后执行一条 <code>uname -r</code> 的 median 是 11.6ms。</p>
+  <p class="muted">对应代码：<code>firecracker-vsock-bridge.ts</code> 的 <code>connectWithRetry</code>（默认 20000/150/1000，驱动冷启动路径用 20000/50/300）。</p>
 </div></div>
 
 <div class="step who-kvm"><div class="num">11</div><div class="body">
@@ -282,7 +284,7 @@
    │ 内核 → init → inittab                    │
    │   系统盘作为根文件系统（见下方说明）        │
    │   /dev/vdb 挂为 /workspace                │
-   │   socat 监听 vsock 5000 → agent           │
+   │   /agent/main 自监听 vsock 5000（静态 C）  │
    └──────────────────────────────────────────┘</pre>
 </div>
 

@@ -538,33 +538,50 @@ Sandbox Broker 进程（root，唯一持有 Firecracker/jailer 与租户 secret�
 
 <!-- ============ 4 ============ -->
 <h2 id="s4">4. 真机数据：这套东西到底多快</h2>
-<div class="callout warn">本节数字<b>不是我在本次整理中重新跑出来的</b>，而是从项目文档 <code>docs/vm-lifecycle-benchmark.zh-CN.md</code> 与 <code>docs/platform-boundary.md</code> 摘录的历史实测。代码无法证明这些数字仍然成立，换版本后需要重跑 <code>scripts/vm-lifecycle-benchmark.ts</code>。</div>
-<p class="kv">环境：Ubuntu 22.04 · 内核 6.8 · Firecracker v1.17.0 + jailer · guest 内核 4.14.174 · 2026-10-11 实测（单机，结果数字来自项目文档 <code>docs/vm-lifecycle-benchmark.zh-CN.md</code> 与 <code>platform-boundary.md</code>）。</p>
+<div class="callout warn">本节数字来自项目文档的<b>真机实测</b>（<code>docs/vm-startup-optimizations.zh-CN.md</code> 台账 O1–O11、<code>docs/vm-lifecycle-benchmark.zh-CN.md</code>、<code>docs/production-full-flow-report.zh-CN.md</code>），最后更新 2026-10-12。代码无法证明这些数字仍然成立，换版本后需要重跑 <code>scripts/vm-lifecycle-benchmark.ts</code> 与 <code>scripts/sandbox-security-probe.ts</code>。</div>
+<p class="kv">环境：Ubuntu 22.04 · 内核 6.8 · Firecracker v1.17.0 + jailer · guest 内核 4.14.174 · 2026-10-11/12 实测（单机 192 vCPU / 251GB RAM）。</p>
 
 <div class="grid3">
-  <div class="card stat"><div class="lbl">冷启动（无快照）</div><div class="big" style="color:var(--amber)">~1.48 s</div><div class="lbl">n=5，median 1477ms</div></div>
-  <div class="card stat"><div class="lbl">快照热恢复 create</div><div class="big" style="color:var(--green)">~0.51 s</div><div class="lbl">n=10，median 513ms，warmHit 10/10</div></div>
+  <div class="card stat"><div class="lbl">冷启动（无快照，当前）</div><div class="big" style="color:var(--amber)">~0.26 s</div><div class="lbl">静态 C agent + 关 PS/2 探测后 261ms（早期 1338ms）</div></div>
+  <div class="card stat"><div class="lbl">快照热恢复 create</div><div class="big" style="color:var(--green)">~0.10 s</div><div class="lbl">基准 median 101ms；生产连续领取 49/54/76/76/77ms（warmHit=true）</div></div>
   <div class="card stat"><div class="lbl">恢复后执行 uname -r</div><div class="big" style="color:var(--accent)">~12 ms</div><div class="lbl">median 11.6ms</div></div>
 </div>
 
-<h3>热恢复 490ms 里时间花在哪（分阶段埋点，<code>HARNESS_VM_PHASE_TRACE=1</code>）</h3>
+<h3>热恢复从 498ms 降到 101ms：时间去哪了（<code>HARNESS_VM_PHASE_TRACE=1</code> 分阶段埋点）</h3>
 <div class="card">
-  <div class="bar-row"><span>copy-snapshot（拷快照进 chroot）</span><div class="bar hot"><i style="width:61%"></i></div><span>~298 ms · 61%</span></div>
-  <div class="bar-row"><span>copy-disks（拷内核/rootfs/工作区盘）</span><div class="bar hot"><i style="width:22%"></i></div><span>~110 ms · 22%</span></div>
-  <div class="bar-row"><span>vsock-handshake</span><div class="bar"><i style="width:11%"></i></div><span>53 ms</span></div>
-  <div class="bar-row"><span>api-socket-wait</span><div class="bar"><i style="width:4%"></i></div><span>20 ms</span></div>
-  <div class="bar-row"><span>snapshot-load（Firecracker 恢复本身）</span><div class="bar"><i style="width:1.3%"></i></div><span>6~7 ms</span></div>
-  <p class="kv">结论：Firecracker 恢复本身只要毫秒级；<b>端到端延迟主要花在 jailer 要求的"每 VM 私有文件拷贝"上</b>。这是下一步优化的重点。</p>
+  <table>
+    <tr><th>配置</th><th>热恢复 median</th><th>p95</th><th>copy-snapshot</th><th>copy-disks</th></tr>
+    <tr><td>全量复制（早期）</td><td>498.3 ms</td><td>517.0 ms</td><td>~304 ms</td><td>~102 ms</td></tr>
+    <tr><td>共享只读基础文件（默认，<code>HARNESS_VM_SHARE_BASE_FILES</code>）</td><td>175.9 ms</td><td>196.2 ms</td><td>0</td><td>~87 ms</td></tr>
+    <tr><td>再加 <code>HARNESS_VM_SHARE_ROOTFS=1</code>（生产已开）</td><td>101.3 ms</td><td>118.7 ms</td><td>0</td><td>~14 ms</td></tr>
+  </table>
+  <div class="bar-row"><span>copy-disks（内核/rootfs/工作区盘）</span><div class="bar hot"><i style="width:14%"></i></div><span>~14 ms</span></div>
+  <div class="bar-row"><span>api-socket-wait（宿主轮询粒度 20ms）</span><div class="bar"><i style="width:20%"></i></div><span>~20 ms</span></div>
+  <div class="bar-row"><span>snapshot-load（Firecracker 恢复本身）</span><div class="bar"><i style="width:6%"></i></div><span>4~7 ms</span></div>
+  <div class="bar-row"><span>vsock-handshake（热恢复）</span><div class="bar"><i style="width:6%"></i></div><span>~5.5 ms</span></div>
+  <div class="bar-row"><span>chown / spawn / share-base</span><div class="bar"><i style="width:5%"></i></div><span>~4 ms</span></div>
+  <p class="kv">结论：<b>Firecracker 恢复本身只要 4~7ms</b>；早期 490ms 里有 ~400ms 是"每 VM 私有拷贝"，那是我们自己 <code>cp</code> 出来的，不是技术栈限制（官方文档明确内存文件走 <code>MAP_PRIVATE</code> 只读映射、多台 VM 可共享只读磁盘）。已用"共享只读基础文件 + 只读 rootfs + guest tmpfs（O3/O4）"消掉；剩下的最大一块是宿主 20ms 的 socket 轮询粒度。</p>
+</div>
+
+<h3>冷启动拆解：1.33 s → 0.26 s</h3>
+<div class="card">
+  <table>
+    <tr><th>阶段</th><th>优化前</th><th>优化后</th><th>手段</th></tr>
+    <tr><td>内核 initcall（PS/2 探测白等）</td><td>~850 ms</td><td>~50 ms</td><td><code>i8042.noaux i8042.nomux i8042.nopnp i8042.dumbkbd</code>（O6，可再用 <code>HARNESS_VM_EXTRA_BOOT_ARGS</code> 追加）</td></tr>
+    <tr><td>guest 用户态就绪（socat 监听 + 加载 96MB 的 Bun agent）</td><td>~1281 ms</td><td>~130 ms</td><td>静态 C guest agent（974KB，O9）+ 握手"对端关闭即失败"量化修复（O10）</td></tr>
+    <tr><td>建快照（Firecracker 写 256MiB 内存镜像）</td><td>908~918 ms</td><td>753~756 ms</td><td>快照文件硬链接进 staging（O7）；<code>HARNESS_VM_SNAPSHOT_TYPE=Diff</code> 可再降（mem.snap 256MiB→74.6MiB、firstCreate 1140ms）</td></tr>
+  </table>
+  <p class="kv">冷启动 1338 → 539（O6）→ 261ms（O9/O10）；剩余构成：copy-disks 84ms + api-socket-wait 21ms + api-config 11ms + 内核 ~50ms + guest 用户态 ~130ms。快照池空后第一次 create 还要 +753ms 建快照——已用 systemd 预热 timer（<code>harness-vm-prewarm.timer</code>）把它移出用户关键路径（生产首个真实 Run 从 2440ms/warmHit=false 变成 166ms/warmHit=true）。</p>
 </div>
 
 <h3>并发热恢复（墙钟时间）</h3>
 <table>
-  <tr><th>并发 N</th><th>墙钟</th><th>单 VM median</th><th>warmHit</th></tr>
-  <tr><td>1</td><td>595 ms</td><td>497 ms</td><td>1/1</td></tr>
-  <tr><td>4</td><td>651 ms</td><td>558 ms</td><td>4/4</td></tr>
-  <tr><td>10</td><td>766 ms</td><td>652 ms</td><td>10/10</td></tr>
+  <tr><th>并发 N</th><th>墙钟（早期，全量复制）</th><th>墙钟（共享只读基础文件）</th><th>单 VM median</th><th>warmHit</th></tr>
+  <tr><td>1</td><td>595 ms</td><td>—</td><td>~101 ms</td><td>1/1</td></tr>
+  <tr><td>4</td><td>651 ms</td><td>—</td><td>104~117 ms</td><td>4/4</td></tr>
+  <tr><td>10</td><td>766 ms</td><td>206~222 ms</td><td>104~117 ms</td><td>10/10</td></tr>
 </table>
-<p class="kv">并发冷启动（快照池清空）时，10 台约 2.9 秒。首台完成并制作快照，其余仍按冷启动走，这是已知的优化点。</p>
+<p class="kv">并发冷启动（快照池清空，10 台，256MiB）：墙钟 2341~2472ms、单 VM median 1718~1852ms，其中 <b>9 台命中 <code>snapshot-reuse</code></b>（只有 1 台真正写快照）——早期"并发冷启动不复用快照"的结论已被 O5 的新埋点推翻。</p>
 
 <!-- ============ 5 ============ -->
 <h2 id="s5">5. 边界与未做的事（诚实版）</h2>
@@ -580,14 +597,19 @@ Sandbox Broker 进程（root，唯一持有 Firecracker/jailer 与租户 secret�
   <tr><td>磁盘配额 / PID 上限</td><td><span class="tag a">未强制</span></td><td>Provider 的 enforcement 里 <code>diskLimitEnforced</code>、<code>pidLimitEnforced</code> 都是 false，不假装有</td></tr>
   <tr><td>工作区实时同步</td><td><span class="tag a">否</span></td><td>只在终止时导出一次，运行中宿主看不到 VM 内的中间文件</td></tr>
   <tr><td>加密临时盘（dm-crypt/LUKS）</td><td><span class="tag r">未实现</span></td><td>代码与脚本中无对应实现</td></tr>
-  <tr><td>microVM 预热池</td><td><span class="tag r">已删除</span></td><td>方案中的预热池被删，保留的是快照加速池</td></tr>
-  <tr><td>并发冷启动复用快照</td><td><span class="tag a">待优化</span></td><td>门控结束前就已判定 canRestore=false 的 VM 仍走冷启动</td></tr>
+  <tr><td>microVM 预热池（快照形态）</td><td><span class="tag g">已有</span></td><td><code>scripts/vm-snapshot-prewarm.ts</code> + <code>harness-vm-prewarm.timer</code> 定时预热快照池；<code>harness-ops.ts cleanup --snapshot-pool</code> 豁免当前模板哈希（O11，<code>snapshotPoolProtected=N</code>）。<b>常驻 running 待机 VM 未做</b>：属边界外新增能力，需按 §9.7/§9.8/§9.9 流程写解冻决策</td></tr>
+  <tr><td>并发冷启动复用快照</td><td><span class="tag g">已生效</span></td><td>N=10 时 9 台命中 <code>snapshot-reuse</code>、只有 1 台真正写快照</td></tr>
+  <tr><td>快照类型 / 落盘同步</td><td><span class="tag g">可配</span></td><td><code>HARNESS_VM_SNAPSHOT_TYPE=Diff</code>（mem.snap 256MiB→74.6MiB、firstCreate 1301→1140ms）；<code>HARNESS_VM_SNAPSHOT_SYNC_FILES=0</code> 实测<b>无收益</b>（753 vs 756ms），默认保持持久</td></tr>
   <tr><td>运行环境</td><td><span class="tag a">仅 Linux + KVM</span></td><td>macOS 开发机用 runsc 或 mock 驱动；生产 strict 档需要 Linux 服务器</td></tr>
 </table>
 
 <div class="callout">
-  <b>下一步优化方向（来自实测分析）：</b>只读文件用硬链接（约省 80ms）；在支持 reflink 的文件系统（xfs/btrfs）上让内存镜像拷贝近乎零成本（端到端估计 ~190ms）；
-  预热池（后台预恢复待命，交接只剩握手 ~50ms）；socket 轮询粒度从 20ms 收紧到 2ms；工作区模板从 128MB 缩到 32MB。
+  <b>下一步优化方向（按当前实测口径排序）：</b>
+  ① 剩余冷启动 261ms 里 guest 用户态仍占 ~130ms（继续压静态 agent / 精简 init）；② <code>make-snapshot</code> 753ms 已靠预热 timer 移出关键路径，Diff 快照可把内存镜像降到 74.6MiB；
+  ③ socket 轮询粒度 20ms → 2ms（约省 17ms）；④ 工作区模板 128MB → 32MB（约省 10ms）；
+  ⑤ <b>常驻 running 待机 VM</b>（K=1~2 可把 101ms 压到 5~20ms，但需处理"同一快照不可恢复两次"的唯一性问题——guest 4.14 不支持 VMGenID，且每台约 20~60MB 内存）；
+  ⑥ 可写盘 reflink/COW（需 XFS/btrfs，宿主当前是 ext4）。
+  一个更重要的对照：真机用户旅程里 <code>SESSION_INITIALIZED → MODEL_STARTED</code> 的空档实测 2.4s~11.1s，比整个沙箱领取（49~77ms）大 40~100 倍——优化优先级应在外模型服务链路上，而不是再压 VM 启动。
 </div>
 
 <!-- ============ 6 ============ -->
