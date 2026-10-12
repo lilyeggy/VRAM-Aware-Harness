@@ -103,9 +103,11 @@ src/
 bun test ./tests
 ```
 
-当前测试基线：`592 pass / 7 skip / 0 fail`。
+当前测试基线：`595 pass / 7 skip / 0 fail`。
 
 生产级 VM 生命周期基准（Phase 1，§9.8 v1.4）见 `docs/vm-lifecycle-benchmark.zh-CN.md`，运行脚本为 `scripts/vm-lifecycle-benchmark.ts`。
+VM 创建分阶段耗时埋点：设 `HARNESS_VM_PHASE_TRACE=1` 后每台 VM 会向 stderr 打 `[vm-phase] <sandboxId> <阶段> <ms>`（默认关闭零开销）。
+主流 Agent Sandbox 技术方案调研（E2B / Daytona / Modal / CubeSandbox / CodeSandbox / Firecracker 官方快照与 UFFD 等）见 `docs/agent-sandbox-landscape.zh-CN.md`。
 队列优先级 / 深度 backpressure / RunAttempt 租约心跳（Phase 2，§9.8 v1.4）见 `.env.example` 的 `HARNESS_MAX_QUEUED_RUNS*` 与 `HARNESS_RUN_LEASE_*`。
 Durable Execution / 重试 / Run 幂等键（Phase 3，§9.8 v1.4）见 `.env.example` 的 `HARNESS_RUN_MAX_ATTEMPTS`、`HARNESS_RUN_RETRY_*`；提交 `POST /runs` 或会话消息时可带 `idempotencyKey`，终态后以 `RUN_ARTIFACTS_READY` 事件标记 artifacts 可读。
 MCP 工具接入（Phase 4，§9.8 v1.4）见 `.env.example` 的 `HARNESS_MCP_SERVERS`：stdio MCP server 的工具以 `mcp__<server>__<tool>` 暴露，调用仍经过 ToolGateway 的策略守卫、PREPARED 记账与审计；烟测脚本 `scripts/mcp-smoke.ts`。
