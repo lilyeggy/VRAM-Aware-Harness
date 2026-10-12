@@ -15,9 +15,9 @@ describe("快照类型旋钮（Full / Diff）与冷启动归因台账（O8）", 
         );
     });
 
-    it("vsock 握手保持 100ms 间隔 / 300ms 单次超时（密集重试会在 guest 里引发 agent 进程风暴）", () => {
+    it("vsock 握手：50ms 间隔 / 300ms 单次超时（O10 后失败尝试亚毫秒级，interval 才决定探测延迟）", () => {
         const driver = read("src/sandbox/microvm/firecracker-sandbox-driver.ts");
-        expect(driver).toContain("await vsockBridge.connectWithRetry(20000, 100, 300);");
+        expect(driver).toContain("await vsockBridge.connectWithRetry(20000, 50, 300);");
     });
 
     it("台账 O8 记录实测数字与被否证的结论", () => {

@@ -191,6 +191,119 @@ Run 准入(policy/RESOURCE) → sandbox.create
   3. 保持服务启动预热（O5），让用户路径始终命中热恢复，而不是去追冷启动的绝对数字。
 - **提交**：见 O8 对应 commit（含 `tests/sandbox/vm-snapshot-type.test.ts`）。
 
+### O9 静态 C guest agent 替换 socat + 96MB Bun 产物（2026-10-12，实现）
+
+**动机**：O8 三组实验证明剩下的冷启动时间几乎全在 guest 用户态，其中约 240ms 是加载
+96MB 的 `bun build --compile` 产物（Bun 运行时初始化 + 大量页面读入），约 90ms 是
+`socat`（动态链接 OpenSSL/readline）进入监听。业界（Fly.io `init`、Apple `vminitd`、
+microsandbox `agentd`、E2B `envd`）无一例外都是"静态单二进制 + `init=<agent>`"，没有
+人会为了开一个 socket 拖进 OpenSSL —— 调研见 `docs/research/cold-start-guest-init.md`。
+
+**实现**：
+- 新增 `guest/agent/agent.c`（单文件、无依赖、约 1050 行）：自带最小 JSON 解析器 +
+  流式 base64 编码；协议与 `guest/agent/main.ts` 完全一致（`ping`/`exec`、`exec_output`
+  按 64KB 分片、`exec_result` 带 `exitCode/timedOut/truncated`、>1MB 帧判
+  `protocol_frame_too_large`、超时 SIGTERM→2s→SIGKILL、子进程退出后 1s 静默即收尾，
+  避免孙进程占住管道把宿主挂死）。与 socat 版的关键差别：**agent 自己 `AF_VSOCK` 监听**
+  （`bind(VMADDR_CID_ANY, port)` + 每连接 `fork`），因此不再需要 socat 转发，也不再需要
+  `libssl3/libcrypto3/libstdc++/libgcc/readline/libncursesw`（约 6.9MB 动态库）。
+- 编译体积：macOS `cc -O2`（clang）**35,792 字节**，零警告；对比 96MB Bun 产物约 1/2700。
+- `scripts/microvm/build-guest-rootfs.sh`：新增 `HARNESS_GUEST_AGENT_IMPL=c|bun|auto`
+  （默认 auto：有 `cc` 即 c）。`c` 时现场静态编译并写 `/agent/main`，inittab 的 respawn 行
+  改为 `::respawn:/agent/main`（不再经 socat），并跳过 socat/OpenSSL/C++ 运行时 apk 拉取；
+  `bun` 时保持原行为。加了自检：`impl=c` 出镜像前必须确认 inittab 直接 respawn `/agent/main`。
+- `scripts/microvm/patch-guest-rootfs-c-agent.sh`：给**存量镜像**原地换 agent（生产镜像不重
+  建也能切）。幂等、先 `cp -a` 备份 `<image>.bak-cagent`、inittab 白名单校验（未知行拒绝
+  改写）、回写后 dump 校验 + `cmp` 校验二进制一致，输出 `PATCH_C_AGENT_OK`。
+- `src/sandbox/microvm/firecracker-sandbox-driver.ts`：`guestAgentVersion` 默认 `1.0.0` →
+  `2.0.0`。**该值参与 `computeTemplateHash`，换 agent 不提升它就会复用旧 agent 的黄金快照**
+  （旧快照内的 `/agent/main` 是 socat 版）。切实现后必须清空快照池。
+- 与 `docs/microvm-implementation-plan.md:228`（"不要引入 Go/C 工具链"）冲突：这里显式记偏差，
+  理由 = 冷启动是 VM 沙箱的核心体验指标，而 96MB 解释型运行时是当前最大的单点开销；
+  代价是 guest agent 从 TS 变成 C（宿主侧仍全 TS，协议未变，测试见
+  `tests/guest/agent-stdio.test.ts`）。
+
+**本地验证**：`tests/guest/agent-stdio.test.ts` 14 用例全绿（pong/数字 id 回显、stdout/stderr
+分帧、env 注入与 PATH 解析、timeout→124、`maxOutputBytes` 截断、200KB 输出分帧拼接、
+`kill -9` → 1、后台孙进程不挂住、四类协议错误、>1MiB 帧、cwd 不存在 → 127）。
+
+**真机 A/B（172.17.43.193，jailer + fc117，256MiB guest，共享只读基础文件开，冷启动 3 次）**：
+
+| 配置 | 冷启动 total 中位 | vsock-connect-ok | vsock-pong | 说明 |
+| --- | --- | --- | --- | --- |
+| socat + 96MB Bun 产物 | **338ms** | 140ms | 207ms | connect 成功后还要 ~70ms 加载 Bun agent |
+| 静态 C agent（974,536 字节，glibc -static） | **261ms** | 138ms | 138ms | connect 成功后 ~0ms 即可应答 |
+
+- 两个数字都是**同一批补丁后**（见 O10 的握手量化修复）；修复前同样两个配置是 602ms / 535ms。
+- guest 侧时间线（`/etc/boot-mark` + agent 自己的 `harness-agent listening on vsock:5000` 串口打印）：
+  init 链在 **uptime 0.06~0.08s** 就全部走完，C agent 的监听行紧跟着出现 —— 也就是说
+  **guest 用户态 ~70ms 就绪**，`copy-disks`(84ms)+`api-socket-wait`(21ms)+`api-config`(11ms)+
+  内核启动(~50ms) 才是冷启动剩下的主要成本。
+- 热恢复（同一 C agent 镜像，snapshot 模式 5 次）：total 中位 **117.5ms**、`snapshot-load` 5ms、
+  `vsock-handshake` 5.5ms → C agent 对热路径无回归（宿主侧握手本来就是一次成功）。
+- 结论：96MB 解释型运行时带来的真实差异是 **connect 之后的 ~70ms**，加上 O6 之前那次误归因，
+  说明"用静态二进制的收益"必须在握手不再被量化之后才能测准。
+
+**代价 / 未做**：镜像里的 socat 与那几个动态库**没有删除**（只删了引用），镜像体积暂时没降；
+`init=<agent>`（连 init 链一起去掉，业界 3/3 采用）未做，留待下一步。
+
+### O11 让"池里永远有匹配的快照"：GC 豁免当前模板（2026-10-12）
+
+**问题**：`pruneSnapshotPool` 按目录 mtime 降序做"年龄 TTL + 条数上限"双条件删除，而**当前在用**
+的黄金快照目录的 mtime 就是它被发布的时间；预热命中时脚本走 `VM_PREWARM_SKIP` 直接返回、不会
+`touch` 目录。于是生产参数 `--max-age-hours 72` 会在 72 小时后把**唯一在用的**快照删掉，直到下一次
+预热重建之间落进来的 Run 吃完整冷启动（1334ms）。来源：`docs/research/cold-start-standby-pool.md` §5.3。
+
+**修复**：
+- `src/ops/harness-maintenance.ts`：`PruneResult` 增加 `protected:string[]`；`pruneSnapshotPool` 与
+  `pruneDirectories` 接受 `protectedNames?:readonly string[]`，命中者**既不删也不计入条数上限**。
+- `scripts/harness-ops.ts`：新增 `resolveProtectedTemplateHashes(args)` —— 用与 Broker 相同的
+  `VmSnapshotManager.computeTemplateHash(FIRECRACKER_KERNEL_PATH, FIRECRACKER_ROOTFS_PATH,
+  HARNESS_GUEST_AGENT_VERSION ?? "2.0.0")` 算出当前模板并豁免；`--protect-template <hash>` 可追加，
+  `--no-protect-current-template` 显式关闭；输出新增 `snapshotPoolProtected=N` 与
+  `HARNESS_OPS_CLEANUP_PROTECTED <hash,...>`。
+- `deploy/harness-maintenance.sh.example`：只从 `/etc/harness/broker.env` 读取需要的三个键
+  （`read_broker_env`，避免整份 source 把控制令牌带进维护进程），否则维护脚本没有 `FIRECRACKER_*`
+  时豁免会静默失效。
+
+**为什么这也算冷启动优化**：我们已经有业界"藏冷启动"里最贵的那一半（热恢复 median 101ms、
+`/snapshot/load` 4~7ms，比 Fly/Modal/CodeSandbox 都快）。真正会让人"感觉到"的只剩"池里没有匹配快照"，
+而 GC TTL 竞态正是其中一个我们完全可控的来源。
+
+### O10 修复 vsock 握手量化：握手期间对端关闭立即失败（2026-10-12）
+
+**根因**：`FirecrackerVsockBridge.connect()` 只把 `error` 当失败；`close` 事件只通知
+`activeHandlers`（握手阶段该表还是空的），于是 guest 尚未监听时（Firecracker UDS 代理直接关闭
+连接），pending 的握手 promise 一直悬着，直到 `handshakeTimeoutMs`（冷启动路径 300ms）才超时，
+再等一个 `intervalMs`(100ms) 重试 —— `connect-ok` 被**量化到 ~400ms**，而 guest 实际 70ms 就绪。
+
+**修复**：
+- `src/sandbox/microvm/firecracker-vsock-bridge.ts`：`connect()` 的 `close` 处理里，若握手未完成则
+  立即 `reject(new Error("vsock 连接在握手完成前被对端关闭（guest 尚未监听）"))`；并新增 `end`
+  （半关闭）同样处理。已完成的连接仍走原来的 activeHandlers 通知路径。
+- `src/sandbox/microvm/firecracker-sandbox-driver.ts`：冷启动重试参数 `connectWithRetry(20000, 100, 300)`
+  → `connectWithRetry(20000, 50, 300)`（快速失败后可以更密地探测）。
+- 测试：`tests/sandbox/firecracker-vsock-bridge.test.ts` 新增两条 —— 对端关闭时必须在 <300ms 内
+  reject（不等 attemptTimeout）；mock 服务端"前两次拒绝、第三次就绪"时 `connectWithRetry(5000,50,300)`
+  总耗时 <400ms（≈2 个 interval）。
+
+**真机效果（同一批镜像）**：
+
+| 配置 | 修复前冷启动 | 修复后冷启动 | 热恢复 |
+| --- | --- | --- | --- |
+| socat + Bun agent | 602ms | **338ms** | — |
+| 静态 C agent | 535ms | **261ms** | 117.5ms（total）、握手 5.5ms |
+
+**教训**：`connectWithRetry(20000, 20, 30)`（O8 试过的"极密重试"）之所以让热恢复退化到 229~653ms，
+是因为每次尝试都要白等满 30ms 超时；把"对端关闭"当失败之后，失败尝试变成亚毫秒级，interval 才真正
+决定了探测延迟。**先修失败判定，再调重试参数。**
+
+
+
+**代价 / 未做**：镜像里的 socat 与那几个动态库**没有删除**（只删了引用），镜像体积暂时没降；
+`init=<agent>`（连 init 链一起去掉，业界 3/3 采用）未做，留待下一步。
+
+
 ## 3. 待评估 / 未采用
 
 | 候选 | 预期收益 | 现状 |
@@ -205,14 +318,14 @@ Run 准入(policy/RESOURCE) → sandbox.create
 | UFFD diff snapshot / 懒加载（CodeSandbox 式） | 内存镜像不再整块写 | 未采用：需自写 `UFFDIO_COPY` handler，复杂度高 |
 | 预热池（Daytona/Modal/Fly 式常驻待命 VM） | 交接 ~10~50ms | 未采用：内存常驻成本、租户隔离与回收复杂度 |
 | 关闭 guest 内核 i8042/PS-2 探测（`i8042.noaux i8042.nomux i8042.nopnp i8042.dumbkbd`） | 冷启动 1338 → ~540ms | **已实施（O6）**：实测 539ms；建快照首台 2235 → 1452ms；热恢复不变 |
-| 用静态小监听器替换 `socat` | 期望冷启动再减 ~300ms | **已否证（O8）**：同参数实测 523~542ms vs socat 539ms，只值 ~16ms；340ms 不来自 socat |
+| 用静态小监听器替换 `socat` | 期望冷启动再减 ~300ms | **已否证（O8/O10）**：socat 本身只值 ~16ms；O10 修掉握手量化后，socat 与 C agent 的差别就是 connect 后的 ~70ms agent 加载 |
 | jailer 下把 chroot 内快照**硬链接**进 staging（替代 `cp --reflink=auto` 的全量复制） | `make-snapshot` 少一遍 256MiB 读+写 | **已实施（O7）**：908 → 753ms；首建 1452 → 1293ms |
 | `/snapshot/create` 带 `sync_snapshot_files:false`（不等 fsync） | 期望 -200~400ms | **实测无收益**：753 vs 756ms（dump 本身 ~750ms，期间后台回写已完成）→ 默认恢复持久 |
 | 快照先写 tmpfs（RAM）再后台搬到 /data | 前台只剩内存拷贝（~150ms） | 未实施：需给 jailer chroot 造 tmpfs 路径 + 发布前 gate；每模板多占 256MiB RAM |
 | `snapshot_type:"Diff"` 首次快照只写脏页 | 写量降 3.4× → 首建 -160ms | **已实测（O8）**：256MiB→74.6MiB、firstCreate 1301→1140ms、5/5 恢复+exec 探针通过；旋钮 `HARNESS_VM_SNAPSHOT_TYPE=Diff`，默认仍 `Full`（官方 developer preview） |
 | 预读/缓存 `mem.snap` 到 page cache（预热后首次 load 更快） | `snapshot-load` 5~6ms → ~2ms | 未做（收益小） |
 
-| 更小的 guest agent 二进制（静态 C/Go/Rust 替代 96MB Bun 产物） | **冷启动 -230ms**（O8 实测：静态应答器 208ms vs Bun 442ms） | 待做（下一步首要项）；inittab/init 链只占 ~10ms |
+| 更小的 guest agent 二进制（静态 C/Go/Rust 替代 96MB Bun 产物） | 冷启动 **-77ms**（真机 A/B：338 → 261ms） | **已实施（O9）**：`guest/agent/agent.c` + 自监听 AF_VSOCK；老结论 "-230ms" 是握重量化造成的误判（O10） |
 
 
 
@@ -223,7 +336,7 @@ Run 准入(policy/RESOURCE) → sandbox.create
 | 段 | 实测 | 说明 |
 | --- | --- | --- |
 | Firecracker 进程 + 内核 console 起来 | **15ms**（`serial-first-line`） | 进程启动与 API socket 就绪很快（`spawn-process` 1~3ms、`api-socket-wait` 20ms 是 20ms 轮询粒度） |
-| guest 用户态就绪（agent 可握手） | **~1281ms**（O6 前）/ **~390ms**（O6 后） | O6 关掉 i8042 探测后剩 ~390ms：内核→init ~60ms + init 链与 socat 进入监听 ~90ms + **96MB agent 加载 ~240ms**（O8 三组实验拆解） |
+| guest 用户态就绪（agent 可握手） | **O6 前 ~1281ms** → O6 后 ~390ms → O10 后 **~130ms**（connect-ok 138ms） | boot-mark 实测 init 链 uptime 0.06~0.08s 就结束；O9 换 C agent 后 connect 成功即应答（0~2ms），差别只剩 socat+Bun 的 ~70ms |
 | 建快照（把 256MB 内存镜像写盘） | **908~918ms** | 只在"池空后的第一次 create"发生 |
 
 结论：
@@ -232,7 +345,8 @@ Run 准入(policy/RESOURCE) → sandbox.create
 2. **池空后的第一次 create（≈2.2s）无法靠调参消掉**：1.28s 是 guest 用户态，0.9s 是内存镜像写盘。
 3. 因此对用户可见的解法是"改谁付这一笔"：**服务启动预热**（O5）后，用户遇到的第一个 Run 也是热恢复（实测 166ms / warmHit=true）。
 4. 并发场景不会线性放大：N=10 并发冷启动只写 1 次快照，其余复用（O5 埋点）。
-5. O8 已把剩下的 390ms 拆开：init 链 ~90ms、**96MB agent 加载 ~240ms**、其余 ~60ms。要进一步压缩冷启动，首要项是把 guest agent 换成小体积静态二进制（预期 -230ms）；COW 文件系统仍未实测（见 §3）。
+5. O9 已把 guest agent 换成静态 C 二进制（自监听 vsock，不再需要 socat），O10 修掉了握手里 ~400ms 的量化，冷启动 539ms → **261ms**。
+6. O8 已把剩下的 390ms 拆开：init 链 ~90ms、**96MB agent 加载 ~240ms**、其余 ~60ms。要进一步压缩冷启动，首要项是把 guest agent 换成小体积静态二进制（预期 -230ms）；COW 文件系统仍未实测（见 §3）。
 
 ## 5. 复现命令
 
@@ -240,6 +354,19 @@ Run 准入(policy/RESOURCE) → sandbox.create
 # 预热黄金快照（root，读 broker.env；幂等，已存在则 SKIP）
 set -a; . /etc/harness/broker.env; set +a
 bun run scripts/vm-snapshot-prewarm.ts
+```
+
+## 5.1 guest agent 构建与存量镜像切换
+
+```bash
+# 重建镜像（有 cc 时默认 impl=c）
+bash scripts/microvm/build-guest-rootfs.sh - /tmp/rootfs.ext4 /tmp/workspace.ext4
+
+# 存量镜像原地切换（先备份 .bak-cagent，幂等）
+bash scripts/microvm/patch-guest-rootfs-c-agent.sh /data/harness/images/rootfs.ext4
+
+# 切完必须做：提升 HARNESS_GUEST_AGENT_VERSION（默认已 2.0.0）并清空快照池
+rm -rf /data/harness/snapshots-mt/*
 ```
 
 ## 6. 基准与预热复现命令

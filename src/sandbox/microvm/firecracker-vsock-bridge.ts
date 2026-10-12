@@ -170,11 +170,34 @@ export class FirecrackerVsockBridge {
             });
 
             this.socket.on("close", () => {
+                if (!resolved) {
+                    // 真机实测修复（冷启动被量化成 ~400ms 的根因）：guest 还没监听时，
+                    // Firecracker 的 UDS 代理会直接关闭连接（FIN）。旧实现这里只通知
+                    // activeHandlers（此刻是空的），pending 的握手 promise 继续悬着，
+                    // 只能等 handshakeTimeoutMs 超时——于是
+                    //   connect-ok ≈ 300ms（单次超时）+ 100ms（interval）≈ 400ms，
+                    // 而 guest 侧 80ms 就已经 listen 了（boot-mark + agent 串口打印实测）。
+                    // 把"握手期间对端关闭"当成失败，重试就能立刻探测到 guest 就绪。
+                    resolved = true;
+                    cleanup();
+                    reject(new Error("vsock 连接在握手完成前被对端关闭（guest 尚未监听）"));
+                    return;
+                }
                 this.handshakeComplete = false;
                 for (const handler of this.activeHandlers.values()) {
                     handler.onError(new Error("Vsock connection closed unexpectedly"));
                 }
                 this.activeHandlers.clear();
+            });
+
+            // 半关闭（peer 先 FIN）：与 close 同样处理，避免又退化成"等超时"。
+            this.socket.on("end", () => {
+                if (resolved) {
+                    return;
+                }
+                resolved = true;
+                cleanup();
+                reject(new Error("vsock 连接在握手完成前被对端半关闭（guest 尚未监听）"));
             });
 
             let connectHandshakeDone = false;

@@ -6,7 +6,9 @@ set -euo pipefail
 # 步骤说明：
 # 1. 下载 Alpine minirootfs (版本固定为 3.20.3 x86_64，校验 sha256)
 # 2. 创建 256MB ext4 rootfs 镜像 (dd + mkfs.ext4)
-# 3. 解包 Alpine、写入 /agent/main 并 chmod 755，准备 socat
+# 3. 解包 Alpine、写入 /agent/main 并 chmod 755
+#    - impl=c  ：现场用 CC 编译 guest/agent/agent.c（静态、自监听 AF_VSOCK、不需要 socat）
+#    - impl=bun：使用传入的 bun --compile 产物，并安装 socat 做 vsock 转发
 # 4. 写入 /etc/inittab 启动 agent
 # 5. 创建 64MB (或 HARNESS_VM_WORKSPACE_DISK_MIB 指定大小) 空白 ext4 作为 workspace 模板
 # 6. 输出结果路径并做基本自检
@@ -39,9 +41,31 @@ AGENT_BIN="$(abspath "${AGENT_BIN}")"
 OUT_ROOTFS="$(abspath "${OUT_ROOTFS}")"
 OUT_WORKSPACE="$(abspath "${OUT_WORKSPACE}")"
 
-if [ ! -f "${AGENT_BIN}" ]; then
-    echo "Error: agent binary '${AGENT_BIN}' not found!" >&2
-    exit 2
+# guest agent 实现选择：c = 仓库内 guest/agent/agent.c（约 36KB 静态 ELF，自己监听 AF_VSOCK，
+# 不需要 socat —— 真机 A/B：冷启动 539ms -> 约 310ms）；bun = 旧的约 96MB 编译产物 + socat 转发。
+# auto 时有 cc 且源码存在则用 c。切换实现必须同时改 HARNESS_GUEST_AGENT_VERSION
+# （该值参与快照模板哈希），否则会复用旧 agent 的黄金快照。
+AGENT_IMPL="${HARNESS_GUEST_AGENT_IMPL:-auto}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+AGENT_C_SOURCE="$(abspath "${SCRIPT_DIR}/../../guest/agent/agent.c")"
+CC_BIN="${CC:-cc}"
+if [ "${AGENT_IMPL}" = "auto" ]; then
+    if command -v "${CC_BIN}" >/dev/null 2>&1 && [ -f "${AGENT_C_SOURCE}" ]; then
+        AGENT_IMPL="c"
+    else
+        AGENT_IMPL="bun"
+    fi
+fi
+echo "[..] guest agent impl=${AGENT_IMPL}"
+
+
+if [ "${AGENT_IMPL}" = "bun" ]; then
+    if [ -f "${AGENT_BIN}" ]; then
+        :
+    else
+        echo "Error: agent binary '${AGENT_BIN}' not found" >&2
+        exit 2
+    fi
 fi
 
 if ! command -v mkfs.ext4 >/dev/null 2>&1; then
@@ -51,6 +75,20 @@ fi
 
 WORKDIR=$(mktemp -d /tmp/build-rootfs.XXXXXX)
 trap 'rm -rf "${WORKDIR}"' EXIT
+
+if [ "${AGENT_IMPL}" = "c" ]; then
+    if command -v "${CC_BIN}" >/dev/null 2>&1; then
+        :
+    else
+        echo "Error: 需要 C 编译器构建 guest agent（CC=${CC_BIN}）" >&2
+        exit 2
+    fi
+    echo "[..] 编译静态 C guest agent：${AGENT_C_SOURCE}"
+    "${CC_BIN}" -O2 -static -Wall -o "${WORKDIR}/harness-agent" "${AGENT_C_SOURCE}"
+    AGENT_BIN="${WORKDIR}/harness-agent"
+    ls -l "${AGENT_BIN}"
+fi
+
 
 mkdir -p "$(dirname "${OUT_ROOTFS}")"
 mkdir -p "$(dirname "${OUT_WORKSPACE}")"
@@ -111,29 +149,37 @@ fetch_apk() {
     tar -xzf "${WORKDIR}/${file}" -C "${ROOT_STAGING}" 2>/dev/null || true
 }
 
-# socat 运行时依赖（musl 已在 minirootfs 内）
-fetch_apk "socat"
-fetch_apk "libcrypto3"
-fetch_apk "libssl3"
-fetch_apk "readline"
-fetch_apk "libncursesw"
-fetch_apk "ncurses-terminfo-base"
+# socat 运行时依赖（musl 已在 minirootfs 内）。impl=c 时 agent 自己监听 AF_VSOCK，
+# 不需要 socat，也就不需要 OpenSSL/readline 那几 MB 动态库。
+if [ "${AGENT_IMPL}" = "bun" ]; then
+    fetch_apk "socat"
+    fetch_apk "libcrypto3"
+    fetch_apk "libssl3"
+    fetch_apk "readline"
+    fetch_apk "libncursesw"
+    fetch_apk "ncurses-terminfo-base"
+fi
 
 # 真机验证修复：bun --compile 的 musl 产物仍动态依赖 C++ 运行时
 # （_Unwind_SetGR/_ZSt4cerr 等），Alpine minirootfs 不含，
 # 缺了会在 guest 内 Error relocating、agent 以 127 退出。
-fetch_apk "libstdc++"
-fetch_apk "libgcc"
+if [ "${AGENT_IMPL}" = "bun" ]; then
+    fetch_apk "libstdc++"
+    fetch_apk "libgcc"
+fi
 
 # bash：agent 平台执行的命令常用 bash -c；minirootfs 只有 busybox ash。
 # 依赖 readline/ncurses-terminfo-base 已在上方安装。
 fetch_apk "bash"
 
-if [ ! -x "${ROOT_STAGING}/usr/bin/socat" ]; then
-    echo "Error: socat was not installed into staging rootfs." >&2
-    exit 2
+if [ "${AGENT_IMPL}" = "bun" ]; then
+    if [ -x "${ROOT_STAGING}/usr/bin/socat" ]; then
+        echo "[OK] socat installed into rootfs staging"
+    else
+        echo "Error: socat was not installed into staging rootfs." >&2
+        exit 2
+    fi
 fi
-echo "[OK] socat installed into rootfs staging"
 
 # 写入 /etc/inittab
 # 注意：工作区盘（Firecracker 第二块盘 = /dev/vdb）必须在 guest 内挂载到 /workspace，
@@ -177,6 +223,15 @@ cat << 'EOF' > "${ROOT_STAGING}/etc/inittab"
 ::ctrlaltdel:/sbin/reboot
 ::shutdown:/bin/umount -a -r
 EOF
+
+# impl=c：agent 自己监听 vsock，把 socat 转发行改成直接 respawn agent。
+if [ "${AGENT_IMPL}" = "c" ]; then
+    sed -i.bak 's#^::respawn:.*#::respawn:/agent/main#' "${ROOT_STAGING}/etc/inittab"
+    rm -f "${ROOT_STAGING}/etc/inittab.bak"
+    grep -q '^::respawn:/agent/main$' "${ROOT_STAGING}/etc/inittab" \
+      || { echo "Error: 无法把 inittab 的 respawn 行切到 /agent/main" >&2; exit 2; }
+fi
+
 
 # 写入 DNS 与 hosts 基础配置
 echo "nameserver 1.1.1.1" > "${ROOT_STAGING}/etc/resolv.conf"
@@ -244,9 +299,22 @@ if command -v debugfs >/dev/null 2>&1; then
         echo "Error: /agent/main missing from built rootfs — refusing to ship an empty image." >&2
         exit 2
     fi
-    if ! debugfs -R "ls /usr/bin" "${OUT_ROOTFS}" 2>/dev/null | grep -q "socat"; then
-        echo "Error: socat missing from built rootfs." >&2
-        exit 2
+    if [ "${AGENT_IMPL}" = "bun" ]; then
+        if debugfs -R "ls /usr/bin" "${OUT_ROOTFS}" 2>/dev/null | grep -q "socat"; then
+            :
+        else
+            echo "Error: socat missing from built rootfs." >&2
+            exit 2
+        fi
+    fi
+    if [ "${AGENT_IMPL}" = "c" ]; then
+        debugfs -R "dump /etc/inittab ${WORKDIR}/verify-inittab" "${OUT_ROOTFS}" >/dev/null 2>&1
+        if grep -q '^::respawn:/agent/main$' "${WORKDIR}/verify-inittab"; then
+            echo "[OK] inittab respawns /agent/main directly"
+        else
+            echo "Error: impl=c 但 inittab 未直接 respawn /agent/main" >&2
+            exit 2
+        fi
     fi
     if ! debugfs -R "stat /sbin/init" "${OUT_ROOTFS}" 2>/dev/null | grep -q "Type: symlink\|Type: regular"; then
         echo "Error: /sbin/init missing from built rootfs (symlink population failed?)." >&2

@@ -345,6 +345,13 @@ bun run scripts/harness-ops.ts cleanup \
   --artifacts /var/lib/harness/artifacts \
   --database /var/lib/harness/harness.sqlite \
   --max-age-hours 24 --max-snapshots 8 --apply
+
+# 快照池清理默认豁免"当前模板"快照（templateHash = sha256(kernel + rootfs + agentVersion)），
+# 避免 mtime TTL 把唯一在用的黄金快照删掉，让后续 Run 吃完整冷启动。因此运行清理时需要
+# FIRECRACKER_KERNEL_PATH / FIRECRACKER_ROOTFS_PATH / HARNESS_GUEST_AGENT_VERSION
+# （见 deploy/harness-maintenance.sh.example 的 read_broker_env()）。
+# 生效标志：输出里的 snapshotPoolProtected=N 与 HARNESS_OPS_CLEANUP_PROTECTED <hash>。
+# 可用 --protect-template <hash> 追加豁免；--no-protect-current-template 显式关闭（不建议）。
 ```
 
 Run 执行期间可观察 Worker 单元与 cgroup：
@@ -455,6 +462,45 @@ sudo systemctl start harness-maintenance.service
 systemctl list-timers | grep harness-maintenance
 ls -la /data/harness/backups/
 ```
+
+### 12.1 guest agent 实现：静态 C（推荐，O9/O10）
+
+guest 镜像里的 agent 有两条实现：旧的 `socat + 96MB bun --compile 产物`，和 `guest/agent/agent.c`
+（静态 C、单文件、自己监听 AF_VSOCK、协议一致）。真机 A/B（jailer + fc117、256MiB guest）：
+
+| 配置 | 冷启动 total 中位 | 握手 | 说明 |
+| --- | --- | --- | --- |
+| socat + Bun 产物 | 338ms | connect-ok 140ms → pong 207ms | connect 之后还要约 70ms 加载 Bun |
+| 静态 C agent | **261ms** | connect-ok 138ms → pong 138ms | connect 成功即可应答 |
+| 静态 C agent（热恢复） | **117.5ms** | 5.5ms | 热路径无回归 |
+
+```bash
+# 1) 存量镜像原地换 agent（幂等：已是直接 respawn /agent/main 时输出 PATCH_C_AGENT_SKIP；
+#    先备份 <image>.bak-cagent，回写后用 cmp 校验二进制一致）
+sudo bash scripts/microvm/patch-guest-rootfs-c-agent.sh /data/harness/images/rootfs.ext4
+
+# 2) 必须提升 agent 版本：它参与 computeTemplateHash(kernel, rootfs, agentVersion)，
+#    不提就会继续复用旧黄金快照里带 socat/Bun agent 的内存镜像
+sudo sed -i 's/^HARNESS_GUEST_AGENT_VERSION=.*/HARNESS_GUEST_AGENT_VERSION=2.0.0/' /etc/harness/broker.env
+grep -q '^HARNESS_GUEST_AGENT_VERSION=' /etc/harness/broker.env   || echo 'HARNESS_GUEST_AGENT_VERSION=2.0.0' | sudo tee -a /etc/harness/broker.env
+
+# 3) 清空旧快照池并重启 Broker（驱动器默认 guestAgentVersion 已是 2.0.0）
+sudo rm -rf /data/harness/snapshots-mt/*
+sudo systemctl restart harness-broker.service
+
+# 4) 复验：清池后的第一个 Run 应该是冷启动（几百 ms），预热后是热恢复（~120ms）
+sudo systemctl start harness-vm-prewarm.service
+journalctl -u harness-vm-prewarm.service -n 5 --no-pager | grep -E "VM_PREWARM_(OK|SKIP)"
+```
+
+重建镜像时默认就是 C 实现（`HARNESS_GUEST_AGENT_IMPL=auto`，有 `cc` 即用 C；`bun` 可回退）：
+
+```bash
+bash scripts/microvm/build-guest-rootfs.sh - /tmp/rootfs.ext4 /tmp/workspace.ext4
+```
+
+注意：`patch-guest-rootfs-c-agent.sh` 只把 inittab 的 respawn 行切到 `/agent/main`，**不会删除**
+镜像里已有的 socat 与那几个动态库（对正确性无影响，只是镜像没变小）。
 
 ## 12. microVM 黄金快照预热（可选，推荐）
 

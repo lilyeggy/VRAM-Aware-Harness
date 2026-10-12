@@ -267,4 +267,62 @@ describe("FirecrackerVsockBridge", () => {
 
         bridge.close();
     });
+
+    it("握手期间对端关闭：立即失败，不等 attemptTimeout（冷启动 ~400ms 量化修复）", async () => {
+        // guest 还没监听时 Firecracker 的 UDS 代理会直接关闭连接。旧实现只通知
+        // activeHandlers（此刻为空），握手 promise 继续悬着，必须等 handshakeTimeout
+        // （冷启动路径 300ms）才超时，于是 connect-ok 被量化成 300+interval ≈ 400ms。
+        // 现在必须在 close 那一刻就 reject。
+        const s = createServer((sock) => {
+            sock.destroy();
+        });
+        await new Promise<void>((r) => s.listen(testSocketPath, () => r()));
+        server = s;
+
+        const bridge = new FirecrackerVsockBridge(testSocketPath, 5000);
+        const startedAt = Date.now();
+        await expect(bridge.connect(3000)).rejects.toThrow("握手完成前");
+        const elapsed = Date.now() - startedAt;
+        expect(elapsed).toBeLessThan(300);
+        bridge.close();
+    });
+
+    it("connectWithRetry 在 guest 稍后就绪时快速成功（按 interval 探测而非等超时）", async () => {
+        let attempts = 0;
+        const s = createServer((sock) => {
+            attempts += 1;
+            if (attempts < 3) {
+                sock.destroy();
+                return;
+            }
+            let buffer = "";
+            sock.on("data", (chunk) => {
+                buffer += chunk.toString("utf8");
+                const idx = buffer.indexOf("\n");
+                if (idx === -1) return;
+                const line = buffer.slice(0, idx).trim();
+                buffer = buffer.slice(idx + 1);
+                if (line.startsWith("CONNECT")) {
+                    sock.write("OK 5000\n");
+                } else {
+                    const frame = JSON.parse(line);
+                    if (frame.type === "ping") {
+                        sock.write(JSON.stringify({ v: 1, type: "pong", id: frame.id }) + "\n");
+                    }
+                }
+            });
+        });
+        await new Promise<void>((r) => s.listen(testSocketPath, () => r()));
+        server = s;
+
+        const bridge = new FirecrackerVsockBridge(testSocketPath, 5000);
+        const startedAt = Date.now();
+        await bridge.connectWithRetry(5000, 50, 300);
+        const elapsed = Date.now() - startedAt;
+
+        expect(attempts).toBe(3);
+        // 两次失败尝试不再各白等 300ms：总耗时接近 2 个 interval
+        expect(elapsed).toBeLessThan(400);
+        bridge.close();
+    });
 });

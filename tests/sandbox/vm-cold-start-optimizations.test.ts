@@ -20,7 +20,7 @@ describe("冷启动优化（O4 rootfs 共享 / O5 预热与握手快探测）", 
         expect(bridge).toContain("attemptTimeoutMs = 1000");
         expect(bridge).toContain("await this.connect(attemptTimeoutMs)");
         const driver = read("src/sandbox/microvm/firecracker-sandbox-driver.ts");
-        expect(driver).toContain("await vsockBridge.connectWithRetry(20000, 100, 300)");
+        expect(driver).toContain("await vsockBridge.connectWithRetry(20000, 50, 300)");
     });
 
     test("消费 guest 串口：拆出 serial-first-line，避免 stdout pipe 堵死", () => {

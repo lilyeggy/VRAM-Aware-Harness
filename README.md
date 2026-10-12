@@ -103,7 +103,7 @@ src/
 bun test ./tests
 ```
 
-当前测试基线：`633 pass / 7 skip / 0 fail`。
+当前测试基线：`657 pass / 7 skip / 0 fail`。
 
 生产级 VM 生命周期基准（Phase 1，§9.8 v1.4）见 `docs/vm-lifecycle-benchmark.zh-CN.md`，运行脚本为 `scripts/vm-lifecycle-benchmark.ts`；
 启动加速的**持续台账**（每条优化的背景/机制/实测/代价/提交）见 `docs/vm-startup-optimizations.zh-CN.md`。

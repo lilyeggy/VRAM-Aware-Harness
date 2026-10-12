@@ -288,9 +288,12 @@ export class FirecrackerSandboxDriver implements MicrovmDriver {
         // 收益是把热恢复从 ~200ms 降到 ~100ms（真机实测），按需显式开启。
         this.shareRootfs = this.shareBaseFiles
             && (config.shareRootfs ?? (process.env.HARNESS_VM_SHARE_ROOTFS === "1"));
+        // 该值参与 computeTemplateHash(kernel, rootfs, agentVersion)：换 guest agent 实现
+        // 必须提升它，否则会复用旧 agent 的黄金快照（真机踩过）。2.0.0 = 静态 C agent
+        // （guest/agent/agent.c，自监听 vsock，替换掉 socat + 96MB Bun 产物）。
         this.guestAgentVersion = config.guestAgentVersion
             ?? process.env.HARNESS_GUEST_AGENT_VERSION
-            ?? "1.0.0";
+            ?? "2.0.0";
         this.phaseTrace = config.phaseTrace ?? (process.env.HARNESS_VM_PHASE_TRACE === "1");
         this.verboseBoot = config.verboseBoot ?? (process.env.HARNESS_VM_BOOT_VERBOSE === "1");
         this.serialLogDir = config.serialLogDir ?? process.env.HARNESS_VM_SERIAL_LOG_DIR ?? null;
@@ -928,7 +931,7 @@ export class FirecrackerSandboxDriver implements MicrovmDriver {
             );
             // 冷启动：短超时（300ms）+ 密重试（100ms）。握手本身亚毫秒级，
             // 缩短单次超时只是把"等一个注定失败的连接"从 1000ms 降到 300ms。
-            await vsockBridge.connectWithRetry(20000, 100, 300);
+            await vsockBridge.connectWithRetry(20000, 50, 300);
             this.tracePhase(options.id, "vsock-handshake", phaseAt);
             phaseAt = Date.now();
             this.vsockBridges.set(options.id, vsockBridge);
