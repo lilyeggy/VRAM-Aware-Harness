@@ -36,8 +36,9 @@ describe("共享只读基础文件接线（§9.8 维护：启动路径优化）"
         expect(driver).toContain("publishStaging(templateHash, stagingDir)");
         expect(driver).toContain("discardStaging(stagingDir)");
         expect(driver).toContain("createStagingDir(templateHash)");
-        // 绝不能再出现"把 chroot 内快照 cp 覆盖池内路径"的写法
-        expect(driver).toContain("copyFileReflink(snapInChroot, stagingPaths.snapshotPath)");
+        // 绝不能再出现"把 chroot 内快照 cp 覆盖池内路径"的写法。
+        // 现在改为硬链接进 staging（O7）：同 inode、零拷贝，跨设备才退回复制。
+        expect(driver).toContain("await shareBaseFile(snapInChroot, stagingPaths.snapshotPath, {");
         expect(driver.includes("copyFileReflink(snapInChroot, poolPaths.snapshotPath)")).toBe(false);
         expect(driver.includes("copyFileReflink(memInChroot, poolPaths.memFilePath)")).toBe(false);
     });
@@ -47,8 +48,10 @@ describe("共享只读基础文件接线（§9.8 维护：启动路径优化）"
         expect(shared).toContain("sharing of memory pages and read only disks");
         expect(shared).toContain("must be considered immutable");
         expect(shared).toContain("SHARED_BASE_FILE_MODE = 0o444");
-        // 0444 只给驱动自有的快照文件；模板不传 mode，避免硬链接改掉模板权限
-        expect(driver.match(/mode: SHARED_BASE_FILE_MODE/g)?.length).toBe(2);
+        // 0444 只给驱动自有的快照文件；模板不传 mode，避免硬链接改掉模板权限。
+        // 4 处：加载快照 1（share-snapshot）+ rootfs 1 + 制作快照后硬链接进 staging 2
+        // （snapInChroot / memInChroot，O7）
+        expect(driver.match(/mode: SHARED_BASE_FILE_MODE/g)?.length).toBe(4);
         expect(manager).toContain("createStagingDir");
         expect(manager).toContain("renameSync(stagingDir, finalDir)");
     });

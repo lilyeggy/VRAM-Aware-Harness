@@ -111,6 +111,18 @@ export interface FirecrackerDriverConfig {
      * `i8042.noaux i8042.nomux i8042.nopnp i8042.dumbkbd` 可跳过这些探测。
      */
     readonly extraBootArgs?: string;
+
+    /**
+     * `/snapshot/create` 是否等待快照文件 fsync 落盘（默认 false = 不等）。
+     *
+     * 真机实测（256MiB guest，jailer，ext4）——**这个旋钮没有收益**：等 fsync 753ms、
+     * 不等 756ms。原因是 256MiB 的 dump 本身就要约 750ms（≈340MiB/s，受宿主回写/NVMe
+     * 带宽约束），期间后台 writeback 已把大部分脏页写掉，等 fsync 时几乎无剩余工作。
+     * 因此**默认保持持久（true）**；`HARNESS_VM_SNAPSHOT_SYNC_FILES=0` 只留给"宿主确实
+     * 等 fsync 更慢"的环境使用——关闭时驱动会在发布后异步补一次 `fsyncPublished`，
+     * 把"宿主崩溃丢快照"的窗口收窄（快照池始终是可重建缓存，预热 timer 可重建）。
+     */
+    readonly snapshotSyncFiles?: boolean;
     /**
      * 共享只读基础文件（默认开启，`HARNESS_VM_SHARE_BASE_FILES=0` 关闭）。
      *
@@ -199,6 +211,7 @@ export class FirecrackerSandboxDriver implements MicrovmDriver {
     private readonly verboseBoot: boolean;
     private readonly serialLogDir: string | null;
     private readonly extraBootArgs: string;
+    private readonly snapshotSyncFiles: boolean;
     private serialLogDirReady = false;
     /**
      * guest 串口（内核启动日志）尾巴，按 sandbox 存最近 8KB。
@@ -271,6 +284,8 @@ export class FirecrackerSandboxDriver implements MicrovmDriver {
         this.verboseBoot = config.verboseBoot ?? (process.env.HARNESS_VM_BOOT_VERBOSE === "1");
         this.serialLogDir = config.serialLogDir ?? process.env.HARNESS_VM_SERIAL_LOG_DIR ?? null;
         this.extraBootArgs = (config.extraBootArgs ?? process.env.HARNESS_VM_EXTRA_BOOT_ARGS ?? "").trim();
+        this.snapshotSyncFiles = config.snapshotSyncFiles
+            ?? (process.env.HARNESS_VM_SNAPSHOT_SYNC_FILES === "0" ? false : true);
         this.snapshotManager = new VmSnapshotManager({
             ...(config.snapshotPoolDir !== undefined || process.env.HARNESS_VM_SNAPSHOT_POOL_DIR !== undefined
                 ? { snapshotPoolDir: config.snapshotPoolDir ?? process.env.HARNESS_VM_SNAPSHOT_POOL_DIR }
@@ -956,14 +971,35 @@ export class FirecrackerSandboxDriver implements MicrovmDriver {
                                 snapshot_type: "Full",
                                 snapshot_path: snapForApi,
                                 mem_file_path: memForApi,
+                                sync_snapshot_files: this.snapshotSyncFiles,
                             }, "PUT", 60_000);
                             if (snapInChroot !== undefined && memInChroot !== undefined) {
-                                await copyFileReflink(snapInChroot, stagingPaths.snapshotPath);
-                                await copyFileReflink(memInChroot, stagingPaths.memFilePath);
+                                // jailer 下 Firecracker 把快照写在 chroot 内（同一 /data 文件系统），
+                                // 这里**硬链接**进 staging 即可：同 inode、零拷贝。用 cp 复制会让 512MB
+                                // 内存镜像在 create 路径里多走一遍"读+写"（ext4 无 reflink，--reflink=auto
+                                // 退化为全量拷贝）。跨设备时 shareBaseFile 自动退回复制。
+                                await shareBaseFile(snapInChroot, stagingPaths.snapshotPath, {
+                                    fallbackCopy: copyFileReflink,
+                                    mode: SHARED_BASE_FILE_MODE,
+                                });
+                                await shareBaseFile(memInChroot, stagingPaths.memFilePath, {
+                                    fallbackCopy: copyFileReflink,
+                                    mode: SHARED_BASE_FILE_MODE,
+                                });
                             }
                             this.snapshotManager.publishStaging(templateHash, stagingDir);
                             published = true;
                             madeByThisVm = true;
+                            // sync_snapshot_files:false 时前台不等落盘：异步补一次 fsync，
+                            // 让"宿主崩溃丢快照"的窗口尽量小，且不阻塞本次 create。
+                            if (this.snapshotSyncFiles === false) {
+                                void this.snapshotManager.fsyncPublished(templateHash).catch((fsyncErr) => {
+                                    console.error(
+                                        `[Firecracker] 后台 fsync 快照失败（template=${templateHash}）：`,
+                                        fsyncErr,
+                                    );
+                                });
+                            }
                         } finally {
                             if (published === false) {
                                 this.snapshotManager.discardStaging(stagingDir);

@@ -1,4 +1,5 @@
 import { existsSync, mkdirSync, chmodSync, renameSync, rmSync, statSync } from "node:fs";
+import { open } from "node:fs/promises";
 import { resolve, join } from "node:path";
 import { createHash, randomBytes } from "node:crypto";
 import * as http from "node:http";
@@ -104,6 +105,25 @@ export class VmSnapshotManager {
         // 只 unlink 旧目录项：正在运行的 VM 通过硬链接仍持有旧 inode。
         rmSync(finalDir, { recursive: true, force: true });
         renameSync(stagingDir, finalDir);
+    }
+
+    /**
+     * 后台补一次 fsync：`/snapshot/create` 带 `sync_snapshot_files:false` 时前台不等
+     * 落盘（快照先进 page cache，冷启动/首次建快照因此变快），这里异步把池内
+     * vm.snap + mem.snap 刷到盘上，把"宿主崩溃丢快照"的窗口收窄。
+     *
+     * 失败不抛给调用方（快照池是可重建缓存）：由调用方决定怎么记日志。
+     */
+    async fsyncPublished(templateHash: string): Promise<void> {
+        const paths = this.getSnapshotPaths(templateHash);
+        for (const file of [paths.snapshotPath, paths.memFilePath]) {
+            const handle = await open(file, "r");
+            try {
+                await handle.sync();
+            } finally {
+                await handle.close();
+            }
+        }
     }
 
     discardStaging(stagingDir: string): void {

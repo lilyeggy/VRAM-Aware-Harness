@@ -163,6 +163,19 @@ Run 准入(policy/RESOURCE) → sandbox.create
 - **代价**：只影响 PS/2 输入设备探测；无头 guest 不需要键盘/鼠标。删除这几个参数即可回滚（`HARNESS_VM_EXTRA_BOOT_ARGS` 可临时覆盖）。
 - **提交**：见本节末尾 O6 对应 commit（含 boot-mark 脚本、`tests/sandbox/vm-boot-args.test.ts` 4 用例）。
 
+### O7 jailer 下快照硬链接进 staging：make-snapshot 908 → 753ms（2026-10-12）
+
+- **背景**：jailer 下 Firecracker 把快照写在 chroot 内（`/golden.snap`、`/golden.mem`，与池同在一个 /data 文件系统），随后驱动用 `cp --reflink=auto` 把它复制进 staging。**ext4 没有 reflink，`--reflink=auto` 静默退化为全量复制** —— 256MiB 内存镜像因此在 create 路径里被读+写了一遍。
+- **机制**：改用 `shareBaseFile(snapInChroot, stagingPaths.snapshotPath, { fallbackCopy: copyFileReflink, mode: SHARED_BASE_FILE_MODE })`（同 inode、零拷贝；跨设备/失败时自动退回复制）。发布仍是"写 staging + rename"：运行中的 VM 通过硬链接仍持有旧 inode，不会被截断。
+- **实测**（172.17.43.193，jailer + fc117，256MiB guest，共享开，snapshot 模式首次 create + 1 次热恢复）：
+  - `make-snapshot` **908~918ms → 753~756ms**；`firstCreateMs` 1452 → **1293~1302ms**。
+  - 热恢复 `total` 105~107ms（`snapshot-load` 5~6ms、`vsock-handshake` 59~64ms），未受影响。
+- **被否证的假设（重要）**：`sync_snapshot_files:false` 基本没有收益 —— 等 fsync **753ms**、不等 **756ms**。原因：256MiB 的 dump 本身就要约 750ms（≈340MiB/s，受宿主回写与 NVMe 带宽约束），期间后台 writeback 已经写掉大部分脏页，等 `fsync` 时几乎没有剩余工作。因此**默认恢复为持久（`sync_snapshot_files` 不显式关闭）**，只保留 `HARNESS_VM_SNAPSHOT_SYNC_FILES=0` 开关（关闭时发布后异步补一次 `fsyncPublished`），并在 `.env.example` 里写明"实测无收益"。
+- **结论**：首次建快照剩余的 ~750ms 是**Firecracker 写 256MiB 内存镜像本身的速度上限**，API 层已无旋钮可调。再降只有两条路（均未实施，见 §3）：
+  1. `snapshot_type:"Diff"`（首次快照即只写脏页）：官方仍是 developer preview；对我们"一份快照多 VM 加载"的模型要先验证 diff 孔洞语义与恢复正确性（孔洞读 0 只在"刚 boot 的 VM 的 diff"成立）。
+  2. 快照先写 tmpfs（RAM 速度）、后台再搬到 /data：前台只剩内存拷贝，但需要给 jailer chroot 内造 tmpfs 路径 + 发布前 gate（未发布前其他 VM 不能读到半份文件）。代价是每模板多占 256MiB RAM。
+- **提交**：见 O7 对应 commit（含 `tests/sandbox/vm-snapshot-sync-files.test.ts` 4 用例）。
+
 ## 3. 待评估 / 未采用
 
 | 候选 | 预期收益 | 现状 |
@@ -178,7 +191,12 @@ Run 准入(policy/RESOURCE) → sandbox.create
 | 预热池（Daytona/Modal/Fly 式常驻待命 VM） | 交接 ~10~50ms | 未采用：内存常驻成本、租户隔离与回收复杂度 |
 | 关闭 guest 内核 i8042/PS-2 探测（`i8042.noaux i8042.nomux i8042.nopnp i8042.dumbkbd`） | 冷启动 1338 → ~540ms | **已实施（O6）**：实测 539ms；建快照首台 2235 → 1452ms；热恢复不变 |
 | 用静态小监听器替换 `socat`（socat 启动→监听占冷启动 340ms） | 冷启动再减 ~300ms | 待做：正在调研业界做法（`docs/research/cold-start-guest-init.md`） |
-| `make-snapshot` 落盘优化（tmpfs 快照池 / 差分快照 / 惰性解压） | 建快照首台 1452 → ~600ms | 待做：调研已落地（`docs/research/cold-start-snapshot-cost.md`） |
+| jailer 下把 chroot 内快照**硬链接**进 staging（替代 `cp --reflink=auto` 的全量复制） | `make-snapshot` 少一遍 256MiB 读+写 | **已实施（O7）**：908 → 753ms；首建 1452 → 1293ms |
+| `/snapshot/create` 带 `sync_snapshot_files:false`（不等 fsync） | 期望 -200~400ms | **实测无收益**：753 vs 756ms（dump 本身 ~750ms，期间后台回写已完成）→ 默认恢复持久 |
+| 快照先写 tmpfs（RAM）再后台搬到 /data | 前台只剩内存拷贝（~150ms） | 未实施：需给 jailer chroot 造 tmpfs 路径 + 发布前 gate；每模板多占 256MiB RAM |
+| `snapshot_type:"Diff"` 首次快照只写脏页 | 写量降 2~4×（[推测] 750 → 200~350ms） | 未实施：官方 developer preview；孔洞语义只对"刚 boot 的 VM 的 diff"成立，需先验证多 VM 加载的正确性 |
+| 预读/缓存 `mem.snap` 到 page cache（预热后首次 load 更快） | `snapshot-load` 5~6ms → ~2ms | 未做（收益小） |
+
 | 更小的 guest agent 二进制 / 精简 inittab | ~~冷启动 1.28s 中的大部分~~ **已量化** | agent 只值 ~75ms、init 链 ~10ms；1.2s 的大头是内核 PS/2 探测（O6 已修）与 socat 启动 |
 
 
