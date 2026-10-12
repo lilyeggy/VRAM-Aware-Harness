@@ -126,11 +126,18 @@ HARNESS_VM_SHARE_BASE_FILES=1     # 默认开：内核 + 快照文件硬链接�
 #HARNESS_VM_SHARE_ROOTFS=1        # 可选：rootfs 也共享（→101ms），但 guest 内除 /workspace 外全部只读
 #HARNESS_VM_PHASE_TRACE=1         # 排查用：打印 [vm-phase] 分阶段耗时
 #HARNESS_VM_WORKSPACE_SEED=0      # 关闭工作区播种（guest 将看不到工作区既有文件；仅排障用）
+# 默认开启：宿主工作区目录非空时用 mke2fs 播种本 Run 的盘（工作区跨 Run 持久）
 ```
 
 > 硬链接共享要求 `FIRECRACKER_*` 资产与 `HARNESS_VM_RUNTIME_ROOT`、
 > `HARNESS_VM_SNAPSHOT_POOL_DIR` 在**同一文件系统**，否则退化为复制。建议把内核与磁盘模板
 > 放在数据盘上（172.17.43.193 为 `/data/harness/images/`）。
+
+> 工作区播种（默认开）要求宿主工作区目录所在磁盘**有** `mke2fs`（e2fsprogs）；缺工具时退化为
+> 空盘模板复制并打印一行 `[workspace-seed] mke2fs 不可用…`（Run 不会失败，但 guest 看不到
+> 工作区既有文件）。播种 Run 走**冷启动**（不恢复快照、也不制作快照）：播种盘的 ext4 布局与
+> 黄金快照的工作区盘不同，恢复快照会让 guest 命中旧盘缓存并报 `Bad message`；空工作区仍走
+> 热恢复。实测播种 Run ~210ms vs 热恢复 ~98ms。细节见 `docs/full-coverage-report.zh-CN.md` §6.1。
 ```sh
 # 开机预热黄金快照（可选但推荐）：让用户遇到的第一个 Run 也是热恢复。见 §12。
 sudo systemctl enable --now harness-vm-prewarm.timer
