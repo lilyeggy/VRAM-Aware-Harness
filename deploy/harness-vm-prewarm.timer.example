@@ -1,12 +1,17 @@
 # 单机 systemd 部署示例：开机后触发一次 microVM 黄金快照预热（O5）。
 #
-# 只在开机时跑一次；broker 重启 / 手动清空快照池之后再补一次：
-#   sudo systemctl start harness-vm-prewarm.service
+# 开机 20s 后跑一次，之后每小时自检一次（自检很便宜：算 templateHash + stat 快照目录；
+# 命中则 VM_PREWARM_SKIP 立即返回）。这样清空快照池 / 改过模板之后无需重启也会自动补上。
+# 想立刻补一次：sudo systemctl start harness-vm-prewarm.service
+#
+# 注意：这里用 OnCalendar 而不是 OnUnitActiveSec —— 后者对 Type=oneshot 服务（执行完就
+# 变 inactive）算不出下一次触发时间，`systemctl list-timers` 会显示 n/a。
 [Unit]
 Description=Prewarm Harness microVM golden snapshot after boot
 
 [Timer]
 OnBootSec=20s
+OnCalendar=hourly
 Persistent=false
 Unit=harness-vm-prewarm.service
 

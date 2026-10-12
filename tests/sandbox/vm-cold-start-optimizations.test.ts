@@ -64,6 +64,10 @@ describe("冷启动优化（O4 rootfs 共享 / O5 预热与握手快探测）", 
         const timer = read("deploy/harness-vm-prewarm.timer.example");
         expect(timer).toContain("OnBootSec=20s");
         expect(timer).toContain("Unit=harness-vm-prewarm.service");
+        // 必须用 OnCalendar：OnUnitActiveSec 对 oneshot 服务算不出下次触发（list-timers 显示 n/a）
+        expect(timer).toContain("OnCalendar=hourly");
+        // 该文件里 OnUnitActiveSec 只应出现在解释"为什么用它"的注释里
+        expect(timer).toContain("用 OnCalendar 而不是 OnUnitActiveSec");
     });
 
     test("guest 镜像为只读 rootfs 准备 tmpfs（/tmp /run /var/tmp）", () => {

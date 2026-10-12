@@ -465,7 +465,9 @@ Run 必然付这一笔（实测 `SANDBOX_ACQUIRED {durationMs: 2440, warmHit: fa
 
 **单位与定时器**：`deploy/harness-vm-prewarm.service.example`（`Type=oneshot`、`User=root`、
 `EnvironmentFile=/etc/harness/broker.env`、`IPAddressDeny=any`）+
-`deploy/harness-vm-prewarm.timer.example`（`OnBootSec=20s`）。
+`deploy/harness-vm-prewarm.timer.example`（`OnBootSec=20s` + `OnCalendar=hourly`：开机 20s 后
+跑一次，之后每小时自检一次；自检只需算 `templateHash` + `stat` 快照目录，命中即
+`VM_PREWARM_SKIP`，所以清空池子或换模板后无需重启也会自动补上）。
 
 ```bash
 sudo install -m 0644 deploy/harness-vm-prewarm.service.example /etc/systemd/system/harness-vm-prewarm.service

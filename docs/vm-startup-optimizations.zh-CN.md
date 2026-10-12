@@ -126,7 +126,7 @@ Run 准入(policy/RESOURCE) → sandbox.create
 - **机制 1：分段埋点**（`serial-first-line`、`snapshot-reuse`，配合 `HARNESS_VM_BOOT_VERBOSE`）
   - 驱动 drain Firecracker stdout（内核 console，原来只挂 `proc.on("error")` 完全不读），记录**首个串口字节**的时刻，以及被抓取到的最后 8KB 串口输出（`HARNESS_VM_BOOT_VERBOSE=1` 时内核打印完整启动日志，否则 `quiet loglevel=3`）。
   - `snapshot-reuse`：本 VM 没写快照、只是在并发门控里等到别人做好后复用；`make-snapshot` 只在真的写镜像时记录。
-- **机制 2：预热脚本**：`scripts/vm-snapshot-prewarm.ts`（内存自检 + 真机模式）：按模板哈希查快照，不存在就 create + terminate 一次以生成快照；已存在则 `VM_PREWARM_SKIP`。`deploy/harness-vm-prewarm.service.example`（`EnvironmentFile=/etc/harness/broker.env`，`IPAddressDeny=any`）+ `harness-vm-prewarm.timer.example`（`OnBootSec=20s`）。
+- **机制 2：预热脚本**：`scripts/vm-snapshot-prewarm.ts`（内存自检 + 真机模式）：按模板哈希查快照，不存在就 create + terminate 一次以生成快照；已存在则 `VM_PREWARM_SKIP`。`deploy/harness-vm-prewarm.service.example`（`EnvironmentFile=/etc/harness/broker.env`，`IPAddressDeny=any`）+ `harness-vm-prewarm.timer.example`（`OnBootSec=20s` + `OnCalendar=hourly` 自检）。
 - **实测拆解**（172.17.43.193，jailer + fc117，256MB，共享开）：
   - 纯冷启动（不建快照）n=3：median **1334ms** = `vsock-handshake` 1281 + `api-socket-wait` 20 + `copy-disks` 16 + `api-config-cold` 14 + `chown-chroot`/`spawn-process`/`share-base` ~5。
   - `serial-first-line`：冷启动 **15ms**、热恢复 21ms —— 说明 Firecracker 进程与内核 console 是"立刻"起来的，**慢的 1.28s 全在 guest 用户态**（busybox init 链 + `socat VSOCK-LISTEN` + agent 二进制加载）。
