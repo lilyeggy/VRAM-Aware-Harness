@@ -15,10 +15,10 @@
 | --- | --- |
 | HTTP/API 与用户旅程（生产实例） | 36 项断言，修复后全通过（首轮 34/36） |
 | 全覆盖矩阵（测试实例，45 项 × 5 phase） | base 通过 38 + 跳过 7 + 失败 0（**F-K 已修复并复跑验证**，见 §6.1）；priority / backpressure / ratelimit / mcp 全部 PASS |
-| 故障注入与恢复（p0 e2e、F1/F2、F4/F5/F7） | p0 `P0_E2E_SMOKE_OK label=48ae079c`；`PHASE5_FAULT_INJECTION_OK f4=COMPLETED f5=skipped f7=ok`；F1/F2 `PHASE5_WORKER_CRASH_OK label=batteryD f1=path=supervisor f2=recoveredRun=97803846-…` |
+| 故障注入与恢复（p0 e2e、F1/F2、F4/F5/F7） | p0 `P0_E2E_SMOKE_OK label=48ae079c`；`PHASE5_FAULT_INJECTION_OK f4=COMPLETED f5=skipped f7=ok`；F1/F2 `PHASE5_WORKER_CRASH_OK label=batteryD f1=path=supervisor f2=recoveredRun=97803846-…`；F-K 修复后复跑 F1/F2 `PHASE5_WORKER_CRASH_OK label=postfk f1=path=supervisor unit=harness-worker-552e8a67-… f2=recoveredRun=c736f676-…`（`waitForWorkerUnit(90_000)` 竞态修复后首次稳定通过） |
 | 持久化与审计 | RUNNING 期间备份 + 备份上审计链校验 `ok:true checked=7962 legacy=0` |
 | 运维 | `disk-check`、`cleanup`（含新增 fail-closed 保护）、`backup`、maintenance timer 全部可用 |
-| HTTPS 全链路 | `P0_E2E_SMOKE_OK label=d09cc195`（经 `127.0.0.1:8443` 自签 TLS 反代） |
+| HTTPS 全链路 | `P0_E2E_SMOKE_OK label=d09cc195`（经 `127.0.0.1:8443` 自签 TLS 反代）；F-K 修复后复跑 `P0_E2E_SMOKE_OK label=tls-postfk`（2026-10-13 01:00；`concurrent maxActive=2 overlap=true`、跨租户 404 全集） |
 | 平台侧隔离性 | `SANDBOX_SECURITY_PROBE_OK` 13/13 |
 | 本地/远程单测 | 675 pass / 10 skip / 0 fail；typecheck 仅 9 条既有基线错误 |
 
