@@ -103,10 +103,11 @@ src/
 bun test ./tests
 ```
 
-当前测试基线：`659 pass / 7 skip / 0 fail`。
+当前测试基线：`663 pass / 7 skip / 0 fail`。
 
 生产级 VM 生命周期基准（Phase 1，§9.8 v1.4）见 `docs/vm-lifecycle-benchmark.zh-CN.md`，运行脚本为 `scripts/vm-lifecycle-benchmark.ts`；
 启动加速的**持续台账**（每条优化的背景/机制/实测/代价/提交）见 `docs/vm-startup-optimizations.zh-CN.md`。
+生产实例的真机全流程验证（36 项断言 + 平台侧隔离性探针 13 项）见 `docs/production-full-flow-report.zh-CN.md`；隔离性探针脚本为 `scripts/sandbox-security-probe.ts`（不经过 Agent，直接用 `provider.execute` 下探 guest）。
 热恢复默认走"共享只读基础文件"（内核/快照文件硬链接，`HARNESS_VM_SHARE_BASE_FILES`，
 设 `0` 关闭），实测 498ms → 176ms；再加 `HARNESS_VM_SHARE_ROOTFS=1` 可到 101ms，
 但 guest 内除 `/workspace` 外只读（详见该文档的 A/B 与踩坑小节）。

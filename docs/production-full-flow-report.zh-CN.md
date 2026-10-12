@@ -73,3 +73,47 @@ Run `42bfd88e-4768-44da-ad27-72098d65bc0c`（修复后复验）：总墙钟 1329
 - 并发规模压力（10/50/100 并发）→ 由 `scripts/full-coverage-smoke.ts`（测试实例）与 `scripts/vm-lifecycle-benchmark.ts`（并发 1/2/4/8/10）覆盖。
 - 故障注入 F1-F7、备份/审计/账单/运维/TLS → 由故障运维电池覆盖（见 `docs/fault-ops-report.zh-CN.md`）。
 - 浏览器端 UI 交互（本报告只验证 `/app` 静态页与新文案在，用户旅程由 HTTP 契约等价复现）。
+- 隔离性只能平台侧下探（Agent 会拒答这类命令）→ 见 §5。
+
+## 5. 平台侧隔离性探针（真机 13/13）
+
+### 5.1 为什么必须绕过 Agent（模型拒答）
+曾把"guest 无网卡 / 看不到宿主 / 模型 key 不在沙箱"写成一条工具命令交给 Agent 执行，结果模型**直接拒绝**：Run `a50879c3-8340-4f05-8674-ba2b6286456a` 没有发起任何工具调用（单次 `MODEL_COMPLETED stopReason=stop`），thinking 认为这是凭据搜集/外传探测（“This is suspicious… I should decline to help extract secrets”），最终回答 761 字符拒绝执行并给出"去敏感化"的替代命令。
+
+→ 结论：**平台级隔离断言不能靠 Agent 工具链验证**（模型出于安全理由拒答，与被测系统的隔离性无关，而且拒答不等于隔离成立）。必须在平台侧用 `provider.execute` 直接下探。
+
+### 5.2 探针
+`scripts/sandbox-security-probe.ts`（与生产 broker 同一构造：`FirecrackerSandboxDriver` + `MicrovmSandboxProvider` + `InMemorySandboxStore`，jailer + 快照 + 共享只读基础文件），建两台沙箱：
+
+- `security-probe-a`（tenant `probe-a`，`allowedSecrets=["PROBE_TOKEN"]`，环境里种入 `HARNESS_SECRET_<HEX(probe-a)>_PROBE_TOKEN=planted-secret-value`）
+- `security-probe-b`（tenant `probe-b`，无 secret）
+- 同时把 `OPENCODE_API_KEY`/`PI_AUTH_TOKEN` 设为哨兵值 `should-never-reach-guest-model-key`，用于证明宿主模型凭据不进沙箱。
+
+输出 `SANDBOX_SECURITY_PROBE_OK` / `_FAIL failed=[…]`，结束 terminate 两台并清理工作区。
+
+### 5.3 真机结果（172.17.43.193，jailer + Firecracker v1.17.0，256MiB guest，`HARNESS_VM_SHARE_ROOTFS=1`）
+`ACQUISITION A={"durationMs":60,"warmHit":true} B={"durationMs":69,"warmHit":true}`（命中快照池）
+
+| 断言 | 证据 |
+| --- | --- |
+| 只有 lo 网卡 | `ls /sys/class/net` → `lo`；`ip -o link` 只有 `lo`（`state DOWN`） |
+| 无法出网 | guest 内无 `curl`；`wget`/`nc`/`ping 1.1.1.1` 全部 `Network unreachable`；无路由表 |
+| guest 内 root | `uid=0(root) gid=0(root)`，PID1 = `init` |
+| 内核 | `Linux (none) 4.14.174` |
+| 被授权 secret 进沙箱 | `PROBE_TOKEN=planted-secret-value` |
+| 宿主模型 key 未进沙箱 | guest `env` 只有 `PATH/PROBE_TOKEN/PWD/SHLVL`，哨兵值 0 次命中 |
+| 宿主文件系统不可见 | `/home/cxr`、`/home/cxr/agent-harness-mt/data`、`/var/lib/harness-worker`、`/etc/harness` 全部 `No such file or directory`；`find / -maxdepth 4 -name harness.sqlite` 无命中 |
+| rootfs 只读 | `touch /usr/local/...`、`touch /etc/...` → `Read-only file system`；`/dev/root on / type ext4 (ro,…)` |
+| /tmp 可写（tmpfs） | `tmpfs 64M /tmp`、`16M /run`、`32M /var/tmp` |
+| /workspace 独立可写 | `/dev/vdb 103.9M` 挂 `/workspace`，写 `marker-a.txt` 成功 |
+| 跨沙箱工作区隔离 | B 的 `/workspace` 只有 `lost+found`；`cat /workspace/marker-a.txt` → `No such file or directory` |
+| 未授权 secret 不注入 | B 的 `PROBE_TOKEN` 为空 |
+| 资源限额（VM 级） | `nproc`=2、`MemTotal 243804 kB`（256MiB guest 配置） |
+
+### 5.4 附带的边界事实（记录，不构成本轮缺陷）
+- guest 内 `/proc/self/cgroup` 为空：限额在 **VM 层**（vCPU 数、内存镜像大小、磁盘镜像大小），不在 guest 内核 cgroup；guest 内是单用户 root（`userId: 0`，仅在 guest 内部有意义，不穿透宿主）。
+- guest 镜像 `/etc/resolv.conf` 仍写着 `nameserver 1.1.1.1`（镜像遗留）；无网卡无路由，解析不可能成功，重建镜像时清掉以免误导。
+- 探针脚本的类型兼容处理与生产一致：`broker-main.ts:136-138` 也用 `store as unknown as SandboxStore`（`SandboxStore` 带私有字段，`InMemorySandboxStore` 只能这样传）。
+
+### 5.5 与业界对照
+业界方案常见的"隔离性声明"（无网卡 / 只读根 / 跨租户不可见 / secret 按租户注入）在本轮全部**用平台侧真机证据**落到了同一张表里，而不是靠模型自述或文档推断；这也是 `docs/agent-sandbox-landscape.zh-CN.md` §5 逐维对照里我们"已对齐"的那一列。
