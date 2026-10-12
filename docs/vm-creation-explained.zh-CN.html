@@ -1,0 +1,318 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>虚拟机是怎么被"造"出来的 · 零基础讲解</title>
+<style>
+  :root { --bg:#0f1419; --panel:#171e26; --panel2:#1e2731; --line:#2a3644; --text:#e6edf3; --muted:#8b98a5;
+          --accent:#5ac8fa; --green:#3ddc97; --amber:#ffb547; --red:#ff6b6b; --purple:#b28dff; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--text);
+    font: 15px/1.75 -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif; }
+  a { color: var(--accent); }
+  .wrap { max-width: 1000px; margin: 0 auto; padding: 0 24px; }
+  header { padding: 52px 0 30px; background: linear-gradient(135deg,#132033,#0f1419 60%); border-bottom:1px solid var(--line); }
+  h1 { font-size: 30px; margin: 0 0 10px; }
+  h2 { font-size: 22px; margin: 50px 0 12px; padding-top: 10px; border-top:1px solid var(--line); }
+  h3 { font-size: 17px; margin: 22px 0 8px; color: var(--accent); }
+  p { margin: 8px 0; }
+  .lead { color: var(--muted); font-size: 16px; max-width: 800px; }
+  .back { font-size: 13px; }
+  .card { background: var(--panel); border:1px solid var(--line); border-radius:12px; padding:16px 20px; margin:12px 0; }
+  .grid2 { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+  .grid4 { display:grid; grid-template-columns:repeat(4,1fr); gap:10px; }
+  @media (max-width:800px){ .grid2,.grid4{ grid-template-columns:1fr; } }
+  code { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 13px; background: var(--panel2); padding: 1px 6px; border-radius: 4px; color:#cfe8ff; }
+  pre { font: 13px/1.6 ui-monospace, Menlo, Consolas, monospace; background:#0b0f14; border:1px solid var(--line); border-radius:8px; padding:12px 14px; overflow-x:auto; color:#c9d6e3; }
+  table { width:100%; border-collapse:collapse; margin:10px 0; font-size:14px; }
+  th, td { border:1px solid var(--line); padding:8px 10px; text-align:left; vertical-align:top; }
+  th { background:var(--panel2); color:var(--muted); font-weight:600; }
+  .callout { border-left:3px solid var(--accent); background:#142232; padding:10px 14px; border-radius:0 8px 8px 0; margin:12px 0; color:#cfe3f5; }
+  .callout.warn { border-color:var(--amber); background:#2a2216; color:#f3dfb8; }
+  .callout.ok { border-color:var(--green); background:#12261f; color:#cdeedd; }
+  .muted { color: var(--muted); }
+  .box { background: var(--panel2); border:1px solid var(--line); border-radius:8px; padding:10px 12px; font-size:14px; }
+  .box b { display:block; font-size:15px; margin-bottom:2px; }
+  .arrow { text-align:center; color:var(--muted); font-size:20px; line-height:1; margin:2px 0; }
+
+  /* 步骤 */
+  .step { display:grid; grid-template-columns: 56px 1fr; gap:14px; margin: 14px 0; }
+  .step .num { width:44px; height:44px; border-radius:50%; background:var(--accent); color:#06121c; font-weight:800;
+    display:flex; align-items:center; justify-content:center; font-size:17px; }
+  .step.who-host .num { background: var(--amber); }
+  .step.who-kvm .num { background: var(--purple); }
+  .step.who-guest .num { background: var(--green); }
+  .step .body { background: var(--panel); border:1px solid var(--line); border-radius:10px; padding:12px 16px; }
+  .step .body h4 { margin: 0 0 4px; font-size: 16px; }
+  .tag { display:inline-block; font-size:12px; padding:1px 8px; border-radius:6px; background:var(--panel2); border:1px solid var(--line); color:var(--muted); margin-right:4px; }
+  .tag.h { color: var(--amber); border-color:#5a4520; }
+  .tag.k { color: var(--purple); border-color:#3e3360; }
+  .tag.g { color: var(--green); border-color:#245a45; }
+
+  /* 比喻图 */
+  .analogy { display:flex; gap:10px; align-items:stretch; flex-wrap:wrap; margin: 12px 0; }
+  .analogy > div { flex:1 1 200px; background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:12px; font-size:14px; }
+  .analogy .eq { flex:0 0 auto; align-self:center; color:var(--muted); font-size:22px; }
+
+  /* 组件图 */
+  .stack { display:flex; flex-direction:column; gap:6px; }
+  .stack .lvl { border-radius:8px; padding:10px 14px; border:1px solid var(--line); background:var(--panel2); font-size:14px; }
+  .stack .lvl b { color:var(--text); }
+
+  footer { color: var(--muted); font-size:13px; padding: 30px 0 60px; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="wrap">
+    <div class="back"><a href="vm-technology-guide.zh-CN.html">← 返回《虚拟机技术讲解》总览</a></div>
+    <h1>虚拟机是怎么被"造"出来的</h1>
+    <p class="lead">这一页假设你没有任何操作系统和硬件基础。我们从"一台电脑是什么"讲起，然后一步一步看：
+      本项目在收到"请给我一台虚拟机"的请求后，具体做了哪些事情，每一步对应哪段代码。</p>
+  </div>
+</header>
+
+<main class="wrap">
+
+<!-- ================= 第一部分 ================= -->
+<h2>一、先搞清楚：一台电脑到底由什么组成？</h2>
+<p>虚拟机的本质，是<b>用软件伪造出一台电脑</b>。要伪造，先得知道一台真电脑由哪些东西组成：</p>
+<div class="grid4">
+  <div class="box"><b>CPU（处理器）</b>真正执行指令的芯片。它只会一件事：按顺序读指令、算数、读写内存。</div>
+  <div class="box"><b>内存（RAM）</b>CPU 的"工作台"。程序和数据要先放到内存里，CPU 才能处理。断电即失。</div>
+  <div class="box"><b>硬盘（磁盘）</b>长期保存文件的地方。里面存着操作系统、程序、你的文件。断电不丢。</div>
+  <div class="box"><b>其他设备</b>网卡、键盘、屏幕、串口等，负责和外界交换信息。</div>
+</div>
+
+<p>任何一台电脑开机时，做的都是同一件事：<b>CPU 从某个固定位置取第一条指令开始执行</b>。这个位置通常放着"引导程序"，它把操作系统内核从硬盘读进内存，然后把控制权交给内核。</p>
+
+<h3>什么是"操作系统"和"内核"？</h3>
+<div class="card">
+  <p><b>内核（kernel）</b>：操作系统的心脏。它是一个大程序，负责管理 CPU（让多个程序轮流用）、内存（给每个程序分地盘）、硬盘和设备（替程序读写）。</p>
+  <p><b>init（1 号进程）</b>：内核启动后第一个启动的用户程序，它是所有其他程序的"祖先"，负责按配置启动服务。</p>
+  <p><b>根文件系统（rootfs）</b>：一个装着 <code>/bin</code>、<code>/etc</code>、<code>/usr</code> 等目录的磁盘镜像，就是操作系统"本体"的全部文件。</p>
+  <p class="muted">所以一台能用的系统 = <b>内核</b>（会启动） + <b>rootfs</b>（有文件可用） + <b>init 配置</b>（知道要启动什么）。本项目 guest 镜像里这三样都准备好了。</p>
+</div>
+
+<h3>什么是"虚拟机"？</h3>
+<div class="analogy">
+  <div><b>真电脑</b><br>真实的 CPU、内存、硬盘，直接连着</div>
+  <div class="eq">=</div>
+  <div><b>虚拟机</b><br>一个进程假装拥有 CPU、内存、硬盘，<br>里面运行的系统以为自己是真的</div>
+</div>
+<p>关键问题是：<b>这个"假装"怎么做到的？</b> 答案分三层：</p>
+<div class="stack">
+  <div class="lvl"><b>① 硬件辅助（KVM）</b>：现代 CPU 自带"虚拟化模式"。Linux 内核的 KVM 模块让宿主机上的一个进程进入这个模式，CPU 大部分指令直接在硬件上跑，效率接近真机。遇到"碰到真实硬件"的操作，CPU 会自动"停下来"，交给宿主机处理。</div>
+  <div class="lvl"><b>② 虚拟机监视器（VMM，本项目用 Firecracker）</b>：一个普通的宿主进程，负责"伪造硬件"。它告诉 KVM："给我一块 256MB 的内存、2 个 CPU、一个串口、两块硬盘"，然后把客户机要碰的设备操作转译成宿主机上的文件读写。</div>
+  <div class="lvl"><b>③ 客户机（guest）</b>：运行在里面的操作系统，它完全不知道自己是虚拟的，按照正常流程开机。</div>
+</div>
+<div class="callout"><b>一句话：</b>KVM 负责让 CPU 能"隔出一个假电脑"；Firecracker 负责"往这台假电脑上装假硬件"；guest 里的内核和系统像真电脑一样启动。</div>
+
+<!-- ================= 第二部分 ================= -->
+<h2>二、创建虚拟机 = 三件事</h2>
+<p>不论细节如何，造一台虚拟机都可以拆成三件事：</p>
+<ol>
+  <li><b>准备材料</b>：内核文件、系统盘、工作区盘、一块私有的文件夹。</li>
+  <li><b>启动"管家进程"</b>：把 Firecracker 跑起来，它此时还是个"空壳"，没有任何硬件。</li>
+  <li><b>通过配置，把假硬件插上去，然后按"开机"</b>：用 HTTP 请求告诉 Firecracker "给我装什么"，最后发一个"开机"指令。</li>
+</ol>
+<p>这里有个容易混淆的地方：<b>Firecracker 不是虚拟机本身</b>，它是"管家"。虚拟机是 Firecracker 通过 KVM 造出来的那台假电脑。管家进程死了，虚拟机也会跟着消失。</p>
+
+<!-- ================= 第三部分 ================= -->
+<h2>三、本项目的完整创建过程（逐步）</h2>
+<p>下面按真实执行顺序讲。每一步标注了<b>谁在做</b>：
+<span class="tag h">宿主机代码</span> 宿主机上的 TypeScript 程序；
+<span class="tag k">Firecracker/KVM</span> 管家进程与硬件虚拟化；
+<span class="tag g">虚拟机内部</span> guest 里的系统。</p>
+
+<div class="step who-host"><div class="num">1</div><div class="body">
+  <h4>检查环境能不能造虚拟机 <span class="tag h">宿主机代码</span></h4>
+  <p>第一件事是确认"造得出来"：</p>
+  <ul>
+    <li><code>/dev/kvm</code> 能不能读写。它是 KVM 的入口，没有它就没有硬件虚拟化，只能拒绝创建。</li>
+    <li>内核文件和系统盘文件是否存在。缺一个就报错，不会造一台没有操作系统的"空机器"。</li>
+    <li>如果开启了 jailer（见下文第 5 步），检查 jailer 和 firecracker 两个程序都在。</li>
+  </ul>
+  <p class="muted">对应代码：<code>firecracker-sandbox-driver.ts</code> 的 <code>create()</code> 开头部分。</p>
+</div></div>
+
+<div class="step who-host"><div class="num">2</div><div class="body">
+  <h4>分配"身份证件"与私有文件夹 <span class="tag h">宿主机代码</span></h4>
+  <p>每台虚拟机需要三样东西，都是宿主机上的程序分配的：</p>
+  <table>
+    <tr><th>东西</th><th>作用</th><th>例子</th></tr>
+    <tr><td>私有文件夹</td><td>放这台虚拟机的所有文件，权限设成只有自己能进</td><td><code>&lt;runtimeRoot&gt;/&lt;id&gt;/</code>，权限 0700</td></tr>
+    <tr><td>UID / GID（用户编号）</td><td>让这台虚拟机的管家进程用一个专属、低权限的用户身份运行</td><td>20000～29999 之间取一个没用过的</td></tr>
+    <tr><td>CID（通信地址）</td><td>之后宿主机和虚拟机通过 vsock 对话，需要一个唯一的"房间号"</td><td>从 3 开始递增，0～2 系统保留</td></tr>
+  </table>
+  <p class="muted">对应代码：<code>vm-run-directory.ts</code>、<code>vm-uid-allocator.ts</code>、<code>vm-cid-allocator.ts</code>。</p>
+</div></div>
+
+<div class="step who-host"><div class="num">3</div><div class="body">
+  <h4>把材料放进私有目录 <span class="tag h">宿主机代码</span></h4>
+  <p>把三样材料复制到这台虚拟机自己的目录里：</p>
+  <ul>
+    <li><b>内核文件</b>（<code>kernel.bin</code>）：告诉 CPU 第一步该执行什么的操作系统核心。</li>
+    <li><b>系统盘</b>（<code>rootfs.ext4</code>）：Alpine Linux 的全部文件。</li>
+    <li><b>工作区盘</b>（<code>workspace.ext4</code>）：一块空白磁盘，Agent 的代码和产物都放在这里。</li>
+  </ul>
+  <p>复制有两种方式，由配置决定：</p>
+  <ul>
+    <li><b>硬链接</b>（内核文件默认如此）：只是给同一份文件多起一个名字，不真的复制内容，几乎零成本。前提是文件只读，所以它们被设成 0444。</li>
+    <li><b>整份复制</b>（系统盘默认如此）：每台虚拟机各复制一份，各自可写。系统盘也可以通过环境变量改成只读共享，但那样 guest 里除工作区外都是只读的，<code>pip install</code> 之类写临时文件的操作会失败，所以默认关闭。</li>
+  </ul>
+  <p class="muted">工作区盘永远是每台虚拟机独占的，因为它要被写入。对应代码：<code>copyFileReflink</code>、<code>shareBaseFile</code>。</p>
+</div></div>
+
+<div class="step who-host"><div class="num">4</div><div class="body">
+  <h4>把文件的所有权交给这台虚拟机的专属用户 <span class="tag h">宿主机代码</span></h4>
+  <p>执行 <code>chown -R uid:gid</code>。原因是：第 5 步启动的管家进程会以那个低权限用户身份运行，如果文件属于 root，它就读不到。</p>
+</div></div>
+
+<div class="step who-kvm"><div class="num">5</div><div class="body">
+  <h4>启动管家进程 Firecracker（经由 jailer 上锁） <span class="tag h">宿主机代码</span> <span class="tag k">Firecracker</span></h4>
+  <p>宿主机用 <code>spawn</code> 启动 <b>jailer</b>，jailer 再启动 <b>Firecracker</b>。jailer 做的事情：</p>
+  <ul>
+    <li>切换到第 4 步分配的低权限用户；</li>
+    <li>把 Firecracker 关进一个只包含上面材料的文件夹（chroot），它看不到宿主机的其他文件；</li>
+    <li>用 cgroup 限制它能用的 CPU 和内存。</li>
+  </ul>
+  <p>Firecracker 启动后什么硬件都没有，它只打开一个 <b>API 接口</b>（一个本地 socket 文件 <code>firecracker.socket</code>），等待宿主机发配置。</p>
+  <p>宿主机同时把这个管家进程的进程号写进一个小文件（<code>vm.pid</code>），这是以后找回它的唯一凭证。</p>
+  <p class="muted">对应代码：<code>firecracker-sandbox-driver.ts</code> 的 jailer 分支，<code>buildJailerCgroupArgs</code>。</p>
+</div></div>
+
+<div class="step who-kvm"><div class="num">6</div><div class="body">
+  <h4>等管家进程就绪 <span class="tag h">宿主机代码</span></h4>
+  <p>宿主机轮询 <code>firecracker.socket</code>，直到它出现，说明 Firecracker 已经在听了。这一步在真机上通常只要几十毫秒。</p>
+</div></div>
+
+<div class="step who-kvm"><div class="num">7</div><div class="body">
+  <h4>用 HTTP 请求"插上"假硬件 <span class="tag h">宿主机代码</span> <span class="tag k">Firecracker</span></h4>
+  <p>宿主机通过上一步的 socket，像调用网页接口一样给 Firecracker 发配置。下面是本项目冷启动时的真实顺序：</p>
+  <table>
+    <tr><th>顺序</th><th>接口</th><th>含义（用人话说）</th></tr>
+    <tr><td>1</td><td><code>PUT /boot-source</code></td><td>"开机时，内核文件用这个，启动参数是这些。"启动参数里写着 <code>init=/sbin/init</code>，告诉内核第一个程序是谁。</td></tr>
+    <tr><td>2</td><td><code>PUT /drives/rootfs</code></td><td>"插上第一块盘，它是系统盘（根设备）。"</td></tr>
+    <tr><td>3</td><td><code>PUT /drives/workspace</code></td><td>"再插上第二块盘，它是工作区，可读写。"在虚拟机里它会显示为 <code>/dev/vdb</code>。</td></tr>
+    <tr><td>4</td><td><code>PUT /vsock</code></td><td>"开一条和宿主机的专用通信线路，地址是第 2 步的 CID，socket 文件是 <code>vsock.sock</code>。"</td></tr>
+    <tr><td>5</td><td><code>PUT /machine-config</code></td><td>"给你 2 个 CPU、256/512MB 内存。"这些数值由策略决定。</td></tr>
+    <tr><td>6</td><td><code>PUT /actions {InstanceStart}</code></td><td>"开机！"</td></tr>
+  </table>
+  <div class="callout warn">注意：<b>没有网卡</b>。这是产品边界，代码里根本不会插入网络设备。虚拟机只能通过 vsock 与宿主机说话。</div>
+  <p class="muted">对应代码：<code>firecracker-sandbox-driver.ts</code> 中 <code>putSocket(...)</code> 的调用序列。</p>
+</div></div>
+
+<div class="step who-guest"><div class="num">8</div><div class="body">
+  <h4>虚拟机内部开机 <span class="tag g">虚拟机内部</span> <span class="tag k">KVM</span></h4>
+  <p>KVM 让 CPU 进入虚拟化模式，从内核文件的入口开始执行。接下来发生的是任何一台 Linux 开机都会经历的流程：</p>
+  <ol>
+    <li><b>内核初始化</b>：识别 CPU、内存，找到两块盘（<code>/dev/vda</code> 系统盘、<code>/dev/vdb</code> 工作区盘）。</li>
+    <li><b>启动 init（1 号进程）</b>：内核把控制权交给 <code>/sbin/init</code>。本项目用的是 Alpine 的 init，它读取 <code>/etc/inittab</code>。
+      <br><span class="muted">注：启动参数里没有 <code>root=</code>，源码中也没有说明内核如何选定根设备。这一点我没有验证，以真机能启动为准。</span></li>
+    <li><b>执行 inittab 里的命令</b>（这是本项目专门写进去的，见下一步说明）。</li>
+  </ol>
+  <p>内核启动日志默认是静默的（<code>quiet loglevel=3</code>），因为宿主机不消费它，打印出来只会浪费时间。</p>
+</div></div>
+
+<div class="step who-guest"><div class="num">9</div><div class="body">
+  <h4>inittab 把工作区挂到 /workspace，并启动"接线员"和"执行员" <span class="tag g">虚拟机内部</span></h4>
+  <p>本项目的 <code>/etc/inittab</code> 大致是这样（由 <code>scripts/microvm/build-guest-rootfs.sh</code> 写入）：</p>
+<pre>::sysinit:/bin/mount -t proc proc /proc      # 挂上进程信息目录
+::sysinit:/bin/mount -t sysfs sysfs /sys     # 挂上设备信息目录
+::sysinit:/bin/mount -t ext4 -o noatime /dev/vdb /workspace   # 把工作区盘挂成 /workspace
+::respawn:/usr/bin/socat VSOCK-LISTEN:5000,fork EXEC:/agent/main   # 在 vsock 5000 端口等待宿主机连接</pre>
+  <ul>
+    <li><b>挂载</b>：磁盘本身只是一堆字节，要"挂载"到一个目录，程序才能用路径访问它。挂到 <code>/workspace</code> 之后，Agent 的命令就能在那里读写文件。</li>
+    <li><b>socat</b>：一个通用的"连接转接"工具。它在 vsock 5000 端口监听，每来一个连接，就 fork 一个 <code>/agent/main</code> 来处理。</li>
+    <li><b>respawn</b>：如果 socat 退出了，init 会自动把它重新拉起来。</li>
+  </ul>
+</div></div>
+
+<div class="step who-guest"><div class="num">10</div><div class="body">
+  <h4>宿主机与虚拟机"握手"，通道正式打通 <span class="tag h">宿主机代码</span> <span class="tag g">虚拟机内部</span></h4>
+  <p>宿主机此时才真正"确认虚拟机活着"：</p>
+  <ol>
+    <li>连接 <code>vsock.sock</code>（这是 Firecracker 为 vsock 开的宿主侧入口）。</li>
+    <li>发送一行文本 <code>CONNECT 5000</code>，意思是"我要连 guest 的 5000 端口"。</li>
+    <li>收到 <code>OK</code>，说明 socat 接住了连接，转交给了 agent。</li>
+    <li>发一个 <code>ping</code> 帧，收到 <code>pong</code>，证明 agent 能正常回话。</li>
+  </ol>
+  <p>冷启动时虚拟机内核要花一秒多时间启动，所以宿主机会<b>反复尝试</b>，每 100 毫秒一次，最多等 20 秒。</p>
+  <p class="muted">对应代码：<code>firecracker-vsock-bridge.ts</code> 的 <code>connectWithRetry</code>。</p>
+</div></div>
+
+<div class="step who-kvm"><div class="num">11</div><div class="body">
+  <h4>可选：给这台虚拟机"拍快照"，供以后快速复用 <span class="tag h">宿主机代码</span> <span class="tag k">Firecracker</span></h4>
+  <p>冷启动一台虚拟机要 1.5 秒左右。如果每次都这么慢，体验会很差，所以项目做了"快照"：</p>
+  <ul>
+    <li><b>快照是什么</b>：把一台已经开机、agent 已就绪的虚拟机，<b>连同它的内存状态</b>保存成两个文件（<code>vm.snap</code> 是设备状态，<code>mem.snap</code> 是整块内存）。像游戏存档：存档时的画面、进度原样保留。</li>
+    <li><b>怎么拍</b>：先 <code>PATCH /vm {"state":"Paused"}</code> 暂停虚拟机，再 <code>PUT /snapshot/create</code> 写文件，最后 <code>Resumed</code> 继续运行。</li>
+    <li><b>怎么用</b>：之后同一模板的虚拟机不再开机，而是 <code>PUT /snapshot/load</code> 直接把存档读回内存，然后继续运行。真机实测这一步只要 6～7 毫秒。</li>
+    <li><b>代价</b>：拍快照时虚拟机会被冻结，宿主机和它的 vsock 连接会断，需要重连。</li>
+    <li><b>模板指纹</b>：存档只对"同样的内核 + 同样的系统盘 + 同样版本的 agent"有效。任何一个变了，指纹就变，旧存档自动不用。</li>
+  </ul>
+  <p class="muted">对应代码：<code>vm-snapshot-manager.ts</code>（指纹与存档路径）、<code>firecracker-sandbox-driver.ts</code> 的快照分支。</p>
+</div></div>
+
+<div class="step who-host"><div class="num">12</div><div class="body">
+  <h4>create 返回，虚拟机交付给上层 <span class="tag h">宿主机代码</span></h4>
+  <p>到这里，create 才算完成。上层拿到的是一个"沙箱句柄"（sandbox handle），里面有 id、工作区路径、隔离声明等信息。之后 Agent 的每一次工具调用，都是拿这个句柄去执行命令。</p>
+</div></div>
+
+<!-- ================= 第四部分 ================= -->
+<h2>四、创建完成后的状态：一张图看懂</h2>
+<div class="card">
+<pre>宿主机（Linux）
+│
+├─ 运行目录 &lt;runtimeRoot&gt;/&lt;id&gt;/（权限 0700）
+│     ├─ vm.pid            ← 管家进程的号码（以后找它用）
+│     ├─ kernel.bin        ← 内核（只读）
+│     ├─ rootfs.ext4       ← 系统盘（只读共享或独立副本）
+│     ├─ workspace.ext4    ← 工作区盘（这台虚拟机独占，可写）
+│     └─ vsock.sock        ← 与虚拟机通话的门
+│
+├─ 管家进程 jailer → firecracker  （低权限用户 uid=2xxxx，被关在 chroot 里，受 cgroup 限额）
+│        │
+│        │  KVM（CPU 的虚拟化模式）
+│        ▼
+└─ ┌──────────── 虚拟机（guest） ────────────┐
+   │ 内核 → init → inittab                    │
+   │   系统盘作为根文件系统（见下方说明）        │
+   │   /dev/vdb 挂为 /workspace                │
+   │   socat 监听 vsock 5000 → agent           │
+   └──────────────────────────────────────────┘</pre>
+</div>
+
+<div class="callout">到这一步，虚拟机"活着"，并且宿主机和它之间的通道已经打通。之后要执行命令，就是通过这条通道发消息、收结果，本文不再展开（见总览页的第 3 节）。</div>
+
+<!-- ================= 第五部分 ================= -->
+<h2>五、销毁时发生什么（简要）</h2>
+<p>虚拟机用完之后，顺序是固定的，而且是"先停、后拷、再删"：</p>
+<ol>
+  <li><b>停机</b>：用 <code>vm.pid</code> 找到管家进程，发 SIGKILL 强制结束，并等它真正退出。这样虚拟机里不会再有人写盘。</li>
+  <li><b>导出</b>：把工作区盘里的文件拷回宿主机的工作区目录。</li>
+  <li><b>删除</b>：释放 UID、CID，删除 chroot 和私有目录。删除必须放在停机之后，否则管家进程就找不到了，会变成"吃内存的孤儿"。</li>
+</ol>
+
+<!-- ================= 第六部分 ================= -->
+<h2>六、常见疑问</h2>
+<div class="card">
+  <p><b>Q：虚拟机里的 root 用户能不能逃出去？</b><br>A：虚拟机里的 root 只能控制它自己的内核和文件。跨出去需要攻破 CPU 的硬件隔离，这远比攻破普通进程难。即使这样，管家进程还有 jailer 再一层限制。</p>
+  <p><b>Q：为什么不直接用 Docker？</b><br>A：Docker 容器和宿主机共用一个内核，内核漏洞会波及所有容器。虚拟机有自己的内核，隔离更强。代价是启动更慢、更占资源，所以我们用快照来弥补。</p>
+  <p><b>Q：宿主机重启了，虚拟机会怎样？</b><br>A：管家进程会随宿主机进程一起消失，虚拟机也就没了。下次启动时，平台会根据运行目录里的 <code>vm.pid</code> 找到遗留的管家进程并清理掉。</p>
+  <p><b>Q：虚拟机里能上网吗？</b><br>A：不能。它没有网卡，这是设计决定。需要宿主能力时，只能走 vsock 通道。</p>
+  <p><b>Q：一台虚拟机能跑多个命令吗？</b><br>A：可以。开机和握手只做一次，之后每条命令都通过同一条通道发过去，互不共享环境变量，各自有独立的退出码。</p>
+</div>
+
+</main>
+
+<footer class="wrap">
+  <p>依据源码：<code>src/sandbox/microvm/firecracker-sandbox-driver.ts</code>（create 的步骤与 API 调用顺序）、<code>vm-run-directory.ts</code>、<code>vm-uid-allocator.ts</code>、<code>vm-cid-allocator.ts</code>、<code>vm-snapshot-manager.ts</code>、<code>firecracker-vsock-bridge.ts</code>、<code>scripts/microvm/build-guest-rootfs.sh</code>。
+    其中快照耗时数字来自项目文档的真机记录，未在本页重新测量。</p>
+</footer>
+
+</body>
+</html>
