@@ -1,0 +1,16 @@
+{
+  "name": "vm-visual",
+  "private": true,
+  "version": "1.0.0",
+  "description": "VRAM-Aware Harness 虚拟机技术可视化讲解",
+  "scripts": {
+    "build": "esbuild src/main.js --bundle --format=iife --outfile=dist/app.js --log-level=warning",
+    "watch": "esbuild src/main.js --bundle --format=iife --outfile=dist/app.js --watch"
+  },
+  "dependencies": {
+    "gsap": "^3.15.0"
+  },
+  "devDependencies": {
+    "esbuild": "^0.28.2"
+  }
+}

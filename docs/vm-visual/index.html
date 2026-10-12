@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>虚拟机技术 · 从底层开始讲</title>
+<link rel="stylesheet" href="src/style.css">
+</head>
+<body>
+<div class="progress"></div>
+
+<header class="hero">
+  <div class="eyebrow">VRAM-Aware Harness · 零基础虚拟机课</div>
+  <h1>虚拟机到底是什么？<br><span class="grad">从 CPU 开始，一层一层拆</span></h1>
+  <p class="lead">虚拟机 = 用软件造出来的"假电脑"，里面还能再跑一个完整的操作系统。要理解它，只需要知道四层东西，以及它们怎么配合。下面这张图就是全部的骨架，点击任意一层跳到对应章节。</p>
+
+  <div class="onion">
+    <a class="o-row o-guest" href="#ch5"><small>第 4 层 · 客户机（虚拟机里的系统）</small><b>一个完整的操作系统，以为自己在独占一台真电脑</b><span>第 4、5 章 →</span></a>
+    <a class="o-row o-vmm" href="#ch6"><small>第 3 层 · 虚拟机监视器 VMM（Firecracker）</small><b>宿主上的一个普通进程，负责"造假硬件"</b><span>第 5、6 章 →</span></a>
+    <a class="o-row o-kvm" href="#ch3"><small>第 2 层 · 内核模块（KVM）</small><b>Linux 内核里的一块，把 CPU 的虚拟化能力开放出来</b><span>第 3、6 章 →</span></a>
+    <a class="o-row o-hw" href="#ch1"><small>第 1 层 · 硬件（CPU + 内存）</small><b>CPU 自带"虚拟化模式"，这是一切的基础</b><span>第 1、2 章 →</span></a>
+  </div>
+  <p class="hint">读的顺序：自下而上。每章都有可以点击、会动的图。</p>
+</header>
+
+<section class="sec">
+  <div class="sec-head"><span class="num">第一部分</span><div><h2>底层原理：从 CPU 开始</h2><p>六章，每章只讲一个概念。</p></div></div>
+
+  <article class="chapter" id="ch1">
+    <div class="ch-tag">第 1 章 · 硬件</div>
+    <h3>CPU 有"权限等级"</h3>
+    <div id="lesson-rings"></div>
+  </article>
+
+  <article class="chapter" id="ch2">
+    <div class="ch-tag">第 2 章 · 硬件</div>
+    <h3>为什么虚拟化很难？</h3>
+    <div id="lesson-why"></div>
+  </article>
+
+  <article class="chapter" id="ch3">
+    <div class="ch-tag">第 3 章 · 硬件辅助 + 内核</div>
+    <h3>硬件辅助的核心：VM entry / VM exit</h3>
+    <div id="lesson-vmx"></div>
+  </article>
+
+  <article class="chapter" id="ch4">
+    <div class="ch-tag">第 4 章 · 硬件</div>
+    <h3>内存：两次地址翻译</h3>
+    <div id="lesson-mem"></div>
+  </article>
+
+  <article class="chapter" id="ch5">
+    <div class="ch-tag">第 5 章 · 设备</div>
+    <h3>虚拟设备：模拟 vs virtio</h3>
+    <div id="lesson-dev"></div>
+  </article>
+
+  <article class="chapter" id="ch6">
+    <div class="ch-tag">第 6 章 · 三层配合</div>
+    <h3>KVM 与 VMM：谁负责什么</h3>
+    <div id="lesson-kvm"></div>
+  </article>
+</section>
+
+<section class="sec">
+  <div class="sec-head"><span class="num">第二部分</span><div><h2>回到本项目：这些零件在哪里出现</h2><p>底层原理讲完，再看我们的代码是怎么把它们拼起来的。</p></div></div>
+  <table class="map">
+    <tr><th>底层概念</th><th>本项目中的对应</th><th>代码位置</th></tr>
+    <tr><td>硬件虚拟化（VT-x）</td><td>通过 <code>/dev/kvm</code> 访问，启动前先检查可读写</td><td><code>firecracker-sandbox-driver.ts</code> · <code>accessSync(kvmPath)</code></td></tr>
+    <tr><td>VMM（虚拟机监视器）</td><td>每台 VM 一个 Firecracker 进程，由 jailer 启动</td><td><code>firecracker-sandbox-driver.ts</code> · <code>spawn(jailerPath, …)</code></td></tr>
+    <tr><td>模拟的串口</td><td>内核参数 <code>console=ttyS0</code>，串口只留给内核日志</td><td>驱动里的 <code>boot_args</code></td></tr>
+    <tr><td>没有 PCI 总线</td><td>内核参数 <code>pci=off</code>，Firecracker 的设备不走 PCI</td><td>同上 <code>boot_args</code></td></tr>
+    <tr><td>virtio 块设备</td><td>系统盘 <code>/dev/vda</code>、工作区盘 <code>/dev/vdb</code>，guest 内挂到 <code>/workspace</code></td><td><code>PUT /drives/*</code>，<code>build-guest-rootfs.sh</code></td></tr>
+    <tr><td>virtio-vsock（宿主↔虚拟机通信）</td><td>宿主连 <code>vsock.sock</code>，guest 里 socat 监听端口 5000</td><td><code>firecracker-vsock-bridge.ts</code>、inittab</td></tr>
+    <tr><td>客户机内存 = 宿主进程内存</td><td>快照把这块内存整块写成 <code>mem.snap</code></td><td><code>vm-snapshot-manager.ts</code></td></tr>
+  </table>
+</section>
+
+<section class="sec">
+  <div class="sec-head"><span class="num">第三部分</span><div><h2>一台 VM 的生命周期</h2><p>创建 → 执行命令 → 销毁。下面三个图对应前面讲的底层机制。</p></div></div>
+  <div class="card-block" id="creation"></div>
+  <div class="card-block" id="channel"></div>
+  <div class="card-block" id="startup"></div>
+  <div class="card-block"><div id="destroy" class="destroy"></div></div>
+</section>
+
+<section class="sec">
+  <div class="sec-head"><span class="num">附</span><div><h2>模块总览（八个模块，四层）</h2><p>点一个模块看它做什么、怎么做、代码在哪。</p></div></div>
+  <div class="arch-wrap">
+    <div id="arch" class="arch"></div>
+    <div id="arch-detail" class="detail flash"></div>
+  </div>
+</section>
+
+<footer>
+  <p>依据仓库源码与公开的硬件虚拟化机制。性能数字为历史真机实测，未在本页重测。下列 Intel VT-x 的 VMX 术语采用通用名称，具体字段以 Intel SDM 为准。</p>
+  <p class="muted">构建：<code>npm install && npm run build</code>，双击 <code>index.html</code> 即可查看。</p>
+</footer>
+
+<script src="dist/app.js"></script>
+</body>
+</html>
