@@ -125,6 +125,7 @@ FIRECRACKER_WORKSPACE_DISK_TEMPLATE_PATH=/opt/firecracker/images/workspace-templ
 HARNESS_VM_SHARE_BASE_FILES=1     # 默认开：内核 + 快照文件硬链接共享（热恢复 498ms → 176ms）
 #HARNESS_VM_SHARE_ROOTFS=1        # 可选：rootfs 也共享（→101ms），但 guest 内除 /workspace 外全部只读
 #HARNESS_VM_PHASE_TRACE=1         # 排查用：打印 [vm-phase] 分阶段耗时
+#HARNESS_VM_WORKSPACE_SEED=0      # 关闭工作区播种（guest 将看不到工作区既有文件；仅排障用）
 ```
 
 > 硬链接共享要求 `FIRECRACKER_*` 资产与 `HARNESS_VM_RUNTIME_ROOT`、

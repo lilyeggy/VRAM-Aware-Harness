@@ -7,7 +7,9 @@
  * 可选 phase 开关（未设置则相应项 SKIP 并记录原因）：
  *   FULLCOVER_PRIORITY=1       需要测试 master 配置 HARNESS_MAX_ACTIVE_RUNS=1
  *   FULLCOVER_BACKPRESSURE=1   需要 HARNESS_MAX_QUEUED_RUNS=1 且 HARNESS_MAX_ACTIVE_RUNS=1
- *   FULLCOVER_RATELIMIT=1      需要 HARNESS_RATE_LIMIT_MAX_PER_IP=2（建议 FULLCOVER_ONLY=system.ratelimit）
+ *   FULLCOVER_RATELIMIT=1      需要 HARNESS_RATE_LIMIT_MAX_PER_IP=2，且必须搭配
+ *                              FULLCOVER_ONLY=system.ratelimit + FULLCOVER_SKIP_BOOTSTRAP=1
+ *                              （否则脚本自己的注册/登录就会被 429 拦下）
  *   FULLCOVER_MCP=1            需要 HARNESS_MCP_SERVERS 配置 echo fixture
  *   FULLCOVER_ONLY=id1,id2     只跑指定 id（用于隔离 phase）
  *   FULLCOVER_SKIP_BOOTSTRAP=1 隔离 phase 时不预建租户
@@ -153,6 +155,23 @@ async function pollRun(runId: string, token: string | null, timeoutMs: number = 
     throw new Error("Run " + runId + " 等待终态超时，最后状态=" + lastStatus);
 }
 
+/**
+ * 终态先落库、工作区快照与产物在 finally 里采集（src/runs/run-service.ts:441-471），
+ * 由 RUN_ARTIFACTS_READY 标记就绪。客户端在断言 workspace-diff / artifacts 之前
+ * 必须等这个事件，否则会读到空结果（真机实测窗口约 232ms）。
+ */
+async function waitForArtifactsReady(runId: string, token: string | null, timeoutMs: number = 20000): Promise<boolean> {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+        const events = await getEvents(runId, token);
+        if (events.some((event: any) => event.type === "RUN_ARTIFACTS_READY")) {
+            return true;
+        }
+        await Bun.sleep(200);
+    }
+    return false;
+}
+
 async function waitForStatus(runId: string, wanted: string[], token: string | null, timeoutMs: number): Promise<string> {
     const deadline = Date.now() + timeoutMs;
     let lastStatus = "UNKNOWN";
@@ -238,6 +257,11 @@ async function submitAndWait(workspaceId: string, userInput: string, token: stri
     const response = await api("POST", "/runs", { token, body });
     const runId = runIdOf(response);
     const detail = await pollRun(runId, token, options.timeoutMs ?? runTimeoutMs);
+    const finalStatus = detail.run.status;
+    if (finalStatus === "COMPLETED" || finalStatus === "FAILED") {
+        // 契约：结果（workspace-diff / artifacts）在 RUN_ARTIFACTS_READY 之后才可读。
+        await waitForArtifactsReady(runId, token);
+    }
     const events = await getEvents(runId, token);
     return { runId, detail, events, status: detail.run.status };
 }
@@ -486,6 +510,31 @@ async function main(): Promise<void> {
         });
     }
 
+    // F-K 观测项：同一 workspace 跨 Run 的文件可见性。
+    // 期望：平台文档承诺「工作区是持久文件归属地」，因此上一条消息写的文件应当在下一条消息可见。
+    await step("workspace.persistence", "同一 workspace 跨 Run 文件可见（F-K）", async () => {
+        const marker = "persist-" + Date.now();
+        await submitAndWait(
+            context.workspaceId,
+            "请使用 bash 工具执行：echo " + marker + " > persistence-marker.txt 。只做这一步。",
+            context.token,
+        );
+        const second = await submitAndWait(
+            context.workspaceId,
+            "请使用 bash 工具执行：cat persistence-marker.txt 。只做这一步。",
+            context.token,
+        );
+        const serialized = JSON.stringify(second.events);
+        if (serialized.includes(marker)) {
+            return "跨 Run 可见：第二轮 cat 读到了 " + marker;
+        }
+        return {
+            status: "FAIL",
+            detail: "上一条消息创建的文件在下一条消息不可见：guest 每个 Run 从工作区模板新建可写盘，宿主工作区只导出（artifacts/diff）不回灌（F-K）",
+            evidence: "第二轮 cat 未见 " + marker + "；见 docs/full-coverage-report.zh-CN.md F-K",
+        };
+    });
+
     await step("system.queue", "GET /queue → 200", async () => {
         const response = await api("GET", "/queue", { token: context.token });
         assertEq(response.status, 200, "GET /queue 状态 body=" + response.text.slice(0, 200));
@@ -504,7 +553,9 @@ async function main(): Promise<void> {
     const toolCases: Array<{ id: string; tool: string; input: string; expectFile?: string }> = [
         { id: "tool.write", tool: "write", input: "使用 write 工具创建文件 tool-write.txt，内容为 hello-from-write。只做这一步。", expectFile: "tool-write.txt" },
         { id: "tool.read", tool: "read", input: "使用 read 工具读取当前工作区中的文件 tool-write.txt，并在回复中给出它的内容。只做这一步。" },
-        { id: "tool.edit", tool: "edit", input: "使用 edit 工具把文件 tool-write.txt 中的文本 hello-from-write 改成 hello-from-edit。只做这一步。", expectFile: "tool-write.txt" },
+        // F-K：工作区文件不跨 Run 持久（guest 每 Run 从工作区模板新建可写盘），
+        // 所以工具用例必须自包含：先在本 Run 内创建文件，再对它执行目标工具。
+        { id: "tool.edit", tool: "edit", input: "先使用 bash 工具在当前工作区创建文件 tool-write.txt，内容为 hello-from-write；然后使用 edit 工具把其中的 hello-from-write 改成 hello-from-edit。只做这一步。", expectFile: "tool-write.txt" },
         { id: "tool.grep", tool: "grep", input: "使用 grep 工具在当前工作区搜索字符串 hello-from-edit。只做这一步。" },
         { id: "tool.find", tool: "find", input: "使用 find 工具在当前工作区查找所有 .txt 文件。只做这一步。" },
         { id: "tool.ls", tool: "ls", input: "使用 ls 工具列出当前工作区根目录下的文件。只做这一步。" },
@@ -518,8 +569,12 @@ async function main(): Promise<void> {
             let extra = "";
             if (testCase.expectFile !== undefined) {
                 const diff = await diffPaths(outcome.runId, context.token);
-                const touched = diff.added.map((item: any) => item.path).concat(diff.modified.map((item: any) => item.path));
-                assert(touched.includes(testCase.expectFile), "workspace-diff 未体现 " + testCase.expectFile + "（added=" + JSON.stringify(diff.added.map((item: any) => item.path)) + " modified=" + JSON.stringify(diff.modified.map((item: any) => item.path)) + "）");
+                // N24 契约：added / deleted 条目有顶层 path，modified 是
+                // { before: {path,...}, after: {path,...} } 包装（见 web/app.js 的 diffPath）。
+                const addedPaths = diff.added.map((item: any) => item.path);
+                const modifiedPaths = diff.modified.map((item: any) => (item && item.after ? item.after.path : item && item.path));
+                const touched = addedPaths.concat(modifiedPaths);
+                assert(touched.includes(testCase.expectFile), "workspace-diff 未体现 " + testCase.expectFile + "（added=" + JSON.stringify(addedPaths) + " modified=" + JSON.stringify(modifiedPaths) + "）");
                 const artifacts = await artifactPaths(outcome.runId, context.token);
                 const hasArtifact = artifacts.some((item: any) => item.path === testCase.expectFile);
                 extra = " diff=" + JSON.stringify(touched) + " artifact=" + String(hasArtifact);

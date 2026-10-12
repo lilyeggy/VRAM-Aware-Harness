@@ -43,6 +43,12 @@ export interface MicrovmCreateOptions {
      * 语义是"模板"：驱动会为每个 Run 复制独立副本，绝不会直接写模板本身。
      */
     readonly workspaceDiskTemplatePath?: string;
+    /**
+     * F-K 修复：宿主工作区目录。非空时驱动用 `mke2fs -d` 把该目录内容播种进
+     * 本 Run 的工作区盘，使 guest 能看到该工作区里上次 Run 写入的文件；为空则
+     * 沿用模板复制快路径。宿主目录是租户持久资产（见 docs/platform-boundary.md）。
+     */
+    readonly workspaceSeedPath?: string;
     readonly cpuCount?: number;
     readonly memoryMb?: number;
     readonly allowNetwork?: boolean;

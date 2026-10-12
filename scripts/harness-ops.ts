@@ -105,6 +105,7 @@ function usage():void {
   restore --backup <sqlite> --database <sqlite> [--force]
   cleanup --vm-runtime <目录> --snapshot-pool <目录> [--artifacts <目录> --database <sqlite>] [--max-age-hours 24] [--max-snapshots 8] [--apply]
           [--protect-template <hash>] [--no-protect-current-template]
+          （snapshot-pool 未配置 FIRECRACKER_KERNEL_PATH/FIRECRACKER_ROOTFS_PATH 时默认跳过清理）
 
 cleanup 的 snapshot-pool 默认豁免"当前模板"快照（按 FIRECRACKER_KERNEL_PATH /
 FIRECRACKER_ROOTFS_PATH / HARNESS_GUEST_AGENT_VERSION 算 templateHash），
@@ -154,7 +155,17 @@ try {
                 maxAgeMs,
                 dryRun,
             });
-        const snapshotPool = args["snapshot-pool"] === undefined
+        // 保护名单靠 FIRECRACKER_KERNEL_PATH / FIRECRACKER_ROOTFS_PATH 算出来。
+        // 生产上 harness-maintenance 是 root 直跑 CLI，很容易漏掉这几个变量，
+        // 一旦为空就会被 mtime TTL 把唯一在用的黄金快照删掉（真机复现：
+        // snapshotPoolProtected=0 且待删列表里就是当前模板目录）。所以取不到
+        // 当前模板时默认拒绝清理快照池，除非显式 --no-protect-current-template。
+        const templateResolvable = process.env.FIRECRACKER_KERNEL_PATH !== undefined
+            && process.env.FIRECRACKER_ROOTFS_PATH !== undefined;
+        const skipSnapshotPool = args["snapshot-pool"] !== undefined
+            && templateResolvable === false
+            && args["no-protect-current-template"] !== true;
+        const snapshotPool = args["snapshot-pool"] === undefined || skipSnapshotPool
             ? { removed:[], kept:0, protected:[], dryRun }
             : pruneSnapshotPool({
                 poolDir:stringArg(args, "snapshot-pool"),
@@ -177,6 +188,13 @@ try {
         );
         if (snapshotPool.protected.length > 0) {
             console.log(`HARNESS_OPS_CLEANUP_PROTECTED ${snapshotPool.protected.join(",")}`);
+        }
+        if (skipSnapshotPool) {
+            console.log(
+                "HARNESS_OPS_CLEANUP_SNAPSHOT_POOL_SKIPPED reason=no-current-template"
+                + "（缺少 FIRECRACKER_KERNEL_PATH/FIRECRACKER_ROOTFS_PATH，无法算出当前模板，"
+                + "拒绝按 mtime 清理快照池；确认要清理可显式加 --no-protect-current-template）",
+            );
         }
     } else {
         usage();

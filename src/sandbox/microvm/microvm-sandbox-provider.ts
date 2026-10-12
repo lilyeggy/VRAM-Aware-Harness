@@ -187,6 +187,7 @@ export class MicrovmSandboxProvider implements SandboxProvider, SandboxCommandEx
                 id: input.id,
                 runId: input.runId,
                 workspacePath: input.workspacePath,
+                workspaceSeedPath: input.workspacePath,
                 cpuCount: cpuCores,
                 memoryMb,
                 allowNetwork: input.policy.allowNetwork,

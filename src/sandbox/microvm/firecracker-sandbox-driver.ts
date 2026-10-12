@@ -1,4 +1,4 @@
-import { accessSync, appendFileSync, constants, existsSync, mkdirSync, rmSync } from "node:fs";
+import { accessSync, appendFileSync, constants, existsSync, mkdirSync, readdirSync, rmSync, statSync } from "node:fs";
 import { resolve, dirname, basename, join } from "node:path";
 import { tmpdir } from "node:os";
 import { createHash } from "node:crypto";
@@ -165,10 +165,121 @@ async function copyFileReflink(src: string, dst: string): Promise<void> {
         stderr: "pipe",
     });
     const exitCode = await proc.exited;
-    if (exitCode !== 0) {
-        const errText = await new Response(proc.stderr).text();
-        throw new Error(`Failed to copy ${src} to ${dst}: ${errText}`);
+    if (exitCode === 0) {
+        return;
     }
+    const errText = await new Response(proc.stderr).text();
+    // 非 Linux 宿主（macOS/BSD cp 不支持 --reflink）退化为普通复制：
+    // reflink 只是省拷贝的优化，缺了它不该让整个沙箱不可用。
+    const fallback = Bun.spawn(["cp", src, dst], { stdout: "ignore", stderr: "pipe" });
+    const fallbackExit = await fallback.exited;
+    if (fallbackExit !== 0) {
+        const fallbackErr = await new Response(fallback.stderr).text();
+        throw new Error(`Failed to copy ${src} to ${dst}: ${errText} / ${fallbackErr}`);
+    }
+}
+
+
+export const WORKSPACE_SEED_ENV = "HARNESS_VM_WORKSPACE_SEED";
+
+/** 播种容量预估：ext4 元数据与目录项需要额外空间，按内容 1.1 倍 + 8MiB 预留。 */
+export function workspaceSeedRequiredBytes(seedBytes: number): number {
+    return Math.ceil(seedBytes * 1.1) + 8 * 1024 * 1024;
+}
+
+/**
+ * 本 Run 工作区盘的块数：恒等于模板容量（4096B/块）。
+ * 容量必须与黄金快照一致——快照恢复复用同一盘 geometry，
+ * 每 Run 现场放大容量会让恢复出的 VM 与快照状态错位。
+ */
+export function computeWorkspaceImageBlocks(templateBytes: number): number {
+    return Math.max(1024, Math.floor(templateBytes / 4096));
+}
+
+/** 统计播种目录内容（跳过 lost+found 与导出临时目录），用于容量预检。 */
+export function summarizeSeedDirectory(dir: string): { entries: number; bytes: number } {
+    let entries = 0;
+    let bytes = 0;
+    const walk = (current: string): void => {
+        for (const entry of readdirSync(current, { withFileTypes: true })) {
+            if (entry.name === "lost+found" || entry.name.startsWith(".tmp-")) {
+                continue;
+            }
+            const itemPath = join(current, entry.name);
+            if (entry.isDirectory()) {
+                entries += 1;
+                walk(itemPath);
+                continue;
+            }
+            if (entry.isFile()) {
+                entries += 1;
+                bytes += statSync(itemPath).size;
+            }
+        }
+    };
+    walk(dir);
+    return { entries, bytes };
+}
+
+/**
+ * F-K 修复：把宿主工作区目录播种进本 Run 的工作区盘。
+ *
+ * 每个 Run 的工作区盘原本只是模板副本（空 ext4），于是 guest 看不到租户上次
+ * Run 写进工作区的文件——真机证据：同一 workspace 连续三个 Run，
+ * 写 persist.txt 成功之后 `ls -1` 只回 lost+found、`cat persist.txt` 报
+ * "No such file or directory"（见 docs/full-coverage-report.zh-CN.md F-K）。
+ * 宿主工作区目录才是持久资产，因此非空时用 `mke2fs -d` 播种；
+ * 目录为空或显式设置 HARNESS_VM_WORKSPACE_SEED=0 时保留模板复制快路径。
+ */
+export async function prepareWorkspaceDiskFromHost(
+    templatePath: string,
+    seedPath: string | undefined,
+    destination: string,
+): Promise<{ seeded: boolean }> {
+    mkdirSync(dirname(destination), { recursive: true, mode: 0o700 });
+    if (
+        seedPath === undefined
+        || process.env[WORKSPACE_SEED_ENV] === "0"
+        || existsSync(seedPath) === false
+    ) {
+        await copyFileReflink(templatePath, destination);
+        return { seeded: false };
+    }
+    const seed = summarizeSeedDirectory(seedPath);
+    if (seed.entries === 0) {
+        await copyFileReflink(templatePath, destination);
+        return { seeded: false };
+    }
+    const templateBytes = statSync(templatePath).size;
+    const required = workspaceSeedRequiredBytes(seed.bytes);
+    if (required > templateBytes) {
+        throw new Error(
+            `工作区内容 ${seed.bytes}B 超过模板容量 ${templateBytes}B：`
+            + "请扩大 FIRECRACKER_WORKSPACE_DISK_TEMPLATE_PATH 指向的 ext4 模板并重建快照池"
+            + "（盘容量必须与黄金快照一致，不得在每 Run 现场放大）。",
+        );
+    }
+    const blocks = computeWorkspaceImageBlocks(templateBytes);
+    // 宿主机未装 e2fsprogs 时退化为空盘模板复制并留一行警告：
+    // 仅缺一个工具就让所有 Run 失败不合理；退化不等于静默（有日志可查）。
+    if (Bun.which("mke2fs") === null) {
+        console.warn("[workspace-seed] mke2fs 不可用，退化为空盘模板（guest 看不到工作区既有文件）");
+        await copyFileReflink(templatePath, destination);
+        return { seeded: false };
+    }
+    const proc = Bun.spawn(
+        [
+            "mke2fs", "-q", "-t", "ext4", "-F", "-L", "workspace",
+            "-b", "4096", "-d", seedPath, destination, String(blocks),
+        ],
+        { stdout: "ignore", stderr: "pipe" },
+    );
+    const exitCode = await proc.exited;
+    if (exitCode === 0) {
+        return { seeded: true };
+    }
+    const stderr = await new Response(proc.stderr).text();
+    throw new Error(`工作区磁盘播种失败（mke2fs -d ${seedPath}）：${stderr}`);
 }
 
 /**
@@ -622,6 +733,11 @@ export class FirecrackerSandboxDriver implements MicrovmDriver {
             let chrootRootForVm: string | undefined;
             // rootfs 是否以共享只读盘挂给 guest（决定 /drives/rootfs.is_read_only）。
             let sharedRootfsReadOnly = false;
+            // 工作区盘是否由宿主工作区目录播种（F-K）。
+            // 播种盘的 ext4 布局与黄金快照时的工作区盘不同，恢复快照的 guest 内存里
+            // 持有旧盘缓存（真机实测第二轮 cat 报 `Bad message`，diff 为空）；因此播种
+            // Run 一律冷启动：不恢复快照、也不制作快照（见下方 canRestore 与 make-snapshot）。
+            let workspaceDiskSeeded = false;
 
             if (this.useJailer) {
                 // 3. jailer 目录架构
@@ -646,7 +762,7 @@ export class FirecrackerSandboxDriver implements MicrovmDriver {
                 // 内核/rootfs 在共享模式下不在这里复制：硬链接要放在 chown 之后，
                 // 否则 `chown -R` 会把模板/池内文件的属主一起改掉。
                 phaseAt = Date.now();
-                await copyFileReflink(workspaceTemplate, resolve(chrootRoot, "workspace.ext4"));
+                workspaceDiskSeeded = (await prepareWorkspaceDiskFromHost(workspaceTemplate, options.workspaceSeedPath, resolve(chrootRoot, "workspace.ext4"))).seeded;
                 if (this.shareBaseFiles === false) {
                     await copyFileReflink(this.kernelPath, resolve(chrootRoot, "kernel.bin"));
                     await copyFileReflink(this.rootfsPath, resolve(chrootRoot, "rootfs.ext4"));
@@ -738,7 +854,7 @@ export class FirecrackerSandboxDriver implements MicrovmDriver {
                 } else {
                     await copyFileReflink(this.rootfsPath, dir.rootfsPath());
                 }
-                await copyFileReflink(workspaceTemplate, dir.workspaceDiskPath());
+                workspaceDiskSeeded = (await prepareWorkspaceDiskFromHost(workspaceTemplate, options.workspaceSeedPath, dir.workspaceDiskPath())).seeded;
                 this.tracePhase(options.id, "copy-disks", phaseAt);
 
                 const sockets = this.allocateSocketPaths(options.id);
@@ -820,7 +936,7 @@ export class FirecrackerSandboxDriver implements MicrovmDriver {
                     this.guestAgentVersion,
                 )
                 : null;
-            const canRestore = templateHash !== null && this.snapshotManager.hasSnapshot(templateHash);
+            const canRestore = templateHash != null && workspaceDiskSeeded === false && this.snapshotManager.hasSnapshot(templateHash);
 
             if (canRestore && templateHash !== null) {
                 // 快速路径：加载黄金快照并直接恢复。
@@ -950,7 +1066,7 @@ export class FirecrackerSandboxDriver implements MicrovmDriver {
             // 因为后面的 make-snapshot 埋点要按它决定记不记时）。埋点必须区分“真的写了
             // 256MB 内存镜像”和“只是等闸门”，否则并发冷启动看起来像每台都在写快照。
             let reusedSnapshot = false;
-            if (this.snapshotsEnabled && !canRestore && templateHash !== null) {
+            if (this.snapshotsEnabled && canRestore === false && workspaceDiskSeeded === false && templateHash !== null) {
                 // madeByThisVm：本 VM 是否真的执行了 pause/create（决定要不要重连 vsock）
                 let madeByThisVm = false;
                 try {

@@ -197,6 +197,24 @@ async function assertCrossTenantHidden(other: Principal, runId: string): Promise
     }
 }
 
+async function waitForWorkerUnit(timeoutMs: number): Promise<string> {
+    const deadline = Date.now() + timeoutMs;
+    let lastOutput = "";
+    while (Date.now() < deadline) {
+        const units = sh([
+            "systemctl", "list-units", "--type=service", "--state=running",
+            "--no-legend", "harness-worker-*",
+        ]);
+        lastOutput = units.stdout + units.stderr;
+        const unit = units.stdout.trim().split("\n")[0]?.trim().split(/\s+/)[0];
+        if (unit !== undefined && unit !== "") {
+            return unit;
+        }
+        await Bun.sleep(2000);
+    }
+    throw new Error("F1 找不到运行中的 harness-worker-* 单元（已等待 " + timeoutMs + "ms）：" + lastOutput);
+}
+
 async function faultInjectionF1(owner: Principal, other: Principal, workspaceId: string): Promise<string> {
     const baselineFirecracker = countProcesses("firecracker");
     const runId = await submitRun(owner, workspaceId, "请使用 bash 工具执行 sleep 180，然后只回答 CRASH-DONE。");
@@ -205,14 +223,9 @@ async function faultInjectionF1(owner: Principal, other: Principal, workspaceId:
         throw new Error("F1 Run 未进入 RUNNING，当前 " + running);
     }
 
-    const units = sh([
-        "systemctl", "list-units", "--type=service", "--state=running",
-        "--no-legend", "harness-worker-*",
-    ]);
-    const unit = units.stdout.trim().split("\n")[0]?.trim().split(/\s+/)[0];
-    if (unit === undefined || unit === "") {
-        throw new Error("F1 找不到运行中的 harness-worker-* 单元：" + units.stdout + units.stderr);
-    }
+    // RUNNING 先落库、Worker 单元随后才创建（sandbox.create → spawn worker），
+    // 所以这里必须轮询等待，否则会在真机上偶发“找不到运行中的单元”。
+    const unit = await waitForWorkerUnit(90_000);
 
     const killed = sudo(["systemctl", "kill", "-s", "KILL", unit]);
     if (killed.status !== 0) {
