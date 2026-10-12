@@ -103,9 +103,12 @@ src/
 bun test ./tests
 ```
 
-当前测试基线：`595 pass / 7 skip / 0 fail`。
+当前测试基线：`612 pass / 7 skip / 0 fail`。
 
 生产级 VM 生命周期基准（Phase 1，§9.8 v1.4）见 `docs/vm-lifecycle-benchmark.zh-CN.md`，运行脚本为 `scripts/vm-lifecycle-benchmark.ts`。
+热恢复默认走"共享只读基础文件"（内核/快照文件硬链接，`HARNESS_VM_SHARE_BASE_FILES`，
+设 `0` 关闭），实测 498ms → 176ms；再加 `HARNESS_VM_SHARE_ROOTFS=1` 可到 101ms，
+但 guest 内除 `/workspace` 外只读（详见该文档的 A/B 与踩坑小节）。
 VM 创建分阶段耗时埋点：设 `HARNESS_VM_PHASE_TRACE=1` 后每台 VM 会向 stderr 打 `[vm-phase] <sandboxId> <阶段> <ms>`（默认关闭零开销）。
 主流 Agent Sandbox 技术方案调研（E2B / Daytona / Modal / CubeSandbox / CodeSandbox / Firecracker 官方快照与 UFFD 等）见 `docs/agent-sandbox-landscape.zh-CN.md`。
 队列优先级 / 深度 backpressure / RunAttempt 租约心跳（Phase 2，§9.8 v1.4）见 `.env.example` 的 `HARNESS_MAX_QUEUED_RUNS*` 与 `HARNESS_RUN_LEASE_*`。

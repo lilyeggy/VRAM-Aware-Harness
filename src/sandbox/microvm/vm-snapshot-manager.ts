@@ -1,6 +1,6 @@
-import { existsSync, mkdirSync, chmodSync, rmSync, statSync } from "node:fs";
+import { existsSync, mkdirSync, chmodSync, renameSync, rmSync, statSync } from "node:fs";
 import { resolve, join } from "node:path";
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import * as http from "node:http";
 
 export interface VmSnapshotPaths {
@@ -65,6 +65,49 @@ export class VmSnapshotManager {
         mkdirSync(dir, { recursive: true, mode: 0o700 });
         chmodSync(dir, 0o700);
         return dir;
+    }
+
+    /**
+     * 快照发布用的 staging 目录（同池内父目录，保证 rename 不跨设备）。
+     *
+     * 为什么不能直接写池内最终路径：共享只读模式下，运行中的 VM 用硬链接
+     * 引用池内 mem.snap，Firecracker 以 MAP_PRIVATE 映射它，官方要求该文件
+     * 对 Firecracker 与宿主都不可变。若新快照直接覆盖同一 inode（cp 会截断），
+     * 等于在 VM 运行期间改它的内存文件 → guest 内存损坏。
+     * 因此先写 staging，成功后 rename 目录项：运行中的 VM 继续持有旧 inode，
+     * 内容不受影响；新 VM 看到完整的新快照。
+     */
+    createStagingDir(templateHash: string): string {
+        const dir = resolve(
+            this.poolDir,
+            `${templateHash}.staging-${process.pid}-${randomBytes(4).toString("hex")}`,
+        );
+        mkdirSync(dir, { recursive: true, mode: 0o700 });
+        chmodSync(dir, 0o700);
+        return dir;
+    }
+
+    stagingSnapshotPaths(stagingDir: string): VmSnapshotPaths {
+        return {
+            snapshotPath: join(stagingDir, "vm.snap"),
+            memFilePath: join(stagingDir, "mem.snap"),
+        };
+    }
+
+    /** 把 staging 目录原子发布为最终快照目录；缺文件时拒绝发布。 */
+    publishStaging(templateHash: string, stagingDir: string): void {
+        const staged = this.stagingSnapshotPaths(stagingDir);
+        if (existsSync(staged.snapshotPath) === false || existsSync(staged.memFilePath) === false) {
+            throw new Error(`staging 目录缺少快照文件，拒绝发布：${stagingDir}`);
+        }
+        const finalDir = resolve(this.poolDir, templateHash);
+        // 只 unlink 旧目录项：正在运行的 VM 通过硬链接仍持有旧 inode。
+        rmSync(finalDir, { recursive: true, force: true });
+        renameSync(stagingDir, finalDir);
+    }
+
+    discardStaging(stagingDir: string): void {
+        rmSync(stagingDir, { recursive: true, force: true });
     }
 
     invalidate(templateHash: string): void {

@@ -122,7 +122,16 @@ FIRECRACKER_JAILER_PATH=/opt/firecracker/jailer
 FIRECRACKER_KERNEL_PATH=/opt/firecracker/vmlinux
 FIRECRACKER_ROOTFS_PATH=/opt/firecracker/images/rootfs.ext4
 FIRECRACKER_WORKSPACE_DISK_TEMPLATE_PATH=/opt/firecracker/images/workspace-template.ext4
+HARNESS_VM_SHARE_BASE_FILES=1     # 默认开：内核 + 快照文件硬链接共享（热恢复 498ms → 176ms）
+#HARNESS_VM_SHARE_ROOTFS=1        # 可选：rootfs 也共享（→101ms），但 guest 内除 /workspace 外全部只读
+#HARNESS_VM_PHASE_TRACE=1         # 排查用：打印 [vm-phase] 分阶段耗时
 ```
+
+> 硬链接共享要求 `FIRECRACKER_*` 资产与 `HARNESS_VM_RUNTIME_ROOT`、
+> `HARNESS_VM_SNAPSHOT_POOL_DIR` 在**同一文件系统**，否则退化为复制。建议把内核与磁盘模板
+> 放在数据盘上（172.17.43.193 为 `/data/harness/images/`）。
+> `HARNESS_VM_SHARE_ROOTFS` 的只读语义固化在黄金快照的 drive 配置里，切换开关后必须清空快照池，
+> 否则旧快照恢复出来的盘仍按旧语义运行。细节与实测数字见 `docs/vm-lifecycle-benchmark.zh-CN.md`。
 
 创建 `/etc/systemd/system/harness-broker.service`：
 

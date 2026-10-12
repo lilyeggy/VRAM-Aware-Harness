@@ -18,6 +18,7 @@ import { VmCidAllocator } from "./vm-cid-allocator.ts";
 import { checkJailerPrereqs } from "./jailer-prereq-check.ts";
 import { VmSnapshotManager } from "./vm-snapshot-manager.ts";
 import { KeyedSemaphore } from "./vm-concurrency-gate.ts";
+import { SHARED_BASE_FILE_MODE, shareBaseFile, type ShareBaseFileOutcome } from "./shared-base-files.ts";
 import {
     isFirecrackerProcess,
     killPid,
@@ -62,6 +63,21 @@ export interface FirecrackerDriverConfig {
      * socket 等待、快照文件复制、/snapshot/load、vsock 握手逐段拆开。
      */
     readonly phaseTrace?: boolean;
+    /**
+     * 共享只读基础文件（默认开启，`HARNESS_VM_SHARE_BASE_FILES=0` 关闭）。
+     *
+     * 开启后内核与快照文件（vm.snap / mem.snap）不再逐 VM 拷进 chroot，
+     * 而是硬链接进 VM 目录：同 inode、零拷贝，多台 VM 共享同一份。
+     * 安全前提见 shared-base-files.ts（Firecracker 官方 MAP_PRIVATE 只读映射）。
+     */
+    readonly shareBaseFiles?: boolean;
+    /**
+     * 是否把 rootfs 也作为共享只读盘（默认开启，`HARNESS_VM_SHARE_ROOTFS=0` 关闭）。
+     *
+     * 关闭时 rootfs 仍逐 VM 复制且可写（旧行为）。开启后 rootfs 以
+     * `is_read_only: true` 挂给 guest，guest 根文件系统只读。
+     */
+    readonly shareRootfs?: boolean;
     /** 快照池目录（默认 /var/lib/harness/snapshots）。 */
     readonly snapshotPoolDir?: string;
     /**
@@ -128,6 +144,8 @@ export class FirecrackerSandboxDriver implements MicrovmDriver {
     private readonly vsockPort: number;
     private readonly useJailer: boolean;
     private readonly snapshotsEnabled: boolean;
+    private readonly shareBaseFiles: boolean;
+    private readonly shareRootfs: boolean;
     private readonly guestAgentVersion: string;
     private readonly phaseTrace: boolean;
     private readonly snapshotManager: VmSnapshotManager;
@@ -179,6 +197,14 @@ export class FirecrackerSandboxDriver implements MicrovmDriver {
         this.useJailer = config.useJailer ?? (process.env.HARNESS_USE_JAILER !== "false");
         this.snapshotsEnabled = config.snapshotsEnabled
             ?? (process.env.HARNESS_VM_SNAPSHOTS_ENABLED === "true");
+        this.shareBaseFiles = config.shareBaseFiles
+            ?? (process.env.HARNESS_VM_SHARE_BASE_FILES !== "0");
+        // rootfs 共享默认**关闭**：共享后 rootfs 只能以只读 virtio 盘挂给 guest
+        // （同一 inode 不能给多台 VM 写），guest 内除 /workspace 外全部只读，
+        // `pip install`/编译缓存这类写 /tmp、$HOME 的工具会 EROFS 失败。
+        // 收益是把热恢复从 ~200ms 降到 ~100ms（真机实测），按需显式开启。
+        this.shareRootfs = this.shareBaseFiles
+            && (config.shareRootfs ?? (process.env.HARNESS_VM_SHARE_ROOTFS === "1"));
         this.guestAgentVersion = config.guestAgentVersion
             ?? process.env.HARNESS_GUEST_AGENT_VERSION
             ?? "1.0.0";
@@ -366,6 +392,18 @@ export class FirecrackerSandboxDriver implements MicrovmDriver {
         console.error(`[vm-phase] ${sandboxId} ${phase} ${Date.now() - startedAt}ms`);
     }
 
+    /** 记录共享方式（linked = 硬链接零拷贝，copied = 跨设备/无权限时的复制兜底）。 */
+    private traceShare(
+        sandboxId: string,
+        kernel: ShareBaseFileOutcome,
+        rootfs: ShareBaseFileOutcome,
+    ): void {
+        if (this.phaseTrace === false) {
+            return;
+        }
+        console.error(`[vm-phase] ${sandboxId} share kernel=${kernel} rootfs=${rootfs}`);
+    }
+
     async create(options: MicrovmCreateOptions): Promise<MicrovmInstance> {
         // 0. 产品边界门禁（先于一切环境检查）：
         // MicroVM 不提供网卡服务——绝不挂载任何 network-interfaces，
@@ -445,9 +483,11 @@ export class FirecrackerSandboxDriver implements MicrovmDriver {
             let workspaceDiskHostPath: string;
             // 分阶段耗时追踪用的游标（见 tracePhase）
             let phaseAt = Date.now();
-            // jailer chroot 根（快照文件必须复制进 chroot 才能被降权后的
+            // jailer chroot 根（快照文件必须放进 chroot 才能被降权后的
             // Firecracker 进程访问）；非 jailer 模式为 undefined。
             let chrootRootForVm: string | undefined;
+            // rootfs 是否以共享只读盘挂给 guest（决定 /drives/rootfs.is_read_only）。
+            let sharedRootfsReadOnly = false;
 
             if (this.useJailer) {
                 // 3. jailer 目录架构
@@ -468,11 +508,20 @@ export class FirecrackerSandboxDriver implements MicrovmDriver {
                 // 在 jail 内看不到，宿主侧也读不到 Firecracker 创建的 socket。
                 // 因此所有需要跨 jail 边界访问的东西一律放 chroot **根目录**。
 
-                // 异步复制到 chroot 内部
+                // 3.1 工作区盘必须每 Run 私有可写 → 逐份复制。
+                // 内核/rootfs 在共享模式下不在这里复制：硬链接要放在 chown 之后，
+                // 否则 `chown -R` 会把模板/池内文件的属主一起改掉。
                 phaseAt = Date.now();
-                await copyFileReflink(this.kernelPath, resolve(chrootRoot, "kernel.bin"));
-                await copyFileReflink(this.rootfsPath, resolve(chrootRoot, "rootfs.ext4"));
                 await copyFileReflink(workspaceTemplate, resolve(chrootRoot, "workspace.ext4"));
+                if (this.shareBaseFiles === false) {
+                    await copyFileReflink(this.kernelPath, resolve(chrootRoot, "kernel.bin"));
+                    await copyFileReflink(this.rootfsPath, resolve(chrootRoot, "rootfs.ext4"));
+                } else if (this.shareRootfs === false) {
+                    // 只共享内核/快照、不共享 rootfs 时，rootfs 仍是本 VM 私有的
+                    // 可写盘：必须在 chown **之前**复制，否则它归 root 所有而
+                    // Firecracker 以 VM uid 打开 O_RDWR → EACCES（真机实测）。
+                    await copyFileReflink(this.rootfsPath, resolve(chrootRoot, "rootfs.ext4"));
+                }
                 this.tracePhase(options.id, "copy-disks", phaseAt);
 
                 // 4. 分配 UID/GID 并 chown
@@ -481,6 +530,35 @@ export class FirecrackerSandboxDriver implements MicrovmDriver {
                 const chownProc = Bun.spawn(["chown", "-R", `${uid}:${gid}`, chrootRoot]);
                 await chownProc.exited;
                 this.tracePhase(options.id, "chown-chroot", phaseAt);
+
+                // 4.1 共享只读基础文件：硬链接（同 inode、零拷贝）。
+                // 放在 chown 之后 → 模板与池内文件保持原属主；0444 保证
+                // 降权后的 Firecracker 只能读，不能改（官方要求不可变）。
+                if (this.shareBaseFiles) {
+                    phaseAt = Date.now();
+                    const kernelShare = await shareBaseFile(
+                        this.kernelPath,
+                        resolve(chrootRoot, "kernel.bin"),
+                        { fallbackCopy: copyFileReflink },
+                    );
+                    let rootfsShare: ShareBaseFileOutcome = "copied";
+                    if (this.shareRootfs) {
+                        rootfsShare = await shareBaseFile(
+                            this.rootfsPath,
+                            resolve(chrootRoot, "rootfs.ext4"),
+                            { fallbackCopy: copyFileReflink },
+                        );
+                    }
+                    // 注意：RO 标志必须跟随"是否请求共享"，不能跟随链接结果。
+                    // shareBaseFile 无论硬链接还是退化复制都会 chmod 0444，
+                    // 而降权后的 Firecracker 对 is_read_only=false 的盘会以 O_RDWR
+                    // 打开 → 0444 直接 EACCES（真机实测：Drive config error ...
+                    // Permission denied /rootfs.ext4）。共享时以只读 virtio 盘挂载，
+                    // 既避免多台 VM 写同一 inode，也保证打开方式与文件权限一致。
+                    sharedRootfsReadOnly = this.shareRootfs;
+                    this.tracePhase(options.id, "share-base", phaseAt);
+                    this.traceShare(options.id, kernelShare, rootfsShare);
+                }
 
                 apiSocketOnHost = resolve(chrootRoot, "firecracker.socket");
                 vsockUdsOnHost = resolve(chrootRoot, "vsock.sock");
@@ -516,7 +594,16 @@ export class FirecrackerSandboxDriver implements MicrovmDriver {
             } else {
                 // 非 jailer 运行模式 (私有目录直接运行)
                 phaseAt = Date.now();
-                await copyFileReflink(this.rootfsPath, dir.rootfsPath());
+                if (this.shareRootfs) {
+                    await shareBaseFile(
+                        this.rootfsPath,
+                        dir.rootfsPath(),
+                        { fallbackCopy: copyFileReflink },
+                    );
+                    sharedRootfsReadOnly = this.shareRootfs;
+                } else {
+                    await copyFileReflink(this.rootfsPath, dir.rootfsPath());
+                }
                 await copyFileReflink(workspaceTemplate, dir.workspaceDiskPath());
                 this.tracePhase(options.id, "copy-disks", phaseAt);
 
@@ -607,14 +694,28 @@ export class FirecrackerSandboxDriver implements MicrovmDriver {
                 let snapForApi = poolPaths.snapshotPath;
                 let memForApi = poolPaths.memFilePath;
                 if (chrootRootForVm !== undefined) {
-                    // jailer 降权后只能访问 chroot 内部：复制快照进去
+                    // jailer 降权后只能访问 chroot 内部：把快照放进 chroot。
                     const snapInChroot = resolve(chrootRootForVm, "restore.snap");
                     const memInChroot = resolve(chrootRootForVm, "restore.mem");
-                    await copyFileReflink(poolPaths.snapshotPath, snapInChroot);
-                    await copyFileReflink(poolPaths.memFilePath, memInChroot);
+                    if (this.shareBaseFiles) {
+                        // 硬链接共享：零拷贝，且池内文件被替换/删除也不影响
+                        // 本 VM（硬链接持有 inode）。内存文件按官方要求只读。
+                        await shareBaseFile(poolPaths.snapshotPath, snapInChroot, {
+                            fallbackCopy: copyFileReflink,
+                            mode: SHARED_BASE_FILE_MODE,
+                        });
+                        await shareBaseFile(poolPaths.memFilePath, memInChroot, {
+                            fallbackCopy: copyFileReflink,
+                            mode: SHARED_BASE_FILE_MODE,
+                        });
+                        this.tracePhase(options.id, "share-snapshot", phaseAt);
+                    } else {
+                        await copyFileReflink(poolPaths.snapshotPath, snapInChroot);
+                        await copyFileReflink(poolPaths.memFilePath, memInChroot);
+                        this.tracePhase(options.id, "copy-snapshot", phaseAt);
+                    }
                     snapForApi = "/restore.snap";
                     memForApi = "/restore.mem";
-                    this.tracePhase(options.id, "copy-snapshot", phaseAt);
                     phaseAt = Date.now();
                 }
                 await this.putSocket(apiSocketOnHost, "/snapshot/load", {
@@ -646,7 +747,9 @@ export class FirecrackerSandboxDriver implements MicrovmDriver {
                     drive_id: "rootfs",
                     path_on_host: rootfsPathForApi,
                     is_root_device: true,
-                    is_read_only: false,
+                    // 共享 rootfs 是同一 inode 被多台 VM 共用：必须只读，
+                    // 否则一台 VM 的写入会污染所有 VM 的根文件系统。
+                    is_read_only: sharedRootfsReadOnly,
                 });
 
                 await this.putSocket(apiSocketOnHost, "/drives/workspace", {
@@ -701,10 +804,12 @@ export class FirecrackerSandboxDriver implements MicrovmDriver {
                             return;
                         }
 
-                        this.snapshotManager.ensureDir(templateHash);
-                        const poolPaths = this.snapshotManager.getSnapshotPaths(templateHash);
-                        let snapForApi = poolPaths.snapshotPath;
-                        let memForApi = poolPaths.memFilePath;
+                        // 快照先写 staging，成功后 rename 发布（见 publishStaging）：
+                        // 绝不原地截断池内文件 —— 运行中的 VM 用硬链接映射着它。
+                        const stagingDir = this.snapshotManager.createStagingDir(templateHash);
+                        const stagingPaths = this.snapshotManager.stagingSnapshotPaths(stagingDir);
+                        let snapForApi = stagingPaths.snapshotPath;
+                        let memForApi = stagingPaths.memFilePath;
                         let snapInChroot: string | undefined;
                         let memInChroot: string | undefined;
                         if (chrootRootForVm !== undefined) {
@@ -715,6 +820,7 @@ export class FirecrackerSandboxDriver implements MicrovmDriver {
                         }
 
                         let paused = false;
+                        let published = false;
                         try {
                             await this.setVmState(apiSocketOnHost, "Paused");
                             paused = true;
@@ -724,11 +830,16 @@ export class FirecrackerSandboxDriver implements MicrovmDriver {
                                 mem_file_path: memForApi,
                             }, "PUT", 60_000);
                             if (snapInChroot !== undefined && memInChroot !== undefined) {
-                                await copyFileReflink(snapInChroot, poolPaths.snapshotPath);
-                                await copyFileReflink(memInChroot, poolPaths.memFilePath);
+                                await copyFileReflink(snapInChroot, stagingPaths.snapshotPath);
+                                await copyFileReflink(memInChroot, stagingPaths.memFilePath);
                             }
+                            this.snapshotManager.publishStaging(templateHash, stagingDir);
+                            published = true;
                             madeByThisVm = true;
                         } finally {
+                            if (published === false) {
+                                this.snapshotManager.discardStaging(stagingDir);
+                            }
                             // 无论快照成功与否都必须恢复 vCPU，否则本 VM 会永久停在
                             // Paused（guest 不再执行指令），表现为"任务卡死"而非报错。
                             if (paused) {
