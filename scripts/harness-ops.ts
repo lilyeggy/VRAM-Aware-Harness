@@ -18,6 +18,7 @@ import {
     pruneVmRuntime,
     restoreSqliteDatabase,
 } from "../src/ops/harness-maintenance.ts";
+import { VmSnapshotManager } from "../src/sandbox/microvm/vm-snapshot-manager.ts";
 
 type Args = Record<string, string | boolean>;
 
@@ -61,6 +62,40 @@ function numberArg(args:Args, name:string, fallback:number):number {
     return parsed;
 }
 
+/**
+ * 快照池清理时要豁免的目录名（= templateHash）。
+ *
+ * 默认用与 Broker 相同的算法算出"当前模板"的哈希并豁免它：当前快照目录的 mtime
+ * 就是发布时刻，预热命中时不会 touch，纯 mtime TTL 会把唯一在用的快照删掉。
+ * 需要豁免额外模板时用 `--protect-template <hash>`；显式关闭用
+ * `--no-protect-current-template`（只在确实想连当前快照一起清的时候用）。
+ */
+function resolveProtectedTemplateHashes(args:Args):string[] {
+    const hashes:string[] = [];
+    const explicit = args["protect-template"];
+    if (typeof explicit === "string" && explicit.length > 0) {
+        hashes.push(explicit);
+    }
+    if (args["no-protect-current-template"] === true) {
+        return hashes;
+    }
+    const kernelPath = process.env.FIRECRACKER_KERNEL_PATH;
+    const rootfsPath = process.env.FIRECRACKER_ROOTFS_PATH;
+    if (kernelPath === undefined || rootfsPath === undefined) {
+        return hashes;
+    }
+    const agentVersion = process.env.HARNESS_GUEST_AGENT_VERSION ?? "2.0.0";
+    const current = new VmSnapshotManager({}).computeTemplateHash(
+        kernelPath,
+        rootfsPath,
+        agentVersion,
+    );
+    if (hashes.includes(current) === false) {
+        hashes.push(current);
+    }
+    return hashes;
+}
+
 function usage():void {
     console.log(`Harness 单机运维 CLI
 
@@ -69,6 +104,11 @@ function usage():void {
   backup --database <sqlite> --backup-dir <目录> [--keep 7]
   restore --backup <sqlite> --database <sqlite> [--force]
   cleanup --vm-runtime <目录> --snapshot-pool <目录> [--artifacts <目录> --database <sqlite>] [--max-age-hours 24] [--max-snapshots 8] [--apply]
+          [--protect-template <hash>] [--no-protect-current-template]
+
+cleanup 的 snapshot-pool 默认豁免"当前模板"快照（按 FIRECRACKER_KERNEL_PATH /
+FIRECRACKER_ROOTFS_PATH / HARNESS_GUEST_AGENT_VERSION 算 templateHash），
+避免 mtime TTL 把唯一在用的黄金快照删掉。
 `);
 }
 
@@ -108,19 +148,20 @@ try {
         const maxAgeMs = numberArg(args, "max-age-hours", 24) * 60 * 60 * 1000;
         const dryRun = args.apply !== true;
         const vmRuntime = args["vm-runtime"] === undefined
-            ? { removed:[], kept:0, dryRun }
+            ? { removed:[], kept:0, protected:[], dryRun }
             : pruneVmRuntime({
                 runtimeRoot:stringArg(args, "vm-runtime"),
                 maxAgeMs,
                 dryRun,
             });
         const snapshotPool = args["snapshot-pool"] === undefined
-            ? { removed:[], kept:0, dryRun }
+            ? { removed:[], kept:0, protected:[], dryRun }
             : pruneSnapshotPool({
                 poolDir:stringArg(args, "snapshot-pool"),
                 maxAgeMs,
                 maxEntries:numberArg(args, "max-snapshots", 8),
                 dryRun,
+                protectedNames:resolveProtectedTemplateHashes(args),
             });
         const artifacts = args.artifacts === undefined
             ? { removed:[], files:0, dryRun }
@@ -132,8 +173,11 @@ try {
             });
         console.log(JSON.stringify({ vmRuntime, snapshotPool, artifacts }));
         console.log(
-            `HARNESS_OPS_CLEANUP_OK dryRun=${dryRun} vmRuntimeRemoved=${vmRuntime.removed.length} snapshotPoolRemoved=${snapshotPool.removed.length} artifactsRemoved=${artifacts.removed.length} artifactFiles=${artifacts.files}`,
+            `HARNESS_OPS_CLEANUP_OK dryRun=${dryRun} vmRuntimeRemoved=${vmRuntime.removed.length} snapshotPoolRemoved=${snapshotPool.removed.length} snapshotPoolProtected=${snapshotPool.protected.length} artifactsRemoved=${artifacts.removed.length} artifactFiles=${artifacts.files}`,
         );
+        if (snapshotPool.protected.length > 0) {
+            console.log(`HARNESS_OPS_CLEANUP_PROTECTED ${snapshotPool.protected.join(",")}`);
+        }
     } else {
         usage();
         if (command !== "help" && command !== "--help") {

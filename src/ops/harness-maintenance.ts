@@ -158,6 +158,8 @@ export function pruneBackups(backupDir:string, keep:number):string[] {
 export interface PruneResult {
     removed:string[];
     kept:number;
+    /** 命中 protectedNames 而始终保留的条目名（快照池用来豁免当前模板哈希）。 */
+    protected:string[];
     dryRun:boolean;
 }
 
@@ -182,6 +184,15 @@ export function pruneSnapshotPool(input:{
     maxEntries?:number;
     dryRun?:boolean;
     now?:Date;
+    /**
+     * 永不删除的条目名（池目录名就是 templateHash）。
+     *
+     * 当前在用的黄金快照目录的 mtime 就是它被发布的时间，而预热命中时
+     * `VM_PREWARM_SKIP` 不会 touch 目录 —— 纯 mtime TTL 会在若干小时后把
+     * 唯一在用的快照删掉，直到下一次预热重建之间落进来的 Run 吃完整冷启动
+     * （见 docs/research/cold-start-standby-pool.md §5.3）。
+     */
+    protectedNames?:readonly string[];
 }):PruneResult {
     return pruneDirectories({
         root:input.poolDir,
@@ -189,6 +200,7 @@ export function pruneSnapshotPool(input:{
         maxEntries:input.maxEntries ?? Number.POSITIVE_INFINITY,
         dryRun:input.dryRun,
         now:input.now,
+        protectedNames:input.protectedNames,
     });
 }
 
@@ -198,14 +210,24 @@ function pruneDirectories(input:{
     maxEntries:number;
     dryRun?:boolean;
     now?:Date;
+    protectedNames?:readonly string[];
 }):PruneResult {
     const dryRun = input.dryRun === true;
     const nowMs = (input.now ?? new Date()).getTime();
     if (!existsSync(input.root)) {
-        return { removed:[], kept:0, dryRun };
+        return { removed:[], kept:0, protected:[], dryRun };
     }
+    const protectedSet = new Set(input.protectedNames ?? []);
+    const protectedEntries:string[] = [];
     const entries = readdirSync(input.root, { withFileTypes:true })
         .filter((entry) => entry.isDirectory())
+        .filter((entry) => {
+            if (protectedSet.has(entry.name)) {
+                protectedEntries.push(entry.name);
+                return false;
+            }
+            return true;
+        })
         .map((entry) => {
             const path = join(input.root, entry.name);
             return { path, mtimeMs:statSync(path).mtimeMs };
@@ -226,6 +248,7 @@ function pruneDirectories(input:{
     return {
         removed,
         kept:entries.length - removed.length,
+        protected:protectedEntries,
         dryRun,
     };
 }

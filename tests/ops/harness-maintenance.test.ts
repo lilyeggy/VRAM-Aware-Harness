@@ -1,5 +1,6 @@
 import { Database } from "bun:sqlite";
 import { expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
 import {
     existsSync,
     mkdirSync,
@@ -167,6 +168,55 @@ test("pruneSnapshotPool 同时按年龄与最大条目数清理", () => {
     });
     expect(byAge.removed).toEqual([middle]);
     expect(existsSync(newest)).toBe(true);
+});
+
+test("pruneSnapshotPool 豁免当前模板哈希（mtime TTL 不得删掉在用的黄金快照）", () => {
+    const pool = join(tempDir(), "snapshots-protected");
+    mkdirSync(pool);
+    const now = new Date("2026-10-10T12:00:00.000Z");
+    const current = join(pool, "hash-current");
+    const stale = join(pool, "hash-stale");
+    for (const path of [current, stale]) {
+        mkdirSync(path);
+    }
+    // 当前模板的快照比旧模板更旧（预热命中时不会 touch，mtime 会一直停在那里）
+    setAge(current, 30 * 86_400_000, now);
+    setAge(stale, 1 * 86_400_000, now);
+
+    const result = pruneSnapshotPool({
+        poolDir:pool,
+        maxAgeMs:1 * 3_600_000,
+        maxEntries:0,
+        dryRun:false,
+        now,
+        protectedNames:["hash-current"],
+    });
+
+    expect(result.removed).toEqual([stale]);
+    expect(result.protected).toEqual(["hash-current"]);
+    expect(existsSync(current)).toBe(true);
+    expect(existsSync(stale)).toBe(false);
+});
+
+test("harness-ops cleanup 默认豁免当前模板快照（源码守卫）", () => {
+    const source = readFileSync(
+        new URL("../../scripts/harness-ops.ts", import.meta.url),
+        "utf8",
+    );
+    expect(source).toContain("function resolveProtectedTemplateHashes(args:Args):string[]");
+    expect(source).toContain("protectedNames:resolveProtectedTemplateHashes(args)");
+    expect(source).toContain('const agentVersion = process.env.HARNESS_GUEST_AGENT_VERSION ?? "2.0.0";');
+    expect(source).toContain('args["no-protect-current-template"] === true');
+    expect(source).toContain("snapshotPoolProtected=${snapshotPool.protected.length}");
+    expect(source).toContain("computeTemplateHash(");
+
+    const maintenance = readFileSync(
+        new URL("../../deploy/harness-maintenance.sh.example", import.meta.url),
+        "utf8",
+    );
+    expect(maintenance).toContain("read_broker_env FIRECRACKER_KERNEL_PATH");
+    expect(maintenance).toContain("read_broker_env FIRECRACKER_ROOTFS_PATH");
+    expect(maintenance).toContain("read_broker_env HARNESS_GUEST_AGENT_VERSION");
 });
 
 test("pruneArtifacts 按 Run 最新 artifact 时间清理目录与索引行", () => {

@@ -8,6 +8,22 @@ DB=/data/harness/live-full-flow/harness.sqlite
 BACKUP_DIR=/data/harness/backups
 VM_RUNTIME=/data/harness/live-full-flow/vm-runtime
 SNAPSHOT_POOL=/data/harness/snapshots-mt
+BROKER_ENV=${HARNESS_BROKER_ENV_FILE:-/etc/harness/broker.env}
+
+# 快照池清理会豁免"当前模板"快照：templateHash = sha256(kernel + rootfs + agentVersion)，
+# 因此需要 Broker 的三个变量。只读取需要的键，不整份 source（避免把控制令牌等带进本进程）。
+read_broker_env() {
+    key="$1"
+    if [ -f "$BROKER_ENV" ]; then
+        value=$(grep -m1 "^${key}=" "$BROKER_ENV" | cut -d= -f2- || true)
+        if [ -n "$value" ]; then
+            export "$key=$value"
+        fi
+    fi
+}
+read_broker_env FIRECRACKER_KERNEL_PATH
+read_broker_env FIRECRACKER_ROOTFS_PATH
+read_broker_env HARNESS_GUEST_AGENT_VERSION
 
 $BUN run scripts/harness-ops.ts disk-check --path /data --warn 80 --critical 90 || true
 $BUN run scripts/harness-ops.ts disk-check --path / --warn 80 --critical 90 || true
