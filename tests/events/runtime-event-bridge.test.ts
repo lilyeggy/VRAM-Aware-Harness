@@ -1,4 +1,6 @@
 import { expect, test } from "bun:test";
+import { readdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 
 import {
     RuntimeEventBridge,
@@ -230,4 +232,29 @@ test("未知 RuntimeEvent 会告警并返回 null", () => {
             event: unknownEvent,
         },
     ]);
+});
+
+
+/**
+ * 回归（真机发现的重复事件缺陷）：
+ * Worker 模式下同一个 toolCallId 曾经同时被两个写入方落事件——
+ *   - RuntimeEventBridge（模型侧工具时序，payload 带 arguments/result）
+ *   - RunService.markToolPhase（网关边界，payload 只有 toolName/toolCallId）
+ * 结果同一个工具调用在 GET /runs/:id/events 里出现两条 TOOL_STARTED（payload
+ * 形状还不同），时间线无法解释。现在 markToolPhase 落 TOOL_DISPATCHED /
+ * TOOL_SETTLED，本测试锁死"TOOL_STARTED/TOOL_COMPLETED/TOOL_FAILED 只有一个
+ * 写入方"，避免以后再出现第二条写入路径。
+ */
+test("TOOL_STARTED/TOOL_COMPLETED/TOOL_FAILED 全仓只有一个写入方（RuntimeEventBridge）", () => {
+    const srcRoot = new URL("../../src", import.meta.url).pathname;
+    const entries = readdirSync(srcRoot, { recursive: true }) as string[];
+    const writers = entries
+        .filter((entry) => entry.endsWith(".ts"))
+        .map((entry) => ({ rel: entry, abs: join(srcRoot, entry) }))
+        .filter((file) => /"TOOL_(STARTED|COMPLETED|FAILED)"/.test(readFileSync(file.abs, "utf8")))
+        .map((file) => file.rel)
+        // 类型联合声明本身必然包含这些字面量，不构成"写入方"。
+        .filter((rel) => rel !== "runs/agent-run.ts");
+
+    expect(writers).toEqual(["events/runtime-event-bridge.ts"]);
 });

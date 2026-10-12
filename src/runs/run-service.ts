@@ -791,6 +791,11 @@ export class RunService{
      * （ENDED）时驱动。Run 不在预期状态时静默忽略——Run 可能已被中断/终态化，
      * 此时工具阶段的迟回执不得覆盖终态事实。Worker 在工具执行中崩溃时收不到
      * ENDED，Run 停在 WAITING_TOOL，恢复扫描与 RUNNING 一样转 INTERRUPTED。
+     *
+     * 事件类型刻意用 TOOL_DISPATCHED/TOOL_SETTLED：这是"网关边界"事实，
+     * 与 RuntimeEventBridge 落下的 TOOL_STARTED/TOOL_COMPLETED（模型侧工具
+     * 调用时序与结果）不是同一件事。两者此前共用类型名，Worker 模式下同一个
+     * toolCallId 会重复落两条同类型事件（payload 形状还不同）。
      */
     markToolPhase(
         runId: string,
@@ -815,7 +820,7 @@ export class RunService{
                     eventId: crypto.randomUUID(),
                     runId,
                     sequence: this.store.getLastEventSequence(runId) + 1,
-                    type: "TOOL_STARTED",
+                    type: "TOOL_DISPATCHED",
                     timestamp,
                     payloadVersion: 1,
                     payload: info,
@@ -838,7 +843,7 @@ export class RunService{
                 eventId: crypto.randomUUID(),
                 runId,
                 sequence: this.store.getLastEventSequence(runId) + 1,
-                type: "TOOL_COMPLETED",
+                type: "TOOL_SETTLED",
                 timestamp,
                 payloadVersion: 1,
                 payload: info,

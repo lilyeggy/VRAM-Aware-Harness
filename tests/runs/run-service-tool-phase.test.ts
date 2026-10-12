@@ -50,12 +50,12 @@ test("markToolPhase STARTED/ENDED 在 RUNNING 与 WAITING_TOOL 间往返并记�
 
         const events = store.listEvents(run.id);
         const toolEvents = events.filter(
-            (event) => event.type === "TOOL_STARTED" || event.type === "TOOL_COMPLETED",
+            (event) => event.type === "TOOL_DISPATCHED" || event.type === "TOOL_SETTLED",
         );
 
         expect(toolEvents.map((event) => event.type)).toEqual([
-            "TOOL_STARTED",
-            "TOOL_COMPLETED",
+            "TOOL_DISPATCHED",
+            "TOOL_SETTLED",
         ]);
         expect(toolEvents.map((event) => event.payload)).toEqual([info, info]);
         expect(toolEvents.map((event) => event.sequence)).toEqual([3, 4]);
@@ -118,8 +118,8 @@ test("markToolPhase 在非预期状态下静默忽略迟到的阶段回执", () 
 
         const types = store.listEvents(run.id)
             .map((event) => event.type);
-        expect(types).not.toContain("TOOL_STARTED");
-        expect(types).not.toContain("TOOL_COMPLETED");
+        expect(types).not.toContain("TOOL_DISPATCHED");
+        expect(types).not.toContain("TOOL_SETTLED");
     } finally {
         db.close();
     }

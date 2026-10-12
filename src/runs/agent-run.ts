@@ -86,6 +86,13 @@ export type RunEventType =
     | "CONTROL_PREPARED"
     | "SESSION_INITIALIZED"
     | "TOOL_REQUESTED"
+    // 网关（治理桥）边界事实：副作用已放行 / 已结算。
+    // 与 RuntimeEventBridge 产生的 TOOL_STARTED/TOOL_COMPLETED/TOOL_FAILED 是两件
+    // 不同的事——后者是"模型这次工具调用的时序与结果"。此前两者共用同一组类型名，
+    // Worker 模式下同一个 toolCallId 会落下两条同类型事件（payload 形状还不同），
+    // 时间线无法解释，"这次工具调用发生过几次"这类判断也失去意义。
+    | "TOOL_DISPATCHED"
+    | "TOOL_SETTLED"
     | "TOOL_STARTED"
     | "TOOL_COMPLETED"
     | "TOOL_FAILED"
