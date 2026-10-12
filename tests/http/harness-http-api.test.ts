@@ -48,8 +48,9 @@ function createRun(
 function createApi(
     limits?: { maxUserInputChars: number },
     accessControl?: HttpAccessControl,
+    initialRun?: Partial<AgentRun>,
 ) {
-    let currentRun = createRun();
+    let currentRun = createRun(initialRun ?? {});
     let submittedInput:StartRunInput | null = null;
     let resumeInput:ResumeRunInput | null = null;
     let preparedExecutions: ToolExecution[] = [];
@@ -705,4 +706,50 @@ test("POST /runs 拒绝超长 idempotencyKey", async () => {
     expect(await response.json()).toEqual({
         error: "idempotencyKey 长度不能超过 200",
     });
+});
+
+test("终态/非 INTERRUPTED Run 的中断与恢复返回 409（而不是 500）", async () => {
+    const terminal = createApi(undefined, undefined, { status: "COMPLETED" });
+    const interruptTerminal = await terminal.api.fetch(new Request(
+        "http://harness.local/runs/run-http/interrupt",
+        { method: "POST" },
+    ));
+    expect(interruptTerminal.status).toBe(409);
+    expect(await jsonBody<{ error: string }>(interruptTerminal)).toMatchObject({
+        error: "终态 Run 不能中断：run-http",
+    });
+
+    const resumeTerminal = await terminal.api.fetch(new Request(
+        "http://harness.local/runs/run-http/resume",
+        {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ continuationInput: "继续" }),
+        },
+    ));
+    expect(resumeTerminal.status).toBe(409);
+    expect(await jsonBody<{ error: string }>(resumeTerminal)).toMatchObject({
+        error: "只有 INTERRUPTED 的 Run 可以恢复，当前状态：COMPLETED",
+    });
+
+    const running = createApi(undefined, undefined, { status: "RUNNING" });
+    const resumeRunning = await running.api.fetch(new Request(
+        "http://harness.local/runs/run-http/resume",
+        {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ continuationInput: "继续" }),
+        },
+    ));
+    expect(resumeRunning.status).toBe(409);
+    expect(await jsonBody<{ error: string }>(resumeRunning)).toMatchObject({
+        error: "只有 INTERRUPTED 的 Run 可以恢复，当前状态：RUNNING",
+    });
+
+    // RUNNING 的中断仍然允许
+    const interrupted = await running.api.fetch(new Request(
+        "http://harness.local/runs/run-http/interrupt",
+        { method: "POST" },
+    ));
+    expect(interrupted.status).toBe(200);
 });

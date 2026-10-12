@@ -190,7 +190,15 @@ async function interruptRun(
     runId: string,
     ctx: HttpRouteContext,
 ): Promise<Response> {
-    const { principal } = requireOwnedRun(request, runId, ctx, "RUN_INTERRUPT");
+    const { principal, run } = requireOwnedRun(request, runId, ctx, "RUN_INTERRUPT");
+
+    // 终态 Run 的中断是客户端可预期的冲突，不是服务端错误：显式 409，
+    // 否则会穿透到 HTTP 兜底变成 500「内部错误」（真机全流程实测）。
+    if (run.status === "COMPLETED" || run.status === "FAILED") {
+        ctx.auditResource("RUN", runId, "RUN_INTERRUPT", "DENY", principal.tenantId, "terminal_run");
+        throw new HttpError(409, `终态 Run 不能中断：${runId}`);
+    }
+
     ctx.auditResource("RUN", runId, "RUN_INTERRUPT", "ALLOW", principal.tenantId, "interrupt_requested");
     return jsonResponse({ run: await ctx.application.interruptRun(runId) });
 }
@@ -201,6 +209,13 @@ async function resumeRun(
     ctx: HttpRouteContext,
 ): Promise<Response> {
     const { principal, run } = requireOwnedRun(request, runId, ctx, "RUN_RESUME");
+
+    // 只有 INTERRUPTED 的 Run 可以恢复；其它状态（尤其终态）显式 409，
+    // 避免状态机异常穿透成 500「内部错误」（真机全流程实测）。
+    if (run.status !== "INTERRUPTED") {
+        ctx.auditResource("RUN", runId, "RUN_RESUME", "DENY", principal.tenantId, `not_interrupted:${run.status}`);
+        throw new HttpError(409, `只有 INTERRUPTED 的 Run 可以恢复，当前状态：${run.status}`);
+    }
 
     if (run.checkpointId === null) {
         ctx.auditResource("RUN", runId, "RUN_RESUME", "DENY", principal.tenantId, "no_checkpoint");
