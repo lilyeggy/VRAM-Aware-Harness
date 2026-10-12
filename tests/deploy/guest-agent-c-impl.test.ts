@@ -81,4 +81,14 @@ describe("静态 C guest agent（§9.8 v1.4 冷启动 O9）", () => {
         expect(ledger).toContain("docs/microvm-implementation-plan.md:228");
         expect(ledger).toContain("## 5.1 guest agent 构建与存量镜像切换");
     });
+
+    test("microvm 脚本首行是合法 shebang（生成时不能丢 # 号）", () => {
+        const expected = "#" + String.fromCharCode(33) + "/usr/bin/env bash";
+        for (const path of [
+            "scripts/microvm/patch-guest-rootfs-c-agent.sh",
+            "scripts/microvm/build-guest-rootfs.sh",
+        ]) {
+            expect(readText(path).split("\n")[0]).toBe(expected);
+        }
+    });
 });

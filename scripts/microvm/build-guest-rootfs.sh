@@ -1,4 +1,4 @@
-##!/usr/bin/env bash
+#!/usr/bin/env bash
 # 用法: build-guest-rootfs.sh <agentBinary> <outputRootfs.ext4> <outputWorkspaceTemplate.ext4>
 # 依赖: mkfs.ext4、debugfs 或挂载权限。禁止 sudo 交互——检测不到权限直接退出码 2。
 set -euo pipefail

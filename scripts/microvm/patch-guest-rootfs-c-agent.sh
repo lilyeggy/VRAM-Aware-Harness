@@ -1,4 +1,4 @@
-!/usr/bin/env bash
+#!/usr/bin/env bash
 # 给"已经存在"的 guest rootfs 换上仓库内的静态 C agent（guest/agent/agent.c）：
 # 写入 /agent/main，并把 /etc/inittab 的 socat respawn 行改成 ::respawn:/agent/main。
 #
