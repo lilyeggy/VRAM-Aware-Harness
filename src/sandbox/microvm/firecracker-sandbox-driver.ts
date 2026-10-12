@@ -54,6 +54,14 @@ export interface FirecrackerDriverConfig {
      * 后续同模板 VM 走 /snapshot/load 快速路径（约 10ms 级恢复）。
      */
     readonly snapshotsEnabled?: boolean;
+    /**
+     * 分阶段耗时追踪（默认读 HARNESS_VM_PHASE_TRACE=1）。
+     *
+     * 打开后每创建一台 VM 会往 stderr 打 `[vm-phase] <sandboxId> <阶段> <ms>`，
+     * 用于回答"快照恢复为什么不是几毫秒"这类问题：把磁盘复制、chown、进程启动、
+     * socket 等待、快照文件复制、/snapshot/load、vsock 握手逐段拆开。
+     */
+    readonly phaseTrace?: boolean;
     /** 快照池目录（默认 /var/lib/harness/snapshots）。 */
     readonly snapshotPoolDir?: string;
     /**
@@ -121,6 +129,7 @@ export class FirecrackerSandboxDriver implements MicrovmDriver {
     private readonly useJailer: boolean;
     private readonly snapshotsEnabled: boolean;
     private readonly guestAgentVersion: string;
+    private readonly phaseTrace: boolean;
     private readonly snapshotManager: VmSnapshotManager;
     private readonly runDirManager: VmRunDirectoryManager;
     private readonly uidAllocator = new VmUidAllocator();
@@ -173,6 +182,7 @@ export class FirecrackerSandboxDriver implements MicrovmDriver {
         this.guestAgentVersion = config.guestAgentVersion
             ?? process.env.HARNESS_GUEST_AGENT_VERSION
             ?? "1.0.0";
+        this.phaseTrace = config.phaseTrace ?? (process.env.HARNESS_VM_PHASE_TRACE === "1");
         this.snapshotManager = new VmSnapshotManager({
             ...(config.snapshotPoolDir !== undefined || process.env.HARNESS_VM_SNAPSHOT_POOL_DIR !== undefined
                 ? { snapshotPoolDir: config.snapshotPoolDir ?? process.env.HARNESS_VM_SNAPSHOT_POOL_DIR }
@@ -349,6 +359,13 @@ export class FirecrackerSandboxDriver implements MicrovmDriver {
         });
     }
 
+    private tracePhase(sandboxId: string, phase: string, startedAt: number): void {
+        if (this.phaseTrace === false) {
+            return;
+        }
+        console.error(`[vm-phase] ${sandboxId} ${phase} ${Date.now() - startedAt}ms`);
+    }
+
     async create(options: MicrovmCreateOptions): Promise<MicrovmInstance> {
         // 0. 产品边界门禁（先于一切环境检查）：
         // MicroVM 不提供网卡服务——绝不挂载任何 network-interfaces，
@@ -406,6 +423,7 @@ export class FirecrackerSandboxDriver implements MicrovmDriver {
 
         let proc: ChildProcess | undefined;
         let childStderr = "";
+        const createStartedAt = Date.now();
         try {
             let apiSocketOnHost: string;
             let vsockUdsOnHost: string;
@@ -425,6 +443,8 @@ export class FirecrackerSandboxDriver implements MicrovmDriver {
             // 本 Run 工作区磁盘在宿主上的真实路径（jailer 模式位于 chroot 内），
             // 创建成功后回传给调用方用于终止时导出。
             let workspaceDiskHostPath: string;
+            // 分阶段耗时追踪用的游标（见 tracePhase）
+            let phaseAt = Date.now();
             // jailer chroot 根（快照文件必须复制进 chroot 才能被降权后的
             // Firecracker 进程访问）；非 jailer 模式为 undefined。
             let chrootRootForVm: string | undefined;
@@ -449,14 +469,18 @@ export class FirecrackerSandboxDriver implements MicrovmDriver {
                 // 因此所有需要跨 jail 边界访问的东西一律放 chroot **根目录**。
 
                 // 异步复制到 chroot 内部
+                phaseAt = Date.now();
                 await copyFileReflink(this.kernelPath, resolve(chrootRoot, "kernel.bin"));
                 await copyFileReflink(this.rootfsPath, resolve(chrootRoot, "rootfs.ext4"));
                 await copyFileReflink(workspaceTemplate, resolve(chrootRoot, "workspace.ext4"));
+                this.tracePhase(options.id, "copy-disks", phaseAt);
 
                 // 4. 分配 UID/GID 并 chown
                 const { uid, gid } = this.uidAllocator.allocate(options.id);
+                phaseAt = Date.now();
                 const chownProc = Bun.spawn(["chown", "-R", `${uid}:${gid}`, chrootRoot]);
                 await chownProc.exited;
+                this.tracePhase(options.id, "chown-chroot", phaseAt);
 
                 apiSocketOnHost = resolve(chrootRoot, "firecracker.socket");
                 vsockUdsOnHost = resolve(chrootRoot, "vsock.sock");
@@ -474,6 +498,7 @@ export class FirecrackerSandboxDriver implements MicrovmDriver {
                 // 重挂为独立 tmpfs，放在其中的 socket 宿主完全无法访问。
                 const cgroupArgs = buildJailerCgroupArgs(vcpuCount, memoryMb);
 
+                phaseAt = Date.now();
                 proc = spawn(this.jailerPath, [
                     "--id", options.id,
                     "--exec-file", this.binaryPath,
@@ -490,8 +515,10 @@ export class FirecrackerSandboxDriver implements MicrovmDriver {
                 });
             } else {
                 // 非 jailer 运行模式 (私有目录直接运行)
+                phaseAt = Date.now();
                 await copyFileReflink(this.rootfsPath, dir.rootfsPath());
                 await copyFileReflink(workspaceTemplate, dir.workspaceDiskPath());
+                this.tracePhase(options.id, "copy-disks", phaseAt);
 
                 const sockets = this.allocateSocketPaths(options.id);
                 apiSocketOnHost = sockets.apiSocketPath;
@@ -502,6 +529,7 @@ export class FirecrackerSandboxDriver implements MicrovmDriver {
                 rootfsPathForApi = dir.rootfsPath();
                 workspacePathForApi = dir.workspaceDiskPath();
 
+                phaseAt = Date.now();
                 proc = spawn(this.binaryPath, ["--api-sock", apiSocketOnHost], {
                     stdio: ["ignore", "pipe", "pipe"],
                     detached: false,
@@ -529,11 +557,15 @@ export class FirecrackerSandboxDriver implements MicrovmDriver {
 
             // 6. 等待 API Socket 出现
             const maxWaitMs = 1500;
+            this.tracePhase(options.id, "spawn-process", phaseAt);
             const start = Date.now();
+            phaseAt = start;
             while (!existsSync(apiSocketOnHost) && Date.now() - start < maxWaitMs) {
                 if (proc.exitCode !== null || proc.signalCode !== null) break;
                 await new Promise((r) => setTimeout(r, 20));
             }
+            this.tracePhase(options.id, "api-socket-wait", phaseAt);
+            phaseAt = Date.now();
             if (!existsSync(apiSocketOnHost)) {
                 const exited = proc.exitCode !== null || proc.signalCode !== null;
                 const status = exited
@@ -582,6 +614,8 @@ export class FirecrackerSandboxDriver implements MicrovmDriver {
                     await copyFileReflink(poolPaths.memFilePath, memInChroot);
                     snapForApi = "/restore.snap";
                     memForApi = "/restore.mem";
+                    this.tracePhase(options.id, "copy-snapshot", phaseAt);
+                    phaseAt = Date.now();
                 }
                 await this.putSocket(apiSocketOnHost, "/snapshot/load", {
                     snapshot_path: snapForApi,
@@ -599,6 +633,8 @@ export class FirecrackerSandboxDriver implements MicrovmDriver {
                     },
                     resume_vm: true,
                 }, "PUT", 60_000);
+                this.tracePhase(options.id, "snapshot-load", phaseAt);
+                phaseAt = Date.now();
             } else {
                 // 冷启动路径：完整配置再开机。
                 await this.putSocket(apiSocketOnHost, "/boot-source", {
@@ -633,11 +669,15 @@ export class FirecrackerSandboxDriver implements MicrovmDriver {
                 await this.putSocket(apiSocketOnHost, "/actions", {
                     action_type: "InstanceStart",
                 });
+                this.tracePhase(options.id, "api-config-cold", phaseAt);
+                phaseAt = Date.now();
             }
 
             // 8. 建立 vsock agent 连接并握手（带重试：等待 guest 内核启动 + socat 监听）
             const vsockBridge = new FirecrackerVsockBridge(vsockUdsOnHost, this.vsockPort);
             await vsockBridge.connectWithRetry(20000, 250);
+            this.tracePhase(options.id, "vsock-handshake", phaseAt);
+            phaseAt = Date.now();
             this.vsockBridges.set(options.id, vsockBridge);
 
             // 9. 首次完整开机后制作黄金快照（pause → create → resume），
@@ -730,6 +770,8 @@ export class FirecrackerSandboxDriver implements MicrovmDriver {
                 }
             }
 
+            this.tracePhase(options.id, "make-snapshot", phaseAt);
+            this.tracePhase(options.id, "total", createStartedAt);
             return {
                 id: options.id,
                 driver: "firecracker",
