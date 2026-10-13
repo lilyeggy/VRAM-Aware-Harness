@@ -1,0 +1,200 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><title>Harness · 任务台（改版预览）</title>
+<style>
+:root{--bg:#0B0B0C;--panel:#121214;--panel2:#16171A;--line:#222327;--line2:#2C2E33;--fg:#E9E9EC;--fg2:#9BA1AB;--fg3:#6C727C;--accent:#7DD3FC;--ok:#4ADE80;--warn:#FBBF24;--bad:#F87171;--mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,monospace}
+*{box-sizing:border-box}html,body{margin:0;height:100%}
+body{background:var(--bg);color:var(--fg);font:13px/1.55 -apple-system,"PingFang SC","Helvetica Neue",sans-serif;-webkit-font-smoothing:antialiased}
+.shell{display:grid;grid-template-columns:246px minmax(0,1fr) 372px;height:100vh}
+.rail{border-right:1px solid var(--line);background:#0E0E10;display:flex;flex-direction:column;min-height:0}
+.rb{padding:12px 12px 10px;display:flex;align-items:center;gap:9px;border-bottom:1px solid var(--line)}
+.logo{width:20px;height:20px;border-radius:5px;background:linear-gradient(140deg,#7DD3FC,#4F46E5);flex:0 0 auto}
+.brand b{font-size:12.5px;letter-spacing:.02em}.brand small{display:block;color:var(--fg3);font-size:10.5px}
+.tabs{display:flex;gap:2px;padding:8px 10px 6px}
+.tab{flex:1;text-align:center;padding:5px 0;font-size:11.5px;color:var(--fg2);border-radius:6px}
+.tab.on{background:var(--panel2);color:var(--fg);box-shadow:inset 0 0 0 1px var(--line2)}
+.newtask{margin:6px 10px 10px;padding:7px 10px;border-radius:7px;border:1px solid var(--line2);background:#191A1E;font-size:12px;display:flex;align-items:center;gap:7px}
+.newtask kbd{margin-left:auto;font:10px var(--mono);color:var(--fg3);border:1px solid var(--line2);border-radius:4px;padding:1px 4px}
+.wsbar{margin:0 10px 8px;padding:6px 8px;border-radius:7px;background:var(--panel);border:1px solid var(--line);font-size:11.5px;color:var(--fg2);display:flex;align-items:center;gap:6px}
+.wsbar b{color:var(--fg);font-weight:600}
+.dot{width:6px;height:6px;border-radius:50%;background:var(--fg3);flex:0 0 auto}
+.dot.run{background:var(--ok);box-shadow:0 0 0 3px rgba(74,222,128,.14)}.dot.queue{background:var(--warn)}.dot.done{background:#4B5563}.dot.ask{background:var(--accent)}
+.list{overflow:auto;padding:0 8px 8px;flex:1;min-height:0}
+.glabel{color:var(--fg3);font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;padding:12px 6px 5px}
+.card{padding:8px 9px;border-radius:8px;border:1px solid transparent;margin-bottom:3px}
+.card.on{background:#181A1E;border-color:var(--line2)}
+.card .t{font-size:12.2px;line-height:1.4;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.card .m{margin-top:5px;display:flex;align-items:center;gap:7px;color:var(--fg3);font-size:10.5px}
+.card .m .st{color:var(--ok)}.card .m .st.q{color:var(--warn)}.card .m .st.a{color:var(--accent)}
+.tag{font:10px var(--mono);border:1px solid var(--line2);border-radius:4px;padding:0 4px;color:var(--fg2)}
+.railfoot{border-top:1px solid var(--line);padding:8px 10px;display:flex;align-items:center;gap:8px;font-size:11px;color:var(--fg2)}
+.av{width:20px;height:20px;border-radius:50%;background:#25272C;display:grid;place-items:center;font-size:10px;color:var(--fg)}
+.center{display:flex;flex-direction:column;min-width:0;min-height:0;background:var(--bg)}
+.chead{border-bottom:1px solid var(--line);padding:13px 22px 11px;background:linear-gradient(180deg,#101012,#0B0B0C);position:relative}
+.chead h1{margin:0;font-size:15.5px;font-weight:600;letter-spacing:.01em}
+.chips{margin-top:9px;display:flex;flex-wrap:wrap;gap:6px}
+.chip{display:inline-flex;align-items:center;gap:5px;padding:2.5px 8px;border-radius:999px;border:1px solid var(--line2);background:#141518;font:11px var(--mono);color:var(--fg2)}
+.chip b{color:var(--fg);font-weight:600}
+.chip.g{border-color:#1F3D2A;background:#0F1A14;color:#8FE0AE}
+.actions{position:absolute;right:22px;top:14px;display:flex;gap:6px}
+.btn{font-size:11.5px;padding:4px 9px;border-radius:6px;border:1px solid var(--line2);background:#17181C;color:var(--fg2)}
+.stream{flex:1;overflow:auto;padding:16px 22px 8px}
+.ev{display:grid;grid-template-columns:22px minmax(0,1fr);gap:10px;margin-bottom:12px}
+.gut{display:flex;flex-direction:column;align-items:center;color:var(--fg3)}
+.gut i{width:16px;height:16px;border-radius:5px;background:var(--panel2);border:1px solid var(--line2);display:grid;place-items:center;font-size:9px;font-style:normal}
+.gut s{flex:1;width:1px;background:var(--line);text-decoration:none;margin-top:4px}
+.box{border:1px solid var(--line);border-radius:9px;background:var(--panel);overflow:hidden}
+.box .bh{padding:7px 10px;display:flex;align-items:center;gap:8px;font-size:11.5px;color:var(--fg2);border-bottom:1px solid var(--line)}
+.box .bh b{color:var(--fg);font-weight:600}
+.box .bh .r{margin-left:auto;font:10.5px var(--mono);color:var(--fg3)}
+.term{background:#0C0D0F;padding:9px 11px;font:11.5px/1.6 var(--mono);white-space:pre-wrap;color:#CBD5E1}
+.term .c{color:var(--fg3)}.term .g{color:#86EFAC}
+.think{padding:8px 11px;font-size:12px;color:var(--fg2);font-style:italic;background:#101114;border-left:2px solid var(--line2)}
+.think .more{color:var(--accent);font-style:normal;font-size:11px}
+.diff{padding:8px 11px;font:11.5px/1.6 var(--mono)}
+.diff .a{color:#86EFAC}.diff .d{color:#FCA5A5}
+.art{padding:9px 11px;display:flex;align-items:center;gap:9px;font-size:12px}
+.art .fn{font:12px var(--mono)}.art .sz{color:var(--fg3);font-size:11px}
+.art .dl{margin-left:auto;font-size:11px;border:1px solid var(--line2);border-radius:6px;padding:3px 8px;color:var(--fg2)}
+.answer{padding:2px 2px 4px}
+.answer h3{margin:2px 0 8px;font-size:13.5px}
+.answer p{margin:0 0 9px;color:#D6D9DE}
+.answer table{border-collapse:collapse;width:100%;font-size:12px;margin:0 0 10px}
+.answer th,.answer td{border-bottom:1px solid var(--line);padding:5px 8px;text-align:left}
+.answer th{color:var(--fg2);font-weight:600;font-size:11px;background:#101114}
+.answer code{font:11.5px var(--mono);background:#17181C;border:1px solid var(--line);border-radius:4px;padding:1px 4px}
+.ask{border-color:#3A3420;background:#191609}.ask .bh{border-bottom-color:#3A3420}
+.composer{border-top:1px solid var(--line);padding:11px 22px 14px;background:#0C0C0E}
+.cwrap{border:1px solid var(--line2);border-radius:11px;background:#141518;padding:10px 11px}
+.cwrap .ph{color:var(--fg3);font-size:12.5px}
+.cfoot{margin-top:9px;display:flex;align-items:center;gap:8px;font-size:11px;color:var(--fg3)}
+.cfoot .sp{margin-left:auto;display:flex;gap:7px;align-items:center}
+.send{width:26px;height:26px;border-radius:7px;background:var(--fg);display:grid;place-items:center;color:#0B0B0C;font-size:13px}
+.drawer{border-left:1px solid var(--line);background:#0E0E10;overflow:auto}
+.dsec{padding:13px 14px;border-bottom:1px solid var(--line)}
+.dsec h4{margin:0 0 9px;font-size:11px;letter-spacing:.07em;text-transform:uppercase;color:var(--fg3)}
+.tl{font:11.5px var(--mono)}
+.tl div{display:flex;gap:8px;padding:3px 0;color:var(--fg2)}
+.tl div b{color:var(--fg);font-weight:500;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tl div s{color:var(--fg3);text-decoration:none}
+.kv{display:grid;grid-template-columns:88px minmax(0,1fr);gap:4px 8px;font-size:11.5px;margin:0}
+.kv dt{color:var(--fg3)}.kv dd{margin:0;font:11.5px var(--mono);color:var(--fg)}
+.ok{color:#8FE0AE}.no{color:#FCA5A5}
+.hash{font:10.5px var(--mono);color:var(--fg2);word-break:break-all}
+</style></head><body>
+<div class="shell">
+<aside class="rail">
+<div class="rb"><div class="logo"></div><div class="brand"><b>Harness</b><small>任务台 · 实验室内网</small></div></div>
+<div class="tabs"><div class="tab on">任务</div><div class="tab">产物</div><div class="tab">审计</div></div>
+<div class="newtask">＋ 新建任务 <kbd>⌘K</kbd></div>
+<div class="wsbar"><span class="dot run"></span><b>ws-default</b><span>· 个人助手工作区</span></div>
+<div class="list">
+<div class="glabel">进行中</div>
+<div class="card on"><div class="t">分析 images 下的模板盘，输出一份容量报告</div>
+<div class="m"><span class="st">● 运行中</span><span>12s</span><span class="tag">bash</span></div></div>
+<div class="card"><div class="t">把 build 目录里的日志按日期归档到 workspace/logs</div>
+<div class="m"><span class="st q">● 排队中</span><span>队列 #1</span></div></div>
+<div class="glabel">今天</div>
+<div class="card"><div class="t">检查根盘占用并给出清理建议</div>
+<div class="m"><span class="st">● 已完成</span><span>8.4s</span><span class="tag">2 产物</span></div></div>
+<div class="card"><div class="t">统计 workspace 里所有 .ts 文件行数</div>
+<div class="m"><span class="st">● 已完成</span><span>5.1s</span><span class="tag">1 产物</span></div></div>
+<div class="card"><div class="t">删除 /workspace 下的临时文件</div>
+<div class="m"><span class="st a">◆ 待你确认</span><span>未知副作用</span></div></div>
+<div class="glabel">更早</div>
+<div class="card"><div class="t">写一个把 ext4 镜像布局打印成表格的脚本</div>
+<div class="m"><span class="st">● 已完成</span><span>35s</span><span class="tag">3 产物</span></div></div>
+</div>
+<div class="railfoot"><div class="av">C</div><span>cxr@lab.local</span><span style="margin-left:auto">池 2/2 热</span></div>
+</aside>
+<main class="center">
+<div class="chead">
+<h1>分析 images 下的模板盘，输出一份容量报告</h1>
+<div class="chips">
+<span class="chip g"><span class="dot run"></span>运行中 <b>12s</b></span>
+<span class="chip">沙箱 <b>热恢复 98ms</b></span>
+<span class="chip">隔离 <b>jailer · seccomp · Landlock</b></span>
+<span class="chip">网络 <b class="no">已拒绝</b></span>
+<span class="chip">租约 <b>30s</b></span>
+<span class="chip">重试 <b>0</b></span>
+</div>
+<div class="actions"><button class="btn">产物 2</button><button class="btn">事件</button><button class="btn">中断</button></div>
+</div>
+<div class="stream">
+<div class="ev"><div class="gut"><i>思</i><s></s></div>
+<div class="box"><div class="think">先确认工作区里到底有什么，再决定统计口径：容器层、templates 磁盘与日志目录分开看。<span class="more">展开</span></div></div></div>
+<div class="ev"><div class="gut"><i>$</i><s></s></div>
+<div class="box">
+<div class="bh"><b>bash</b><span>查看工作区结构</span><span class="r">exit 0 · 141ms</span></div>
+<div class="term"><span class="c">$</span> ls -la /workspace &amp;&amp; du -sh /workspace
+total 24
+drwxr-xr-x  4 agent agent 4096 Oct 13 01:20 .
+drwxr-xr-x  3 root  root  4096 Oct 13 01:20 ..
+drwxr-xr-x  2 agent agent 4096 Oct 13 01:20 images
+drwxr-xr-x  2 agent agent 4096 Oct 13 01:19 logs
+<span class="g">4.0K</span>  /workspace</div>
+</div></div>
+<div class="ev"><div class="gut"><i>±</i><s></s></div>
+<div class="box">
+<div class="bh"><b>write</b><span>disk-report.md</span><span class="r">+42 行</span></div>
+<div class="diff"><span class="a">+ ## 模板盘容量</span>
+<span class="a">+ | 文件 | 大小 | 已用 | 说明 |</span>
+<span class="a">+ | workspace-template.ext4 | 128 MiB | 0.4% | 由 rsync 模板复制而来 |</span></div>
+</div></div>
+<div class="ev"><div class="gut"><i>±</i><s></s></div>
+<div class="box">
+<div class="bh"><b>文件变更</b><span>工作区 diff</span><span class="r">1 新增 · 1 修改</span></div>
+<div class="diff">~ disk-report.md  <span class="a">+42</span> <span class="d">-0</span>
+~ tmp/scan.log     <span class="a">+9</span>  <span class="d">-0</span></div>
+</div></div>
+<div class="ev"><div class="gut"><i>◆</i><s></s></div>
+<div class="box">
+<div class="bh"><b>产物</b><span>本轮交付</span><span class="r">2 个 · 3.4 KB</span></div>
+<div class="art"><span class="fn">disk-report.md</span><span class="sz">2.1 KB</span><span class="dl">下载</span></div>
+<div class="art" style="border-top:1px solid var(--line)"><span class="fn">tmp/scan.log</span><span class="sz">1.3 KB</span><span class="dl">下载</span></div>
+</div></div>
+<div class="ev"><div class="gut"><i>◆</i><s></s></div>
+<div class="box ask">
+<div class="bh"><b>需要你确认</b><span>未知副作用：删除文件</span><span class="r">等待中</span></div>
+<div class="art">命令 <span class="fn">rm -rf /workspace/tmp</span> 无法判定副作用，已暂停。<span class="dl">批准</span><span class="dl">拒绝</span></div>
+</div></div>
+<div class="ev"><div class="gut"><i>答</i></div>
+<div class="answer">
+<h3>容量报告已生成</h3>
+<p>三处主要占用如下，<code>workspace-template.ext4</code> 仍是稀疏盘，实际写入仅 512 KiB。</p>
+<table><tr><th>位置</th><th>大小</th><th>已用</th></tr>
+<tr><td>workspace-template.ext4</td><td>128 MiB</td><td>0.4%</td></tr>
+<tr><td>rootfs.ext4</td><td>256 MiB</td><td>62.1%</td></tr>
+<tr><td>/data/harness/logs</td><td>—</td><td>1.2 GiB</td></tr></table>
+<p>建议保留模板盘不动，日志目录按周轮转。</p>
+</div></div>
+</div>
+<div class="composer">
+<div class="cwrap">
+<div class="ph">继续交代任务…（⌘↵ 发送，Shift+↵ 换行）</div>
+<div class="cfoot"><span class="chip">工作区 <b>ws-default</b></span><span class="chip">思考 <b>中等</b></span>
+<span class="sp"><span>Enter 发送</span><div class="send">↑</div></span></div>
+</div>
+</div>
+</main>
+<aside class="drawer">
+<div class="dsec"><h4>本次运行</h4>
+<dl class="kv"><dt>Run</dt><dd>7f3c1a92</dd><dt>尝试</dt><dd>1 / 3</dd><dt>状态</dt><dd class="ok">RUNNING</dd><dt>开始</dt><dd>01:20:41</dd><dt>沙箱</dt><dd>52e-b8d1</dd></dl></div>
+<div class="dsec"><h4>事件时间线</h4>
+<div class="tl">
+<div><b>RUN_STARTED</b><s>+0ms</s></div>
+<div><b>POLICY_SNAPSHOT</b><s>+4ms</s></div>
+<div><b>SANDBOX_ACQUIRED</b><s>+98ms</s></div>
+<div><b>TOOL_COMPLETED bash</b><s>+141ms</s></div>
+<div><b>TOOL_COMPLETED write</b><s>+63ms</s></div>
+<div><b>RUN_ARTIFACTS_READY</b><s>+12ms</s></div>
+<div><b>RUNNING…</b><s>—</s></div>
+</div></div>
+<div class="dsec"><h4>隔离与策略快照</h4>
+<dl class="kv"><dt>网络</dt><dd class="no">拒绝（deny any）</dd><dt>文件系统</dt><dd>workspace 读写</dd><dt>jailer</dt><dd class="ok">on（uid 1004）</dd><dt>seccomp</dt><dd class="ok">on</dd><dt>Landlock</dt><dd class="ok">abi 4</dd><dt>资源</dt><dd>2 vCPU · 512 MiB</dd><dt>工具策略</dt><dd>bash ／ write ／ read</dd></dl></div>
+<div class="dsec"><h4>审计链</h4>
+<div class="hash">hash 8776f2c1…9a4e<br>prev 4a1c07d3…11bd<br>链式校验 <span class="ok">通过</span></div></div>
+<div class="dsec"><h4>工作区</h4>
+<dl class="kv"><dt>路径</dt><dd>/workspace</dd><dt>持久化</dt><dd class="ok">跨 Run 保留</dd><dt>种子</dt><dd>宿主目录播种 · 冷启</dd></dl></div>
+</aside>
+</div>
+</body></html>
