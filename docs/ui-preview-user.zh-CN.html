@@ -1,0 +1,219 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Harness · 个人助手（界面预览）</title>
+<style>
+:root{--bg:#FBFBFA;--surface:#FFFFFF;--soft:#F7F7F9;--line:#E9E9EC;--line2:#F1F1F3;--fg:#17171B;--fg2:#5C5D66;--fg3:#8B8C95;--acc:#4F46E5;--acc2:#7C3AED;--ok:#0F9D58;--warn:#C2410C;--mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,monospace;--sh:0 1px 2px rgba(16,17,20,.04),0 8px 24px -12px rgba(16,17,20,.14);--sh2:0 1px 2px rgba(16,17,20,.05),0 18px 40px -22px rgba(16,17,20,.30)}
+*{box-sizing:border-box}html,body{margin:0;height:100%}
+body{background:var(--bg);color:var(--fg);font:14px/1.6 -apple-system,"PingFang SC","Helvetica Neue",system-ui,sans-serif;-webkit-font-smoothing:antialiased}
+.app{display:grid;grid-template-columns:264px minmax(0,1fr);height:100vh}
+.app.open{grid-template-columns:264px minmax(0,1fr) 356px}
+.app .drawer{display:none}.app.open .drawer{display:block}
+.side{border-right:1px solid var(--line);background:#FCFCFD;display:flex;flex-direction:column;min-height:0}
+.brand{display:flex;align-items:center;gap:10px;padding:18px 16px 14px}
+.logo{width:26px;height:26px;border-radius:9px;background:linear-gradient(135deg,#6366F1,#8B5CF6 55%,#EC4899);box-shadow:0 3px 10px -3px rgba(99,102,241,.6)}
+.brand b{font-size:14px;letter-spacing:-.01em}.brand span{display:block;font-size:11px;color:var(--fg3)}
+.newtask{margin:0 12px 14px;display:flex;align-items:center;gap:8px;padding:9px 12px;border-radius:12px;background:#17171B;color:#fff;font-size:13px;font-weight:500;box-shadow:var(--sh)}
+.newtask kbd{margin-left:auto;font:10.5px var(--mono);background:rgba(255,255,255,.14);border-radius:5px;padding:1px 5px}
+.sectlbl{padding:10px 18px 6px;font-size:10.5px;letter-spacing:.09em;text-transform:uppercase;color:var(--fg3)}
+.tasks{padding:0 10px;display:flex;flex-direction:column;gap:2px;overflow:auto;flex:1;min-height:0}
+.task{padding:9px 10px;border-radius:12px;border:1px solid transparent}
+.task.on{background:#fff;border-color:var(--line);box-shadow:0 1px 2px rgba(16,17,20,.05)}
+.task .tt{display:block;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.task .tm{margin-top:4px;display:flex;align-items:center;gap:6px;font-size:11.5px;color:var(--fg3)}
+.dot{width:6px;height:6px;border-radius:50%;background:var(--fg3)}
+.dot.run{background:var(--acc);box-shadow:0 0 0 3px rgba(79,70,229,.12)}
+.dot.wait{background:#F59E0B}.dot.ask{background:var(--warn)}
+.me{border-top:1px solid var(--line);padding:12px 14px;display:flex;align-items:center;gap:9px;font-size:12.5px}
+.av{width:26px;height:26px;border-radius:50%;background:linear-gradient(135deg,#ECECF1,#DCDCE3);display:grid;place-items:center;font-size:11px;font-weight:600;color:#42434B}
+.me b{font-weight:500;display:block}.me span.sm{display:block;font-size:11px;color:var(--fg3)}
+.me .gear{margin-left:auto;color:var(--fg3);font-size:14px}
+.main{display:flex;flex-direction:column;min-width:0;min-height:0;background:linear-gradient(180deg,#FFFFFF,#FDFDFE)}
+.topbar{display:flex;align-items:center;gap:12px;padding:15px 30px;border-bottom:1px solid var(--line2);background:rgba(255,255,255,.88);backdrop-filter:blur(10px)}
+.topbar h1{margin:0;font-size:16px;font-weight:600;letter-spacing:-.012em}
+.topbar .sub{margin-top:3px;font-size:11.5px;color:var(--fg3)}
+.tbr{margin-left:auto;display:flex;align-items:center;gap:9px}
+.pill{display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:999px;font-size:11.5px;border:1px solid var(--line);background:#fff;color:var(--fg2)}
+.pill.run{border-color:rgba(79,70,229,.22);background:rgba(79,70,229,.06);color:#3F38C7;font-weight:500}
+.pill.soft{background:var(--soft);border-color:var(--line2)}
+.ghost{font-size:12.5px;color:var(--fg2);border:1px solid var(--line);background:#fff;border-radius:10px;padding:5px 12px;box-shadow:0 1px 2px rgba(16,17,20,.04)}
+.scroll{flex:1;overflow:auto;min-height:0}
+.wrap{max-width:772px;margin:0 auto;padding:28px 30px 44px}
+.usermsg{margin-left:auto;max-width:82%;background:#F4F4F5;border-radius:16px;padding:11px 15px;font-size:14px;color:#26262B}
+.steps{margin-top:24px;border:1px solid var(--line2);border-radius:16px;background:var(--surface);box-shadow:var(--sh);overflow:hidden}
+.step{display:grid;grid-template-columns:26px minmax(0,1fr);gap:11px;padding:13px 16px;border-bottom:1px solid var(--line2)}
+.step:last-child{border-bottom:0}
+.si{width:22px;height:22px;border-radius:50%;background:rgba(15,157,88,.10);color:var(--ok);display:grid;place-items:center;font-size:11px;font-weight:700;margin-top:1px}
+.si.now{background:rgba(79,70,229,.10);color:var(--acc)}
+.sh{display:flex;align-items:center;gap:9px;font-size:13.5px}
+.sh b{font-weight:500}.sh em{font-style:normal;font-size:11.5px;color:var(--fg3)}
+.sh .tg{margin-left:auto;font-size:11.5px;color:var(--acc);font-weight:500}
+.sysblock{margin-top:10px;background:var(--soft);border:1px solid var(--line2);border-radius:12px;padding:11px 13px;font:12px/1.7 var(--mono);color:#4A4B53;white-space:pre-wrap}
+.sysblock i{color:#8B8C95;font-style:normal}.sysblock u{color:var(--ok);text-decoration:none}
+.artcard{margin-top:16px;border:1px solid var(--line2);background:#fff;border-radius:16px;padding:7px;box-shadow:var(--sh)}
+.ah{padding:9px 12px 5px;font-size:11.5px;color:var(--fg3)}
+.file{display:flex;align-items:center;gap:11px;padding:10px 12px;border-radius:12px}
+.fi{width:32px;height:32px;border-radius:9px;background:linear-gradient(135deg,#EEF0FF,#E4E7FF);color:var(--acc);display:grid;place-items:center;font:10.5px var(--mono);font-weight:600}
+.file b{font-size:13.5px;font-weight:500}.file .sm{display:block;font-size:11.5px;color:var(--fg3);font-weight:400}
+.dl{margin-left:auto;font-size:12px;color:var(--acc);border:1px solid rgba(79,70,229,.25);background:rgba(79,70,229,.05);border-radius:9px;padding:4px 11px}
+.ask{margin-top:16px;border:1px solid #F2E3CB;background:linear-gradient(180deg,#FFFBF3,#FFFDFA);border-radius:16px;padding:15px 17px;box-shadow:var(--sh)}
+.ask h4{margin:0 0 5px;font-size:13.5px;font-weight:600}
+.ask p{margin:0;font-size:12.5px;color:var(--fg2)}
+.ask .btns{margin-top:12px;display:flex;gap:8px}
+.btnp{background:#17171B;color:#fff;border-radius:10px;padding:6px 15px;font-size:12.5px;font-weight:500}
+.btng{border:1px solid var(--line);background:#fff;border-radius:10px;padding:6px 15px;font-size:12.5px;color:var(--fg2)}
+.answer{margin-top:26px}
+.answer h2{margin:0 0 9px;font-size:15.5px;font-weight:600;letter-spacing:-.012em}
+.answer p{margin:0 0 13px;color:#33343B;line-height:1.78}
+.answer code{font:12.5px var(--mono);background:#F4F4F6;border-radius:6px;padding:1.5px 5px;color:#3F40C4}
+.tbl{border:1px solid var(--line2);border-radius:14px;overflow:hidden;background:#fff;box-shadow:0 1px 2px rgba(16,17,20,.04)}
+.tbl table{width:100%;border-collapse:collapse;font-size:13px}
+.tbl th{background:#FAFAFB;color:var(--fg2);font-weight:500;font-size:11.5px;text-align:left;padding:9px 12px;border-bottom:1px solid var(--line2)}
+.tbl td{padding:10px 12px;border-bottom:1px solid var(--line2);color:#33343B}
+.tbl tr:last-child td{border-bottom:0}
+.num{font:12.5px var(--mono)}
+.composer{margin-top:28px;border:1px solid var(--line);border-radius:18px;background:#fff;box-shadow:var(--sh2);padding:15px 17px}
+.cin{font-size:14px;color:var(--fg3)}
+.cfoot{margin-top:13px;display:flex;align-items:center;gap:8px}
+.send{margin-left:auto;width:30px;height:30px;border-radius:50%;background:linear-gradient(135deg,#4F46E5,#7C3AED);color:#fff;display:grid;place-items:center;font-size:14px;box-shadow:0 6px 16px -6px rgba(79,70,229,.65)}
+.hint{margin-top:11px;text-align:center;font-size:11.5px;color:var(--fg3)}
+.drawer{border-left:1px solid var(--line);background:#FCFCFD;overflow:auto;min-height:0}
+.dsec{padding:18px;border-bottom:1px solid var(--line2)}
+.dsec h4{margin:0 0 13px;font-size:10.5px;letter-spacing:.09em;text-transform:uppercase;color:var(--fg3);font-weight:600}
+.rows{display:flex;flex-direction:column;gap:10px}
+.row{display:flex;justify-content:space-between;gap:12px;font-size:13px}
+.row i{font-style:normal;color:var(--fg3)}.row b{font-weight:500}
+.tl{display:flex;flex-direction:column;gap:11px;font-size:12.5px}
+.tl div{display:flex;align-items:center;gap:9px}
+.tl .d{width:7px;height:7px;border-radius:50%;background:rgba(15,157,88,.85)}
+.tl .d.now{background:var(--acc);box-shadow:0 0 0 3px rgba(79,70,229,.12)}
+.tl b{font-weight:500;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tl s{color:var(--fg3);text-decoration:none;font:11.5px var(--mono)}
+.tech{margin-top:12px;font:11.5px/1.8 var(--mono);color:var(--fg3);background:var(--soft);border-radius:11px;padding:10px 11px}
+</style></head><body>
+<div class="app open" id="app">
+<aside class="side">
+<div class="brand"><div class="logo"></div><div><b>Harness</b><span>个人助手</span></div></div>
+<div class="newtask">＋ 交给助手一件事 <kbd>⌘K</kbd></div>
+<div class="sectlbl">今天</div>
+<div class="tasks">
+<div class="task on"><span class="tt">模板盘与日志的容量报告</span><span class="tm"><i class="dot run"></i>正在执行 · 12 秒</span></div>
+<div class="task"><span class="tt">把 build 日志按日期归档</span><span class="tm"><i class="dot wait"></i>排队中 · 前面还有 1 个</span></div>
+<div class="task"><span class="tt">检查根盘占用并给清理建议</span><span class="tm"><i class="dot"></i>已完成 · 8.4 秒 · 2 个文件</span></div>
+<div class="task"><span class="tt">统计工作区里所有 .ts 文件行数</span><span class="tm"><i class="dot"></i>已完成 · 5.1 秒</span></div>
+<div class="task"><span class="tt">删除工作区里的临时文件</span><span class="tm"><i class="dot ask"></i>等你确认</span></div>
+<div class="sectlbl">更早</div>
+<div class="task"><span class="tt">写个脚本打印 ext4 镜像布局</span><span class="tm"><i class="dot"></i>已完成 · 35 秒 · 3 个文件</span></div>
+</div>
+<div class="me"><div class="av">C</div><div><b>cxr@lab.local</b><span class="sm">实验室内网</span></div><span class="gear">⚙</span></div>
+</aside>
+<main class="main">
+<div class="topbar">
+<div><h1>模板盘与日志的容量报告</h1><div class="sub">8 分钟前 · 工作区 ws-default</div></div>
+<div class="tbr"><span class="pill run"><i class="dot run"></i>正在执行 · 12 秒</span><button class="ghost">详情</button></div>
+</div>
+<div class="scroll"><div class="wrap">
+<div class="usermsg">分析 /workspace/images 下的模板盘和日志目录，给我一份容量报告。</div>
+<div class="steps">
+<div class="step"><div class="si">✓</div><div><div class="sh"><b>查看了工作区结构</b><em>0.14 秒</em><span class="tg">技术细节</span></div>
+<div class="sysblock"><i>$</i> ls -la /workspace <u>4.0K</u> images/  logs/
+<i>3 个目录 · 1 个文件</i></div></div></div>
+<div class="step"><div class="si">✓</div><div><div class="sh"><b>读取了镜像与日志的占用</b><em>2.3 秒</em></div></div></div>
+<div class="step"><div class="si">✓</div><div><div class="sh"><b>写了报告文件</b><em>disk-report.md · 新增 42 行</em></div></div></div>
+<div class="step"><div class="si now">→</div><div><div class="sh"><b>正在整理结论</b><em>用时可忽略</em></div></div></div>
+</div>
+<div class="artcard">
+<div class="ah">本轮交付 2 个文件</div>
+<div class="file"><div class="fi">MD</div><div><b>disk-report.md</b><span class="sm">2.1 KB · 工作区根目录</span></div><span class="dl">下载</span></div>
+<div class="file"><div class="fi">LOG</div><div><b>scan.log</b><span class="sm">1.3 KB · 扫描过程记录</span></div><span class="dl">下载</span></div>
+</div>
+<div class="ask">
+<h4>需要你确认一下</h4>
+<p>助手想删除 <code>workspace/tmp</code>（清理扫描临时文件）。删除操作无法撤销，需要你点头。</p>
+<div class="btns"><span class="btnp">允许删除</span><span class="btng">换个方式</span></div>
+</div>
+<article class="answer">
+<h2>容量报告已生成</h2>
+<p>三处主要占用如下。<code>workspace-template.ext4</code> 是稀疏盘，标称 128 MiB 但实际只写了 512 KiB，暂时不用管。</p>
+<div class="tbl"><table>
+<tr><th>位置</th><th>标称大小</th><th>实际已用</th></tr>
+<tr><td>workspace-template.ext4</td><td class="num">128 MiB</td><td class="num">0.4%</td></tr>
+<tr><td>rootfs.ext4</td><td class="num">256 MiB</td><td class="num">62.1%</td></tr>
+<tr><td>/data/harness/logs</td><td class="num">—</td><td class="num">1.2 GiB</td></tr>
+</table></div>
+<p>建议：模板盘保持不动；日志目录按周轮转，超过 30 天的可以清掉。需要我直接写一个轮转脚本吗？</p>
+</article>
+<div class="composer">
+<div class="cin">继续交给助手一件事…</div>
+<div class="cfoot"><span class="pill soft">工作区 ws-default</span><span class="pill soft">思考 · 中等</span><span class="send">↑</span></div>
+</div>
+<p class="hint">助手在隔离沙箱里干活，文件都留在你的工作区；需要联网的操作会被拒绝。</p>
+</div></div>
+</main>
+<aside class="drawer" id="drawer">
+<div class="dsec"><h4>这次执行</h4><div class="rows">
+<div class="row"><i>状态</i><b class="ok">正在执行 · 12 秒</b></div>
+<div class="row"><i>工作区</i><b>ws-default</b></div>
+<div class="row"><i>沙箱</i><b>已隔离</b></div>
+<div class="row"><i>网络</i><b>已禁止</b></div>
+</div></div>
+<div class="dsec"><h4>执行步骤</h4><div class="tl">
+<div><span class="d"></span><b>任务开始</b><s>+0ms</s></div>
+<div><span class="d"></span><b>准备隔离环境</b><s>+98ms</s></div>
+<div><span class="d"></span><b>查看工作区结构</b><s>+141ms</s></div>
+<div><span class="d"></span><b>读取目录占用</b><s>+2.3s</s></div>
+<div><span class="d"></span><b>写入报告</b><s>+63ms</s></div>
+<div><span class="d now"></span><b>整理结论中</b><s>—</s></div>
+</div></div>
+<div class="dsec"><h4>文件</h4><div class="rows">
+<div class="row"><i>交付</i><b>2 个 · 3.4 KB</b></div>
+<div class="row"><i>改动</i><b>1 个文件 · +42 行</b></div>
+<div class="row"><i>保存位置</i><b>工作区根目录</b></div>
+</div></div>
+<div class="dsec"><h4>安全</h4><div class="rows">
+<div class="row"><i>联网</i><b>被拒绝</b></div>
+<div class="row"><i>文件访问</i><b>仅你的工作区</b></div>
+<div class="row"><i>任务结束后</i><b>环境销毁</b></div>
+</div><div class="tech">jailer uid 1004 · seccomp on · Landlock abi 4
+热恢复 98ms · 审计 hash 8776f2c1…9a4e · 校验通过</div></div>
+</aside>
+</div>
+<script>
+(function(){
+  var app=document.getElementById('app');
+  var opened=(location.hash.indexOf('drawer')>=0);
+  app.className = opened ? 'app open' : 'app';
+  document.querySelector('.ghost').addEventListener('click',function(){
+    app.className = (app.className.indexOf('open')>=0) ? 'app' : 'app open';
+  });
+  if(location.search.indexOf('audit')<0){return;}
+  function pathOf(el){
+    var p=[],e=el;
+    while(e&&e.parentElement){
+      var s=e.tagName.toLowerCase();
+      if(e.id){s=s+'#'+e.id;}
+      else if(typeof e.className==='string'&&e.className.trim()){s=s+'.'+e.className.trim().split(/\s+/).slice(0,2).join('.');}
+      p.unshift(s);e=e.parentElement;if(e===document.body){break;}
+    }
+    return p.join('>');
+  }
+  var out=['viewport='+innerWidth+'x'+innerHeight+' docW='+document.documentElement.scrollWidth+' docH='+document.documentElement.scrollHeight];
+  var bad=[];
+  Array.prototype.forEach.call(document.querySelectorAll('*'),function(el){
+    var r=el.getBoundingClientRect(),cs=getComputedStyle(el);
+    var hidden=false;if(typeof el.checkVisibility==='function'){hidden=(el.checkVisibility()===false);}else{hidden=(cs.display==='none')||(cs.visibility==='hidden');}
+    if(hidden){return;}
+    if(r.width===0&&r.height===0){bad.push('ZERO '+pathOf(el));}
+    if(r.right>innerWidth+1){bad.push('RIGHT '+pathOf(el)+' '+Math.round(r.right));}
+    var oxs=cs.overflowX,scrollable=(oxs==='auto')||(oxs==='scroll')||(oxs==='hidden');
+    if(scrollable===false&&el.clientWidth>0&&el.scrollWidth>el.clientWidth+2){bad.push('HOVER '+pathOf(el)+' '+el.scrollWidth+'>'+el.clientWidth);}
+  });
+  var need=['.task.on','.steps','.sysblock','.artcard','.answer table','.composer','.drawer .dsec','.ask'];
+  var missing=[];
+  need.forEach(function(s){if(document.querySelectorAll(s).length===0){missing.push(s);}});
+  out.push('offenders='+bad.length);
+  out=out.concat(bad.slice(0,20));
+  out.push('missing='+missing.length+' ['+missing.join(', ')+']');
+  var pre=document.createElement('pre');pre.id='diag';pre.textContent=out.join('\n');
+  document.documentElement.appendChild(pre);
+})();
+</script>
+</body></html>
