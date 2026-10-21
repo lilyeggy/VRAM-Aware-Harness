@@ -98,7 +98,7 @@ test("GET /app 返回用户工作台，/ 重定向到 /app", async () => {
         },
         getRun: () => null,
         getRunsForTenant: () => [],
-        getRunEvents: () => [],
+        getRunEvents: () => [], getRunTrace: () => null,
         getRunOutput: () => ({ chunks: [], finalText: "" }),
         getRunWorkspaceDiff: () => null,
         getRunArtifacts: () => [],

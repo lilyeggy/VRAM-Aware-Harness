@@ -183,7 +183,7 @@ HTTP API ──> Master (调度/审计/策略/LLM网关)
 4. 执行隔离：jailer + Firecracker microVM，无网卡，工作区盘独立，Broker 只暴露 create/execute/terminate。
 5. 工具治理：bash/file 等工具、路径围栏、副作用账本、崩溃/中断后安全重放。
 6. 外部模型接入：OpenAI 兼容 endpoint（opencode-go / 自建 vLLM 等）经 Pi runtime；平台只调用。
-7. 可审计：Run events、策略决策、工具执行记录写入本地 SQLite。
+7. 可审计：Run events、策略决策、工具执行记录写入本地 SQLite；`GET /runs/:id/trace` 基于事件流提供分步耗时与 token/成本归因（只读聚合）。
 8. 部署形态：单台 Linux + KVM，systemd 管理 Master/Broker/Worker，SQLite 本地持久化。
 
 ### 9.3 范围外（Out of scope，明确不做）

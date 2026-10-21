@@ -13,6 +13,7 @@ import type {
     SchedulerCapacity,
     TenantRunScheduler,
 } from "../scheduling/tenant-run-scheduler.ts";
+import { buildRunTrace, type RunTrace } from "../runs/run-trace.ts";
 import type {
     AgentRun,
     RunEvent,
@@ -223,6 +224,20 @@ export class HarnessApplication {
 
     getRunEvents(runId:string):RunEvent[] {
         return this.runStore.listEvents(runId);
+    }
+
+    /**
+     * Run 级分步时间线：把事件流折叠成"每步耗时 + token/成本归因"。
+     * 只读聚合，不改变任何状态；Run 不存在时返回 null。
+     */
+    getRunTrace(runId: string): RunTrace | null {
+        const run = this.runStore.get(runId);
+
+        if (run === null) {
+            return null;
+        }
+
+        return buildRunTrace(run, this.runStore.listEvents(runId));
     }
 
     getRunOutput(runId: string): { chunks: RunOutputChunk[]; finalText: string; thinkingText: string } {

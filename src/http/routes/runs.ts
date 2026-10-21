@@ -51,6 +51,18 @@ export async function handleRunsRoute(
         return jsonResponse({ events: ctx.application.getRunEvents(runId) });
     }
 
+    // 分步时间线：每步耗时 + token/成本归因（只读聚合）。
+    if (request.method === "GET" && segments.length === 3 && segments[2] === "trace") {
+        ctx.getRequiredRun(runId, request, "tasks:read");
+        const trace = ctx.application.getRunTrace(runId);
+
+        if (trace === null) {
+            throw new HttpError(404, "Run 不存在");
+        }
+
+        return jsonResponse(trace);
+    }
+
     if (request.method === "GET" && segments.length === 3 && segments[2] === "output") {
         ctx.getRequiredRun(runId, request, "tasks:read");
         return jsonResponse(ctx.application.getRunOutput(runId));

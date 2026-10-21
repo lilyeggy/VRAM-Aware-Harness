@@ -254,7 +254,9 @@ test("TOOL_STARTED/TOOL_COMPLETED/TOOL_FAILED 全仓只有一个写入方（Runt
         .filter((file) => /"TOOL_(STARTED|COMPLETED|FAILED)"/.test(readFileSync(file.abs, "utf8")))
         .map((file) => file.rel)
         // 类型联合声明本身必然包含这些字面量，不构成"写入方"。
-        .filter((rel) => rel !== "runs/agent-run.ts");
+        .filter((rel) => rel !== "runs/agent-run.ts")
+        // run-trace 是只读聚合（把事件折叠成时间线），引用字面量但不是写入方。
+        .filter((rel) => rel !== "runs/run-trace.ts");
 
     expect(writers).toEqual(["events/runtime-event-bridge.ts"]);
 });

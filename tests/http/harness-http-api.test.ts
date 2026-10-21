@@ -93,6 +93,36 @@ function createApi(
         getRunEvents(runId) {
             return runId === currentRun.id ? [event] : [];
         },
+        getRunTrace(runId) {
+            if (runId !== currentRun.id) {
+                return null;
+            }
+            return {
+                runId,
+                tenantId: currentRun.tenantId,
+                status: currentRun.status,
+                createdAt: currentRun.createdAt,
+                finishedAt: null,
+                steps: [],
+                totals: {
+                    wallMs: null,
+                    queueWaitMs: null,
+                    sandboxMs: 0,
+                    modelMs: 0,
+                    toolMs: 0,
+                    lifecycleMs: 0,
+                    unaccountedMs: null,
+                    modelCalls: 0,
+                    toolCalls: 0,
+                    inputTokens: 0,
+                    outputTokens: 0,
+                    cacheReadTokens: 0,
+                    cacheWriteTokens: 0,
+                    totalTokens: 0,
+                    costTotal: 0,
+                },
+            };
+        },
         getRunOutput(runId) {
             return runId === currentRun.id
                 ? { chunks: [], finalText: "" }
@@ -237,6 +267,19 @@ test("最小 HTTP API 覆盖提交、查询、中断、恢复、队列、资源�
     expect(await jsonBody<{ events:RunEvent[] }>(eventsResponse))
         .toMatchObject({ events:[{ type:"RUN_CREATED" }] });
 
+    const traceResponse = await api.fetch(new Request(
+        "http://harness.local/runs/run-http/trace",
+    ));
+    expect(traceResponse.status).toBe(200);
+    expect(await jsonBody<{ runId: string; steps: unknown[]; totals: { modelCalls: number } }>(
+        traceResponse,
+    )).toMatchObject({ runId: "run-http", steps: [], totals: { modelCalls: 0 } });
+
+    const missingTraceResponse = await api.fetch(new Request(
+        "http://harness.local/runs/run-missing/trace",
+    ));
+    expect(missingTraceResponse.status).toBe(404);
+
     const outputResponse = await api.fetch(new Request(
         "http://harness.local/runs/run-http/output",
     ));
@@ -300,6 +343,7 @@ test("LLM 网关入口走统一身份主干：无 key 401、作用域不足 403�
         getRun: () => null,
         getRunsForTenant: () => [],
         getRunEvents: () => [],
+        getRunTrace: () => null,
         getRunOutput: () => ({ chunks: [], finalText: "" }),
         getRunWorkspaceDiff: () => null,
         getRunArtifacts: () => [],
