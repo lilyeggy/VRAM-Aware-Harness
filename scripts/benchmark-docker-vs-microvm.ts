@@ -178,7 +178,7 @@ async function runBenchmark() {
     // 2. 宿主机物理内存驻留 (Host RSS Memory Footprint)
     // -------------------------------------------------------------------------
     console.log("▶ [Test 2] 宿主机物理内存驻留 (Host Memory Footprint / RSS)...");
-    const dLive = startDocker("bench-docker-mem");
+    startDocker("bench-docker-mem");
     const vmLive = await startMicroVM("mem");
 
     // Docker shim/container RSS
@@ -254,7 +254,7 @@ async function runBenchmark() {
     // 6. 销毁与收割时延 (Teardown Latency)
     // -------------------------------------------------------------------------
     console.log("▶ [Test 6] 销毁与资源收割时延 (Teardown Latency)...");
-    const dForTeardown = startDocker("bench-docker-td");
+    startDocker("bench-docker-td");
     const vmForTeardown = await startMicroVM("td");
 
     const dTeardownMs = Math.round(stopDocker("bench-docker-td"));

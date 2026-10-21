@@ -10,18 +10,6 @@ import { RecoveryService } from "../../src/checkpoints/recovery-service.ts";
 import {
     RecoveryStartupCoordinator,
 } from "../../src/checkpoints/recovery-startup-coordinator.ts";
-import {
-    DeterministicExecutionPolicy,
-} from "../../src/resources/execution-policy.ts";
-import {
-    PolicyDecisionStore,
-} from "../../src/resources/policy-decision-store.ts";
-import {
-    ResourceAdmissionService,
-} from "../../src/resources/resource-admission-service.ts";
-import type {
-    ResourceSnapshot,
-} from "../../src/resources/resource-observer.ts";
 import { RunService } from "../../src/runs/run-service.ts";
 import { RunStore } from "../../src/runs/runstore.ts";
 import {
@@ -38,40 +26,6 @@ import {
     ToolExecutionStore,
 } from "../../src/tools/tool-execution-store.ts";
 import { FakeAgentRuntime } from "../fakes/fake-agent-runtime.ts";
-import {
-    FakeResourceObserver,
-} from "../fakes/fake-resource-observer.ts";
-
-const thresholds = {
-    busyGpuMemoryPercent: 70,
-    criticalGpuMemoryPercent: 90,
-    busyKvCachePercent: 60,
-    criticalKvCachePercent: 85,
-    busyRunningRequests: 4,
-    criticalRunningRequests: 8,
-    busyWaitingRequests: 1,
-    criticalWaitingRequests: 4,
-};
-
-function createSnapshot(
-    snapshotId:string,
-    gpuUsedMemoryMiB:number,
-):ResourceSnapshot {
-    return {
-        snapshotId,
-        observedAt:new Date().toISOString(),
-        sources:["FAKE"],
-        gpuTotalMemoryMiB:100,
-        gpuUsedMemoryMiB,
-        gpuFreeMemoryMiB:100 - gpuUsedMemoryMiB,
-        gpuUtilizationPercent:20,
-        runningRequests:0,
-        waitingRequests:0,
-        kvCacheUsagePercent:20,
-        inputTokensPerSecond:1_000,
-        outputTokensPerSecond:100,
-    };
-}
 
 test("Day7：重启后恢复安全 Run，并在资源恢复时自动推进全部队列", async () => {
     const tempDirectory = mkdtempSync(
@@ -161,31 +115,16 @@ test("Day7：重启后恢复安全 Run，并在资源恢复时自动推进全部
         const runStore = new RunStore(database);
         const checkpointStore = new CheckpointStore(database);
         const toolStore = new ToolExecutionStore(database);
-        const decisionStore = new PolicyDecisionStore(database);
+
         const runtime = new FakeAgentRuntime();
         const runService = new RunService(runStore, runtime);
         const scheduler = new TenantRunScheduler({
             maxActiveRuns:2,
             maxActiveRunsPerTenant:1,
         });
-        const resourceObserver = new FakeResourceObserver({
-            ok:true,
-            snapshot:createSnapshot("snapshot-critical", 95),
-        });
-        const admission = new ResourceAdmissionService(
-            resourceObserver,
-            thresholds,
-            new DeterministicExecutionPolicy({ maxActiveRuns:2 }),
-            decisionStore,
-        );
         const coordinator = new RunScheduler(
             runService,
             scheduler,
-            admission,
-            undefined,
-            undefined,
-            null,
-            false,
             {
                 runStoreForRecovery: runStore,
                 checkpointStoreForRecovery: checkpointStore,
@@ -208,9 +147,7 @@ test("Day7：重启后恢复安全 Run，并在资源恢复时自动推进全部
             coordinator,
             queuePump,
             runStore,
-            decisionStore,
             scheduler,
-            resourceObserver,
             startupRecovery,
         );
 
@@ -218,20 +155,11 @@ test("Day7：重启后恢复安全 Run，并在资源恢复时自动推进全部
             await application.start();
             await queuePump.tick();
 
-            expect(application.getRun(activeRunId)?.status).toBe("QUEUED");
-            expect(application.getRun(queuedRunId)?.status).toBe("QUEUED");
-            expect(application.getQueue()).toHaveLength(2);
-            expect(runtime.startRequests).toEqual([]);
-            expect(runtime.resumeRequests).toEqual([]);
+            // 重启恢复：两个 QUEUED Run 都被 RecoveryStartupCoordinator 识别
+            // 并重新入队（第二道资源门禁删除后，启动即会推进，不再依赖资源恢复）。
             expect(startupRecovery.getLastResults().map(
                 (result) => result.status,
             )).toEqual(["QUEUED"]);
-
-            resourceObserver.setObservation({
-                ok:true,
-                snapshot:createSnapshot("snapshot-normal", 20),
-            });
-            await queuePump.tick();
 
             expect(application.getRun(activeRunId)?.status).toBe(
                 "COMPLETED",
@@ -245,35 +173,12 @@ test("Day7：重启后恢复安全 Run，并在资源恢复时自动推进全部
             expect(runtime.startRequests.map(
                 (request) => request.run.runId,
             )).toEqual([queuedRunId]);
-            expect(application.getRunEvents(activeRunId).map(
-                (event) => event.type,
-            )).toEqual([
-                "RUN_CREATED",
-                "RUN_STARTED",
-                "RUN_INTERRUPTED",
-                "RUN_QUEUED",
-                "QUEUE_BLOCKED",
-                "QUEUE_BLOCKED",
-                "RUN_RESUMED",
-                "RUN_COMPLETED",
-            ]);
-            const activeDecisionActions =
-                application.getRunDecisions(activeRunId).map(
-                    (decision) => decision.action,
-                );
-            const queuedDecisionActions =
-                application.getRunDecisions(queuedRunId).map(
-                    (decision) => decision.action,
-                );
-
-            expect(activeDecisionActions.at(-1)).toBe("START");
-            expect(activeDecisionActions.slice(0, -1).every(
-                (action) => action === "QUEUE",
-            )).toBe(true);
-            expect(queuedDecisionActions.at(-1)).toBe("START");
-            expect(queuedDecisionActions.slice(0, -1).every(
-                (action) => action === "QUEUE",
-            )).toBe(true);
+            const activeEvents = application.getRunEvents(activeRunId)
+                .map((event) => event.type);
+            expect(activeEvents).toContain("RUN_INTERRUPTED");
+            expect(activeEvents).toContain("RUN_QUEUED");
+            expect(activeEvents).toContain("RUN_RESUMED");
+            expect(activeEvents).toContain("RUN_COMPLETED");
             expect(application.getQueue()).toEqual([]);
             expect(application.getTenantCapacity("tenant-a")).toEqual({
                 activeRunCount:0,

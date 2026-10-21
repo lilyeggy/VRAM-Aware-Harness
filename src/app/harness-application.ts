@@ -1,14 +1,4 @@
 import type {
-    PolicyDecisionStore,
-} from "../resources/policy-decision-store.ts";
-import type {
-    PolicyDecision,
-} from "../resources/execution-policy.ts";
-import type {
-    ResourceObservation,
-    ResourceObserver,
-} from "../resources/resource-observer.ts";
-import type {
     RunStore,
 } from "../runs/runstore.ts";
 import type { RunOutputStore, RunOutputChunk } from "../runs/run-output-store.ts";
@@ -19,7 +9,7 @@ import type {
     RunScheduler,
 } from "../scheduling/run-scheduler.ts";
 import type {
-    QueueEntry,
+    QueueBlocker,
     SchedulerCapacity,
     TenantRunScheduler,
 } from "../scheduling/tenant-run-scheduler.ts";
@@ -64,7 +54,7 @@ export interface QueuePump {
 /**
  * harnessApplication 要负责的很多
  * 1. 应用启动和停止
- * 2. 提交 run，并查询 run、事件、决策、队列和资源
+ * 2. 提交 run，并查询 run、事件、队列和容量
  * 3. 后续统一处理interrupt/resume
  * 4. http 层只负责协议转换
  */
@@ -78,9 +68,7 @@ export class HarnessApplication {
         private readonly coordinator: RunScheduler,
         private readonly queuePump: QueuePump,
         private readonly runStore: RunStore,
-        private readonly decisionStore: PolicyDecisionStore,
         private readonly scheduler: TenantRunScheduler,
-        private readonly resourceObserver: ResourceObserver,
         private readonly startupRecovery:StartupRecoveryCoordinator,
         private readonly runOutputStore?: RunOutputStore,
         private readonly workspaceResults?: RunWorkspaceResultCoordinator,
@@ -258,26 +246,23 @@ export class HarnessApplication {
         return this.workspaceResults?.readArtifact(runId, path) ?? Promise.resolve(null);
     }
 
-    getRunDecisions(runId:string):PolicyDecision[] {
-        return this.decisionStore.listForRun(runId);
-    }
-
     /** N3：完成但受限的 Run 的 DENY 账本聚合；未注入工具策略库时空数组。 */
     getRunLimitations(runId:string):RunLimitation[] {
         const decisions = this.toolPolicyStore?.listToolDecisions(runId) ?? [];
         return summarizeToolDenials(decisions);
     }
 
-    getQueue():QueueEntry[] {
-        return this.scheduler.listQueue();
+    /**
+     * 队列视图：reasonCode 由调度器按当前容量实时计算（blocker 视图），
+     * 而不是入队时记下的陈旧原因。QueueBlocker 是 QueueEntry 的超集，
+     * 对外契约不变。
+     */
+    getQueue():QueueBlocker[] {
+        return this.scheduler.listQueueBlockers();
     }
 
     getTenantCapacity(tenantId:string):SchedulerCapacity {
         return this.scheduler.getCapacity(tenantId);
-    }
-
-    observeResources():Promise<ResourceObservation> {
-        return this.resourceObserver.observe();
     }
 
     /** §9.8 v1.4：最小可观测性快照；计数来自 RunStore，队列长度来自调度器。 */

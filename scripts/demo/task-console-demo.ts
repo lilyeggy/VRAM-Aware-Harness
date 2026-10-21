@@ -3,20 +3,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { startHarnessProcess } from "../../src/main.ts";
 import { loadHarnessConfig } from "../../src/app/harness-config.ts";
-import type { ResourceObservation, ResourceObserver, ResourceSnapshot } from "../../src/resources/resource-observer.ts";
 import { DemoAgentRuntime } from "./demo-agent-runtime.ts";
 
 /**
- * Local interview/demo entrypoint. It intentionally replaces only model and
- * resource observation; HTTP auth, workspaces, queueing, persistence and the
- * same-origin Task Console are the real application composition.
+ * Local interview/demo entrypoint. It intentionally replaces only the model
+ * runtime; HTTP auth, workspaces, queueing, persistence and the same-origin
+ * Task Console are the real application composition.
  */
-class NormalDemoResourceObserver implements ResourceObserver {
-    async observe(): Promise<ResourceObservation> {
-        return { ok: true, snapshot: snapshot() };
-    }
-}
-
 const directory = mkdtempSync(join(tmpdir(), "vram-aware-task-console-"));
 const apiKey = "demo-local-key-2026-not-for-production";
 const config = loadHarnessConfig({
@@ -31,7 +24,6 @@ const running = await startHarnessProcess({
     config,
     compositionDependencies: {
         runtime: new DemoAgentRuntime(),
-        resourceObserver: new NormalDemoResourceObserver(),
     },
     installSignalHandlers: false,
 });
@@ -53,19 +45,3 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
     });
 }
 
-function snapshot(): ResourceSnapshot {
-    return {
-        snapshotId: `demo-normal-${Date.now()}`,
-        observedAt: new Date().toISOString(),
-        sources: ["FAKE"],
-        gpuTotalMemoryMiB: 100,
-        gpuUsedMemoryMiB: 20,
-        gpuFreeMemoryMiB: 80,
-        gpuUtilizationPercent: 20,
-        runningRequests: 0,
-        waitingRequests: 0,
-        kvCacheUsagePercent: 20,
-        inputTokensPerSecond: 1_000,
-        outputTokensPerSecond: 100,
-    };
-}

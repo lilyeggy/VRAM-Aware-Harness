@@ -7,15 +7,6 @@ import {
 } from "../../src/app/create-harness-application.ts";
 import { loadHarnessConfig } from "../../src/app/harness-config.ts";
 import { formatRunEventTimeline } from "../../src/events/run-event-timeline.ts";
-import type {
-    PolicyDecision,
-} from "../../src/resources/execution-policy.ts";
-import type {
-    ResourceObservation,
-    ResourceObserver,
-    ResourceSnapshot,
-} from "../../src/resources/resource-observer.ts";
-import type { AgentRun } from "../../src/runs/agent-run.ts";
 import { RunService } from "../../src/runs/run-service.ts";
 import { RunStore } from "../../src/runs/runstore.ts";
 import { openHarnessDatabase } from "../../src/storage/database.ts";
@@ -25,17 +16,59 @@ import type {
 import {
     ToolExecutionStore,
 } from "../../src/tools/tool-execution-store.ts";
+import type { AgentRun } from "../../src/runs/agent-run.ts";
+import type {
+    RuntimeResumeRequest,
+    RuntimeStartRequest,
+} from "../../src/runtime/agent-runtime.ts";
 import { DemoAgentRuntime } from "./demo-agent-runtime.ts";
 
-class DemoResourceObserver implements ResourceObserver {
-    constructor(private observation:ResourceObservation) {}
+/**
+ * 演示用 Runtime：第一批 start/resume 停在 gate 上，用来观察并发上限
+ * 造成的真实排队；release() 之后复用 DemoAgentRuntime 的正常完成路径。
+ */
+class GatedDemoAgentRuntime extends DemoAgentRuntime {
+    private readonly gate: Promise<void>;
+    private openGate: () => void = () => undefined;
+    private firstInvocationResolve: () => void = () => undefined;
+    private firstInvocation: Promise<void>;
+    private invocationCount = 0;
 
-    async observe():Promise<ResourceObservation> {
-        return this.observation;
+    constructor() {
+        super();
+        this.gate = new Promise((resolve) => {
+            this.openGate = resolve;
+        });
+        this.firstInvocation = new Promise((resolve) => {
+            this.firstInvocationResolve = resolve;
+        });
     }
 
-    setObservation(observation:ResourceObservation):void {
-        this.observation = observation;
+    override async start(request: RuntimeStartRequest): Promise<void> {
+        this.noteInvocation();
+        await this.gate;
+        await super.start(request);
+    }
+
+    override async resume(request: RuntimeResumeRequest): Promise<void> {
+        this.noteInvocation();
+        await this.gate;
+        await super.resume(request);
+    }
+
+    waitForFirstInvocation(): Promise<void> {
+        return this.firstInvocation;
+    }
+
+    release(): void {
+        this.openGate();
+    }
+
+    private noteInvocation(): void {
+        this.invocationCount += 1;
+        if (this.invocationCount === 1) {
+            this.firstInvocationResolve();
+        }
     }
 }
 
@@ -43,11 +76,11 @@ export interface Day7DemoRunReport {
     label:string;
     run:AgentRun;
     timeline:string;
-    decisions:PolicyDecision[];
+    limitations:string;
 }
 
 export interface Day7FakeDemoReport {
-    queueAtCritical:Array<{
+    queueAtConcurrencyLimit:Array<{
         runId:string;
         tenantId:string;
         reasonCode:string;
@@ -66,14 +99,7 @@ export async function runDay7FakeDemo():Promise<Day7FakeDemoReport> {
 
     try {
         const seeded = seedFirstProcess(databasePath);
-        const runtime = new DemoAgentRuntime();
-        const resourceObserver = new DemoResourceObserver({
-            ok:true,
-            // N5：显存压力按「同机推理服务稳态基线（默认 90%）之上的增量」度量。
-            // 基线内（如 vLLM 预占的 90%）是预期稳态，不再判 CRITICAL；因此这里
-            // 用一个真正把余量吃干净的 99% 快照来表达"资源紧张 → 排队"。
-            snapshot:createSnapshot("demo-critical", 99),
-        });
+        const runtime = new GatedDemoAgentRuntime();
         const config = loadHarnessConfig({
             VLLM_MODEL_ID:"demo-model",
             HARNESS_DATABASE_PATH:databasePath,
@@ -81,17 +107,19 @@ export async function runDay7FakeDemo():Promise<Day7FakeDemoReport> {
             // 会让 demo 往仓库写一批无人引用的工作空间目录。
             HARNESS_WORKSPACE_ROOT:join(tempDirectory, "workspaces"),
             HARNESS_PUMP_INTERVAL_MS:"60000",
+            // 用真实并发上限制造排队，替代已删除的资源压力观测。
+            HARNESS_MAX_ACTIVE_RUNS:"1",
+            HARNESS_MAX_ACTIVE_RUNS_PER_TENANT:"1",
         });
         const composition = await createHarnessApplication(config, {
             runtime,
-            resourceObserver,
         });
 
         try {
             await composition.application.start();
-            await composition.queuePump.tick();
+            await runtime.waitForFirstInvocation();
 
-            const queueAtCritical = composition.application.getQueue().map(
+            const queueAtConcurrencyLimit = composition.application.getQueue().map(
                 (entry) => ({
                     runId:entry.runId,
                     tenantId:entry.tenantId,
@@ -100,20 +128,9 @@ export async function runDay7FakeDemo():Promise<Day7FakeDemoReport> {
                 }),
             );
 
-            assertStatus(
-                composition.runStore.get(seeded.recoveryRunId),
-                "QUEUED",
-            );
-            assertStatus(
-                composition.runStore.get(seeded.freshRunId),
-                "QUEUED",
-            );
-
-            resourceObserver.setObservation({
-                ok:true,
-                snapshot:createSnapshot("demo-normal", 20),
-            });
-            await composition.queuePump.tick();
+            runtime.release();
+            await waitForTerminal(composition, seeded.recoveryRunId);
+            await waitForTerminal(composition, seeded.freshRunId);
 
             const recoveryRun = requiredRun(
                 composition.runStore.get(seeded.recoveryRunId),
@@ -126,7 +143,7 @@ export async function runDay7FakeDemo():Promise<Day7FakeDemoReport> {
             assertStatus(freshRun, "COMPLETED");
 
             return {
-                queueAtCritical,
+                queueAtConcurrencyLimit,
                 startRunIds:runtime.startRequests.map(
                     (request) => request.run.runId,
                 ),
@@ -147,6 +164,7 @@ export async function runDay7FakeDemo():Promise<Day7FakeDemoReport> {
                 ],
             };
         } finally {
+            runtime.release();
             await composition.close();
         }
     } finally {
@@ -160,13 +178,13 @@ export function formatDay7FakeDemoReport(
     const lines:string[] = [
         "=== VRAM-Aware Harness / Day7 Fake Demo ===",
         "",
-        "[CRITICAL] queue snapshot",
-        ...report.queueAtCritical.map((entry) =>
+        "[CONCURRENCY LIMIT] queue snapshot",
+        ...report.queueAtConcurrencyLimit.map((entry) =>
             `${entry.position}. ${entry.tenantId} ${entry.runId} reason=${entry.reasonCode}`,
         ),
         "",
-        `[NORMAL] runtime.start  -> ${report.startRunIds.join(", ")}`,
-        `[NORMAL] runtime.resume -> ${report.resumeRunIds.join(", ")}`,
+        `[EXECUTED] runtime.start  -> ${report.startRunIds.join(", ")}`,
+        `[EXECUTED] runtime.resume -> ${report.resumeRunIds.join(", ")}`,
     ];
 
     for (const runReport of report.runs) {
@@ -176,13 +194,8 @@ export function formatDay7FakeDemoReport(
             `run=${runReport.run.id} status=${runReport.run.status}`,
             "timeline:",
             runReport.timeline,
-            "policy decisions:",
-            ...runReport.decisions.map((decision) => [
-                decision.action,
-                decision.reasonCode,
-                `pressure=${decision.pressure}`,
-                `snapshot=${decision.resourceSnapshotId ?? "none"}`,
-            ].join(" ")),
+            "limitations:",
+            runReport.limitations,
         );
     }
 
@@ -282,28 +295,32 @@ function createRunReport(
         timeline:formatRunEventTimeline(
             composition.runStore.listEvents(run.id),
         ),
-        decisions:composition.decisionStore.listForRun(run.id),
+        limitations:JSON.stringify(
+            composition.application.getRunLimitations(run.id),
+        ),
     };
 }
 
-function createSnapshot(
-    snapshotId:string,
-    usedMemory:number,
-):ResourceSnapshot {
-    return {
-        snapshotId,
-        observedAt:new Date().toISOString(),
-        sources:["FAKE"],
-        gpuTotalMemoryMiB:100,
-        gpuUsedMemoryMiB:usedMemory,
-        gpuFreeMemoryMiB:100 - usedMemory,
-        gpuUtilizationPercent:usedMemory,
-        runningRequests:0,
-        waitingRequests:0,
-        kvCacheUsagePercent:20,
-        inputTokensPerSecond:1_000,
-        outputTokensPerSecond:100,
-    };
+async function waitForTerminal(
+    composition:Awaited<ReturnType<typeof createHarnessApplication>>,
+    runId:string,
+):Promise<AgentRun> {
+    const deadline = Date.now() + 15_000;
+
+    while (Date.now() < deadline) {
+        const run = composition.runStore.get(runId);
+        if (
+            run !== null
+            && (run.status === "COMPLETED"
+                || run.status === "FAILED"
+                || run.status === "INTERRUPTED")
+        ) {
+            return run;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+
+    throw new Error(`Day7 Demo 等待 Run 终态超时：${runId}`);
 }
 
 function requiredRun(run:AgentRun | null):AgentRun {

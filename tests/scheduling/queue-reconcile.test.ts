@@ -2,15 +2,6 @@ import { expect, test } from "bun:test";
 
 import { RunService } from "../../src/runs/run-service.ts";
 import { RunStore } from "../../src/runs/runstore.ts";
-import type {
-    PolicyAction,
-    PolicyDecision,
-    PolicyReasonCode,
-} from "../../src/resources/execution-policy.ts";
-import type {
-    ResourceAdmissionEvaluator,
-    ResourceAdmissionRequest,
-} from "../../src/resources/resource-admission-service.ts";
 import {
     RunScheduler,
 } from "../../src/scheduling/run-scheduler.ts";
@@ -30,59 +21,12 @@ import {
  * 留在"DB 仍 QUEUED 但内存队列里没有"的孤儿态；reconcile 必须补回。
  * B4——TTL 熔断以 DB updatedAt 为排队时钟，重启/孤儿补回不重置等待时间。
  */
-function alwaysQueueAdmission(): ResourceAdmissionEvaluator {
-    return {
-        async evaluate(request: ResourceAdmissionRequest) {
-            const decision: PolicyDecision = {
-                decisionId: `decision-${request.runId}`,
-                runId: request.runId,
-                action: "QUEUE" as PolicyAction,
-                reasonCode: "GLOBAL_CONCURRENCY_LIMIT" as PolicyReasonCode,
-                resourceSnapshotId: "snapshot-1",
-                pressure: "NORMAL",
-                observationFailureReason: null,
-                decidedAt: new Date().toISOString(),
-            };
-            return {
-                observation: {
-                    ok: true as const,
-                    snapshot: {
-                        snapshotId: "snapshot-1",
-                        observedAt: new Date().toISOString(),
-                        sources: ["FAKE" as const],
-                        gpuTotalMemoryMiB: 100,
-                        gpuUsedMemoryMiB: 20,
-                        gpuFreeMemoryMiB: 80,
-                        gpuUtilizationPercent: 20,
-                        runningRequests: 0,
-                        waitingRequests: 0,
-                        kvCacheUsagePercent: 20,
-                        inputTokensPerSecond: 1_000,
-                        outputTokensPerSecond: 100,
-                    },
-                },
-                classification: null,
-                decision,
-            };
-        },
-    };
-}
-
 function buildCoordinator(
     runService: RunService,
     scheduler: TenantRunScheduler,
-    options: ConstructorParameters<typeof RunScheduler>[7],
+    options: ConstructorParameters<typeof RunScheduler>[2],
 ): RunScheduler {
-    return new RunScheduler(
-        runService,
-        scheduler,
-        alwaysQueueAdmission(),
-        undefined,
-        undefined,
-        null,
-        false,
-        options,
-    );
+    return new RunScheduler(runService, scheduler, options);
 }
 
 test("B5：DB QUEUED 但脱离内存队列的孤儿 Run 被 reconcile 补回，排队时钟取自 DB", () => {

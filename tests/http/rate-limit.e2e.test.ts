@@ -2,25 +2,8 @@ import { expect, test } from "bun:test";
 
 import { createHarnessApplication } from "../../src/app/create-harness-application.ts";
 import { loadHarnessConfig } from "../../src/app/harness-config.ts";
-import type { ResourceSnapshot } from "../../src/resources/resource-observer.ts";
 import { FakeAgentRuntime } from "../fakes/fake-agent-runtime.ts";
-import { FakeResourceObserver } from "../fakes/fake-resource-observer.ts";
 import { tempWorkspaceEnv } from "../support/temp-workspace-root.ts";
-
-const normalSnapshot:ResourceSnapshot = {
-    snapshotId:"rate-limit-snapshot",
-    observedAt:"2026-10-11T00:00:00.000Z",
-    sources:["FAKE"],
-    gpuTotalMemoryMiB:100,
-    gpuUsedMemoryMiB:20,
-    gpuFreeMemoryMiB:80,
-    gpuUtilizationPercent:20,
-    runningRequests:0,
-    waitingRequests:0,
-    kvCacheUsagePercent:20,
-    inputTokensPerSecond:1_000,
-    outputTokensPerSecond:100,
-};
 
 async function createComposition(extraEnv:Record<string,string>) {
     const config = loadHarnessConfig({
@@ -33,7 +16,6 @@ async function createComposition(extraEnv:Record<string,string>) {
     });
     return createHarnessApplication(config, {
         runtime: new FakeAgentRuntime(),
-        resourceObserver: new FakeResourceObserver({ ok:true, snapshot:normalSnapshot }),
     });
 }
 

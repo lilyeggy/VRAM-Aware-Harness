@@ -23,8 +23,7 @@ test("认证身份绑定 Tenant，伪造 tenantId 和跨租户 Run ID 都不会�
         getConversation: (id, tenantId) => conversation?.id === id && conversation.tenantId === tenantId ? conversation : null,
         getConversationsForWorkspace: (tenantId, workspaceId) => conversation?.tenantId === tenantId && conversation.workspaceId === workspaceId ? [conversation] : [],
         getRunsForConversation: (_tenantId, id) => id === conversation?.id ? [run] : [],
-        getRunEvents: () => [], getRunOutput: () => ({ chunks: [], finalText: "" }), getRunWorkspaceDiff: () => null, getRunArtifacts: () => [], getRunArtifact: async () => null, getRunDecisions: () => [], getQueue: () => [],
-        observeResources: async () => ({ ok: false, observedAt: "now", attemptedSources: [], reason: "UNAVAILABLE", message: "x" }),
+        getRunEvents: () => [], getRunOutput: () => ({ chunks: [], finalText: "" }), getRunWorkspaceDiff: () => null, getRunArtifacts: () => [], getRunArtifact: async () => null, getQueue: () => [],
         interruptRun: async () => run, resumeRun: () => run,
     };
     const workspaceService = {
@@ -83,8 +82,7 @@ test("审计 API 按 Principal Tenant 收口，并要求 audits:read", async () 
         const application: HarnessHttpApplication = {
             isStarted: () => true, submitRun: () => run, getRun: () => run, getRunsForTenant: () => [],
             getRunEvents: () => [], getRunOutput: () => ({ chunks: [], finalText: "" }), getRunWorkspaceDiff: () => null,
-            getRunArtifacts: () => [], getRunArtifact: async () => null, getRunDecisions: () => [], getQueue: () => [],
-            observeResources: async () => ({ ok: false, observedAt: "now", attemptedSources: [], reason: "UNAVAILABLE", message: "x" }),
+            getRunArtifacts: () => [], getRunArtifact: async () => null, getQueue: () => [],
             interruptRun: async () => run, resumeRun: () => run,
         };
         const api = new HarnessHttpApi(application, { get: () => null }, {
@@ -146,8 +144,7 @@ test("账单 API 按 Principal Tenant 收口，并要求 billing:read", async ()
         const application: HarnessHttpApplication = {
             isStarted: () => true, submitRun: () => run, getRun: () => run, getRunsForTenant: () => [],
             getRunEvents: () => [], getRunOutput: () => ({ chunks: [], finalText: "" }), getRunWorkspaceDiff: () => null,
-            getRunArtifacts: () => [], getRunArtifact: async () => null, getRunDecisions: () => [], getQueue: () => [],
-            observeResources: async () => ({ ok: false, observedAt: "now", attemptedSources: [], reason: "UNAVAILABLE", message: "x" }),
+            getRunArtifacts: () => [], getRunArtifact: async () => null, getQueue: () => [],
             interruptRun: async () => run, resumeRun: () => run,
         };
         const api = new HarnessHttpApi(application, { get: () => null }, {

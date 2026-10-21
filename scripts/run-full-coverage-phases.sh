@@ -123,12 +123,6 @@ phase_base() {
   run_matrix base
 }
 
-phase_priority() {
-  stop_master
-  start_master priority HARNESS_MAX_ACTIVE_RUNS=1 HARNESS_MAX_ACTIVE_RUNS_PER_TENANT=1 || return 1
-  run_matrix priority FULLCOVER_PRIORITY=1 FULLCOVER_ONLY=run.priority
-}
-
 phase_backpressure() {
   stop_master
   start_master backpressure HARNESS_MAX_ACTIVE_RUNS=1 HARNESS_MAX_ACTIVE_RUNS_PER_TENANT=1 HARNESS_MAX_QUEUED_RUNS=1 || return 1
@@ -151,7 +145,7 @@ phase_mcp() {
 main() {
   log "START"
   start_broker || { log "ABORT broker"; exit 1; }
-  for p in ${PHASES:-base priority backpressure ratelimit mcp}; do
+  for p in ${PHASES:-base backpressure ratelimit mcp}; do
     log "PHASE $p begin"
     "phase_$p" || log "PHASE $p ERROR"
     log "PHASE $p end"

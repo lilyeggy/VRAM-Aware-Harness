@@ -2,93 +2,70 @@ import { expect, test } from "bun:test";
 
 import { RunService } from "../../src/runs/run-service.ts";
 import { RunStore } from "../../src/runs/runstore.ts";
-import type {
-    PolicyAction,
-    PolicyDecision,
-    PolicyReasonCode,
-} from "../../src/resources/execution-policy.ts";
-import type {
-    ResourceAdmissionEvaluator,
-    ResourceAdmissionRequest,
-} from "../../src/resources/resource-admission-service.ts";
-import {
-    RunScheduler,
-} from "../../src/scheduling/run-scheduler.ts";
-import {
-    TenantRunScheduler,
-} from "../../src/scheduling/tenant-run-scheduler.ts";
-import {
-    openHarnessDatabase,
-} from "../../src/storage/database.ts";
-import {
-    FakeAgentRuntime,
-} from "../fakes/fake-agent-runtime.ts";
+import type { RuntimeStartRequest } from "../../src/runtime/agent-runtime.ts";
+import { RunScheduler } from "../../src/scheduling/run-scheduler.ts";
+import { TenantRunScheduler } from "../../src/scheduling/tenant-run-scheduler.ts";
+import { openHarnessDatabase } from "../../src/storage/database.ts";
+import { FakeAgentRuntime } from "../fakes/fake-agent-runtime.ts";
 
 /**
  * 支柱 3 一级防线：排队 TTL。
- * 任务在队列中等待超过门限仍未获得调度准入时，被安全熔断为
- * FAILED(QUEUE_TIMEOUT)，队列与并发计数同步释放。
+ *
+ * 第二道资源门禁删除后，排队只可能由宿主层硬约束产生：全局/租户并发上限、
+ * 会话锁。这里用「占满唯一 slot 的阻塞 Run」制造真实排队。
  */
-function alwaysQueueAdmission(): ResourceAdmissionEvaluator {
-    return {
-        async evaluate(request: ResourceAdmissionRequest) {
-            const decision: PolicyDecision = {
-                decisionId: `decision-${request.runId}`,
-                runId: request.runId,
-                action: "QUEUE" as PolicyAction,
-                reasonCode: "GLOBAL_CONCURRENCY_LIMIT" as PolicyReasonCode,
-                resourceSnapshotId: "snapshot-1",
-                pressure: "NORMAL",
-                observationFailureReason: null,
-                decidedAt: new Date().toISOString(),
-            };
-            return {
-                observation: {
-                    ok: true as const,
-                    snapshot: {
-                        snapshotId: "snapshot-1",
-                        observedAt: new Date().toISOString(),
-                        sources: ["FAKE" as const],
-                        gpuTotalMemoryMiB: 100,
-                        gpuUsedMemoryMiB: 20,
-                        gpuFreeMemoryMiB: 80,
-                        gpuUtilizationPercent: 20,
-                        runningRequests: 0,
-                        waitingRequests: 0,
-                        kvCacheUsagePercent: 20,
-                        inputTokensPerSecond: 1_000,
-                        outputTokensPerSecond: 100,
-                    },
-                },
-                classification: null,
-                decision,
-            };
-        },
-    };
+class GatedRuntime extends FakeAgentRuntime {
+    private readonly releases: Array<() => void> = [];
+
+    override async start(request: RuntimeStartRequest): Promise<void> {
+        await new Promise<void>((resolve) => {
+            this.releases.push(resolve);
+        });
+        await super.start(request);
+    }
+
+    releaseAll(): void {
+        for (const release of this.releases.splice(0)) {
+            release();
+        }
+    }
 }
 
 function sleep(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+async function waitForRunning(store: RunStore, runId: string): Promise<void> {
+    for (let attempt = 0; attempt < 200; attempt += 1) {
+        if (store.get(runId)?.status === "RUNNING") {
+            return;
+        }
+        await sleep(2);
+    }
+    throw new Error(`Run 未进入 RUNNING：${runId}`);
+}
+
 test("排队超过 TTL 的 Run 被熔断为 FAILED(QUEUE_TIMEOUT) 并释放队列计数", async () => {
     const db = openHarnessDatabase(":memory:");
     const store = new RunStore(db);
-    const runService = new RunService(store, new FakeAgentRuntime());
+    const runtime = new GatedRuntime();
+    const runService = new RunService(store, runtime);
     const scheduler = new TenantRunScheduler({
-        maxActiveRuns: 2,
-        maxActiveRunsPerTenant: 2,
+        maxActiveRuns: 1,
+        maxActiveRunsPerTenant: 1,
     });
-    const coordinator = new RunScheduler(
-        runService,
-        scheduler,
-        alwaysQueueAdmission(),
-        undefined,
-        undefined,
-        null,
-        false,
-        { queueTtlMs: 20 },
-    );
+    const coordinator = new RunScheduler(runService, scheduler, {
+        queueTtlMs: 20,
+    });
+
+    const blocker = coordinator.submit({
+        tenantId: "tenant-block",
+        harnessSessionId: "session-block",
+        userInput: "占住唯一 slot",
+        workspacePath: "/tmp/ws-block",
+    });
+    const blockerAttempt = coordinator.attemptNext();
+    await waitForRunning(store, blocker.id);
 
     const run = coordinator.submit({
         tenantId: "tenant-a",
@@ -97,12 +74,13 @@ test("排队超过 TTL 的 Run 被熔断为 FAILED(QUEUE_TIMEOUT) 并释放队�
         workspacePath: "/tmp/ws-a",
     });
 
-    // 第一次 drain：TTL 未到期 → 仍排队（准入拒绝重新入队）。
     await coordinator.drain();
     expect(store.get(run.id)?.status).toBe("QUEUED");
     expect(scheduler.listQueue()).toHaveLength(1);
+    expect(scheduler.listQueueBlockers()[0]?.reasonCode).toBe(
+        "GLOBAL_CONCURRENCY_LIMIT",
+    );
 
-    // 等待超过 TTL 后再 drain：排队超时熔断。
     await sleep(60);
     await coordinator.drain();
 
@@ -111,42 +89,48 @@ test("排队超过 TTL 的 Run 被熔断为 FAILED(QUEUE_TIMEOUT) 并释放队�
     expect(failed?.failureReason).toBe("QUEUE_TIMEOUT");
     expect(failed?.finishedAt).not.toBeNull();
 
-    // RUN_FAILED 事件带 QUEUE_TIMEOUT 原因与等待时长证据。
-    const events = store.listEvents(run.id);
-    const failedEvent = events.find((e) => e.type === "RUN_FAILED");
-    expect(failedEvent).toBeDefined();
-    expect((failedEvent!.payload as { reason: string }).reason)
-        .toBe("QUEUE_TIMEOUT");
-    expect(
-        (failedEvent!.payload as { waitedMs: number }).waitedMs,
-    ).toBeGreaterThan(20);
+    const failedEvent = store
+        .listEvents(run.id)
+        .find((event) => event.type === "RUN_FAILED");
+    if (failedEvent === undefined) {
+        throw new Error("缺少 RUN_FAILED 事件");
+    }
+    const payload = failedEvent.payload as { reason: string; waitedMs: number };
+    expect(payload.reason).toBe("QUEUE_TIMEOUT");
+    expect(payload.waitedMs).toBeGreaterThan(20);
 
-    // 队列与并发计数同步释放，不留幽灵排队。
     expect(scheduler.listQueue()).toHaveLength(0);
-    expect(scheduler.getCapacity("tenant-a").activeRunCount).toBe(0);
+    // tenant-a 自己的活跃计数必须归零（全局 1 个 slot 仍被 blocker 占着）。
+    expect(scheduler.getCapacity("tenant-a").activeTenantRunCount).toBe(0);
+
+    runtime.releaseAll();
+    await blockerAttempt;
     db.close();
 });
 
-test("未超 TTL 的排队 Run 不受影响，已摘除的 Run 不再被重复熔断", async () => {
+test("未超 TTL 的排队 Run 不受影响", async () => {
     const db = openHarnessDatabase(":memory:");
     const store = new RunStore(db);
-    const runService = new RunService(store, new FakeAgentRuntime());
+    const runtime = new GatedRuntime();
+    const runService = new RunService(store, runtime);
     const scheduler = new TenantRunScheduler({
-        maxActiveRuns: 5,
-        maxActiveRunsPerTenant: 5,
+        maxActiveRuns: 1,
+        maxActiveRunsPerTenant: 1,
     });
-    const coordinator = new RunScheduler(
-        runService,
-        scheduler,
-        alwaysQueueAdmission(),
-        undefined,
-        undefined,
-        null,
-        false,
-        { queueTtlMs: 60_000 },
-    );
+    const coordinator = new RunScheduler(runService, scheduler, {
+        queueTtlMs: 60_000,
+    });
 
-    coordinator.submit({
+    const blocker = coordinator.submit({
+        tenantId: "tenant-block",
+        harnessSessionId: "session-block",
+        userInput: "占住唯一 slot",
+        workspacePath: "/tmp/ws-block",
+    });
+    const blockerAttempt = coordinator.attemptNext();
+    await waitForRunning(store, blocker.id);
+
+    const queued = coordinator.submit({
         tenantId: "tenant-b",
         harnessSessionId: "session-b",
         userInput: "还在 TTL 内的任务",
@@ -154,12 +138,57 @@ test("未超 TTL 的排队 Run 不受影响，已摘除的 Run 不再被重复�
     });
     await coordinator.drain();
 
-    // TTL 未到期：保持 QUEUED，准入原因记录为 GLOBAL_CONCURRENCY_LIMIT。
     expect(scheduler.listQueue()).toHaveLength(1);
-    expect(scheduler.listQueue()[0]!.reasonCode).toBe(
+    expect(scheduler.listQueueBlockers()[0]?.runId).toBe(queued.id);
+    expect(scheduler.listQueueBlockers()[0]?.reasonCode).toBe(
         "GLOBAL_CONCURRENCY_LIMIT",
     );
-    expect(store.get(scheduler.listQueue()[0]!.runId)?.status).toBe("QUEUED");
+    expect(store.get(queued.id)?.status).toBe("QUEUED");
+
+    runtime.releaseAll();
+    await blockerAttempt;
+    db.close();
+});
+
+test("会话锁等待不计入 Queue TTL", async () => {
+    const db = openHarnessDatabase(":memory:");
+    const store = new RunStore(db);
+    const runtime = new GatedRuntime();
+    const runService = new RunService(store, runtime);
+    const scheduler = new TenantRunScheduler({
+        maxActiveRuns: 4,
+        maxActiveRunsPerTenant: 4,
+    });
+    const coordinator = new RunScheduler(runService, scheduler, {
+        queueTtlMs: 20,
+    });
+
+    const first = coordinator.submit({
+        tenantId: "tenant-a",
+        harnessSessionId: "session-shared",
+        userInput: "会话里的第一条",
+        workspacePath: "/tmp/ws-a",
+    });
+    const firstAttempt = coordinator.attemptNext();
+    await waitForRunning(store, first.id);
+
+    const followUp = coordinator.submit({
+        tenantId: "tenant-a",
+        harnessSessionId: "session-shared",
+        userInput: "同一会话的追问",
+        workspacePath: "/tmp/ws-a",
+    });
+
+    await sleep(60);
+    await coordinator.drain();
+
+    expect(store.get(followUp.id)?.status).toBe("QUEUED");
+    expect(scheduler.listQueueBlockers()[0]?.reasonCode).toBe(
+        "SESSION_SERIALIZATION",
+    );
+
+    runtime.releaseAll();
+    await firstAttempt;
     db.close();
 });
 
@@ -179,11 +208,10 @@ test("RunService.failQueuedRun 只熔断 QUEUED Run，终态幂等返回 null", 
     expect(failed?.status).toBe("FAILED");
     expect(failed?.failureReason).toBe("QUEUE_TIMEOUT");
 
-    // 已是 FAILED：再次调用不产生重复事件。
     expect(runService.failQueuedRun(run.id, "QUEUE_TIMEOUT")).toBeNull();
     const failedEvents = store
         .listEvents(run.id)
-        .filter((e) => e.type === "RUN_FAILED");
+        .filter((event) => event.type === "RUN_FAILED");
     expect(failedEvents).toHaveLength(1);
     db.close();
 });

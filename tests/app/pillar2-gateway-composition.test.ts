@@ -6,29 +6,8 @@ import {
 import {
     loadHarnessConfig,
 } from "../../src/app/harness-config.ts";
-import type {
-    ResourceSnapshot,
-} from "../../src/resources/resource-observer.ts";
 import { FakeAgentRuntime } from "../fakes/fake-agent-runtime.ts";
-import {
-    FakeResourceObserver,
-} from "../fakes/fake-resource-observer.ts";
 import { tempWorkspaceEnv } from "../support/temp-workspace-root.ts";
-
-const normalSnapshot: ResourceSnapshot = {
-    snapshotId: "pillar2-snapshot",
-    observedAt: "2026-09-08T14:00:00.000Z",
-    sources: ["FAKE"],
-    gpuTotalMemoryMiB: 100,
-    gpuUsedMemoryMiB: 20,
-    gpuFreeMemoryMiB: 80,
-    gpuUtilizationPercent: 20,
-    runningRequests: 0,
-    waitingRequests: 0,
-    kvCacheUsagePercent: 20,
-    inputTokensPerSecond: 1_000,
-    outputTokensPerSecond: 100,
-};
 
 const DUAL_BACKENDS = [
     { id: "vllm-gpu0", baseUrl: "http://gpu0/v1", model: "fake-model", logicalModel: "fake-model" },
@@ -71,15 +50,14 @@ test("支柱 2：组合根装配双卡网关、健康探测与缓存台账并放
 
     const composition = await createHarnessApplication(config, {
         runtime: new FakeAgentRuntime(),
-        resourceObserver: new FakeResourceObserver({ ok: true, snapshot: normalSnapshot }),
     });
 
     try {
         expect(composition.llmGateway).toBeDefined();
         expect(composition.llmHealthMonitor).toBeDefined();
-        // 并发放开：默认 30 全局 / 10 每租户。
+        // 并发放开：默认 30 全局；每租户 0 = 自动公平份额。
         expect(config.maxActiveRuns).toBe(30);
-        expect(config.maxActiveRunsPerTenant).toBe(10);
+        expect(config.maxActiveRunsPerTenant).toBe(0);
 
         // 双卡轮询 + 稳定前缀 + 健康探测回填。
         const chatRequest = (): Request => new Request(

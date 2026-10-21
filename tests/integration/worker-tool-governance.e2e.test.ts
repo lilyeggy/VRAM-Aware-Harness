@@ -6,26 +6,9 @@ import { join } from "node:path";
 import { Database } from "bun:sqlite";
 
 import { loadHarnessConfig } from "../../src/app/harness-config.ts";
-import type { ResourceSnapshot } from "../../src/resources/resource-observer.ts";
 import { startHarnessProcess } from "../../src/main.ts";
-import { FakeResourceObserver } from "../fakes/fake-resource-observer.ts";
 import { canAutomaticallyReplay } from "../../src/tools/tool-execution.ts";
 import { tempWorkspaceEnv } from "../support/temp-workspace-root.ts";
-
-const normalSnapshot: ResourceSnapshot = {
-    snapshotId: "governance-e2e-normal",
-    observedAt: "2026-09-08T15:00:00.000Z",
-    sources: ["FAKE"],
-    gpuTotalMemoryMiB: 100,
-    gpuUsedMemoryMiB: 20,
-    gpuFreeMemoryMiB: 80,
-    gpuUtilizationPercent: 20,
-    runningRequests: 0,
-    waitingRequests: 0,
-    kvCacheUsagePercent: 20,
-    inputTokensPerSecond: 1_000,
-    outputTokensPerSecond: 100,
-};
 
 async function findAvailablePort(): Promise<number> {
     const probe = createServer();
@@ -96,10 +79,6 @@ describe("Worker 模式工具治理端到端（真实子进程 + SQLite 账本�
         const runningHarness = await startHarnessProcess({
             config,
             compositionDependencies: {
-                resourceObserver: new FakeResourceObserver({
-                    ok: true,
-                    snapshot: normalSnapshot,
-                }),
             },
             installSignalHandlers: false,
         });

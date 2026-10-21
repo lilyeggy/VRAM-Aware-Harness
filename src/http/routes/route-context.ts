@@ -1,7 +1,6 @@
 import type { RequestPrincipal } from "../../auth/request-principal.ts";
 import type { AgentRun } from "../../runs/agent-run.ts";
 import type { LlmGateway } from "../../llm-gateway/llm-gateway.ts";
-import type { ResourceMetricsSampler } from "../../resources/resource-metrics-sampler.ts";
 import type {
     CheckpointLookup,
     HarnessHttpApplication,
@@ -17,7 +16,6 @@ export interface HttpRouteContext {
     readonly checkpointLookup: CheckpointLookup;
     readonly accessControl?: HttpAccessControl;
     readonly llmGateway?: LlmGateway;
-    readonly resourceMetrics?: ResourceMetricsSampler;
     readonly limits?: { maxUserInputChars: number };
     /** §9.8 v1.4：进程内 HTTP 状态码计数，供 /metrics 渲染。 */
     readonly httpRequestCounts?: ReadonlyMap<number, number>;

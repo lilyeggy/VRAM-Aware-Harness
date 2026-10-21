@@ -20,10 +20,11 @@ test("loadHarnessConfig 提供本地安全默认值并派生 metrics URL", () =>
         piModelId:"qwen3.5-4b",
         piModelsPath:"/tmp/harness-project/.pi/spike/models.json",
         maxActiveRuns:30,
-        maxActiveRunsPerTenant:10,
+        // 0 = 自动公平份额（全局并发 / 有需求租户数）。
+        maxActiveRunsPerTenant:0,
         llmGatewayStrategy:"round-robin",
         llmHealthProbeIntervalMs:10_000,
-        pumpIntervalMs:1_000,
+        pumpIntervalMs:2_000,
         containerUserId:65532,
     });
     expect(config.piTools).toEqual([
@@ -333,26 +334,22 @@ test("N28：Pi 压缩参数默认值按 32768 窗口标定，且可被环境变�
     }
 });
 
-test("loadHarnessConfig 为 N5/N10/N14 注入适配本项目的默认值", () => {
+test("loadHarnessConfig 为 N10/N14 注入适配本项目的默认值", () => {
     const config = loadHarnessConfig({ VLLM_MODEL_ID: "qwen" }, "/tmp/harness-project");
 
-    // N5：同机 vLLM 默认预占 90% 显存，准入按基线之上的增量判定。
-    expect(config.resourceThresholds.gpuMemoryBaselinePercent).toBe(90);
     // N10：排队超过 60s 的 Run 插队优先调度。
     expect(config.schedulerAgingMs).toBe(60_000);
     // N14：容器 PID 上限（可下调到 gVisor 内部上限之下）。
     expect(config.containerPidsLimit).toBe(128);
 });
 
-test("loadHarnessConfig 允许覆盖 N5/N10/N14 三个新开关", () => {
+test("loadHarnessConfig 允许覆盖 N10/N14 两个新开关", () => {
     const config = loadHarnessConfig({
         VLLM_MODEL_ID: "qwen",
-        HARNESS_GPU_MEMORY_BASELINE_PERCENT: "0",
         HARNESS_SCHEDULER_AGING_MS: "0",
         HARNESS_CONTAINER_PIDS_LIMIT: "64",
     }, "/tmp/harness-project");
 
-    expect(config.resourceThresholds.gpuMemoryBaselinePercent).toBe(0);
     expect(config.schedulerAgingMs).toBe(0);
     expect(config.containerPidsLimit).toBe(64);
 });

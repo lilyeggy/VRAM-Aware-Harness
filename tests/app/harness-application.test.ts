@@ -7,18 +7,6 @@ import {
     HarnessApplication,
     type StartupRecoveryCoordinator,
 } from "../../src/app/harness-application.ts";
-import {
-    PolicyDecisionStore,
-} from "../../src/resources/policy-decision-store.ts";
-import type {
-    PolicyDecision,
-} from "../../src/resources/execution-policy.ts";
-import type {
-    ResourceAdmissionEvaluator,
-} from "../../src/resources/resource-admission-service.ts";
-import type {
-    ResourceSnapshot,
-} from "../../src/resources/resource-observer.ts";
 import { RunService } from "../../src/runs/run-service.ts";
 import type {
     AgentRun,
@@ -36,9 +24,6 @@ import {
 import {
     FakeAgentRuntime,
 } from "../fakes/fake-agent-runtime.ts";
-import {
-    FakeResourceObserver,
-} from "../fakes/fake-resource-observer.ts";
 
 function createDeferred(): {
     promise: Promise<void>;
@@ -58,7 +43,6 @@ function createDeferred(): {
 function createApplication(
     startupRecovery: StartupRecoveryCoordinator,
     lifecycleEvents: string[] = [],
-    admissionOverride?: ResourceAdmissionEvaluator,
 ) {
     const db = openHarnessDatabase(":memory:");
     const runStore = new RunStore(db);
@@ -68,15 +52,9 @@ function createApplication(
         maxActiveRuns: 1,
         maxActiveRunsPerTenant: 1,
     });
-    const admission: ResourceAdmissionEvaluator = admissionOverride ?? {
-        async evaluate() {
-            throw new Error("空队列启动不应调用 Admission");
-        },
-    };
     const coordinator = new RunScheduler(
         runService,
         scheduler,
-        admission,
     );
     const queuePump = {
         start() {
@@ -90,90 +68,21 @@ function createApplication(
             await coordinator.drain();
         },
     };
-    const decisionStore = new PolicyDecisionStore(db);
-    const resourceObserver = new FakeResourceObserver({
-        ok: false,
-        observedAt: "2026-08-05T10:00:00.000Z",
-        attemptedSources: ["FAKE"],
-        reason: "UNAVAILABLE",
-        message: "生命周期测试不读取资源",
-    });
     const application = new HarnessApplication(
         coordinator,
         queuePump,
         runStore,
-        decisionStore,
         scheduler,
-        resourceObserver,
         startupRecovery,
     );
 
     return {
         application,
         db,
-        decisionStore,
         queuePump,
-        resourceObserver,
         runStore,
         runtime,
         scheduler,
-    };
-}
-
-const normalSnapshot: ResourceSnapshot = {
-    snapshotId: "snapshot-normal",
-    observedAt: "2026-08-05T10:00:00.000Z",
-    sources: ["FAKE"],
-    gpuTotalMemoryMiB: 24_000,
-    gpuUsedMemoryMiB: 4_000,
-    gpuFreeMemoryMiB: 20_000,
-    gpuUtilizationPercent: 10,
-    runningRequests: 0,
-    waitingRequests: 0,
-    kvCacheUsagePercent: 5,
-    inputTokensPerSecond: 100,
-    outputTokensPerSecond: 50,
-};
-
-function createAdmission(
-    action: "START" | "QUEUE",
-): ResourceAdmissionEvaluator {
-    return {
-        async evaluate(request) {
-            const decision: PolicyDecision = {
-                decisionId: crypto.randomUUID(),
-                runId: request.runId,
-                action,
-                reasonCode:
-                    action === "START"
-                        ? "RESOURCE_NORMAL"
-                        : "RESOURCE_CRITICAL",
-                resourceSnapshotId: normalSnapshot.snapshotId,
-                pressure: action === "START" ? "NORMAL" : "CRITICAL",
-                observationFailureReason: null,
-                decidedAt: new Date().toISOString(),
-            };
-
-            return {
-                observation: {
-                    ok: true,
-                    snapshot: normalSnapshot,
-                },
-                classification: {
-                    snapshotId: normalSnapshot.snapshotId,
-                    pressure: decision.pressure,
-                    reasons:
-                        action === "START"
-                            ? ["WITHIN_THRESHOLDS"]
-                            : ["GPU_MEMORY_CRITICAL"],
-                    gpuMemoryUsagePercent:
-                        action === "START" ? 16.67 : 95,
-                    gpuMemoryPressurePercent:
-                        action === "START" ? 16.67 : 95,
-                },
-                decision,
-            };
-        },
     };
 }
 
@@ -317,7 +226,6 @@ test("submitRun 只在应用启动后接收任务，并立即触发调度", asyn
     const { application, db, queuePump, runtime } = createApplication(
         { async recover() {} },
         lifecycleEvents,
-        createAdmission("START"),
     );
     const input = {
         tenantId: "tenant-a",
@@ -351,61 +259,33 @@ test("submitRun 只在应用启动后接收任务，并立即触发调度", asyn
     }
 });
 
-test("应用门面统一查询 Run、事件、决策、队列、容量和资源", async () => {
-    const { application, db, decisionStore, queuePump, resourceObserver } =
-        createApplication(
-            { async recover() {} },
-            [],
-            createAdmission("QUEUE"),
-        );
+test("应用门面统一查询 Run、事件、队列与容量", async () => {
+    const { application, db, queuePump, runtime } = createApplication(
+        { async recover() {} },
+    );
 
     try {
         await application.start();
         const run = application.submitRun({
             tenantId: "tenant-b",
             harnessSessionId: "session-b",
-            userInput: "等待资源恢复",
+            userInput: "查询门面",
             workspacePath: "/workspace/demo",
         });
 
         await queuePump.tick();
 
-        const decision: PolicyDecision = {
-            decisionId: "decision-query-test",
-            runId: run.id,
-            action: "QUEUE",
-            reasonCode: "RESOURCE_CRITICAL",
-            resourceSnapshotId: normalSnapshot.snapshotId,
-            pressure: "CRITICAL",
-            observationFailureReason: null,
-            decidedAt: "2026-08-05T10:01:00.000Z",
-        };
-        decisionStore.save(decision, normalSnapshot);
-
-        expect(application.getRun(run.id)?.status).toBe("QUEUED");
+        expect(runtime.startRequests).toHaveLength(1);
+        expect(application.getRun(run.id)?.status).toBe("COMPLETED");
         expect(application.getRunEvents(run.id).map((event) => event.type))
-            .toEqual(["RUN_CREATED", "QUEUE_BLOCKED"]);
-        expect(application.getRunDecisions(run.id)).toEqual([decision]);
-        expect(application.getQueue()).toEqual([
-            expect.objectContaining({
-                runId: run.id,
-                tenantId: "tenant-b",
-                reasonCode: "RESOURCE_CRITICAL",
-                position: 1,
-                tenantPosition: 1,
-            }),
-        ]);
+            .toContain("RUN_CREATED");
+        expect(application.getQueue()).toEqual([]);
         expect(application.getTenantCapacity("tenant-b")).toEqual({
             activeRunCount: 0,
             activeTenantRunCount: 0,
         });
-
-        const observation = await application.observeResources();
-        expect(observation.ok).toBe(false);
-        expect(resourceObserver.observeCallCount).toBe(1);
         expect(application.getRun("missing-run")).toBeNull();
         expect(application.getRunEvents("missing-run")).toEqual([]);
-        expect(application.getRunDecisions("missing-run")).toEqual([]);
     } finally {
         await application.stop();
         db.close();
@@ -418,7 +298,6 @@ test("resumeRun 将中断任务提交到统一调度链并立即推进", async (
         createApplication(
             { async recover() {} },
             lifecycleEvents,
-            createAdmission("START"),
         );
     const timestamp = new Date().toISOString();
     const checkpoint: Checkpoint = {

@@ -2,10 +2,8 @@
  * 端到端走查脚本：真实 HTTP → 鉴权 → Workspace → 准入 → 队列 → Sandbox →
  * Worker 子进程（NDJSON IPC）→ 事件落库 → 输出/证据查询。
  *
- * 与 src/main.ts 的唯一区别：
- * 1. 注入一个可切换的 ResourceObserver（代替需要真实 vLLM + nvidia-smi 的观测器），
- *    以便在没有 GPU 的机器上演示 VRAM 准入的两条分支（START 与 QUEUE）。
- * 2. HTTP 端口用 0，由内核分配空闲端口。
+ * 与 src/main.ts 的唯一区别：HTTP 端口用 0，由内核分配空闲端口。
+ * 资源观测/准入层已移除，排队只由并发上限、会话锁与租约解释。
  *
  * Worker 侧沿用生产入口 src/worker/worker-main.ts，用 HARNESS_WORKER_SIMULATE
  * 内置的 mock_stream 模式回放一段 text_delta（不启动 Pi、不需要模型与容器），
@@ -18,48 +16,7 @@ import { join } from "node:path";
 
 import { loadHarnessConfig } from "../src/app/harness-config.ts";
 import { startHarnessProcess } from "../src/main.ts";
-import type {
-    ResourceObservation,
-    ResourceObserver,
-    ResourceSnapshot,
-} from "../src/resources/resource-observer.ts";
 import { formatRunEventTimeline } from "../src/events/run-event-timeline.ts";
-
-/** 可切换的假观测器：只替换"GPU 现在多忙"这一个输入，其余全是真实链路。 */
-class MutableResourceObserver implements ResourceObserver {
-    private observation: ResourceObservation;
-
-    constructor(observation: ResourceObservation) {
-        this.observation = observation;
-    }
-
-    async observe(): Promise<ResourceObservation> {
-        return this.observation;
-    }
-
-    set(snapshot: ResourceSnapshot): void {
-        this.observation = { ok: true, snapshot };
-    }
-}
-
-/** 构造一个可控的 GPU 快照：used/total 决定压力等级。 */
-function snapshot(id: string, usedMiB: number, running: number): ResourceSnapshot {
-    const total = 100;
-    return {
-        snapshotId: id,
-        observedAt: new Date().toISOString(),
-        sources: ["FAKE"],
-        gpuTotalMemoryMiB: total,
-        gpuUsedMemoryMiB: usedMiB,
-        gpuFreeMemoryMiB: total - usedMiB,
-        gpuUtilizationPercent: usedMiB,
-        runningRequests: running,
-        waitingRequests: 0,
-        kvCacheUsagePercent: 20,
-        inputTokensPerSecond: null,
-        outputTokensPerSecond: null,
-    };
-}
 
 interface HttpContext {
     baseUrl: string;
@@ -179,11 +136,6 @@ async function main(): Promise<void> {
     // Worker 子进程通过继承环境变量读取模拟模式。
     process.env.HARNESS_WORKER_SIMULATE = "mock_stream";
 
-    const observer = new MutableResourceObserver({
-        ok: true,
-        snapshot: snapshot("snap-initial-normal", 20, 0),
-    });
-
     const config = loadHarnessConfig({
         VLLM_MODEL_ID: "Qwen3-8B-demo",
         HARNESS_DATABASE_PATH: join(tempRoot, "harness.sqlite"),
@@ -198,7 +150,6 @@ async function main(): Promise<void> {
 
     const running = await startHarnessProcess({
         config,
-        compositionDependencies: { resourceObserver: observer },
         installSignalHandlers: false,
     });
     const context: HttpContext = {
@@ -216,8 +167,6 @@ async function main(): Promise<void> {
         console.log(`workerScriptPath     = ${running.config.workerScriptPath}`);
         console.log(`pumpIntervalMs       = ${running.config.pumpIntervalMs}`);
         console.log(`maxActiveRuns        = ${running.config.maxActiveRuns}`);
-        console.log(`沙箱阈值 busy/critical GPU% = ${running.config.resourceThresholds.busyGpuMemoryPercent}/${running.config.resourceThresholds.criticalGpuMemoryPercent}`);
-        console.log(`沙箱阈值 busy/critical KV%  = ${running.config.resourceThresholds.busyKvCachePercent}/${running.config.resourceThresholds.criticalKvCachePercent}`);
 
         const health = await call(context, "GET", "/health");
         console.log(`\nGET /health -> ${health.status} ${JSON.stringify(health.json)}`);
@@ -274,7 +223,6 @@ async function main(): Promise<void> {
         };
         console.log(`\nPOST /runs body = ${JSON.stringify(requestA)}`);
 
-        observer.set(snapshot("snap-normal-1", 20, 0));
         const submitA = await call(context, "POST", "/runs", requestA);
         console.log(`POST /runs -> ${submitA.status}`);
         console.log(`响应 run = ${JSON.stringify({
@@ -306,7 +254,6 @@ async function main(): Promise<void> {
         });
         const workspaceIdB = workspaceB.json.workspace.id as string;
 
-        observer.set(snapshot("snap-critical-1", 95, 9));
         const submitB = await call(context, "POST", "/runs", {
             sessionId: `sess-b-${crypto.randomUUID()}`,
             userInput: "统计 src 下的模块数量并给出结论。",
@@ -328,8 +275,6 @@ async function main(): Promise<void> {
             pressure: d.pressure,
         })))}`);
 
-        console.log(`\n>>> 切换观测器：GPU 回落到 20%（NORMAL），等待下一次 pump tick`);
-        observer.set(snapshot("snap-normal-2", 20, 0));
         const finalB = await waitForTerminal(context, runIdB);
         console.log(`终态 status = ${finalB.run.status}`);
         console.log(`decisions = ${JSON.stringify(finalB.decisions.map((d: any) => ({
@@ -356,7 +301,6 @@ async function main(): Promise<void> {
         });
         const workspaceIdA2 = workspaceA2.json.workspace.id as string;
 
-        observer.set(snapshot("snap-critical-2", 96, 12));
         const tenantARuns: string[] = [];
         const tenantBRuns: string[] = [];
         tenantARuns.push((await call(context, "POST", "/runs", {
@@ -397,8 +341,7 @@ async function main(): Promise<void> {
         console.log(`租户 B 的 runId 顺序 = ${JSON.stringify(tenantBRuns)}`);
         console.log("（对照 position：全局投影顺序为 A1, B1, A2, B2 —— 每租户内部 FIFO，租户之间轮转）");
 
-        console.log(`\n>>> 切换观测器：GPU 回落到 20%（NORMAL），等待 4 个 Run 全部收敛`);
-        observer.set(snapshot("snap-normal-3", 20, 0));
+        console.log(`\n>>> 等待 4 个 Run 全部收敛`);
         for (const runId of [...tenantARuns, ...tenantBRuns]) {
             const owner = tenantARuns.includes(runId) ? context : contextB;
             const settled = await waitForTerminal(owner, runId);
@@ -527,10 +470,6 @@ async function failureWalkthrough(): Promise<void> {
         const tempRoot = mkdtempSync(join(tmpdir(), "harness-e2e-fail-"));
         const pumpErrors: string[] = [];
         process.env.HARNESS_WORKER_SIMULATE = testCase.simulate;
-        const observer = new MutableResourceObserver({
-            ok: true,
-            snapshot: snapshot("snap-fail", 20, 0),
-        });
         const config = loadHarnessConfig({
             VLLM_MODEL_ID: "Qwen3-8B-demo",
             HARNESS_DATABASE_PATH: join(tempRoot, "harness.sqlite"),
@@ -544,7 +483,6 @@ async function failureWalkthrough(): Promise<void> {
         const running = await startHarnessProcess({
             config,
             compositionDependencies: {
-                resourceObserver: observer,
                 // 统计 pump 抛出的错误次数，用来验证"一次失败被记了几条"。
                 onPumpError: (error) => {
                     pumpErrors.push(
@@ -585,7 +523,7 @@ async function failureWalkthrough(): Promise<void> {
             const settled = await waitForTerminal(context, runId, 60_000);
             console.log(`\n终态 status = ${settled.run.status}`);
             console.log(`failureReason = ${JSON.stringify(settled.run.failureReason)}`);
-            console.log(`decisions = ${JSON.stringify(settled.decisions.map((d: any) => d.action + "/" + d.reasonCode))}`);
+            console.log(`limitations = ${JSON.stringify(settled.limitations ?? [])}`);
 
             const events = await call(context, "GET", `/runs/${runId}/events`);
             console.log(`\n事件时间线：`);

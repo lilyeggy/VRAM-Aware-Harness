@@ -12,9 +12,6 @@ import type {
     ToolExecution,
 } from "../../src/tools/tool-execution.ts";
 import type {
-    PolicyDecision,
-} from "../../src/resources/execution-policy.ts";
-import type {
     AgentRun,
     RunEvent,
 } from "../../src/runs/agent-run.ts";
@@ -64,16 +61,6 @@ function createApi(
         payloadVersion:1,
         payload:{},
     };
-    const decision:PolicyDecision = {
-        decisionId:"decision-http",
-        runId:currentRun.id,
-        action:"QUEUE",
-        reasonCode:"RESOURCE_CRITICAL",
-        resourceSnapshotId:"snapshot-http",
-        pressure:"CRITICAL",
-        observationFailureReason:null,
-        decidedAt:timestamp,
-    };
     const checkpoint:Checkpoint = {
         id:"checkpoint-http",
         runId:currentRun.id,
@@ -116,9 +103,6 @@ function createApi(
         },
         getRunArtifacts() { return [{ runId: currentRun.id, path: "report.txt", hash: "hash", size: 6, createdAt: timestamp }]; },
         async getRunArtifact(_runId, path) { return path === "report.txt" ? new TextEncoder().encode("report") : null; },
-        getRunDecisions(runId) {
-            return runId === currentRun.id ? [decision] : [];
-        },
         getRunLimitations(runId) {
             return runId === currentRun.id
                 ? [{ toolName: "bash", reason: "执行环境无法隔离 Workspace，拒绝 bash", count: 3, lastDecidedAt: timestamp }]
@@ -128,21 +112,11 @@ function createApi(
             return [{
                 runId:currentRun.id,
                 tenantId:currentRun.tenantId,
-                reasonCode:"RESOURCE_CRITICAL",
-                priority:0,
+                reasonCode:"AWAITING_SCHEDULING",
                 enqueuedAt:timestamp,
                 position:1,
                 tenantPosition:1,
             }];
-        },
-        async observeResources() {
-            return {
-                ok:false as const,
-                observedAt:timestamp,
-                attemptedSources:["FAKE" as const],
-                reason:"UNAVAILABLE" as const,
-                message:"测试资源不可用",
-            };
         },
         async interruptRun(runId) {
             if (runId !== currentRun.id) {
@@ -187,7 +161,7 @@ function createApi(
                     ? checkpoint
                     : null;
             },
-        }, accessControl, undefined, undefined, limits),
+        }, accessControl, undefined, limits),
         getResumeInput:() => resumeInput,
         getSubmittedInput:() => submittedInput,
         getResolveInput:() => resolveInput,
@@ -251,11 +225,9 @@ test("最小 HTTP API 覆盖提交、查询、中断、恢复、队列、资源�
     expect(runResponse.status).toBe(200);
     expect(await jsonBody<{
         run:AgentRun;
-        decisions:PolicyDecision[];
         limitations:unknown[];
     }>(runResponse)).toMatchObject({
         run:{ id:"run-http" },
-        decisions:[{ decisionId:"decision-http" }],
         limitations:[{ toolName: "bash", reason: "执行环境无法隔离 Workspace，拒绝 bash", count: 3, lastDecidedAt: timestamp }],
     });
 
@@ -293,16 +265,6 @@ test("最小 HTTP API 覆盖提交、查询、中断、恢复、队列、资源�
     ));
     expect(await jsonBody<{ queue:unknown[] }>(queueResponse))
         .toMatchObject({ queue:[{ position:1 }] });
-
-    const resourcesResponse = await api.fetch(new Request(
-        "http://harness.local/resources",
-    ));
-    expect(await jsonBody(resourcesResponse)).toMatchObject({
-        observation:{
-            ok:false,
-            reason:"UNAVAILABLE",
-        },
-    });
 
     const interruptResponse = await api.fetch(new Request(
         "http://harness.local/runs/run-http/interrupt",
@@ -342,9 +304,7 @@ test("LLM 网关入口走统一身份主干：无 key 401、作用域不足 403�
         getRunWorkspaceDiff: () => null,
         getRunArtifacts: () => [],
         getRunArtifact: async () => null,
-        getRunDecisions: () => [],
         getQueue: () => [],
-        observeResources: async () => ({ ok: false as const, observedAt: timestamp, attemptedSources: ["FAKE" as const], reason: "UNAVAILABLE" as const, message: "x" }),
         interruptRun: async () => createRun(),
         resumeRun: () => createRun(),
     };
@@ -622,48 +582,6 @@ test("未知异常返回 500 通用文案与 requestId，不透出内部 message
     expect(body.error).toBe("内部错误，请稍后重试");
     expect(body.requestId).toMatch(/^[0-9a-f]{8}$/);
     expect(JSON.stringify(body)).not.toContain("UNIQUE constraint failed");
-});
-
-test("POST /runs 解析 priority 并传给 submitRun", async () => {
-    const { api, getSubmittedInput } = createApi();
-    const response = await api.fetch(new Request(
-        "http://harness.local/runs",
-        {
-            method: "POST",
-            headers: { "content-type": "application/json" },
-            body: JSON.stringify({
-                tenantId: "tenant-api",
-                sessionId: "session-priority",
-                userInput: "优先级",
-                workspacePath: "/tmp/api-workspace",
-                priority: 7,
-            }),
-        },
-    ));
-    expect(response.status).toBe(202);
-    expect(getSubmittedInput()?.priority).toBe(7);
-});
-
-test("POST /runs 拒绝非法 priority", async () => {
-    const { api } = createApi();
-    const response = await api.fetch(new Request(
-        "http://harness.local/runs",
-        {
-            method: "POST",
-            headers: { "content-type": "application/json" },
-            body: JSON.stringify({
-                tenantId: "tenant-api",
-                sessionId: "session-priority-bad",
-                userInput: "非法优先级",
-                workspacePath: "/tmp/api-workspace",
-                priority: -1,
-            }),
-        },
-    ));
-    expect(response.status).toBe(400);
-    expect(await response.json()).toEqual({
-        error: "priority 必须是非负整数",
-    });
 });
 
 test("POST /runs 解析并透传 idempotencyKey", async () => {

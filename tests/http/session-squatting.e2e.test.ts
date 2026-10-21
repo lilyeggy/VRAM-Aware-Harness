@@ -6,29 +6,8 @@ import {
 import {
     loadHarnessConfig,
 } from "../../src/app/harness-config.ts";
-import type {
-    ResourceSnapshot,
-} from "../../src/resources/resource-observer.ts";
 import { FakeAgentRuntime } from "../fakes/fake-agent-runtime.ts";
-import {
-    FakeResourceObserver,
-} from "../fakes/fake-resource-observer.ts";
 import { tempWorkspaceEnv } from "../support/temp-workspace-root.ts";
-
-const normalSnapshot:ResourceSnapshot = {
-    snapshotId:"squat-snapshot",
-    observedAt:"2026-09-09T10:00:00.000Z",
-    sources:["FAKE"],
-    gpuTotalMemoryMiB:100,
-    gpuUsedMemoryMiB:20,
-    gpuFreeMemoryMiB:80,
-    gpuUtilizationPercent:20,
-    runningRequests:0,
-    waitingRequests:0,
-    kvCacheUsagePercent:20,
-    inputTokensPerSecond:1_000,
-    outputTokensPerSecond:100,
-};
 
 
 type HarnessComposition = Awaited<ReturnType<typeof createHarnessApplication>>;
@@ -42,7 +21,6 @@ async function createTestComposition(): Promise<HarnessComposition> {
     });
     return createHarnessApplication(config, {
         runtime: new FakeAgentRuntime(),
-        resourceObserver: new FakeResourceObserver({ ok:true, snapshot:normalSnapshot }),
     });
 }
 
@@ -195,17 +173,6 @@ test("资源可见性显式化 + 资源级审计 + 登出语义", async () => {
         );
         expect(((await pagedResponse.json()) as { events:unknown[] }).events)
             .toHaveLength(1);
-
-        // D3：主机级资源遥测显式标注可见性，不再是"悄悄丢弃 principal"。
-        const resourcesResponse = await composition.httpApi.fetch(
-            new Request("http://harness.local/resources", {
-                headers:{ authorization:`Bearer ${tenant.token}` },
-            }),
-        );
-        expect(resourcesResponse.status).toBe(200);
-        expect(await resourcesResponse.json()).toMatchObject({
-            visibility:"HOST_WIDE",
-        });
 
         // D7：无效 token 登出 → 401；有效登出 → 200；同一 token 二次登出 → 401。
         const badLogout = await composition.httpApi.fetch(

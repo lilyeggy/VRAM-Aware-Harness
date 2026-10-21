@@ -2,7 +2,6 @@ import { expect, test } from "bun:test";
 
 import { createHarnessApplication } from "../../src/app/create-harness-application.ts";
 import { loadHarnessConfig } from "../../src/app/harness-config.ts";
-import type { ResourceSnapshot } from "../../src/resources/resource-observer.ts";
 import type {
     AgentRuntime,
     RuntimeEvent,
@@ -11,27 +10,11 @@ import type {
     RuntimeStartRequest,
 } from "../../src/runtime/agent-runtime.ts";
 import { QueueBackpressureError } from "../../src/scheduling/run-scheduler.ts";
-import { FakeResourceObserver } from "../fakes/fake-resource-observer.ts";
 import { tempWorkspaceEnv } from "../support/temp-workspace-root.ts";
 
 /**
  * §9.9 v1.5 Phase 5 F5：队列深度 backpressure 时提交被拒绝且不落库。
  */
-
-const normalSnapshot: ResourceSnapshot = {
-    snapshotId: "backpressure-fault-snapshot",
-    observedAt: "2026-10-11T10:00:00.000Z",
-    sources: ["FAKE"],
-    gpuTotalMemoryMiB: 100,
-    gpuUsedMemoryMiB: 20,
-    gpuFreeMemoryMiB: 80,
-    gpuUtilizationPercent: 20,
-    runningRequests: 0,
-    waitingRequests: 0,
-    kvCacheUsagePercent: 20,
-    inputTokensPerSecond: 1000,
-    outputTokensPerSecond: 100,
-};
 
 /** start/resume 会一直挂住，直到 release()，用于占住并发 slot。 */
 class GatedRuntime implements AgentRuntime {
@@ -105,10 +88,6 @@ test("队列深度超限的提交抛 QueueBackpressureError 且不创建 Run", a
     const runtime = new GatedRuntime();
     const composition = await createHarnessApplication(config, {
         runtime,
-        resourceObserver: new FakeResourceObserver({
-            ok: true,
-            snapshot: normalSnapshot,
-        }),
     });
 
     try {

@@ -278,6 +278,10 @@ async function simulateAgentRun() {
     const tasks = TENANT_PLANS.map(async (plan, idx) => {
         const queued = queuedRuns[idx];
 
+        if (queued === undefined) {
+            throw new Error(`缺少排队 Run：${plan.tenantId}`);
+        }
+
         // 调度器认领
         const claimed = scheduler.claimNext();
         const activeRun = claimed ?? queued;
@@ -317,6 +321,10 @@ async function simulateAgentRun() {
         // 执行多轮对话交互
         for (let turnIdx = 0; turnIdx < plan.turns.length; turnIdx++) {
             const turn = plan.turns[turnIdx];
+
+            if (turn === undefined) {
+                throw new Error(`缺少 turn：${plan.tenantId}#${turnIdx}`);
+            }
 
             // 模拟大模型思考与生成 Tool Call (耗时 ~20-40ms)
             const thinkMs = 25 + Math.floor(Math.random() * 20);

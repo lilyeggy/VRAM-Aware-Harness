@@ -14,19 +14,8 @@ import type {
     RuntimeResumeRequest,
     RuntimeStartRequest,
 } from "../../src/runtime/agent-runtime.ts";
-import type {
-    PolicyAction,
-    PolicyDecision,
-    PolicyReasonCode,
-} from "../../src/resources/execution-policy.ts";
-import type {
-    ResourceAdmissionEvaluator,
-    ResourceAdmissionRequest,
-    ResourceAdmissionResult,
-} from "../../src/resources/resource-admission-service.ts";
 import {
     RunScheduler,
-    toQueueReasonCode,
 } from "../../src/scheduling/run-scheduler.ts";
 import {
     TenantRunScheduler,
@@ -37,52 +26,6 @@ import {
 import {
     FakeAgentRuntime,
 } from "../fakes/fake-agent-runtime.ts";
-
-function createDecision(
-    request: ResourceAdmissionRequest,
-    action: PolicyAction,
-    reasonCode: PolicyReasonCode,
-): PolicyDecision {
-    return {
-        decisionId: `decision-${request.runId}`,
-        runId: request.runId,
-        action,
-        reasonCode,
-        resourceSnapshotId: "snapshot-1",
-        pressure:
-            reasonCode === "RESOURCE_CRITICAL"
-                ? "CRITICAL"
-                : "NORMAL",
-        observationFailureReason: null,
-        decidedAt: "2026-08-04T10:00:00.000Z",
-    };
-}
-
-function createAdmissionResult(
-    decision: PolicyDecision,
-): ResourceAdmissionResult {
-    return {
-        observation: {
-            ok: true,
-            snapshot: {
-                snapshotId: "snapshot-1",
-                observedAt: "2026-08-04T10:00:00.000Z",
-                sources: ["FAKE"],
-                gpuTotalMemoryMiB: 100,
-                gpuUsedMemoryMiB: 20,
-                gpuFreeMemoryMiB: 80,
-                gpuUtilizationPercent: 20,
-                runningRequests: 0,
-                waitingRequests: 0,
-                kvCacheUsagePercent: 20,
-                inputTokensPerSecond: 1_000,
-                outputTokensPerSecond: 100,
-            },
-        },
-        classification: null,
-        decision,
-    };
-}
 
 class BlockingAgentRuntime implements AgentRuntime {
     private readonly handlersByRunId =
@@ -223,25 +166,36 @@ class FailFirstStartRuntime extends FakeAgentRuntime {
     }
 }
 
+/** 执行入口第一次抛错，但让 Run 仍停在 QUEUED，用于验证重新入队。 */
+class FailFirstExecuteRunService extends RunService {
+    private attempts = 0;
+
+    override async executeQueuedRun(runId: string): Promise<AgentRun> {
+        this.attempts += 1;
+        if (this.attempts === 1) {
+            throw new Error("执行前快照失败");
+        }
+        return super.executeQueuedRun(runId);
+    }
+}
+
+function createScheduler(options: {
+    maxActiveRuns?: number;
+    maxActiveRunsPerTenant?: number;
+} = {}): TenantRunScheduler {
+    return new TenantRunScheduler({
+        maxActiveRuns: options.maxActiveRuns ?? 1,
+        maxActiveRunsPerTenant: options.maxActiveRunsPerTenant ?? 1,
+    });
+}
+
 test("submit 持久化 QUEUED Run 并入队，但不启动 Runtime", () => {
     const db = openHarnessDatabase(":memory:");
     const store = new RunStore(db);
     const runtime = new FakeAgentRuntime();
     const runService = new RunService(store, runtime);
-    const scheduler = new TenantRunScheduler({
-        maxActiveRuns: 2,
-        maxActiveRunsPerTenant: 1,
-    });
-    const admission: ResourceAdmissionEvaluator = {
-        async evaluate() {
-            throw new Error("submit 不应该执行资源准入");
-        },
-    };
-    const coordinator = new RunScheduler(
-        runService,
-        scheduler,
-        admission,
-    );
+    const scheduler = createScheduler({ maxActiveRuns: 2 });
+    const coordinator = new RunScheduler(runService, scheduler);
 
     try {
         const run = coordinator.submit({
@@ -263,7 +217,6 @@ test("submit 持久化 QUEUED Run 并入队，但不启动 Runtime", () => {
             tenantId: "tenant-a",
             reasonCode: "AWAITING_SCHEDULING",
             enqueuedAt: expect.any(String),
-            priority: 0,
             position: 1,
             tenantPosition: 1,
         }]);
@@ -274,167 +227,31 @@ test("submit 持久化 QUEUED Run 并入队，但不启动 Runtime", () => {
     }
 });
 
-test("QUEUE Policy reason 会归一化为队列展示原因", () => {
-    const cases = [
-        ["GLOBAL_CONCURRENCY_LIMIT", "GLOBAL_CONCURRENCY_LIMIT"],
-        ["RESOURCE_BUSY_TENANT_LIMIT", "RESOURCE_BUSY"],
-        ["RESOURCE_CRITICAL", "RESOURCE_CRITICAL"],
-        ["RESOURCE_UNKNOWN", "RESOURCE_UNKNOWN"],
-        ["RESOURCE_OBSERVATION_FAILED", "RESOURCE_OBSERVATION_FAILED"],
-    ] as const;
-
-    for (const [policyReason, queueReason] of cases) {
-        expect(toQueueReasonCode({
-            decisionId: `decision-${policyReason}`,
-            runId: "run-1",
-            action: "QUEUE",
-            reasonCode: policyReason,
-            resourceSnapshotId: null,
-            pressure: "UNKNOWN",
-            observationFailureReason: null,
-            decidedAt: "2026-08-04T10:00:00.000Z",
-        })).toBe(queueReason);
-    }
-});
-
-test("START Policy decision 不能转换成排队原因", () => {
-    expect(() => toQueueReasonCode({
-        decisionId: "decision-start",
-        runId: "run-1",
-        action: "START",
-        reasonCode: "RESOURCE_NORMAL",
-        resourceSnapshotId: "snapshot-1",
-        pressure: "NORMAL",
-        observationFailureReason: null,
-        decidedAt: "2026-08-04T10:00:00.000Z",
-    })).toThrow(
-        "START 决策不能转换成排队原因：RESOURCE_NORMAL",
-    );
-});
-
-test("attemptNext 在空队列时不调用 Admission", async () => {
+test("attemptNext 在空队列时返回 EMPTY", async () => {
     const db = openHarnessDatabase(":memory:");
     const store = new RunStore(db);
     const runtime = new FakeAgentRuntime();
     const runService = new RunService(store, runtime);
-    const scheduler = new TenantRunScheduler({
-        maxActiveRuns: 1,
-        maxActiveRunsPerTenant: 1,
-    });
-    let evaluateCallCount = 0;
-    const admission: ResourceAdmissionEvaluator = {
-        async evaluate() {
-            evaluateCallCount += 1;
-            throw new Error("空队列不应执行 Admission");
-        },
-    };
-    const coordinator = new RunScheduler(
-        runService,
-        scheduler,
-        admission,
-    );
+    const scheduler = createScheduler();
+    const coordinator = new RunScheduler(runService, scheduler);
 
     try {
         expect(await coordinator.attemptNext()).toEqual({
             kind: "EMPTY",
         });
-        expect(evaluateCallCount).toBe(0);
         expect(runtime.startRequests).toEqual([]);
     } finally {
         db.close();
     }
 });
 
-test("attemptNext 在 CRITICAL 决策后释放 slot 并保留原入队时间", async () => {
+test("attemptNext claim 成功后直接执行 Run 并释放 slot", async () => {
     const db = openHarnessDatabase(":memory:");
     const store = new RunStore(db);
     const runtime = new FakeAgentRuntime();
     const runService = new RunService(store, runtime);
-    const scheduler = new TenantRunScheduler({
-        maxActiveRuns: 1,
-        maxActiveRunsPerTenant: 1,
-    });
-    const requests: ResourceAdmissionRequest[] = [];
-    const admission: ResourceAdmissionEvaluator = {
-        async evaluate(request) {
-            requests.push(request);
-            return createAdmissionResult(createDecision(
-                request,
-                "QUEUE",
-                "RESOURCE_CRITICAL",
-            ));
-        },
-    };
-    const coordinator = new RunScheduler(
-        runService,
-        scheduler,
-        admission,
-    );
-
-    try {
-        const run = coordinator.submit({
-            tenantId: "tenant-a",
-            harnessSessionId: "session-a",
-            userInput: "资源恢复后执行",
-            workspacePath: "/tmp/workspace-a",
-        });
-        const originalEnqueuedAt =
-            scheduler.listQueue()[0]?.enqueuedAt;
-
-        expect(originalEnqueuedAt).toBeDefined();
-
-        const result = await coordinator.attemptNext();
-
-        expect(result.kind).toBe("DEFERRED");
-        expect(requests).toEqual([{
-            runId: run.id,
-            tenantId: "tenant-a",
-            activeRunCount: 0,
-            activeTenantRunCount: 0,
-        }]);
-        expect(store.get(run.id)?.status).toBe("QUEUED");
-        expect(runtime.startRequests).toEqual([]);
-        expect(scheduler.getCapacity("tenant-a")).toEqual({
-            activeRunCount: 0,
-            activeTenantRunCount: 0,
-        });
-        expect(scheduler.listQueue()).toEqual([{
-            runId: run.id,
-            tenantId: "tenant-a",
-            reasonCode: "RESOURCE_CRITICAL",
-            enqueuedAt: originalEnqueuedAt!,
-            priority: 0,
-            position: 1,
-            tenantPosition: 1,
-        }]);
-    } finally {
-        db.close();
-    }
-});
-
-test("attemptNext 在 START 决策后执行 Run 并释放 slot", async () => {
-    const db = openHarnessDatabase(":memory:");
-    const store = new RunStore(db);
-    const runtime = new FakeAgentRuntime();
-    const runService = new RunService(store, runtime);
-    const scheduler = new TenantRunScheduler({
-        maxActiveRuns: 1,
-        maxActiveRunsPerTenant: 1,
-    });
-    const admission: ResourceAdmissionEvaluator = {
-        async evaluate(request) {
-            return createAdmissionResult(createDecision(
-                request,
-                "START",
-                "RESOURCE_NORMAL",
-            ));
-        },
-    };
-    const coordinator = new RunScheduler(
-        runService,
-        scheduler,
-        admission,
-    );
+    const scheduler = createScheduler();
+    const coordinator = new RunScheduler(runService, scheduler);
 
     try {
         const submittedRun = coordinator.submit({
@@ -462,25 +279,13 @@ test("attemptNext 在 START 决策后执行 Run 并释放 slot", async () => {
     }
 });
 
-test("Admission 抛错时 attemptNext 释放 slot 并恢复等待 Run", async () => {
+test("执行异常且 Run 仍为 QUEUED 时重新入队 AWAITING_SCHEDULING", async () => {
     const db = openHarnessDatabase(":memory:");
     const store = new RunStore(db);
     const runtime = new FakeAgentRuntime();
-    const runService = new RunService(store, runtime);
-    const scheduler = new TenantRunScheduler({
-        maxActiveRuns: 1,
-        maxActiveRunsPerTenant: 1,
-    });
-    const admission: ResourceAdmissionEvaluator = {
-        async evaluate() {
-            throw new Error("决策记录器暂时不可用");
-        },
-    };
-    const coordinator = new RunScheduler(
-        runService,
-        scheduler,
-        admission,
-    );
+    const runService = new FailFirstExecuteRunService(store, runtime);
+    const scheduler = createScheduler();
+    const coordinator = new RunScheduler(runService, scheduler);
 
     try {
         const run = coordinator.submit({
@@ -491,7 +296,7 @@ test("Admission 抛错时 attemptNext 释放 slot 并恢复等待 Run", async ()
         });
 
         await expect(coordinator.attemptNext()).rejects.toThrow(
-            "决策记录器暂时不可用",
+            "执行前快照失败",
         );
 
         expect(store.get(run.id)?.status).toBe("QUEUED");
@@ -505,36 +310,23 @@ test("Admission 抛错时 attemptNext 释放 slot 并恢复等待 Run", async ()
             reasonCode: entry.reasonCode,
         }))).toEqual([{
             runId: run.id,
-            reasonCode: "RESOURCE_OBSERVATION_FAILED",
+            reasonCode: "AWAITING_SCHEDULING",
         }]);
     } finally {
         db.close();
     }
 });
 
-test("drain 在全部 START 时执行当前队列中的所有 Run", async () => {
+test("drain 执行当前队列中的所有 Run", async () => {
     const db = openHarnessDatabase(":memory:");
     const store = new RunStore(db);
     const runtime = new FakeAgentRuntime();
     const runService = new RunService(store, runtime);
-    const scheduler = new TenantRunScheduler({
+    const scheduler = createScheduler({
         maxActiveRuns: 2,
         maxActiveRunsPerTenant: 1,
     });
-    const admission: ResourceAdmissionEvaluator = {
-        async evaluate(request) {
-            return createAdmissionResult(createDecision(
-                request,
-                "START",
-                "RESOURCE_NORMAL",
-            ));
-        },
-    };
-    const coordinator = new RunScheduler(
-        runService,
-        scheduler,
-        admission,
-    );
+    const coordinator = new RunScheduler(runService, scheduler);
 
     try {
         const runA = coordinator.submit({
@@ -567,156 +359,16 @@ test("drain 在全部 START 时执行当前队列中的所有 Run", async () => 
     }
 });
 
-test("drain 在全部 CRITICAL 时每个当前 Run 只检查一次", async () => {
-    const db = openHarnessDatabase(":memory:");
-    const store = new RunStore(db);
-    const runtime = new FakeAgentRuntime();
-    const runService = new RunService(store, runtime);
-    const scheduler = new TenantRunScheduler({
-        maxActiveRuns: 2,
-        maxActiveRunsPerTenant: 1,
-    });
-    let evaluateCallCount = 0;
-    const admission: ResourceAdmissionEvaluator = {
-        async evaluate(request) {
-            evaluateCallCount += 1;
-            return createAdmissionResult(createDecision(
-                request,
-                "QUEUE",
-                "RESOURCE_CRITICAL",
-            ));
-        },
-    };
-    const coordinator = new RunScheduler(
-        runService,
-        scheduler,
-        admission,
-    );
-
-    try {
-        const runA = coordinator.submit({
-            tenantId: "tenant-a",
-            harnessSessionId: "session-a",
-            userInput: "等待 A",
-            workspacePath: "/tmp/workspace-a",
-        });
-        const runB = coordinator.submit({
-            tenantId: "tenant-b",
-            harnessSessionId: "session-b",
-            userInput: "等待 B",
-            workspacePath: "/tmp/workspace-b",
-        });
-
-        const results = await coordinator.drain();
-
-        expect(results.map((result) => result.kind)).toEqual([
-            "DEFERRED",
-            "DEFERRED",
-        ]);
-        expect(evaluateCallCount).toBe(2);
-        expect(runtime.startRequests).toEqual([]);
-        expect(scheduler.listQueue().map((entry) => ({
-            runId: entry.runId,
-            reasonCode: entry.reasonCode,
-        }))).toEqual([
-            {
-                runId: runA.id,
-                reasonCode: "RESOURCE_CRITICAL",
-            },
-            {
-                runId: runB.id,
-                reasonCode: "RESOURCE_CRITICAL",
-            },
-        ]);
-    } finally {
-        db.close();
-    }
-});
-
-test("drain 中一个 Run DEFERRED 不会阻止后续 Run 执行", async () => {
-    const db = openHarnessDatabase(":memory:");
-    const store = new RunStore(db);
-    const runtime = new FakeAgentRuntime();
-    const runService = new RunService(store, runtime);
-    const scheduler = new TenantRunScheduler({
-        maxActiveRuns: 2,
-        maxActiveRunsPerTenant: 1,
-    });
-    const admission: ResourceAdmissionEvaluator = {
-        async evaluate(request) {
-            return createAdmissionResult(
-                request.tenantId === "tenant-a"
-                    ? createDecision(
-                        request,
-                        "QUEUE",
-                        "RESOURCE_CRITICAL",
-                    )
-                    : createDecision(
-                        request,
-                        "START",
-                        "RESOURCE_NORMAL",
-                    ),
-            );
-        },
-    };
-    const coordinator = new RunScheduler(
-        runService,
-        scheduler,
-        admission,
-    );
-
-    try {
-        const runA = coordinator.submit({
-            tenantId: "tenant-a",
-            harnessSessionId: "session-a",
-            userInput: "延后 A",
-            workspacePath: "/tmp/workspace-a",
-        });
-        const runB = coordinator.submit({
-            tenantId: "tenant-b",
-            harnessSessionId: "session-b",
-            userInput: "执行 B",
-            workspacePath: "/tmp/workspace-b",
-        });
-
-        const results = await coordinator.drain();
-
-        expect(results.map((result) => result.kind)).toEqual([
-            "DEFERRED",
-            "EXECUTED",
-        ]);
-        expect(store.get(runA.id)?.status).toBe("QUEUED");
-        expect(store.get(runB.id)?.status).toBe("COMPLETED");
-        expect(scheduler.listQueue().map((entry) => entry.runId))
-            .toEqual([runA.id]);
-    } finally {
-        db.close();
-    }
-});
-
 test("drain 的真实并发不会超过 Scheduler 全局 slot", async () => {
     const db = openHarnessDatabase(":memory:");
     const store = new RunStore(db);
     const runtime = new BlockingAgentRuntime();
     const runService = new RunService(store, runtime);
-    const scheduler = new TenantRunScheduler({
+    const scheduler = createScheduler({
         maxActiveRuns: 2,
         maxActiveRunsPerTenant: 1,
     });
-    const admission: ResourceAdmissionEvaluator = {
-        async evaluate(request) {
-            return createAdmissionResult(createDecision(
-                request,
-                "START",
-                "RESOURCE_NORMAL",
-            ));
-        },
-    };
-    const coordinator = new RunScheduler(
-        runService,
-        scheduler,
-        admission,
-    );
+    const coordinator = new RunScheduler(runService, scheduler);
 
     try {
         const runs = ["a", "b", "c"].map((suffix) =>
@@ -735,6 +387,11 @@ test("drain 的真实并发不会超过 Scheduler 全局 slot", async () => {
         expect(runtime.maxActiveStartCount).toBe(2);
         expect(runtime.startRequests).toHaveLength(2);
         expect(scheduler.listQueue()).toHaveLength(1);
+        // 排队原因由 blocker 视图按当前容量实时计算（队列条目本身只记录
+        // 入队原因 AWAITING_SCHEDULING）。
+        expect(scheduler.listQueueBlockers()[0]?.reasonCode).toBe(
+            "GLOBAL_CONCURRENCY_LIMIT",
+        );
 
         runtime.releaseAllStarted();
         await runtime.waitForStartCount(3);
@@ -765,26 +422,8 @@ test("并发 drain 调用复用同一个推进循环", async () => {
     const store = new RunStore(db);
     const runtime = new BlockingAgentRuntime();
     const runService = new RunService(store, runtime);
-    const scheduler = new TenantRunScheduler({
-        maxActiveRuns: 1,
-        maxActiveRunsPerTenant: 1,
-    });
-    let evaluateCallCount = 0;
-    const admission: ResourceAdmissionEvaluator = {
-        async evaluate(request) {
-            evaluateCallCount += 1;
-            return createAdmissionResult(createDecision(
-                request,
-                "START",
-                "RESOURCE_NORMAL",
-            ));
-        },
-    };
-    const coordinator = new RunScheduler(
-        runService,
-        scheduler,
-        admission,
-    );
+    const scheduler = createScheduler();
+    const coordinator = new RunScheduler(runService, scheduler);
 
     try {
         coordinator.submit({
@@ -809,7 +448,6 @@ test("并发 drain 调用复用同一个推进循环", async () => {
         expect(results.map((result) => result.kind)).toEqual([
             "EXECUTED",
         ]);
-        expect(evaluateCallCount).toBe(1);
         expect(runtime.startRequests).toHaveLength(1);
         expect(scheduler.listQueue()).toEqual([]);
     } finally {
@@ -823,24 +461,8 @@ test("drain 执行期间的新推进请求会在下一轮处理新 Run", async (
     const store = new RunStore(db);
     const runtime = new BlockingAgentRuntime();
     const runService = new RunService(store, runtime);
-    const scheduler = new TenantRunScheduler({
-        maxActiveRuns: 1,
-        maxActiveRunsPerTenant: 1,
-    });
-    const admission: ResourceAdmissionEvaluator = {
-        async evaluate(request) {
-            return createAdmissionResult(createDecision(
-                request,
-                "START",
-                "RESOURCE_NORMAL",
-            ));
-        },
-    };
-    const coordinator = new RunScheduler(
-        runService,
-        scheduler,
-        admission,
-    );
+    const scheduler = createScheduler();
+    const coordinator = new RunScheduler(runService, scheduler);
 
     try {
         const firstRun = coordinator.submit({
@@ -893,24 +515,8 @@ test("drain 完成后可以启动新的独立推进循环", async () => {
     const store = new RunStore(db);
     const runtime = new FakeAgentRuntime();
     const runService = new RunService(store, runtime);
-    const scheduler = new TenantRunScheduler({
-        maxActiveRuns: 1,
-        maxActiveRunsPerTenant: 1,
-    });
-    const admission: ResourceAdmissionEvaluator = {
-        async evaluate(request) {
-            return createAdmissionResult(createDecision(
-                request,
-                "START",
-                "RESOURCE_NORMAL",
-            ));
-        },
-    };
-    const coordinator = new RunScheduler(
-        runService,
-        scheduler,
-        admission,
-    );
+    const scheduler = createScheduler();
+    const coordinator = new RunScheduler(runService, scheduler);
 
     try {
         const firstRun = coordinator.submit({
@@ -945,47 +551,24 @@ test("drain 完成后可以启动新的独立推进循环", async () => {
     }
 });
 
-test("drain 异常结束后会清理 single-flight 状态", async () => {
+test("drain 异常结束后会清理 single-flight 状态并保留待执行 Run", async () => {
     const db = openHarnessDatabase(":memory:");
     const store = new RunStore(db);
     const runtime = new FakeAgentRuntime();
-    const runService = new RunService(store, runtime);
-    const scheduler = new TenantRunScheduler({
-        maxActiveRuns: 1,
-        maxActiveRunsPerTenant: 1,
-    });
-    let evaluateCallCount = 0;
-    const admission: ResourceAdmissionEvaluator = {
-        async evaluate(request) {
-            evaluateCallCount += 1;
-
-            if (evaluateCallCount === 1) {
-                throw new Error("临时准入故障");
-            }
-
-            return createAdmissionResult(createDecision(
-                request,
-                "START",
-                "RESOURCE_NORMAL",
-            ));
-        },
-    };
-    const coordinator = new RunScheduler(
-        runService,
-        scheduler,
-        admission,
-    );
+    const runService = new FailFirstExecuteRunService(store, runtime);
+    const scheduler = createScheduler();
+    const coordinator = new RunScheduler(runService, scheduler);
 
     try {
         const run = coordinator.submit({
             tenantId: "tenant-a",
             harnessSessionId: "session-a",
-            userInput: "准入恢复后继续",
+            userInput: "执行异常后继续",
             workspacePath: "/tmp/workspace-a",
         });
 
         const failedDrain = coordinator.drain();
-        await expect(failedDrain).rejects.toThrow("临时准入故障");
+        await expect(failedDrain).rejects.toThrow("执行前快照失败");
 
         const recoveredDrain = coordinator.drain();
 
@@ -1004,24 +587,8 @@ test("Runtime 启动失败不会泄漏 slot，且 drain 继续推进后续 Run",
     const store = new RunStore(db);
     const runtime = new FailFirstStartRuntime();
     const runService = new RunService(store, runtime);
-    const scheduler = new TenantRunScheduler({
-        maxActiveRuns: 1,
-        maxActiveRunsPerTenant: 1,
-    });
-    const admission: ResourceAdmissionEvaluator = {
-        async evaluate(request) {
-            return createAdmissionResult(createDecision(
-                request,
-                "START",
-                "RESOURCE_NORMAL",
-            ));
-        },
-    };
-    const coordinator = new RunScheduler(
-        runService,
-        scheduler,
-        admission,
-    );
+    const scheduler = createScheduler();
+    const coordinator = new RunScheduler(runService, scheduler);
 
     try {
         const failedRun = coordinator.submit({
@@ -1059,24 +626,8 @@ test("全局并发为 1 时 Tenant B 不会排在 Tenant A 的全部 Run 之后"
     const store = new RunStore(db);
     const runtime = new FakeAgentRuntime();
     const runService = new RunService(store, runtime);
-    const scheduler = new TenantRunScheduler({
-        maxActiveRuns: 1,
-        maxActiveRunsPerTenant: 1,
-    });
-    const admission: ResourceAdmissionEvaluator = {
-        async evaluate(request) {
-            return createAdmissionResult(createDecision(
-                request,
-                "START",
-                "RESOURCE_NORMAL",
-            ));
-        },
-    };
-    const coordinator = new RunScheduler(
-        runService,
-        scheduler,
-        admission,
-    );
+    const scheduler = createScheduler();
+    const coordinator = new RunScheduler(runService, scheduler);
 
     try {
         const runA1 = coordinator.submit({
@@ -1120,32 +671,13 @@ test("全局并发为 1 时 Tenant B 不会排在 Tenant A 的全部 Run 之后"
     }
 });
 
-test("恢复 Run 在资源拒绝后保留恢复参数，资源正常后占用 slot 执行", async () => {
+test("恢复 Run 直接占用 slot 执行并保留恢复参数", async () => {
     const db = openHarnessDatabase(":memory:");
     const store = new RunStore(db);
     const runtime = new FakeAgentRuntime();
     const runService = new RunService(store, runtime);
-    const scheduler = new TenantRunScheduler({
-        maxActiveRuns: 1,
-        maxActiveRunsPerTenant: 1,
-    });
-    let action: PolicyAction = "QUEUE";
-    const admission: ResourceAdmissionEvaluator = {
-        async evaluate(request) {
-            return createAdmissionResult(createDecision(
-                request,
-                action,
-                action === "QUEUE"
-                    ? "RESOURCE_CRITICAL"
-                    : "RESOURCE_NORMAL",
-            ));
-        },
-    };
-    const coordinator = new RunScheduler(
-        runService,
-        scheduler,
-        admission,
-    );
+    const scheduler = createScheduler();
+    const coordinator = new RunScheduler(runService, scheduler);
     const timestamp = new Date().toISOString();
     const checkpoint: Checkpoint = {
         id: "checkpoint-recovery-queue",
@@ -1190,22 +722,6 @@ test("恢复 Run 在资源拒绝后保留恢复参数，资源正常后占用 sl
         expect(queuedRun.status).toBe("QUEUED");
         expect(runtime.resumeRequests).toEqual([]);
 
-        const deferred = await coordinator.attemptNext();
-
-        expect(deferred.kind).toBe("DEFERRED");
-        expect(runtime.resumeRequests).toEqual([]);
-        expect(scheduler.listQueue()).toEqual([
-            expect.objectContaining({
-                runId: interruptedRun.id,
-                reasonCode: "RESOURCE_CRITICAL",
-            }),
-        ]);
-        expect(scheduler.getCapacity(interruptedRun.tenantId)).toEqual({
-            activeRunCount: 0,
-            activeTenantRunCount: 0,
-        });
-
-        action = "START";
         const executed = await coordinator.attemptNext();
 
         expect(executed.kind).toBe("EXECUTED");
@@ -1231,7 +747,6 @@ test("恢复 Run 在资源拒绝后保留恢复参数，资源正常后占用 sl
         )).toEqual([
             "RUN_INTERRUPTED",
             "RUN_QUEUED",
-            "QUEUE_BLOCKED",
             "RUN_RESUMED",
             "RUN_COMPLETED",
         ]);
@@ -1249,18 +764,10 @@ test("interrupt 移除排队 Run，使后续 drain 不会启动它", async () =>
     const db = openHarnessDatabase(":memory:");
     const store = new RunStore(db);
     const runtime = new FakeAgentRuntime();
-    const scheduler = new TenantRunScheduler({
-        maxActiveRuns:1,
-        maxActiveRunsPerTenant:1,
-    });
+    const scheduler = createScheduler();
     const coordinator = new RunScheduler(
         new RunService(store, runtime),
         scheduler,
-        {
-            async evaluate() {
-                throw new Error("被中断的排队 Run 不应进入资源准入");
-            },
-        },
     );
 
     try {
@@ -1287,22 +794,10 @@ test("运行中 interrupt 不提前释放 slot，Runtime 退出后才允许后�
     const db = openHarnessDatabase(":memory:");
     const store = new RunStore(db);
     const runtime = new BlockingAgentRuntime();
-    const scheduler = new TenantRunScheduler({
-        maxActiveRuns:1,
-        maxActiveRunsPerTenant:1,
-    });
+    const scheduler = createScheduler();
     const coordinator = new RunScheduler(
         new RunService(store, runtime),
         scheduler,
-        {
-            async evaluate(request) {
-                return createAdmissionResult(createDecision(
-                    request,
-                    "START",
-                    "RESOURCE_NORMAL",
-                ));
-            },
-        },
     );
 
     try {
@@ -1381,20 +876,7 @@ test("scheduler-only queue blockers are persisted once per reason transition", a
         const runtime = new BlockingAgentRuntime();
         const runService = new RunService(store, runtime);
         const scheduler = new TenantRunScheduler(scenario.config);
-        const admission: ResourceAdmissionEvaluator = {
-            async evaluate(request) {
-                return createAdmissionResult(createDecision(
-                    request,
-                    "START",
-                    "RESOURCE_NORMAL",
-                ));
-            },
-        };
-        const coordinator = new RunScheduler(
-            runService,
-            scheduler,
-            admission,
-        );
+        const coordinator = new RunScheduler(runService, scheduler);
 
         try {
             const active = coordinator.submit({
@@ -1442,20 +924,8 @@ test("提交到已满 scheduler 时立即记录阻塞原因，不等待下一次
     const store = new RunStore(db);
     const runtime = new BlockingAgentRuntime();
     const runService = new RunService(store, runtime);
-    const scheduler = new TenantRunScheduler({
-        maxActiveRuns: 1,
-        maxActiveRunsPerTenant: 1,
-    });
-    const admission: ResourceAdmissionEvaluator = {
-        async evaluate(request) {
-            return createAdmissionResult(createDecision(
-                request,
-                "START",
-                "RESOURCE_NORMAL",
-            ));
-        },
-    };
-    const coordinator = new RunScheduler(runService, scheduler, admission);
+    const scheduler = createScheduler();
+    const coordinator = new RunScheduler(runService, scheduler);
 
     try {
         coordinator.submit({
@@ -1490,20 +960,11 @@ test("kick 可并发启动 drain 批次之外的新 Run", async () => {
     const store = new RunStore(db);
     const runtime = new BlockingAgentRuntime();
     const runService = new RunService(store, runtime);
-    const scheduler = new TenantRunScheduler({
+    const scheduler = createScheduler({
         maxActiveRuns: 2,
         maxActiveRunsPerTenant: 1,
     });
-    const admission: ResourceAdmissionEvaluator = {
-        async evaluate(request) {
-            return createAdmissionResult(createDecision(
-                request,
-                "START",
-                "RESOURCE_NORMAL",
-            ));
-        },
-    };
-    const coordinator = new RunScheduler(runService, scheduler, admission);
+    const coordinator = new RunScheduler(runService, scheduler);
 
     try {
         const firstRun = coordinator.submit({

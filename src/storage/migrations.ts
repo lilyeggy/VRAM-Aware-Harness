@@ -44,13 +44,12 @@ END;
 /**
  * v3：§9.8 v1.4 Phase 2（队列/Worker）所需的最小持久化字段。
  *
- * - agent_runs.priority：提交时可选的调度优先级（越大越先调度）。
+ * - agent_runs.priority 已于 v1.6（2026-10-21）随「等权」定位移除；
+ *   旧库仍保留该列，但代码不再读写。
  * - run_attempts 的 lease_owner / lease_expires_at / heartbeat_at：
  *   Worker/执行器的租约与心跳事实，供崩溃后回收过期 Attempt。
  */
 const queueLeaseFields = `
-ALTER TABLE agent_runs ADD COLUMN priority INTEGER NOT NULL DEFAULT 0;
-
 ALTER TABLE run_attempts ADD COLUMN lease_owner TEXT;
 ALTER TABLE run_attempts ADD COLUMN lease_expires_at TEXT;
 ALTER TABLE run_attempts ADD COLUMN heartbeat_at TEXT;

@@ -2,12 +2,6 @@ import type {
     Checkpoint,
 } from "../checkpoints/checkpoint.ts";
 import type {
-    PolicyDecision,
-} from "../resources/execution-policy.ts";
-import type {
-    ResourceObservation,
-} from "../resources/resource-observer.ts";
-import type {
     AgentRun,
     RunEvent,
 } from "../runs/agent-run.ts";
@@ -48,11 +42,9 @@ export interface HarnessHttpApplication {
     getRunWorkspaceDiff(runId:string):WorkspaceDiff | null;
     getRunArtifacts(runId:string):RunArtifact[];
     getRunArtifact(runId:string, path:string):Promise<Uint8Array | null>;
-    getRunDecisions(runId:string):PolicyDecision[];
     /** N3：完成但受限的 Run 的 DENY 聚合；未装配时为空数组。 */
     getRunLimitations?(runId:string):RunLimitation[];
     getQueue():QueueEntry[];
-    observeResources():Promise<ResourceObservation>;
     /** §9.8 v1.4：最小可观测性快照；未装配时 GET /metrics 返回 501。 */
     getMetricsSnapshot?():HarnessMetricsSnapshot;
     interruptRun(runId:string):Promise<AgentRun>;

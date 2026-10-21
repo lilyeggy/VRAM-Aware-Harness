@@ -47,9 +47,6 @@ export interface AgentRun{
     /** Stage 1 正式控制面入口为新 Run 固定的不可变执行证据。 */
     runPolicy?:PolicyConstraints;
 
-    /** §9.8 v1.4 Phase 2：调度优先级（越大越先调度），缺省 0。 */
-    priority?: number;
-
     /** §9.8 v1.4 Phase 3：提交方幂等键；同租户内唯一。 */
     idempotencyKey?: string;
 

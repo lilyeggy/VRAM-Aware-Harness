@@ -153,19 +153,33 @@ HTTP API ──> Master (调度/审计/策略/LLM网关)
 ## 9. 个人项目裁剪边界（v1.2-frozen，2026-10-10 定档并冻结）
 
 > 本节是项目范围的最终裁决：新增需求先对照本节，不在范围内的默认不做。
+> **v1.6（2026-10-21）宿主层边界收敛**：定位收敛为「准入 / 调度 / 隔离 / 溯源」四职责的宿主层；删除资源观测→分类→策略的第二道门禁与显式优先级，会话串行改为 session 锁。见 §9.10。
 > 本文档已于 2026-10-10 冻结；变更流程见 §9.6。
 
 ### 9.1 产品定位
 
-个人 / 小私有部署的多租户 Agent 任务服务：用户通过 HTTP API（可选最小控制台）提交任务；平台负责租户身份、排队与配额、Run 生命周期、工具治理、jailer + Firecracker microVM 隔离执行、结果与产物导出、事件审计。模型推理由外部 OpenAI 兼容服务提供；平台不承载模型、不做路由、不做显存调度。
+单机、自托管的**多租户 Agent 宿主层（host layer）**：在共享的一台 Linux 机器上，为每个用户提供互相隔离的 Agent 运行环境（每 Run 一台 jailer + Firecracker microVM），并按租户**等权**分配执行容量。
 
-不是：Grok / Manus 式完整平台，不是公网 SaaS，不是多节点集群，不是模型训练/推理平台。
+宿主层只承担四件事，其余都不属于它：
+
+| 职责 | 只回答一个问题 | 接口 |
+|---|---|---|
+| **准入** | 接不接、接多少？ | 提交时配额与排队深度：`202 accept` / `429 reject(reason, retryAfter)` |
+| **调度** | 现在轮到谁？ | `claim() → runId \| null`、`release(runId)`；保证等待时间有上界 |
+| **隔离** | 跑在哪、能碰到什么？ | `execute(run, lease) → result`；一 Run 一 microVM、无网卡、工作区独立、超时强杀 |
+| **溯源** | 事后能证明什么？ | `append(event)`：追加式事件 + 工具副作用账本 + 策略/工具决策记录 |
+
+模型推理由外部 OpenAI 兼容服务提供；平台不承载模型、不做路由、不做显存调度。
+
+多租户的目的是**隔离与等权共享**，不是协作：不提供共享空间、团队空间或多人协作。
+
+不是：Grok / Manus 式完整 Agent 产品（不做浏览器自动化的产品体验、多 Agent 市场、计费结算），不是公网 SaaS，不是多节点集群，不是模型训练/推理平台。
 
 ### 9.2 范围内（In scope）
 
 1. 多租户身份与隔离：API Key 派生 Tenant；Run/Workspace/Sandbox 归属校验；跨租户操作 fail-closed。
 2. 任务生命周期：提交、排队、Run/Attempt、状态与事件查询、中断/恢复、输出与产物导出。
-3. 调度与配额：全局/每租户并发上限、Queue TTL、会话串行、执行超时强杀。
+3. 调度与配额（宿主层职责 1+2）：全局/每租户并发上限、Queue TTL、**会话锁**（同一会话同一时刻最多一个 Run）、执行超时强杀；租户间**等权**轮转 + 老化防饿死；每租户并发默认取**公平份额** `floor(全局并发 / 有需求租户数)`（空闲份额可借用，显式配置为正数时作为硬上限）。**无优先级/档位/权重**；准入只有提交时配额与排队深度，不存在「资源观测 → 分类 → 策略」的第二道门禁（v1.6 删除）。
 4. 执行隔离：jailer + Firecracker microVM，无网卡，工作区盘独立，Broker 只暴露 create/execute/terminate。
 5. 工具治理：bash/file 等工具、路径围栏、副作用账本、崩溃/中断后安全重放。
 6. 外部模型接入：OpenAI 兼容 endpoint（opencode-go / 自建 vLLM 等）经 Pi runtime；平台只调用。
@@ -181,6 +195,9 @@ HTTP API ──> Master (调度/审计/策略/LLM网关)
 - 不做企业身份（SSO/SCIM）、合规认证、复杂 RBAC 后台。
 - 不做完整插件生态、GUI 工作流编排、成本结算系统。
 - 不做共享 / 协作 / 团队空间：产品定位是单用户个人云端 Agent 助手（类 Grok bot / Manus cue / Muse）；多租户隔离是让每个人用自己的账号，不是多人协作平台。
+- 不做租户优先级、档位、权重或任何「谁能插队」的机制（所有租户等权；v1.6 删除全栈 priority）。
+- 不做「资源观测 → 分类 → 策略」的第二道准入门禁（模型服务在平台外，观测不到也不该猜；v1.6 删除）。
+- 不做常驻空闲 Agent：不为闲置 Agent 保留算力；会话级沙箱亲和只做「有活才占槽」的复用。
 
 ### 9.4 验收标准（裁剪版）
 
@@ -346,3 +363,17 @@ HTTP API ──> Master (调度/审计/策略/LLM网关)
   - F6：真机在 Run 处于 `RUNNING` 时执行 `harness-ops.ts backup`（产物 `/data/harness/backups/harness-20261011T124518Z.sqlite`，3,616,768 bytes），再用 `audit-chain-smoke.ts --database <备份>` 校验 → `AUDIT_CHAIN_VERIFY_OK`（`ok:true, checked:2461, legacy:0`）。
   - 回归：`p0-e2e-smoke` → `P0_E2E_SMOKE_OK label=4aa71edd`（serial maxActive=1、concurrent maxActive=2 overlap=true、跨租户 run/events/output/interrupt/对方 workspace 提交全部 404）；远程 `bun test ./tests` = 592 pass / 0 fail。
   - 环境备注：校园网到 opencode.ai 的 IPv4 Cloudflare 段（172.65.90.0/24）不可达而 IPv6 可达，线上 `/etc/hosts` 临时固定 `2606:4700:78::90:0:141` / `...:143 opencode.ai`（注释 `harness-model-pin`），并在 Worker egress 放行 `2606:4700:78::/48`；IPv4 恢复后可移除该固定。
+
+### 9.10 解冻决策：v1.6（2026-10-21）宿主层边界收敛
+
+- 决策：把产品定位收敛为「单机、自托管的多租户 Agent 宿主层」，宿主层只保留 **准入 / 调度 / 隔离 / 溯源** 四职责，并据此删掉两处越界实现：
+  1. **删除资源观测 → 分类 → 策略的第二道门禁**（`resource-observer` / `resource-classifier` / `execution-policy` / `resource-admission-service` / `policy-decision-store` / `resource-metrics-sampler`）。外部模型模式下 `ExternalModelServiceResourceObserver` 恒返回 `NORMAL`，这一层等价于常量函数；删除后 `RunScheduler` 路径为 `claimNext()` → 直接执行。准入只剩「提交时配额 + 排队深度」，超限仍是 `QueueBackpressureError` → HTTP 429 + `Retry-After`。
+  2. **删除显式优先级（priority）全栈链路**：HTTP body 字段、`agent_runs.priority` 读取/排序、`TenantRunScheduler.claimPriority()`、恢复时 `ORDER BY priority DESC`。等权定位下它是唯一的不等权来源，且唯一来源是调用方自己填的数字；DB 列保留（`DEFAULT 0`）但代码不再读取，migration 注释标 deprecated。
+  3. **会话串行升级为 session 锁**：同一 session 是有互斥语义的资源（一把锁），不是「排队原因」。调度器在租户队列内**跳过被锁住的队首**，取第一个可 claim 的 Run；老化插队同样跳过被锁队首。`QUEUE_TIMEOUT` 只对「资源/并发」类阻塞计时，**会话锁等待不计入 TTL**（默认 5min TTL < 30min 执行超时，否则同会话追问必然被误杀）。
+- 理由：宿主层要尽可能简单，四职责之外的东西都应删除；两条越界实现各自带来真实的公平性缺陷（优先级可无限期饿死低优先级租户；队首阻塞让同租户后面的 Run 永远轮不到，已用可运行测试复现）。
+- 边界影响：§9.2 第 3 条改写、§9.3 新增三条「不做」；`README.md` 与 `.env.example` 同步去掉优先级表述；全覆盖 smoke 删除 `run.priority` phase。
+- 简化（随 v1.6 一并落地，2026-10-21/22）：
+  1. 删除已无写入的两张表 `policy_decisions`、`resource_snapshots`（schema.sql 净减 87 行）；`agent_runs.priority` 不再出现在新库 schema，旧库保留该列但代码不读写；删除未使用的原因码 `INSTANCE_NOT_READY`。
+  2. 推进路径收敛：`drainPromise` / `drainRequested` / `inFlight` / `backgroundAttempts` 四个状态字段收敛为 `activePass` / `rerunRequested` / `inlineDispatches`；`drain` + `runDrainLoop` 合并为单个 `runPass`，同一时刻只有一个推进循环。
+  3. 降低空转：pump 兜底轮询 1s → 2s（提交走 `kick()`、完成走 slot 释放补位）；DB 对账从"每次推进都查库"改为 5s 低频兜底。稳态下每秒不再有"全队列拷贝 + SQLite 查询"。
+- 验收：`bun test ./tests` = 638 pass / 10 skip / 0 fail；`bun run typecheck` 保持既有 10 条基线错误（scripts/ 与 firecracker-serial-bridge，均非本次改动引入）；`tests/scheduling/session-lock.test.ts`、`tests/scheduling/aging-skip-blocked-head.test.ts`、`tests/scheduling/queue-ttl.test.ts` 覆盖三条决策。

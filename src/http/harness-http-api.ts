@@ -3,7 +3,6 @@ import type { RequestPrincipal } from "../auth/request-principal.ts";
 import { digest } from "../auth/api-credential-store.ts";
 import { hasScope } from "../auth/request-principal.ts";
 import type { LlmGateway } from "../llm-gateway/llm-gateway.ts";
-import type { ResourceMetricsSampler } from "../resources/resource-metrics-sampler.ts";
 import type { AgentRun } from "../runs/agent-run.ts";
 import type {
     CheckpointLookup,
@@ -39,7 +38,6 @@ export class HarnessHttpApi implements HttpRouteContext {
         readonly checkpointLookup: CheckpointLookup,
         readonly accessControl?: HttpAccessControl,
         readonly llmGateway?: LlmGateway,
-        readonly resourceMetrics?: ResourceMetricsSampler,
         readonly limits?: { maxUserInputChars: number },
         readonly rateLimiter?: RateLimiter,
         readonly trustProxy = false,

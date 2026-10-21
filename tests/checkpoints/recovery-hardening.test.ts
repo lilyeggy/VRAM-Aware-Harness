@@ -18,12 +18,6 @@ import type {
 import {
     FakeAgentRuntime,
 } from "../fakes/fake-agent-runtime.ts";
-import {
-    FakeResourceObserver,
-} from "../fakes/fake-resource-observer.ts";
-import type {
-    ResourceSnapshot,
-} from "../../src/resources/resource-observer.ts";
 import type {
     ToolExecution,
 } from "../../src/tools/tool-execution.ts";
@@ -193,27 +187,8 @@ test("支柱 3 集成：组合根把 MANUAL_REVIEW 审计写进 Run 事件时间
         HARNESS_PUMP_INTERVAL_MS: "60000",
     }, "/tmp/harness-project");
 
-    const normalSnapshot: ResourceSnapshot = {
-        snapshotId: "pillar3-snapshot",
-        observedAt: "2026-09-08T10:00:00.000Z",
-        sources: ["FAKE"],
-        gpuTotalMemoryMiB: 100,
-        gpuUsedMemoryMiB: 20,
-        gpuFreeMemoryMiB: 80,
-        gpuUtilizationPercent: 20,
-        runningRequests: 0,
-        waitingRequests: 0,
-        kvCacheUsagePercent: 20,
-        inputTokensPerSecond: 1_000,
-        outputTokensPerSecond: 100,
-    };
-
     const composition = await createHarnessApplication(config, {
         runtime: new FakeAgentRuntime(),
-        resourceObserver: new FakeResourceObserver({
-            ok: true,
-            snapshot: normalSnapshot,
-        }),
     });
 
     try {

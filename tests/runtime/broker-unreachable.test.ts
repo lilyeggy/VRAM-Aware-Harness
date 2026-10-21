@@ -5,9 +5,7 @@ import { join } from "node:path";
 
 import { createHarnessApplication } from "../../src/app/create-harness-application.ts";
 import { loadHarnessConfig } from "../../src/app/harness-config.ts";
-import type { ResourceSnapshot } from "../../src/resources/resource-observer.ts";
 import { FakeAgentRuntime } from "../fakes/fake-agent-runtime.ts";
-import { FakeResourceObserver } from "../fakes/fake-resource-observer.ts";
 import { tempWorkspaceEnv } from "../support/temp-workspace-root.ts";
 
 /**
@@ -16,21 +14,6 @@ import { tempWorkspaceEnv } from "../support/temp-workspace-root.ts";
  * Master 走 BrokerSandboxProvider 创建 sandbox；Broker socket 缺失时
  * create 必须失败并让 Run 落 INTERRUPTED，且不能留下孤儿 sandbox 记录。
  */
-
-const normalSnapshot: ResourceSnapshot = {
-    snapshotId: "broker-down-snapshot",
-    observedAt: "2026-10-11T10:00:00.000Z",
-    sources: ["FAKE"],
-    gpuTotalMemoryMiB: 100,
-    gpuUsedMemoryMiB: 20,
-    gpuFreeMemoryMiB: 80,
-    gpuUtilizationPercent: 20,
-    runningRequests: 0,
-    waitingRequests: 0,
-    kvCacheUsagePercent: 20,
-    inputTokensPerSecond: 1000,
-    outputTokensPerSecond: 100,
-};
 
 test("Broker 不可达时 Run fail-closed 为 INTERRUPTED，且不留下孤儿 sandbox", async () => {
     const dir = mkdtempSync(join(tmpdir(), "harness-broker-down-"));
@@ -48,10 +31,6 @@ test("Broker 不可达时 Run fail-closed 为 INTERRUPTED，且不留下孤儿 s
     });
     const composition = await createHarnessApplication(config, {
         runtime: new FakeAgentRuntime(),
-        resourceObserver: new FakeResourceObserver({
-            ok: true,
-            snapshot: normalSnapshot,
-        }),
     });
 
     try {

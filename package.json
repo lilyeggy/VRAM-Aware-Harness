@@ -5,7 +5,7 @@
   "private": true,
   "scripts": {
     "test": "bun test ./tests",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "bun ./node_modules/typescript/bin/tsc --noEmit",
     "verify": "tsc --noEmit && bun test ./tests",
     "verify:stage0": "bun run test && bun run typecheck && bun run demo:day7",
     "start": "bun run src/main.ts",

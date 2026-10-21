@@ -3,7 +3,6 @@ import { QueueBackpressureError } from "../../scheduling/run-scheduler.ts";
 import {
     HttpError,
     jsonResponse,
-    optionalNonNegativeInteger,
     optionalString,
     parseRunPolicy,
     parseThinkingLevel,
@@ -126,7 +125,6 @@ async function submitRun(request: Request, ctx: HttpRouteContext): Promise<Respo
     // N15：请求级策略层（RUN 层）。此前 StartRunInput.runPolicy
     // 没有任何产品调用方，受限运行只能靠测试直接调 Runtime。
     const runPolicy = parseRunPolicy(body);
-    const priority = optionalNonNegativeInteger(body, "priority");
     // §9.8 v1.4 Phase 3：可选幂等键；同租户重复提交返回既有 Run。
     const idempotencyKey = optionalString(body, "idempotencyKey");
     if (idempotencyKey !== null && idempotencyKey.length > 200) {
@@ -141,7 +139,6 @@ async function submitRun(request: Request, ctx: HttpRouteContext): Promise<Respo
             harnessSessionId: requestedSessionId ?? crypto.randomUUID(),
             userInput: requireUserInput(body, ctx.limits?.maxUserInputChars),
             thinkingLevel: parseThinkingLevel(body),
-            ...(priority === null ? {} : { priority }),
             ...(idempotencyKey === null ? {} : { idempotencyKey }),
             ...(runPolicy === undefined ? {} : { runPolicy }),
             workspacePath: ctx.accessControl === undefined
@@ -179,7 +176,6 @@ function getRunDetail(request: Request, runId: string, ctx: HttpRouteContext): R
 
     return jsonResponse({
         run,
-        decisions: ctx.application.getRunDecisions(runId),
         limitations: ctx.application.getRunLimitations?.(runId) ?? [],
         unknownEffects,
     });

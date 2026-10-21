@@ -5,7 +5,6 @@
  *   HARNESS_BASE_URL=http://127.0.0.1:3210 HARNESS_API_KEY=<key> bun run scripts/full-coverage-smoke.ts
  *
  * 可选 phase 开关（未设置则相应项 SKIP 并记录原因）：
- *   FULLCOVER_PRIORITY=1       需要测试 master 配置 HARNESS_MAX_ACTIVE_RUNS=1
  *   FULLCOVER_BACKPRESSURE=1   需要 HARNESS_MAX_QUEUED_RUNS=1 且 HARNESS_MAX_ACTIVE_RUNS=1
  *   FULLCOVER_RATELIMIT=1      需要 HARNESS_RATE_LIMIT_MAX_PER_IP=2，且必须搭配
  *                              FULLCOVER_ONLY=system.ratelimit + FULLCOVER_SKIP_BOOTSTRAP=1
@@ -249,9 +248,8 @@ interface RunOutcome {
     status: string;
 }
 
-async function submitAndWait(workspaceId: string, userInput: string, token: string, options: { priority?: number; idempotencyKey?: string; sessionId?: string; timeoutMs?: number } = {}): Promise<RunOutcome> {
+async function submitAndWait(workspaceId: string, userInput: string, token: string, options: { idempotencyKey?: string; sessionId?: string; timeoutMs?: number } = {}): Promise<RunOutcome> {
     const body: Record<string, unknown> = { workspaceId, userInput };
-    if (options.priority !== undefined) body.priority = options.priority;
     if (options.idempotencyKey !== undefined) body.idempotencyKey = options.idempotencyKey;
     if (options.sessionId !== undefined) body.sessionId = options.sessionId;
     const response = await api("POST", "/runs", { token, body });
@@ -629,39 +627,6 @@ async function main(): Promise<void> {
         const matching = ((runs.json && runs.json.runs) || []).filter((item: any) => item && typeof item.userInput === "string" && item.userInput.includes(key));
         assertEq(matching.length, 1, "同 key 命中 Run 数量");
         return "runId=" + firstId + " 命中 Run 数=" + matching.length;
-    });
-
-    // ---------------- 优先级（需 FULLCOVER_PRIORITY=1） ----------------
-    await step("run.priority", "priority 0 vs 9：高优先级先执行", async () => {
-        if (flag("FULLCOVER_PRIORITY") === false) {
-            return { status: "SKIP", detail: "未设置 FULLCOVER_PRIORITY=1（需要测试 master 配置 HARNESS_MAX_ACTIVE_RUNS=1）", evidence: "" };
-        }
-        const blocker = await api("POST", "/runs", { token: context.token, body: { workspaceId: context.workspaceId, userInput: "使用 bash 工具执行命令：sleep 25。只做这一步。" } });
-        const blockerId = runIdOf(blocker);
-        const blockerStatus = await waitForStatus(blockerId, ["RUNNING", "WAITING_TOOL"], context.token, 90000);
-        assert(blockerStatus === "RUNNING" || blockerStatus === "WAITING_TOOL", "blocker 未进入活跃状态：" + blockerStatus);
-        const low = await api("POST", "/runs", { token: context.token, body: { workspaceId: context.workspaceId, userInput: "使用 bash 工具执行：echo low > prio-low.txt", priority: 0 } });
-        const high = await api("POST", "/runs", { token: context.token, body: { workspaceId: context.workspaceId, userInput: "使用 bash 工具执行：echo high > prio-high.txt", priority: 9 } });
-        const lowId = runIdOf(low);
-        const highId = runIdOf(high);
-        let firstStarted: string | null = null;
-        const deadline = Date.now() + 180000;
-        while (Date.now() < deadline && firstStarted === null) {
-            const lowDetail = await getRunDetail(lowId, context.token);
-            const highDetail = await getRunDetail(highId, context.token);
-            const lowActive = ["RUNNING", "WAITING_TOOL", "COMPLETED"].includes(lowDetail.run.status);
-            const highActive = ["RUNNING", "WAITING_TOOL", "COMPLETED"].includes(highDetail.run.status);
-            if (highActive === true) {
-                firstStarted = "priority9";
-            } else if (lowActive === true) {
-                firstStarted = "priority0";
-            } else {
-                await Bun.sleep(300);
-            }
-        }
-        assert(firstStarted !== null, "优先级观察超时");
-        assertEq(firstStarted, "priority9", "先进入执行的 Run");
-        return "blocker=" + blockerId + " 先执行=" + firstStarted + "（priority 9 先于 0）";
     });
 
     // ---------------- backpressure（需 FULLCOVER_BACKPRESSURE=1） ----------------

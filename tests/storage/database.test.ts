@@ -37,8 +37,6 @@ test("打开新数据库时会创建当前版本所需的表", () => {
         expect(tableNames).toContain("run_events");
         expect(tableNames).toContain("tool_executions");
         expect(tableNames).toContain("checkpoints");
-        expect(tableNames).toContain("resource_snapshots");
-        expect(tableNames).toContain("policy_decisions");
         expect(tableNames).toContain("harness_sessions");
         expect(tableNames).toContain("run_attempts");
         expect(tableNames).toContain("effective_policy_snapshots");

@@ -33,15 +33,6 @@ test("Phase 3：retryAt 未到点的 QUEUED Run 不被 reconcile 重新入队", 
         {} as unknown as RunService,
         scheduler,
         {
-            async evaluate() {
-                throw new Error("reconcile 不应触发资源准入");
-            },
-        },
-        undefined,
-        undefined,
-        null,
-        false,
-        {
             queuedRunReader: { listQueuedRuns: () => [run] },
         },
     );
@@ -77,15 +68,6 @@ test("Phase 3：retryAt 已过期的 QUEUED Run 会被 reconcile 重新入队", 
     const coordinator = new RunScheduler(
         {} as unknown as RunService,
         scheduler,
-        {
-            async evaluate() {
-                throw new Error("reconcile 不应触发资源准入");
-            },
-        },
-        undefined,
-        undefined,
-        null,
-        false,
         {
             queuedRunReader: { listQueuedRuns: () => [run] },
         },

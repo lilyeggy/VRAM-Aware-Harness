@@ -17,15 +17,9 @@ export * from "./runs/run-state-machine.ts";
 export * from "./runs/runstore.ts";
 export * from "./runs/run-output-store.ts";
 
-// Scheduling & Resource Admission
+// Scheduling & Admission (concurrency / fairness / queueing)
 export * from "./scheduling/run-scheduler.ts";
 export * from "./scheduling/tenant-run-scheduler.ts";
-export * from "./resources/execution-policy.ts";
-export * from "./resources/policy-decision-store.ts";
-export * from "./resources/resource-admission-service.ts";
-export * from "./resources/resource-classifier.ts";
-export type * from "./resources/resource-observer.ts";
-export * from "./resources/resource-metrics-sampler.ts";
 
 // Policies & Tool Governance
 export * from "./policies/effective-policy.ts";

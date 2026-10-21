@@ -2,25 +2,8 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { createServer } from "node:net";
 
 import { loadHarnessConfig } from "../../src/app/harness-config.ts";
-import type { ResourceSnapshot } from "../../src/resources/resource-observer.ts";
 import { startHarnessProcess } from "../../src/main.ts";
-import { FakeResourceObserver } from "../fakes/fake-resource-observer.ts";
 import { tempWorkspaceEnv } from "../support/temp-workspace-root.ts";
-
-const normalSnapshot: ResourceSnapshot = {
-    snapshotId: "process-e2e-normal",
-    observedAt: "2026-08-05T15:00:00.000Z",
-    sources: ["FAKE"],
-    gpuTotalMemoryMiB: 100,
-    gpuUsedMemoryMiB: 20,
-    gpuFreeMemoryMiB: 80,
-    gpuUtilizationPercent: 20,
-    runningRequests: 0,
-    waitingRequests: 0,
-    kvCacheUsagePercent: 20,
-    inputTokensPerSecond: 1_000,
-    outputTokensPerSecond: 100,
-};
 
 async function findAvailablePort(): Promise<number> {
     const probe = createServer();
@@ -71,10 +54,6 @@ describe("Blast Radius Isolation & Subprocess Watchdog E2E Tests", () => {
         const runningHarness = await startHarnessProcess({
             config,
             compositionDependencies: {
-                resourceObserver: new FakeResourceObserver({
-                    ok: true,
-                    snapshot: normalSnapshot,
-                }),
             },
             installSignalHandlers: false,
         });
@@ -191,10 +170,6 @@ describe("Blast Radius Isolation & Subprocess Watchdog E2E Tests", () => {
         const runningHarness = await startHarnessProcess({
             config,
             compositionDependencies: {
-                resourceObserver: new FakeResourceObserver({
-                    ok: true,
-                    snapshot: normalSnapshot,
-                }),
             },
             installSignalHandlers: false,
         });

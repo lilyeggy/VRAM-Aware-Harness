@@ -6,38 +6,13 @@ import {
 import {
     loadHarnessConfig,
 } from "../../src/app/harness-config.ts";
-import type {
-    ResourceSnapshot,
-} from "../../src/resources/resource-observer.ts";
 import { FakeAgentRuntime } from "../fakes/fake-agent-runtime.ts";
 import type { SandboxProvider } from "../../src/sandbox/sandbox-provider.ts";
 import { unrestrictedPolicy } from "../../src/policies/effective-policy.ts";
-import {
-    FakeResourceObserver,
-} from "../fakes/fake-resource-observer.ts";
 import { tempWorkspaceEnv } from "../support/temp-workspace-root.ts";
-
-const normalSnapshot:ResourceSnapshot = {
-    snapshotId:"composition-snapshot-normal",
-    observedAt:"2026-08-05T14:00:00.000Z",
-    sources:["FAKE"],
-    gpuTotalMemoryMiB:100,
-    gpuUsedMemoryMiB:20,
-    gpuFreeMemoryMiB:80,
-    gpuUtilizationPercent:20,
-    runningRequests:0,
-    waitingRequests:0,
-    kvCacheUsagePercent:20,
-    inputTokensPerSecond:1_000,
-    outputTokensPerSecond:100,
-};
 
 test("createHarnessApplication 用 Fake 外部依赖组装完整真实应用链", async () => {
     const runtime = new FakeAgentRuntime();
-    const resourceObserver = new FakeResourceObserver({
-        ok:true,
-        snapshot:normalSnapshot,
-    });
     const config = loadHarnessConfig({
         VLLM_MODEL_ID:"fake-model",
         ...tempWorkspaceEnv(),
@@ -46,7 +21,6 @@ test("createHarnessApplication 用 Fake 外部依赖组装完整真实应用链"
     });
     const composition = await createHarnessApplication(config, {
         runtime,
-        resourceObserver,
     });
 
     try {
@@ -62,9 +36,6 @@ test("createHarnessApplication 用 Fake 外部依赖组装完整真实应用链"
 
         expect(composition.runStore.get(run.id)?.status).toBe("COMPLETED");
         expect(runtime.startRequests).toHaveLength(1);
-        expect(composition.decisionStore.listForRun(run.id).map(
-            (decision) => decision.action,
-        )).toEqual(["START"]);
         expect(composition.scheduler.listQueue()).toEqual([]);
 
         const healthResponse = await composition.httpApi.fetch(
@@ -100,10 +71,6 @@ test("HARNESS_SANDBOX_PROVIDER=microvm 未显式设置 driver 时必须 fail-clo
 
 test("B2：runPolicy.allowNetwork=true 在 strict 平台策略下 fail-closed，且不创建 sandbox", async () => {
     const runtime = new FakeAgentRuntime();
-    const resourceObserver = new FakeResourceObserver({
-        ok:true,
-        snapshot:normalSnapshot,
-    });
     const config = loadHarnessConfig({
         VLLM_MODEL_ID:"fake-model",
         ...tempWorkspaceEnv(),
@@ -126,7 +93,6 @@ test("B2：runPolicy.allowNetwork=true 在 strict 平台策略下 fail-closed，
     };
     const composition = await createHarnessApplication(config, {
         runtime,
-        resourceObserver,
         sandboxProvider,
     });
 
@@ -156,10 +122,6 @@ test("B2：runPolicy.allowNetwork=true 在 strict 平台策略下 fail-closed，
 });
 
 test("in-process 路径启动 MCP server，并把工具暴露给 PiAdapter", async () => {
-    const resourceObserver = new FakeResourceObserver({
-        ok:true,
-        snapshot:normalSnapshot,
-    });
     const mcpFixturePath = new URL(
         "../mcp/fixtures/echo-mcp-server.ts",
         import.meta.url,
@@ -183,7 +145,6 @@ test("in-process 路径启动 MCP server，并把工具暴露给 PiAdapter", asy
         // PiAdapter 构造只保存 ModelRuntime 引用；本用例不启动 Run，无需真实模型，
         // 但 createPiRuntime 会校验 getModel 返回非 undefined。
         modelRuntime:{ getModel:() => ({}) } as never,
-        resourceObserver,
     });
 
     try {

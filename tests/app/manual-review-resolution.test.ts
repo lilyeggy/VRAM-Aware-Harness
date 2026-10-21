@@ -1,8 +1,6 @@
 import { expect, test } from "bun:test";
 
 import { HarnessApplication, type QueuePump } from "../../src/app/harness-application.ts";
-import type { PolicyDecisionStore } from "../../src/resources/policy-decision-store.ts";
-import type { ResourceObserver } from "../../src/resources/resource-observer.ts";
 import type { AgentRun, RunEvent } from "../../src/runs/agent-run.ts";
 import type { RunScheduler } from "../../src/scheduling/run-scheduler.ts";
 import type { TenantRunScheduler } from "../../src/scheduling/tenant-run-scheduler.ts";
@@ -79,9 +77,7 @@ function makeApp(run: AgentRun, prepared: readonly ToolExecution[]) {
         {} as unknown as RunScheduler,
         {} as unknown as QueuePump,
         store as unknown as RunStore,
-        {} as unknown as PolicyDecisionStore,
         {} as unknown as TenantRunScheduler,
-        {} as unknown as ResourceObserver,
         { async recover() {} },
         undefined,
         undefined,
@@ -155,9 +151,7 @@ test("N16：未装配工具执行库时读数为空（不伪装成已装配）",
         {} as unknown as RunScheduler,
         {} as unknown as QueuePump,
         {} as unknown as RunStore,
-        {} as unknown as PolicyDecisionStore,
         {} as unknown as TenantRunScheduler,
-        {} as unknown as ResourceObserver,
         { async recover() {} },
     );
 

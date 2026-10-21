@@ -128,13 +128,20 @@ export class FirecrackerSerialBridge {
                     const rest = searchArea.slice(markerIndex);
                     const match = rest.match(new RegExp(`${sentinel}:(\\d+)`));
 
-                    if (match) {
-                        const exitCode = parseInt(match[1], 10);
+                    const exitCodeText = match?.[1];
+
+                    if (match && exitCodeText !== undefined) {
+                        const exitCode = parseInt(exitCodeText, 10);
                         let output = searchArea.slice(0, markerIndex);
 
                         // 清洗终端可能的回显指令头部（仅当整行与发出的原始命令一致时剥除）
                         const lines = output.split(/\r?\n/);
-                        if (lines.length > 0 && lines[0].trim() === rawCmd.trim()) {
+                        const firstLine = lines[0];
+
+                        if (
+                            firstLine !== undefined
+                            && firstLine.trim() === rawCmd.trim()
+                        ) {
                             lines.shift();
                         }
                         const cleanStdout = lines.join("\n").trim();

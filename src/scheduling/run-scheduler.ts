@@ -1,16 +1,13 @@
 /**
- * 协调 scheduler,runService和resourceAdmissionServer
- * 1. scheduler 层面：什么时候选择
- * 2. runService 层面：选择以后让谁去执行
+ * 协调 scheduler 与 runService：
+ * 1. scheduler 层面：什么时候选择哪个 Run；
+ * 2. runService 层面：选择以后让谁去执行。
+ *
+ * 资源观测/分类/策略准入层已整体移除：宿主层只负责准入（并发上限）、
+ * 调度、隔离与溯源，不再对平台外模型服务做本地资源压力推断。
  */
 
 
-import type {
-    PolicyDecision,
-} from "../resources/execution-policy.ts";
-import type {
-    ResourceAdmissionEvaluator,
-} from "../resources/resource-admission-service.ts";
 import type {
     AgentRun
 }   from "../runs/agent-run.ts";
@@ -39,14 +36,8 @@ export type SchedulerDrainResult =
         kind: "EMPTY";
     }
     | {
-        kind: "DEFERRED";
-        runId: string;
-        decision: PolicyDecision;
-    }
-    | {
         kind: "EXECUTED";
         run: AgentRun;
-        decision: PolicyDecision;
     };
 
 /**
@@ -90,6 +81,11 @@ export interface RunSchedulerOptions {
     readonly checkpointStoreForRecovery?: Pick<CheckpointStore, "get">;
     /** 自动轮询间隔；未设置时只能手动 tick()。 */
     readonly intervalMs?: number;
+    /**
+     * DB 对账（孤儿 QUEUED 回填 + TTL 熔断）的最小间隔，默认 5s。
+     * 稳态下不必每次推进都查库。
+     */
+    readonly reconcileIntervalMs?: number;
     /** 自动轮询异常回调。 */
     readonly onError?: (error: unknown) => void;
     /**
@@ -97,36 +93,6 @@ export interface RunSchedulerOptions {
      * 过期 RUNNING Attempt，避免死执行器永久占用 slot。
      */
     readonly leaseManager?: RunLeaseManager;
-}
-
-export function toQueueReasonCode(
-    decision: PolicyDecision,
-): QueueReasonCode {
-    if (decision.action !== "QUEUE") {
-        throw new Error(
-            `START 决策不能转换成排队原因：${decision.reasonCode}`,
-        );
-    }
-
-    switch (decision.reasonCode) {
-        case "GLOBAL_CONCURRENCY_LIMIT":
-            return "GLOBAL_CONCURRENCY_LIMIT";
-        case "RESOURCE_BUSY_TENANT_LIMIT":
-            return "RESOURCE_BUSY";
-        case "RESOURCE_CRITICAL":
-            return "RESOURCE_CRITICAL";
-        case "RESOURCE_UNKNOWN":
-            return "RESOURCE_UNKNOWN";
-        case "RESOURCE_OBSERVATION_FAILED":
-            return "RESOURCE_OBSERVATION_FAILED";
-        case "TENANT_BUDGET_EXCEEDED":
-            return "TENANT_BUDGET_EXCEEDED";
-        case "RESOURCE_NORMAL":
-        case "RESOURCE_BUSY_TENANT_AVAILABLE":
-            throw new Error(
-                `START reason 不能作为排队原因：${decision.reasonCode}`,
-            );
-    }
 }
 
 export interface QueuedRunRestoreTarget {
@@ -185,17 +151,20 @@ export class RunScheduler  {
     constructor(
         private readonly runService:RunService,
         private readonly scheduler:TenantRunScheduler,
-        private readonly admission: ResourceAdmissionEvaluator,
-        private readonly pendingResumeByRunId = new Map<string,ResumeRunInput>(),
-        private readonly lastQueueBlockerByRunId = new Map<string, QueueReasonCode>(),
-        private drainPromise: Promise<SchedulerDrainResult[]> | null = null, // 当前是否有drain正在运行
-        private drainRequested = false, // 正在运行期间，是否又收到了新的推进请求
         private readonly options: RunSchedulerOptions = {},
     ) {}
 
+    private readonly pendingResumeByRunId = new Map<string,ResumeRunInput>();
+    private readonly lastQueueBlockerByRunId = new Map<string, QueueReasonCode>();
+    /** 当前正在执行的推进循环；同一时刻只允许一个。 */
+    private activePass: Promise<SchedulerDrainResult[]> | null = null;
+    /** 推进期间又收到推进请求：当前轮结束后再跑一轮。 */
+    private rerunRequested = false;
     private timer: ReturnType<typeof setInterval> | null = null;
-    private inFlight: Promise<void> | null = null;
-    private readonly backgroundAttempts = new Set<Promise<void>>();
+    /** kick() 在批次之外独立派发的 attempt（stopAndDrain 需要等它们收尾）。 */
+    private readonly inlineDispatches = new Set<Promise<void>>();
+    /** 上次 reconcile 的时间：DB 对账按低频兜底，不必每次推进都查库。 */
+    private lastReconcileAt = 0;
 
     start(): void {
         if (this.timer !== null || this.options.intervalMs === undefined) return;
@@ -213,17 +182,17 @@ export class RunScheduler  {
 
     async stopAndDrain(): Promise<void> {
         this.stop();
-        while (this.inFlight !== null || this.backgroundAttempts.size > 0) {
-            if (this.inFlight !== null) {
-                await this.inFlight;
+        while (this.activePass !== null || this.inlineDispatches.size > 0) {
+            if (this.activePass !== null) {
+                await this.activePass;
             }
-            await this.waitForBackgroundAttempts();
+            await this.waitForInlineDispatches();
         }
     }
 
-    private async waitForBackgroundAttempts(): Promise<void> {
-        while (this.backgroundAttempts.size > 0) {
-            await Promise.allSettled([...this.backgroundAttempts]);
+    private async waitForInlineDispatches(): Promise<void> {
+        while (this.inlineDispatches.size > 0) {
+            await Promise.allSettled([...this.inlineDispatches]);
         }
     }
 
@@ -244,29 +213,19 @@ export class RunScheduler  {
                 this.options.onError?.(error);
             }
         })();
-        this.backgroundAttempts.add(attempt);
+        this.inlineDispatches.add(attempt);
         void attempt.finally(() => {
-            this.backgroundAttempts.delete(attempt);
+            this.inlineDispatches.delete(attempt);
         });
     }
 
     async tick(): Promise<void> {
-        const work = (async () => {
-            try {
-                this.options.leaseManager?.reapExpired();
-                await this.drain();
-                await this.waitForBackgroundAttempts();
-            } catch (error) {
-                this.options.onError?.(error);
-            }
-        })();
-        this.inFlight = work;
         try {
-            await work;
-        } finally {
-            if (this.inFlight === work) {
-                this.inFlight = null;
-            }
+            this.options.leaseManager?.reapExpired();
+            await this.drain();
+            await this.waitForInlineDispatches();
+        } catch (error) {
+            this.options.onError?.(error);
         }
     }
 
@@ -285,7 +244,14 @@ export class RunScheduler  {
         }
         const nowMs = this.options.now?.() ?? Date.now();
 
-        for (const entry of this.scheduler.listQueue()) {
+        // 用 blocker 视图而不是裸队列：只有"资源/并发"类阻塞才算饥饿。
+        // 会话串行是 session 锁，等自己会话的前序 Run 属于合法等待，不能被
+        // QUEUE_TIMEOUT 熔断（默认 5min < 执行超时 30min，否则追问必被误杀）。
+        for (const entry of this.scheduler.listQueueBlockers()) {
+            if (entry.reasonCode === "SESSION_SERIALIZATION") {
+                continue;
+            }
+
             const enqueuedAtMs = Date.parse(entry.enqueuedAt);
             if (
                 !Number.isFinite(enqueuedAtMs)
@@ -399,8 +365,7 @@ export class RunScheduler  {
                 runId:run.id,
                 tenantId:run.tenantId,
                 sessionId:run.harnessSessionId,
-                priority: run.priority ?? 0,
-            })
+                            })
         }
         this.synchronizeQueueBlockers();
 
@@ -454,8 +419,7 @@ export class RunScheduler  {
             runId:run.id,
             tenantId:run.tenantId,
             sessionId:run.harnessSessionId,
-            priority: run.priority ?? 0,
-            // B4：排队时间取 DB updatedAt（进入/回到 QUEUED 的时刻），
+                        // B4：排队时间取 DB updatedAt（进入/回到 QUEUED 的时刻），
             // 重启恢复不重置 TTL 时钟，等待时间跨重启累计。
             enqueuedAt:run.updatedAt,
         });
@@ -541,8 +505,7 @@ export class RunScheduler  {
                 runId:run.id,
                 tenantId:run.tenantId,
                 sessionId:run.harnessSessionId,
-                priority: run.priority ?? 0,
-                enqueuedAt:run.updatedAt,
+                                enqueuedAt:run.updatedAt,
             });
             requeued.push(run.id);
         }
@@ -556,6 +519,7 @@ export class RunScheduler  {
 
     /**
      * 先释放已 claim 的 slot，再带原因重新入队并同步 blocker；调用顺序不能反。
+     * 现在只用于执行异常回退（AWAITING_SCHEDULING），不再表达资源拒绝。
      */
     private requeueClaimed(run: QueuedRun, reasonCode: QueueReasonCode): void {
         this.scheduler.release(run.runId);
@@ -564,22 +528,13 @@ export class RunScheduler  {
             tenantId: run.tenantId,
             ...(run.sessionId === undefined ? {} : { sessionId: run.sessionId }),
             reasonCode,
-            priority: run.priority,
             enqueuedAt: run.enqueuedAt,
         });
         this.synchronizeQueueBlockers();
     }
 
     async attemptNext() : Promise<SchedulerDrainResult> {
-        // 它做的是把一个等待中的 run 从队列里推进到运行状态，但是不管如何选
-        // 如何选这个 run，是scheduler做的事
-        // 最终控制流
-        /**
-         * 1. 没有 Run：Empty
-         * 2. 资源拒绝：release -> 重新入队->deferred
-         * 3. 资源允许: executeQueuedRun -> finally release -> executed
-         */
-        // scheduler选择一个 run出来
+        // 调度器选择并保留一个 slot 后，直接执行；不再有第二道资源准入。
         const queuedRun = this.scheduler.claimNext();
 
         if (queuedRun === null) {
@@ -589,47 +544,6 @@ export class RunScheduler  {
             };
         }
 
-        // 选出 run 的时候，run 已经离开队列并占用了 slot，所以需要更新资源情况
-        const capacity = this.scheduler.getCapacity(queuedRun.tenantId);
-
-        const admissionRequest = {
-            runId : queuedRun.runId,
-            tenantId : queuedRun.tenantId,
-            activeRunCount : capacity.activeRunCount - 1,
-            activeTenantRunCount : capacity.activeTenantRunCount - 1,
-        }
-
-        // 执行资源准入
-        let admissionResult;
-
-        
-        try {
-            // 进行资源情况评估
-            admissionResult = await this.admission.evaluate(
-                admissionRequest,
-            );
-        } catch (error) {
-            // 重新入队，防止 admission 自身异常导致 Run 从内存队列中丢失。
-            this.requeueClaimed(queuedRun, "RESOURCE_OBSERVATION_FAILED");
-            throw error;
-        }
-
-        // 获得资源评估结果
-        const decision = admissionResult.decision;
-
-        // 资源评估结果是仍然排队，也就是不执行，那么就release然后重新入队,deferred
-        if (decision.action === "QUEUE") {
-            this.requeueClaimed(queuedRun, toQueueReasonCode(decision));
-            return {
-                kind:"DEFERRED",
-                runId:queuedRun.runId,
-                decision,
-            }
-        }
-
-        // 资源评估结果是执行 Run，那么就不排队了
-
-        // 处理start决策
         const resumeInput = this.pendingResumeByRunId.get(queuedRun.runId);
         try {
             const run =
@@ -644,9 +558,20 @@ export class RunScheduler  {
             return {
                 kind:"EXECUTED",
                 run,
-                decision,
             };
         } catch (error) {
+            // 执行前异常（例如快照/落库失败）可能让 DB 仍停在 QUEUED，
+            // 但 Run 已经离开内存队列。重新入队避免丢失；已进入终态或
+            // INTERRUPTED 的 Run 不再入队，交给恢复流程处理。
+            const current = this.runService.getRun(queuedRun.runId);
+            if (current === null || current.status === "QUEUED") {
+                this.requeueClaimed(queuedRun, "AWAITING_SCHEDULING");
+            }
+            // 标记失败的 Run，drain 据此判断是否要在同一轮立刻补位重试。
+            if (error !== null && typeof error === "object") {
+                (error as { failedRunId?: string }).failedRunId =
+                    queuedRun.runId;
+            }
             throw error;
         } finally {
             if (resumeInput !== undefined){
@@ -661,77 +586,120 @@ export class RunScheduler  {
         // 支柱 3：先熔断排队超时的 Run，再推进队列。
         this.enforceQueueTtl();
 
-        // B4/B5：DB 对账——补回脱离内存队列的孤儿 QUEUED Run，并对
-        // DB 侧超 TTL 的 Run 熔断（不依赖内存队列是否还有它）。
-        this.reconcileQueuedRuns();
+        const errors: unknown[] = [];
+        const results: SchedulerDrainResult[] = [];
+        const pending = new Set<Promise<SchedulerDrainResult>>();
 
-        const errors:unknown[] = [];
-        // 看看当前有多少要处理的请求
-        let remainingAttempts = this.scheduler.listQueue().length;
+        const launchOne = (): void => {
+            const attempt = this.attemptNext();
+            pending.add(attempt);
+            void attempt.then(
+                (result) => {
+                    if (result.kind !== "EMPTY") {
+                        results.push(result);
+                    }
+                },
+                (error) => {
+                    errors.push(error);
+                },
+            ).finally(() => {
+                pending.delete(attempt);
+            });
+        };
 
-        const results : SchedulerDrainResult[] = [];
+        // 初始按队列深度铺开；claimNext 会按全局 slot / 租户公平份额自然限流。
+        const initialAttempts = this.scheduler.listQueue().length;
+        // 异常补位预算：最坏情况下每条初次尝试只额外重试一次，避免
+        // "执行一直失败 -> 一直补位" 的忙等。
+        let retryBudget = initialAttempts;
+        for (let index = 0; index < initialAttempts; index += 1) {
+            launchOne();
+        }
 
-        // 只要还有请求，那么就交给attemptNext去执行
-        while(remainingAttempts > 0) {
-            const roundPromises = Array.from(
-                { length : remainingAttempts },
-                () => this.attemptNext(),
+        // B4/B5：DB 对账按低频兜底，避免每次推进都查库。
+        const nowMs = this.options.now?.() ?? Date.now();
+        const reconcileIntervalMs = this.options.reconcileIntervalMs ?? 5_000;
+
+        if (nowMs - this.lastReconcileAt >= reconcileIntervalMs) {
+            this.lastReconcileAt = nowMs;
+            this.reconcileQueuedRuns();
+        }
+
+        // 批屏障修复：谁先结束就先补谁。空出一个 slot 就立刻再 claim 一个，
+        // 不再等本轮最慢的 Run 结束（旧实现是 Promise.allSettled 整批等待）。
+        while (pending.size > 0) {
+            const settled = await Promise.race(
+                [...pending].map((attempt) => attempt.then(
+                    (result) => ({ attempt, result, error: null as unknown }),
+                    (error) => ({ attempt, result: null, error }),
+                )),
             );
 
-            const settledResults = await Promise.allSettled(roundPromises);
+            pending.delete(settled.attempt);
 
-            let inspectedCount = 0;
+            // 成功结束或异常结束都会释放 slot，两种都要补位；
+            // EMPTY 表示没抢到 slot（容量满/无队列），不补，避免空转。
+            if (this.scheduler.listQueue().length === 0) {
+                continue;
+            }
 
-            for (const settledResult of settledResults) {
-                if (settledResult.status === "rejected"){
-                    errors.push(settledResult.reason);
-                    inspectedCount += 1;
+            if (settled.result === null) {
+                if (retryBudget <= 0) {
                     continue;
                 }
 
-                if (settledResult.value.kind !== "EMPTY"){
-                    results.push(settledResult.value);
-                    inspectedCount += 1;
+                // 同一个 Run 不在同一轮里立即重试（否则执行一直失败会忙等）；
+                // 把它留给下一轮 drain/tick，并先推进队列里的其它 Run。
+                const failedRunId = (settled.error as {
+                    failedRunId?: string;
+                } | null)?.failedRunId;
+                const headRunId = this.scheduler.listQueue()[0]?.runId;
+
+                if (failedRunId !== undefined && failedRunId === headRunId) {
+                    continue;
                 }
+
+                retryBudget -= 1;
+                launchOne();
+                continue;
             }
 
-            if (inspectedCount === 0){
-                break;
+            if (settled.result.kind !== "EMPTY") {
+                launchOne();
             }
-            remainingAttempts -= inspectedCount;
         }
-        if (errors.length === 1){
+
+        if (errors.length === 1) {
             throw errors[0];
         }
         if (errors.length > 1) {
             throw new AggregateError(
                 errors,
                 "多个队列调度尝试执行失败",
-            )
+            );
         }
         return results;
     }
 
-    private async runDrainLoop():Promise<SchedulerDrainResult[]> {
+    /**
+     * 唯一的推进循环：跑一轮 drainOnce；期间若又收到推进请求，再跑一轮。
+     * 同一时刻只允许一个循环，避免两个循环重复 claim。
+     */
+    private async runPass(): Promise<SchedulerDrainResult[]> {
         const results: SchedulerDrainResult[] = [];
+
         try {
-            while(this.drainRequested) {
-                // 消费掉当前的请求
-                this.drainRequested = false;
+            do {
+                this.rerunRequested = false;
                 const passResults = await this.drainOnce();
                 results.push(...passResults);
-
-                // 如果 drainonce 执行期间又有人调用drain(),
-                // drainRequested会重新变成 true，继续下一轮
-            }
+            } while (this.rerunRequested);
 
             return results;
-        } finally{
-            this.drainPromise = null;
+        } finally {
+            this.activePass = null;
         }
     }
-
-
 
     // attemptNext是单次调用，它只处理一个 run，它的核心思路是选择一个 run，检查资源，然后判断能否执行
     // drain 是会反复调用attemptNext的，它会推进当前队列
@@ -739,31 +707,20 @@ export class RunScheduler  {
     // drain 的主要职责是：1. 遍历当前队列并尽可能启动 Run； 2. 处理多个地方同时发起的 drain 请求
     // drain 是负责“当前有空位，看看哪些 run 可以启动的”
     // attemptNext就是调度一个 run
+    /**
+     * 请求推进一次。已有推进在跑时只做标记（复用同一个 Promise），
+     * 等当前轮结束后自动再跑一轮。
+     */
     drain() : Promise<SchedulerDrainResult[]> {
-        // 每次调用都代表系统状态可能发生了变化
-        // 因此至少请求进行一轮队列检查
-        this.drainRequested = true;
-
-        // 已经有drain在执行，重复用同一个Promise
-        if (this.drainPromise !== null){
-            return this.drainPromise;
+        if (this.activePass !== null) {
+            this.rerunRequested = true;
+            return this.activePass;
         }
 
-        // 没有 drain 执行，就启动新的推进循环
-        this.drainPromise = this.runDrainLoop();
-        return this.drainPromise;
+        const pass = this.runPass();
+        this.activePass = pass;
+        return pass;
     }
-
-    // drain是这样的：
-    // 第一次 drain：创建drainPromise 
-    // 开始 drainOnce()
-
-    // 执行过程中第二次drain()
-    // -> drainRequested = true
-    // 不创建第二个循环
-    // 返回现有drainPromise
-
-
 
     submitResume(input:ResumeRunInput) : AgentRun {
         const run = this.runService.queueResume(input);
@@ -798,8 +755,7 @@ export class RunScheduler  {
                 runId:run.id,
                 tenantId:run.tenantId,
                 sessionId:run.harnessSessionId,
-                priority: run.priority ?? 0,
-                // B4：与 restoreQueuedRun 一致，重启/恢复不重置 TTL 时钟。
+                                // B4：与 restoreQueuedRun 一致，重启/恢复不重置 TTL 时钟。
                 enqueuedAt:run.updatedAt,
             });
         } catch (error) {

@@ -5,9 +5,7 @@ import { join } from "node:path";
 
 import { createHarnessApplication } from "../../src/app/create-harness-application.ts";
 import { loadHarnessConfig } from "../../src/app/harness-config.ts";
-import type { ResourceSnapshot } from "../../src/resources/resource-observer.ts";
 import { FakeAgentRuntime } from "../fakes/fake-agent-runtime.ts";
-import { FakeResourceObserver } from "../fakes/fake-resource-observer.ts";
 import { tempWorkspaceEnv } from "../support/temp-workspace-root.ts";
 
 /**
@@ -16,21 +14,6 @@ import { tempWorkspaceEnv } from "../support/temp-workspace-root.ts";
  * 真机曾出现重复入队 500（RunScheduler.submit 在幂等命中后仍 enqueue），
  * 这里在组合根上固化回归。
  */
-
-const normalSnapshot: ResourceSnapshot = {
-    snapshotId: "idempotency-snapshot",
-    observedAt: "2026-10-11T10:00:00.000Z",
-    sources: ["FAKE"],
-    gpuTotalMemoryMiB: 100,
-    gpuUsedMemoryMiB: 20,
-    gpuFreeMemoryMiB: 80,
-    gpuUtilizationPercent: 20,
-    runningRequests: 0,
-    waitingRequests: 0,
-    kvCacheUsagePercent: 20,
-    inputTokensPerSecond: 1000,
-    outputTokensPerSecond: 100,
-};
 
 test("同 idempotencyKey 并发提交只创建一个 Run 且都返回同一 id", async () => {
     const config = loadHarnessConfig({
@@ -43,10 +26,6 @@ test("同 idempotencyKey 并发提交只创建一个 Run 且都返回同一 id",
     });
     const composition = await createHarnessApplication(config, {
         runtime: new FakeAgentRuntime(),
-        resourceObserver: new FakeResourceObserver({
-            ok: true,
-            snapshot: normalSnapshot,
-        }),
     });
 
     try {

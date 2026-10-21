@@ -12,30 +12,7 @@ import { join } from "node:path";
 import { createHarnessApplication } from "../src/app/create-harness-application.ts";
 import { loadHarnessConfig } from "../src/app/harness-config.ts";
 import { startHarnessHttpServer } from "../src/http/harness-http-server.ts";
-import type { ResourceObservation, ResourceObserver } from "../src/resources/resource-observer.ts";
 import { DemoAgentRuntime } from "./demo/demo-agent-runtime.ts";
-
-class FakeResourceObserver implements ResourceObserver {
-    async observe(): Promise<ResourceObservation> {
-        return {
-            ok: true,
-            snapshot: {
-                snapshotId: `fake-${Date.now()}`,
-                observedAt: new Date().toISOString(),
-                sources: ["FAKE"] as const,
-                gpuTotalMemoryMiB: 48000,
-                gpuUsedMemoryMiB: 8000,
-                gpuFreeMemoryMiB: 40000,
-                gpuUtilizationPercent: 10,
-                runningRequests: 0,
-                waitingRequests: 0,
-                kvCacheUsagePercent: 10,
-                inputTokensPerSecond: 0,
-                outputTokensPerSecond: 0,
-            },
-        };
-    }
-}
 
 const tempDirectory = mkdtempSync(join(tmpdir(), "vram-aware-harness-user-demo-"));
 const config = loadHarnessConfig({
@@ -47,7 +24,6 @@ const config = loadHarnessConfig({
 });
 const composition = await createHarnessApplication(config, {
     runtime: new DemoAgentRuntime(),
-    resourceObserver: new FakeResourceObserver(),
 });
 await composition.application.start();
 startHarnessHttpServer(composition.httpApi, { port: 3977 });

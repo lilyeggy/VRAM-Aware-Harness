@@ -28,21 +28,6 @@ import {
 import {
     RecoveryStartupCoordinator,
 } from "../checkpoints/recovery-startup-coordinator.ts";
-import {
-    DeterministicExecutionPolicy,
-} from "../resources/execution-policy.ts";
-import {
-    PolicyDecisionStore,
-} from "../resources/policy-decision-store.ts";
-import {
-    ResourceAdmissionService,
-} from "../resources/resource-admission-service.ts";
-import type {
-    ResourceObserver,
-} from "../resources/resource-observer.ts";
-import {
-    ExternalModelServiceResourceObserver,
-} from "../resources/external-model-service-observer.ts";
 import type {
     AgentRuntime,
 } from "../runtime/agent-runtime.ts";
@@ -102,7 +87,6 @@ import type { HarnessConfig } from "./harness-config.ts";
 export interface HarnessCompositionDependencies {
     database?:Database;
     runtime?:AgentRuntime;
-    resourceObserver?:ResourceObserver;
     modelRuntime?:ModelRuntime;
     onPumpError?:(error:unknown) => void;
     policyRegistry?:PolicyRegistry;
@@ -110,16 +94,12 @@ export interface HarnessCompositionDependencies {
     secretProvider?:SecretProvider;
 }
 
-import { ResourceMetricsSampler } from "../resources/resource-metrics-sampler.ts";
-
 export interface HarnessComposition {
-    resourceMetrics: ResourceMetricsSampler;
     application:HarnessApplication;
     httpApi:HarnessHttpApi;
     database:Database;
     runStore:RunStore;
     checkpointStore:CheckpointStore;
-    decisionStore:PolicyDecisionStore;
     sessionStore:HarnessSessionStore;
     attemptStore:RunAttemptStore;
     effectivePolicyStore:EffectivePolicyStore;
@@ -142,7 +122,6 @@ export interface HarnessComposition {
     scheduler:TenantRunScheduler;
     queuePump:RunScheduler;
     runtime:AgentRuntime;
-    resourceObserver:ResourceObserver;
     /** 支柱 2：双卡 vLLM 网关（未配置后端时为 undefined）。 */
     llmGateway:LlmGateway | undefined;
     /** 支柱 2：后端健康探测（网关未启用或探测周期为 0 时为 undefined）。 */
@@ -169,7 +148,6 @@ export async function createHarnessApplication(
     const runOutputStore = new RunOutputStore(database);
     const checkpointStore = new CheckpointStore(database);
     const toolExecutionStore = new ToolExecutionStore(database);
-    const decisionStore = new PolicyDecisionStore(database);
     const sessionStore = new HarnessSessionStore(database);
     const attemptStore = new RunAttemptStore(database);
     const leaseManager = new RunLeaseManager(attemptStore, {
@@ -391,8 +369,6 @@ export async function createHarnessApplication(
         config.sandboxProfile,
         leaseManager,
     );
-    const resourceObserver = dependencies.resourceObserver
-        ?? new ExternalModelServiceResourceObserver();
     const runService = new RunService(
         runStore, runtime, undefined, runOutputStore,
         workspaceResultCoordinator,
@@ -411,26 +387,9 @@ export async function createHarnessApplication(
         // N10：老化插队，给被洪泛租户挡住的正常租户一个确定的等待上界。
         agingMs:config.schedulerAgingMs ?? 0,
     });
-    const basePolicy = new DeterministicExecutionPolicy({
-        maxActiveRuns:config.maxActiveRuns,
-    });
-    // B7：预算/fair-share 策略接线——仅在显式配置租户预算时叠加；
-    // 未配置时 admission 行为与历史完全一致（opt-in 组合，非默认开启）。
-    const policy = basePolicy;
-    const admission = new ResourceAdmissionService(
-        resourceObserver,
-        config.resourceThresholds,
-        policy,
-        decisionStore,
-    );
     const coordinator = new RunScheduler(
         runService,
         scheduler,
-        admission,
-        undefined,
-        undefined,
-        null,
-        false,
         {
             // 支柱 3：排队 TTL——队列等待超过门限的 Run 安全熔断为
             // FAILED(QUEUE_TIMEOUT)，防止多租户调度器被死等任务拖垮。
@@ -554,9 +513,7 @@ export async function createHarnessApplication(
         coordinator,
         queuePump,
         runStore,
-        decisionStore,
         scheduler,
-        resourceObserver,
         startupRecovery,
         runOutputStore,
         workspaceResultCoordinator,
@@ -564,11 +521,6 @@ export async function createHarnessApplication(
         effectivePolicyStore,
         // N16：UNKNOWN_EFFECT 人工消解需要读写 tool_executions。
         toolExecutionStore,
-    );
-    // Separate observer instance: token-rate counters must not race admission probes.
-    const resourceMetrics = new ResourceMetricsSampler(
-        dependencies.resourceObserver ?? new ExternalModelServiceResourceObserver(),
-        { intervalMs: config.resourceMetricsIntervalMs },
     );
     // 支柱 2：LLM 网关（仅当配置了后端时启用）。
     // - 双卡负载均衡：策略来自 config.llmGatewayStrategy（默认 round-robin）；
@@ -623,7 +575,6 @@ export async function createHarnessApplication(
             billingStore: tenantBillingStore,
         },
         llmGateway,
-        resourceMetrics,
         // N8：提交期输入上界。
         { maxUserInputChars: config.maxUserInputChars },
         rateLimiter,
@@ -633,13 +584,11 @@ export async function createHarnessApplication(
     let closed = false;
 
     return {
-        resourceMetrics,
         application,
         httpApi,
         database,
         runStore,
         checkpointStore,
-        decisionStore,
         sessionStore,
         attemptStore,
         effectivePolicyStore,
@@ -661,7 +610,6 @@ export async function createHarnessApplication(
         scheduler,
         queuePump,
         runtime,
-        resourceObserver,
         llmGateway,
         llmHealthMonitor,
         recoveryExecutor,
@@ -673,7 +621,6 @@ export async function createHarnessApplication(
             await application.stop();
             await mcpRegistry?.close();
             llmHealthMonitor?.stop();
-            resourceMetrics.stop();
             await (sandboxProvider as SandboxProvider).close?.();
 
             if (ownsDatabase) {

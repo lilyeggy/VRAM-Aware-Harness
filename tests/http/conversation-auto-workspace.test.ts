@@ -68,12 +68,7 @@ function buildApi() {
         getRunWorkspaceDiff: () => null,
         getRunArtifacts: () => [],
         getRunArtifact: async () => null,
-        getRunDecisions: () => [],
         getQueue: () => [],
-        observeResources: async () => ({
-            ok: false as const, observedAt: timestamp,
-            attemptedSources: [], reason: "UNAVAILABLE" as const, message: "测试环境",
-        }),
         interruptRun: async () => { throw new Error("本测试不使用 interruptRun"); },
         resumeRun: () => { throw new Error("本测试不使用 resumeRun"); },
         createConversation(input: { tenantId: string; workspaceId: string; title?: string }) {

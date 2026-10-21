@@ -20,8 +20,15 @@ import {
     FirecrackerSandboxDriver,
     type MicrovmDriver,
 } from "../src/sandbox/microvm/index.ts";
-import { estimateSandboxMemoryMiB } from "../src/resources/resource-admission-service.ts";
 import { unrestrictedPolicy } from "../src/policies/effective-policy.ts";
+
+/** 沙箱内存预估（原资源准入模块已删除，脚本自包含此纯计算）。 */
+function estimateSandboxMemoryMiB(
+    profile: "strict" | "default" | "restricted-egress" | "development",
+    memoryMb = 512,
+): number {
+    return profile === "strict" ? memoryMb + 64 : memoryMb;
+}
 
 class MemorySandboxStore {
     readonly records = new Map<string, SandboxRecord>();

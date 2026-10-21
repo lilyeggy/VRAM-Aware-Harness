@@ -1,12 +1,27 @@
 # VRAM-Aware Harness
 
-面向多租户的 Agent 任务服务：隔离执行、公平调度、可审计。项目定位是个人 / 小私有部署的裁剪版，不是 Grok/Manus 式完整平台；权威边界见 docs/platform-boundary.md §9（2026-10-10 已冻结）。
+> **单机多租户 Agent 宿主层：准入 / 调度 / 隔离 / 溯源**
+>
+> 命名保留历史原因：M4 起平台不再观测 VRAM/GPU（模型服务在平台外），当前形态是「外部模型 + 单机多租户宿主层」。定位与边界见 `docs/platform-boundary.md` §9.1 / §9.10（v1.6）。
+
+宿主层只做四件事，其余都不属于它：
+
+| 职责 | 只回答一个问题 | 可证伪的检验 |
+|---|---|---|
+| **准入** | 接不接、接多少？ | 超额时能否干净拒绝（429 + Retry-After） |
+| **调度** | 现在轮到谁？ | 任意 Run 的等待时间是否有上界 |
+| **隔离** | 跑在哪、能碰到什么？ | 越界能否被证明 |
+| **溯源** | 事后能证明什么？ | 崩溃后能否安全重放 |
+
+项目定位是个人 / 小私有部署的裁剪版，不是 Grok/Manus 式完整平台。
 
 核心目标只有三件事：
 
 1. **任务生命周期与调度**：多租户提交任务，按租户轮转、全局/单租户并发上限、会话串行与 Queue TTL 公平调度。
 2. **副作用与恢复**：工具调用先记账后执行，崩溃/中断后只自动重放安全操作。
 3. **隔离与身份边界**：API Key 派生 Tenant，工具与文件操作限制在 jailer + Firecracker microVM（生产）或 runsc Sandbox（开发）内。
+
+调度层量化基准（容量利用率 / 公平性 / 批屏障提速）：`docs/research/scheduler-benchmark.zh-CN.md`，脚本 `scripts/scheduler-benchmark.ts`。
 
 技术栈：Bun + TypeScript + SQLite；沙箱使用 jailer + Firecracker microVM（生产）或 Docker/runsc（开发）；模型后端为外部 OpenAI 兼容服务（本地 vLLM 或 opencode-go 等），平台不观测推理侧 GPU/KV cache。
 
@@ -114,7 +129,7 @@ bun test ./tests
 VM 创建分阶段耗时埋点：设 `HARNESS_VM_PHASE_TRACE=1` 后每台 VM 会向 stderr 打 `[vm-phase] <sandboxId> <阶段> <ms>`（默认关闭零开销）；`HARNESS_VM_BOOT_VERBOSE=1` 可打开内核启动日志并把 `serial-first-line` 纳入排障。
 首次冷启动（池空后的第一次 create，≈2.2s）已拆解为 guest 用户态就绪 ~1.28s + 写内存镜像 ~0.9s，**靠调参消不掉**；对用户可见的解法是服务启动预热：`scripts/vm-snapshot-prewarm.ts` + `deploy/harness-vm-prewarm.{service,timer}.example`，生产实测预热后首个 Run `warmHit:true` / 166ms。
 主流 Agent Sandbox 技术方案调研（E2B / Daytona / Modal / CubeSandbox / CodeSandbox / Firecracker 官方快照与 UFFD 等）见 `docs/agent-sandbox-landscape.zh-CN.md`。
-队列优先级 / 深度 backpressure / RunAttempt 租约心跳（Phase 2，§9.8 v1.4）见 `.env.example` 的 `HARNESS_MAX_QUEUED_RUNS*` 与 `HARNESS_RUN_LEASE_*`。
+深度 backpressure / RunAttempt 租约心跳（Phase 2，§9.8 v1.4）见 `.env.example` 的 `HARNESS_MAX_QUEUED_RUNS*` 与 `HARNESS_RUN_LEASE_*`；**v1.6 已删除队列优先级**（所有租户等权，见 `docs/platform-boundary.md` §9.10）。
 Durable Execution / 重试 / Run 幂等键（Phase 3，§9.8 v1.4）见 `.env.example` 的 `HARNESS_RUN_MAX_ATTEMPTS`、`HARNESS_RUN_RETRY_*`；提交 `POST /runs` 或会话消息时可带 `idempotencyKey`，终态后以 `RUN_ARTIFACTS_READY` 事件标记 artifacts 可读。
 MCP 工具接入（Phase 4，§9.8 v1.4）见 `.env.example` 的 `HARNESS_MCP_SERVERS`：stdio MCP server 的工具以 `mcp__<server>__<tool>` 暴露，调用仍经过 ToolGateway 的策略守卫、PREPARED 记账与审计；烟测脚本 `scripts/mcp-smoke.ts`。
 

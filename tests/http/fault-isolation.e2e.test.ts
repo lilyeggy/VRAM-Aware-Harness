@@ -2,7 +2,6 @@ import { expect, test } from "bun:test";
 import { createHarnessApplication } from "../../src/app/create-harness-application.ts";
 import { loadHarnessConfig } from "../../src/app/harness-config.ts";
 import { HarnessHttpApi } from "../../src/http/harness-http-api.ts";
-import type { ResourceSnapshot } from "../../src/resources/resource-observer.ts";
 import {
     acquireRunAttemptLease,
     createRunAttempt,
@@ -10,7 +9,6 @@ import {
 } from "../../src/runs/run-attempt.ts";
 import type { RunEvent, RunEventType } from "../../src/runs/agent-run.ts";
 import { FakeAgentRuntime } from "../fakes/fake-agent-runtime.ts";
-import { FakeResourceObserver } from "../fakes/fake-resource-observer.ts";
 import { tempWorkspaceEnv } from "../support/temp-workspace-root.ts";
 
 /**
@@ -19,21 +17,6 @@ import { tempWorkspaceEnv } from "../support/temp-workspace-root.ts";
  * Run 因租约过期进入 INTERRUPTED 后，其它租户对 run/events/output/artifacts/
  * interrupt 以及「在对方 workspace 提交」都必须 404。
  */
-
-const normalSnapshot: ResourceSnapshot = {
-    snapshotId: "fault-isolation-snapshot",
-    observedAt: "2026-10-11T10:00:00.000Z",
-    sources: ["FAKE"],
-    gpuTotalMemoryMiB: 100,
-    gpuUsedMemoryMiB: 20,
-    gpuFreeMemoryMiB: 80,
-    gpuUtilizationPercent: 20,
-    runningRequests: 0,
-    waitingRequests: 0,
-    kvCacheUsagePercent: 20,
-    inputTokensPerSecond: 1000,
-    outputTokensPerSecond: 100,
-};
 
 function createEvent(
     runId: string,
@@ -63,10 +46,6 @@ test("故障态 Run 对其它租户完全不可见（run/events/output/artifacts
     });
     const composition = await createHarnessApplication(config, {
         runtime: new FakeAgentRuntime(),
-        resourceObserver: new FakeResourceObserver({
-            ok: true,
-            snapshot: normalSnapshot,
-        }),
     });
 
     try {

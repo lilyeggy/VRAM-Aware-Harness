@@ -8,9 +8,7 @@ import { createHarnessApplication } from "../../src/app/create-harness-applicati
 import { loadHarnessConfig } from "../../src/app/harness-config.ts";
 import { AccessAuditStore } from "../../src/audit/access-audit-store.ts";
 import { backupSqliteDatabase } from "../../src/ops/harness-maintenance.ts";
-import type { ResourceSnapshot } from "../../src/resources/resource-observer.ts";
 import { FakeAgentRuntime } from "../fakes/fake-agent-runtime.ts";
-import { FakeResourceObserver } from "../fakes/fake-resource-observer.ts";
 import { tempWorkspaceEnv } from "../support/temp-workspace-root.ts";
 
 /**
@@ -19,21 +17,6 @@ import { tempWorkspaceEnv } from "../support/temp-workspace-root.ts";
  * 备份走 `VACUUM INTO`，必须与 WAL 写入共存（不抛 SQLITE_BUSY），
  * 且产出的备份要能通过审计 hash 链校验。
  */
-
-const normalSnapshot: ResourceSnapshot = {
-    snapshotId: "backup-snapshot",
-    observedAt: "2026-10-11T10:00:00.000Z",
-    sources: ["FAKE"],
-    gpuTotalMemoryMiB: 100,
-    gpuUsedMemoryMiB: 20,
-    gpuFreeMemoryMiB: 80,
-    gpuUtilizationPercent: 20,
-    runningRequests: 0,
-    waitingRequests: 0,
-    kvCacheUsagePercent: 20,
-    inputTokensPerSecond: 1000,
-    outputTokensPerSecond: 100,
-};
 
 test("Run 执行期间备份：WAL 下 VACUUM INTO 不与写入冲突，备份可校验审计链", async () => {
     const dir = mkdtempSync(join(tmpdir(), "harness-backup-"));
@@ -49,10 +32,6 @@ test("Run 执行期间备份：WAL 下 VACUUM INTO 不与写入冲突，备份�
     });
     const composition = await createHarnessApplication(config, {
         runtime: new FakeAgentRuntime(),
-        resourceObserver: new FakeResourceObserver({
-            ok: true,
-            snapshot: normalSnapshot,
-        }),
     });
 
     try {

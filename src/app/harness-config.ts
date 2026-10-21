@@ -2,9 +2,6 @@ import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { parseMcpServers, type McpServerConfig } from "../mcp/mcp-protocol.ts";
 
-import type {
-    ResourceThresholds,
-} from "../resources/resource-classifier.ts";
 import type { SandboxProfile } from "../sandbox/sandbox-profile.ts";
 import type {
     LlmBackend,
@@ -104,8 +101,6 @@ export interface HarnessConfig {
     piModelsPath:string;
     piAuthPath:string | undefined;
 
-    resourceMetricsIntervalMs:number;
-    resourceThresholds:ResourceThresholds;
 
     maxActiveRuns:number;
     maxActiveRunsPerTenant:number;
@@ -225,13 +220,12 @@ export function loadHarnessConfig(
         positiveInteger(environment, name, fallback);
     const nonNeg = (name: string, fallback: number): number =>
         nonNegativeInteger(environment, name, fallback);
-    const num = (name: string, fallback: number): number =>
-        numberValue(environment, name, fallback);
     // 支柱 2：工具执行与模型等待期间 GPU 不应空转——默认并发上限放开到
     // 20~30 档位，工具与文件 I/O 在沙箱内并发执行，不独占 GPU 槽位。
     // 每租户并发仍然可配（HARNESS_MAX_ACTIVE_RUNS_PER_TENANT）。
     const maxActiveRuns = posInt("HARNESS_MAX_ACTIVE_RUNS", 30);
-    const maxActiveRunsPerTenant = posInt("HARNESS_MAX_ACTIVE_RUNS_PER_TENANT", 10);
+    // 0 = 自动公平份额（全局并发 / 有需求租户数）；显式正数作为硬上限。
+    const maxActiveRunsPerTenant = nonNeg("HARNESS_MAX_ACTIVE_RUNS_PER_TENANT", 0);
     // §9.8 v1.4 Phase 2：默认 0 = 不限制，显式配置后 submit 在队列深度超限时
     // 返回 429（QueueBackpressureError）。
     const maxQueuedRuns = nonNeg("HARNESS_MAX_QUEUED_RUNS", 0);
@@ -270,7 +264,7 @@ export function loadHarnessConfig(
     const rateLimitMaxPerIp = positiveInteger(environment, "HARNESS_RATE_LIMIT_MAX_PER_IP", 1200);
     const trustProxy = boolValue(environment, "HARNESS_TRUST_PROXY", false);
 
-    if (maxActiveRunsPerTenant > maxActiveRuns) {
+    if (maxActiveRunsPerTenant > 0 && maxActiveRunsPerTenant > maxActiveRuns) {
         throw new Error(
             "HARNESS_MAX_ACTIVE_RUNS_PER_TENANT 不能大于 HARNESS_MAX_ACTIVE_RUNS",
         );
@@ -430,21 +424,6 @@ export function loadHarnessConfig(
         piCompactionReserveTokens:posInt("PI_COMPACTION_RESERVE_TOKENS", 12_288),
         piCompactionKeepRecentTokens:posInt("PI_COMPACTION_KEEP_RECENT_TOKENS", 8_192),
 
-        resourceMetricsIntervalMs:posInt("HARNESS_RESOURCE_METRICS_INTERVAL_MS", 1_000),
-        resourceThresholds:{
-            busyGpuMemoryPercent:num("HARNESS_BUSY_GPU_MEMORY_PERCENT", 70),
-            criticalGpuMemoryPercent:num("HARNESS_CRITICAL_GPU_MEMORY_PERCENT", 90),
-            // N5：同机推理服务（如 vLLM，默认预占 90% 显存）的稳态基线。
-            // 准入按「基线之上的增量」判定；无同机推理服务的部署应显式设为 0。
-            gpuMemoryBaselinePercent:num("HARNESS_GPU_MEMORY_BASELINE_PERCENT", 90),
-            busyKvCachePercent:num("HARNESS_BUSY_KV_CACHE_PERCENT", 60),
-            criticalKvCachePercent:num("HARNESS_CRITICAL_KV_CACHE_PERCENT", 85),
-            busyRunningRequests:nonNeg("HARNESS_BUSY_RUNNING_REQUESTS", 4),
-            criticalRunningRequests:nonNeg("HARNESS_CRITICAL_RUNNING_REQUESTS", 8),
-            busyWaitingRequests:nonNeg("HARNESS_BUSY_WAITING_REQUESTS", 1),
-            criticalWaitingRequests:nonNeg("HARNESS_CRITICAL_WAITING_REQUESTS", 4),
-        },
-
         maxActiveRuns,
         maxActiveRunsPerTenant,
         maxQueuedRuns,
@@ -465,7 +444,8 @@ export function loadHarnessConfig(
         rateLimitMaxPerTenant,
         rateLimitMaxPerIp,
         trustProxy,
-        pumpIntervalMs:posInt("HARNESS_PUMP_INTERVAL_MS", 1_000),
+        // 2s 兜底轮询：提交走 kick()、完成走 slot 释放补位，稳态下不依赖轮询。
+        pumpIntervalMs:posInt("HARNESS_PUMP_INTERVAL_MS", 2_000),
         queueTtlMs:posInt("HARNESS_QUEUE_TTL_MS", 300_000),
         schedulerAgingMs:nonNeg("HARNESS_SCHEDULER_AGING_MS", 60_000),
         executionTimeoutMs:posInt("HARNESS_EXECUTION_TIMEOUT_MS", 30 * 60_000),

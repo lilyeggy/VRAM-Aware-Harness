@@ -29,7 +29,6 @@ export interface StartRunInput {
     runPolicy?: PolicyConstraints;
     thinkingLevel?: ThinkingLevel;
     /** §9.8 v1.4 Phase 2：调度优先级（越大越先调度），缺省 0。 */
-    priority?: number;
     /** §9.8 v1.4 Phase 3：提交方幂等键；同租户内唯一，重复提交返回既有 Run。 */
     idempotencyKey?: string;
 }
@@ -104,6 +103,11 @@ export class RunService{
         private readonly retryOptions?: RunRetryOptions,
     ) {}
 
+    /** 读取 Run 当前持久化状态；供调度器在执行异常后判断是否仍可回退入队。 */
+    getRun(runId: string): AgentRun | null {
+        return this.store.get(runId);
+    }
+
     // 创建并持久化Queued Run
     findByTenantIdempotencyKey(tenantId: string, idempotencyKey: string): AgentRun | null {
         return this.store.findByTenantIdempotencyKey(tenantId, idempotencyKey);
@@ -138,7 +142,6 @@ export class RunService{
             checkpointId:null,
             failureReason:null,
             thinkingLevel: input.thinkingLevel ?? "off",
-            priority: input.priority ?? 0,
             retryCount: 0,
             retryAt: null,
             ...(input.idempotencyKey === undefined

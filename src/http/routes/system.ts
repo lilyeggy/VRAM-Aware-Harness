@@ -75,18 +75,6 @@ export async function handleSystemRoute(
                     },
                 );
             }
-            case "resources": {
-                const principal = ctx.requirePrincipal(request, "resources:read");
-                // D3：主机级资源遥测（共享 GPU 池/vLLM 后端）不含跨租户数据，
-                // 但可见性是"有意的主机级"而非"遗漏的租户过滤"——显式标注，
-                // 并保留 principal 供将来引入租户切片视图（如按租户 token 配额）。
-                return jsonResponse({
-                    visibility: "HOST_WIDE",
-                    requestedByTenant: principal.tenantId,
-                    samples: ctx.resourceMetrics?.getSamples() ?? [],
-                    observation: await ctx.application.observeResources(),
-                });
-            }
             case "audit": {
                 const principal = ctx.requirePrincipal(request, "audits:read");
                 if (ctx.accessControl?.auditStore === undefined) {

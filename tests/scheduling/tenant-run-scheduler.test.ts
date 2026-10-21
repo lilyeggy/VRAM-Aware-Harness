@@ -53,8 +53,7 @@ test("enqueue 为新 Run 补齐默认排队事实", () => {
         tenantId: "tenant-a",
         reasonCode: "AWAITING_SCHEDULING",
         enqueuedAt: "2026-08-02T10:00:00.000Z",
-        priority: 0,
-    });
+            });
 });
 
 test("同一 Tenant 的 Run 按提交顺序进入自己的 FIFO", () => {
@@ -296,7 +295,7 @@ test("removeQueued 可以删除 Tenant FIFO 中间的等待 Run", () => {
     const queuedA2 = scheduler.enqueue({
         runId: "run-a2",
         tenantId: "tenant-a",
-        reasonCode: "RESOURCE_BUSY",
+        reasonCode: "TENANT_CONCURRENCY_LIMIT",
         enqueuedAt: "2026-08-03T10:00:00.000Z",
     });
     scheduler.enqueue({
@@ -370,7 +369,7 @@ test("listQueue 按 Tenant round-robin 展示全局和 Tenant 内位置", () => 
     scheduler.enqueue({
         runId: "run-b1",
         tenantId: "tenant-b",
-        reasonCode: "RESOURCE_BUSY",
+        reasonCode: "TENANT_CONCURRENCY_LIMIT",
         enqueuedAt: "2026-08-04T10:00:04.000Z",
     });
     scheduler.enqueue({
@@ -393,7 +392,7 @@ test("listQueue 按 Tenant round-robin 展示全局和 Tenant 内位置", () => 
         },
         {
             runId: "run-b1",
-            reasonCode: "RESOURCE_BUSY",
+            reasonCode: "TENANT_CONCURRENCY_LIMIT",
             position: 2,
             tenantPosition: 1,
         },

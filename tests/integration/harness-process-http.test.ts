@@ -4,30 +4,9 @@ import { createServer } from "node:net";
 import {
     loadHarnessConfig,
 } from "../../src/app/harness-config.ts";
-import type {
-    ResourceSnapshot,
-} from "../../src/resources/resource-observer.ts";
 import { startHarnessProcess } from "../../src/main.ts";
 import { FakeAgentRuntime } from "../fakes/fake-agent-runtime.ts";
-import {
-    FakeResourceObserver,
-} from "../fakes/fake-resource-observer.ts";
 import { tempWorkspaceEnv } from "../support/temp-workspace-root.ts";
-
-const normalSnapshot:ResourceSnapshot = {
-    snapshotId:"process-http-normal",
-    observedAt:"2026-08-05T15:00:00.000Z",
-    sources:["FAKE"],
-    gpuTotalMemoryMiB:100,
-    gpuUsedMemoryMiB:20,
-    gpuFreeMemoryMiB:80,
-    gpuUtilizationPercent:20,
-    runningRequests:0,
-    waitingRequests:0,
-    kvCacheUsagePercent:20,
-    inputTokensPerSecond:1_000,
-    outputTokensPerSecond:100,
-};
 
 async function findAvailablePort():Promise<number> {
     const probe = createServer();
@@ -77,10 +56,6 @@ test("完整进程入口启动真实 HTTP 监听并安全关闭", async () => {
         config,
         compositionDependencies:{
             runtime,
-            resourceObserver:new FakeResourceObserver({
-                ok:true,
-                snapshot:normalSnapshot,
-            }),
         },
         installSignalHandlers:false,
     });

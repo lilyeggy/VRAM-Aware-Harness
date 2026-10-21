@@ -103,15 +103,7 @@ test("GET /app 返回用户工作台，/ 重定向到 /app", async () => {
         getRunWorkspaceDiff: () => null,
         getRunArtifacts: () => [],
         getRunArtifact: async () => null,
-        getRunDecisions: () => [],
         getQueue: () => [],
-        observeResources: async () => ({
-            ok: false as const,
-            observedAt: "2026-01-01T00:00:00.000Z",
-            attemptedSources: ["FAKE" as const],
-            reason: "UNAVAILABLE" as const,
-            message: "测试资源不可用",
-        }),
         interruptRun: async () => {
             throw new Error("not used");
         },

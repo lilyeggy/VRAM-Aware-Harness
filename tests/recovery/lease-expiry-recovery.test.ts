@@ -17,10 +17,8 @@ import type {
     RunEvent,
     RunEventType,
 } from "../../src/runs/agent-run.ts";
-import type { ResourceSnapshot } from "../../src/resources/resource-observer.ts";
 import type { ToolExecution } from "../../src/tools/tool-execution.ts";
 import { FakeAgentRuntime } from "../fakes/fake-agent-runtime.ts";
-import { FakeResourceObserver } from "../fakes/fake-resource-observer.ts";
 import { tempWorkspaceEnv } from "../support/temp-workspace-root.ts";
 
 /**
@@ -31,21 +29,6 @@ import { tempWorkspaceEnv } from "../support/temp-workspace-root.ts";
  * -> RecoveryService.planForInterruptedRun -> RecoveryExecutor.execute。
  * 无 Checkpoint 落 MANUAL_REVIEW 审计；有安全 Checkpoint 走 AUTO_RESUME。
  */
-
-const normalSnapshot: ResourceSnapshot = {
-    snapshotId: "lease-recovery-snapshot",
-    observedAt: "2026-10-11T10:00:00.000Z",
-    sources: ["FAKE"],
-    gpuTotalMemoryMiB: 100,
-    gpuUsedMemoryMiB: 20,
-    gpuFreeMemoryMiB: 80,
-    gpuUtilizationPercent: 20,
-    runningRequests: 0,
-    waitingRequests: 0,
-    kvCacheUsagePercent: 20,
-    inputTokensPerSecond: 1000,
-    outputTokensPerSecond: 100,
-};
 
 function createConfig() {
     return loadHarnessConfig({
@@ -84,10 +67,6 @@ async function createComposition(): Promise<{
     const runtime = new FakeAgentRuntime();
     const composition = await createHarnessApplication(createConfig(), {
         runtime,
-        resourceObserver: new FakeResourceObserver({
-            ok: true,
-            snapshot: normalSnapshot,
-        }),
     });
     return { composition, runtime };
 }

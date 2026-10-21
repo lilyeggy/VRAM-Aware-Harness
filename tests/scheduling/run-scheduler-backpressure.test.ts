@@ -26,19 +26,9 @@ function createCoordinator(options: {
         maxActiveRuns: 8,
         maxActiveRunsPerTenant: 8,
     });
-    const admission = {
-        async evaluate() {
-            throw new Error("submit 不应触发资源准入");
-        },
-    };
     const coordinator = new RunScheduler(
         runService,
         scheduler,
-        admission,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
         {
             ...options,
             runStoreForRecovery: store,

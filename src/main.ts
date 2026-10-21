@@ -48,12 +48,8 @@ export async function startHarnessProcess(
         options.compositionDependencies,
     );
     let server:HarnessServer;
-    /* 
-    我们能够看到，顺序上来看，启动顺序就是 先启动应用，再启动资源监测，然后开启 HTTP 服务
-    */
-    try {   
+    try {
         await composition.application.start();
-        composition.resourceMetrics.start();
         server = startHarnessHttpServer(composition.httpApi, {
             hostname:config.httpHost,
             port:config.httpPort,
