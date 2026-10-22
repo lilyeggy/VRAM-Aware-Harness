@@ -28,5 +28,8 @@ jobs:
       - name: Unit / integration tests
         run: bun test ./tests
 
+      - name: Platform concurrency soak
+        run: bun run scripts/platform-soak.ts
+
       - name: Scheduler benchmark (informational)
         run: bun run scripts/scheduler-benchmark.ts

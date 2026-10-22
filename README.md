@@ -21,6 +21,8 @@
 2. **副作用与恢复**：工具调用先记账后执行，崩溃/中断后只自动重放安全操作。
 3. **隔离与身份边界**：API Key 派生 Tenant，工具与文件操作限制在 jailer + Firecracker microVM（生产）或 runsc Sandbox（开发）内。
 
+平台并发浸泡（1000 Run / 20 租户 / 零泄漏零串会话）：`docs/research/platform-concurrency-soak.zh-CN.md`。
+
 Step 级复用（Run 并发 vs 模型调用并发分开，网关侧 FIFO 排队）：`docs/research/step-level-multiplexing.zh-CN.md`。
 
 外部模型服务并发容量实测（10–20 人能不能撑、TTFT 曲线、建议并发值）：`docs/research/model-capacity.zh-CN.md`。
