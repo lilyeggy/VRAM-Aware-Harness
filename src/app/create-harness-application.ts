@@ -534,6 +534,7 @@ export async function createHarnessApplication(
         llmGateway = new LlmGateway(llmRouter, {
             requestTimeoutMs: config.llmRequestTimeoutMs,
             contextBudgetTokens: config.llmContextBudgetTokens,
+            maxConcurrentRequests: config.llmMaxConcurrentRequests,
         });
         if (config.llmHealthProbeIntervalMs > 0) {
             llmHealthMonitor = new BackendHealthMonitor(

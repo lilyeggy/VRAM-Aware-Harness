@@ -169,6 +169,12 @@ export interface HarnessConfig {
     llmHealthProbePath:string;
     llmRequestTimeoutMs:number;
     /**
+     * 网关侧同时打给上游的模型请求上限（0 = 不限制）。
+     * 这是「step 级复用」的闸门：Run 可以排队/在飞很多，但同时在推理
+     * 服务里的模型调用只有这么多。
+     */
+    llmMaxConcurrentRequests:number;
+    /**
      * N28：会话上下文预算（token）。> 0 时网关在转发前按轮次边界压缩过长的
      * 会话历史，避免会话撞上模型窗口后每个请求都被上游 400 拒绝且永不恢复。
      * 0 = 关闭压缩（保持旧行为）。部署时应设在「模型上下文窗口 − 预留输出」以内。
@@ -408,6 +414,8 @@ export function loadHarnessConfig(
         // ~60s 中止后 RUN_FAILED）。默认放宽到 300s，可用
         // LLM_REQUEST_TIMEOUT_MS 覆盖（大输出/慢后端可调至 600s 以上）。
         llmRequestTimeoutMs:posInt("LLM_REQUEST_TIMEOUT_MS", 300_000),
+        // 外部 API 的安全并发实测约 2–6（docs/research/model-capacity.zh-CN.md）。
+        llmMaxConcurrentRequests:nonNeg("LLM_MAX_CONCURRENT_REQUESTS", 6),
         // N28：会话历史超预算时按轮次边界压缩。旧行为下会话累积超过模型窗口后
         // 每个请求都会被上游 400 拒绝且永不恢复（8h 长稳实测 21.3% 的任务因此失败，
         // 最惨会话 142 连败 0 成功）。默认 24000：本部署模型窗口 32768、预留输出

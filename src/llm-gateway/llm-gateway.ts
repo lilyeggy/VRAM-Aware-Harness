@@ -15,6 +15,7 @@ import type {
     ModelRouter,
     RouteDecision,
 } from "./model-router.ts";
+import { ConcurrencyLimiter } from "./concurrency-limiter.ts";
 import {
     compactConversation,
     estimateToolsTokens,
@@ -24,6 +25,12 @@ import {
 
 export interface LlmGatewayOptions {
     requestTimeoutMs?: number;
+    /**
+     * 同时打给上游的模型请求上限（0 = 不限制）。
+     * 超出的请求在网关内 FIFO 排队 —— 这是「step 级复用」的落点：
+     * Run 可以很多，同时在推理服务的模型调用只有这么多。
+     */
+    maxConcurrentRequests?: number;
     contextBudgetTokens?: number;
     fetchImpl?: typeof fetch;
     requestId?: () => string;
@@ -44,6 +51,7 @@ type UpstreamOutcome =
 
 export class LlmGateway {
     private readonly timeoutMs: number;
+    private readonly limiter: ConcurrencyLimiter | null;
     private readonly contextBudgetTokens: number;
     private readonly fetchImpl: typeof fetch;
     private readonly newRequestId: () => string;
@@ -55,6 +63,9 @@ export class LlmGateway {
         options: LlmGatewayOptions = {},
     ) {
         this.timeoutMs = options.requestTimeoutMs ?? 60_000;
+        this.limiter = (options.maxConcurrentRequests ?? 0) > 0
+            ? new ConcurrencyLimiter(options.maxConcurrentRequests ?? 0)
+            : null;
         this.contextBudgetTokens = options.contextBudgetTokens ?? 0;
         this.fetchImpl = options.fetchImpl ?? fetch;
         this.newRequestId =
@@ -64,6 +75,11 @@ export class LlmGateway {
 
     lastCompactionStats(): CompactionOutcome | null {
         return this.lastCompaction;
+    }
+
+    /** 模型调用并发/排队快照，供 /metrics 或排障使用。 */
+    capacityStats(): ReturnType<ConcurrencyLimiter["stats"]> | null {
+        return this.limiter?.stats() ?? null;
     }
 
     handleListModels(): Response {
@@ -227,6 +243,10 @@ export class LlmGateway {
 
         this.router.acquire(backend.id);
         let upstream: Response;
+        const releaseSlot = this.limiter === null
+            ? null
+            : await this.limiter.acquire();
+
         try {
             upstream = await this.fetchImpl(url, {
                 method: "POST",
@@ -237,6 +257,7 @@ export class LlmGateway {
         } catch {
             return { kind: "retryable" };
         } finally {
+            releaseSlot?.();
             this.router.release(backend.id);
         }
 
