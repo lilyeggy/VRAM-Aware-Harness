@@ -55,8 +55,8 @@ test("支柱 2：组合根装配双卡网关、健康探测与缓存台账并放
     try {
         expect(composition.llmGateway).toBeDefined();
         expect(composition.llmHealthMonitor).toBeDefined();
-        // 并发放开：默认 30 全局；每租户 0 = 自动公平份额。
-        expect(config.maxActiveRuns).toBe(30);
+        // 并发闸门：默认 6（与外部模型服务安全并发对齐）；每租户 0 = 自动公平份额。
+        expect(config.maxActiveRuns).toBe(6);
         expect(config.maxActiveRunsPerTenant).toBe(0);
 
         // 双卡轮询 + 稳定前缀 + 健康探测回填。

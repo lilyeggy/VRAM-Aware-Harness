@@ -223,7 +223,8 @@ export function loadHarnessConfig(
     // 支柱 2：工具执行与模型等待期间 GPU 不应空转——默认并发上限放开到
     // 20~30 档位，工具与文件 I/O 在沙箱内并发执行，不独占 GPU 槽位。
     // 每租户并发仍然可配（HARNESS_MAX_ACTIVE_RUNS_PER_TENANT）。
-    const maxActiveRuns = posInt("HARNESS_MAX_ACTIVE_RUNS", 30);
+    // 默认 6：与外部模型服务的安全并发对齐（见 docs/research/model-capacity.zh-CN.md）。
+    const maxActiveRuns = posInt("HARNESS_MAX_ACTIVE_RUNS", 6);
     // 0 = 自动公平份额（全局并发 / 有需求租户数）；显式正数作为硬上限。
     const maxActiveRunsPerTenant = nonNeg("HARNESS_MAX_ACTIVE_RUNS_PER_TENANT", 0);
     // §9.8 v1.4 Phase 2：默认 0 = 不限制，显式配置后 submit 在队列深度超限时

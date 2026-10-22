@@ -107,6 +107,8 @@ function createApi(
                 totals: {
                     wallMs: null,
                     queueWaitMs: null,
+                    requestAssemblyMs: null,
+                    upstreamTtftMs: null,
                     sandboxMs: 0,
                     modelMs: 0,
                     toolMs: 0,
@@ -146,6 +148,9 @@ function createApi(
                 enqueuedAt:timestamp,
                 position:1,
                 tenantPosition:1,
+                activeRunCount:0,
+                activeTenantRunCount:0,
+                estimatedWaitMs:null,
             }];
         },
         async interruptRun(runId) {

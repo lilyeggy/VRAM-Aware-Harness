@@ -112,6 +112,12 @@ export class RuntimeEventBridge{
                         modelCallId: event.modelCallId,
                         provider: event.provider,
                         model: event.model,
+                        ...(event.requestStartedAt === undefined
+                            ? {}
+                            : { requestStartedAt: event.requestStartedAt }),
+                        ...(event.ttftMs === undefined
+                            ? {}
+                            : { ttftMs: event.ttftMs }),
                     },
                 };
 

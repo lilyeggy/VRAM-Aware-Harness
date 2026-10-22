@@ -17,6 +17,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 
 
+import { installModelRequestTiming, takeModelRequestTiming } from "./model-request-timing.ts";
 import type {
     AgentRuntime,
     RuntimeEventHandler,
@@ -120,7 +121,9 @@ export class PiAdapter implements AgentRuntime{
         private readonly toolGatewayBinding:
             PiAdapterToolGatewayBinding,
     ){
-
+        // 旁路观测：记录模型请求发出/响应头到达时刻，供 trace 拆分
+        // "我们组装" 与 "provider 排队"。
+        installModelRequestTiming();
     }
 
     subscribe(runId: string, handler: RuntimeEventHandler): () => void {
@@ -450,6 +453,8 @@ export class PiAdapter implements AgentRuntime{
                         provider: piEvent.message.provider,
                         model: piEvent.message.responseModel ?? piEvent.message.model,
                     });
+                    const requestTiming = takeModelRequestTiming();
+
                     this.emit({
                         type: "model_started",
                         runId,
@@ -457,6 +462,17 @@ export class PiAdapter implements AgentRuntime{
                         modelCallId,
                         provider: piEvent.message.provider,
                         model: piEvent.message.responseModel ?? piEvent.message.model,
+                        ...(requestTiming === null
+                            ? {}
+                            : {
+                                requestStartedAt: requestTiming.startedAtWall,
+                                ttftMs: requestTiming.headersAt === null
+                                    ? null
+                                    : Math.round(
+                                        requestTiming.headersAt
+                                        - requestTiming.startedAt,
+                                    ),
+                            }),
                     });
                     break;
                 }

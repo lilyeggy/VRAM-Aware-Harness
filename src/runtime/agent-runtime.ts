@@ -149,6 +149,10 @@ export type RuntimeEvent =
         modelCallId: string;
         provider: string;
         model: string;
+        /** 请求真正发出的墙钟时刻（旁路观测，可能缺失）。 */
+        requestStartedAt?: string;
+        /** 请求发出 → 响应头到达的耗时（provider 首字延迟）。 */
+        ttftMs?: number | null;
     }
     | {
         type: "model_first_token";

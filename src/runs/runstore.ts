@@ -285,6 +285,19 @@ export class RunStore {
             .map((row) => this.runFromRow(row));
     }
 
+    /** 最近 windowMs 内完成的 Run 数（用于排队 ETA 的吞吐估计）。 */
+    countCompletedSince(sinceIso: string): number {
+        const row = this.db
+            .query<{ count: number }, [string]>(`
+                SELECT COUNT(*) AS count
+                FROM agent_runs
+                WHERE status = 'COMPLETED' AND finished_at >= ?;
+            `)
+            .get(sinceIso);
+
+        return row?.count ?? 0;
+    }
+
     /**
      * §9.8 v1.4：按状态汇总 Run，供最小 /metrics 使用。
      */

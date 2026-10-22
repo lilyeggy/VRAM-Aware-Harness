@@ -2,6 +2,7 @@ import type {
     Checkpoint,
 } from "../checkpoints/checkpoint.ts";
 import type { RunTrace } from "../runs/run-trace.ts";
+import type { QueueViewEntry } from "../app/harness-application.ts";
 import type {
     AgentRun,
     RunEvent,
@@ -11,7 +12,6 @@ import type {
     StartRunInput,
 } from "../runs/run-service.ts";
 import type {
-    QueueEntry,
 } from "../scheduling/tenant-run-scheduler.ts";
 import type { RequestPrincipal } from "../auth/request-principal.ts";
 import type { WorkspaceService } from "../workspaces/workspace-service.ts";
@@ -46,7 +46,7 @@ export interface HarnessHttpApplication {
     getRunArtifact(runId:string, path:string):Promise<Uint8Array | null>;
     /** N3：完成但受限的 Run 的 DENY 聚合；未装配时为空数组。 */
     getRunLimitations?(runId:string):RunLimitation[];
-    getQueue():QueueEntry[];
+    getQueue():QueueViewEntry[];
     /** §9.8 v1.4：最小可观测性快照；未装配时 GET /metrics 返回 501。 */
     getMetricsSnapshot?():HarnessMetricsSnapshot;
     interruptRun(runId:string):Promise<AgentRun>;

@@ -32,6 +32,16 @@ export interface RunTraceTotals {
     wallMs: number | null;
     /** 首次排队到开始执行的等待。 */
     queueWaitMs: number | null;
+    /**
+     * 会话就绪 → 模型请求真正发出：我们自己的组装时间
+     * （system prompt + tools + 历史序列化）。缺埋点时为 null。
+     */
+    requestAssemblyMs: number | null;
+    /**
+     * 请求发出 → 响应头到达：provider 的首字延迟（TTFT）。
+     * 缺埋点时为 null。
+     */
+    upstreamTtftMs: number | null;
     sandboxMs: number;
     modelMs: number;
     toolMs: number;
@@ -99,10 +109,16 @@ export function buildRunTrace(
     );
 
     const steps: RunTraceStep[] = [];
-    const modelStartedAt = new Map<string, { at: string; name: string }>();
+    const modelStartedAt = new Map<
+        string,
+        { at: string; name: string; ttftMs: number | null }
+    >();
     const toolStartedAt = new Map<string, { at: string; name: string }>();
 
     let queueWaitMs: number | null = null;
+    let lastSessionInitializedAt: string | null = null;
+    let firstModelRequestStartedAt: string | null = null;
+    let firstModelTtftMs: number | null = null;
     let queuedAt: string | null = null;
     let startedAt: string | null = null;
     let finishedAt: string | null = null;
@@ -179,6 +195,11 @@ export function buildRunTrace(
             case "CONTROL_PREPARED":
             case "SESSION_INITIALIZED": {
                 const durationMs = numberField(payload, "durationMs");
+
+                if (event.type === "SESSION_INITIALIZED") {
+                    lastSessionInitializedAt = event.timestamp;
+                }
+
                 lifecycleMs += durationMs;
                 steps.push({
                     kind: "lifecycle",
@@ -193,9 +214,20 @@ export function buildRunTrace(
 
             case "MODEL_STARTED": {
                 const callId = stringField(payload, "modelCallId") ?? `model-${event.sequence}`;
+                const requestStartedAt = stringField(payload, "requestStartedAt");
+                const ttftMs = typeof payload.ttftMs === "number"
+                    ? payload.ttftMs
+                    : null;
+
+                if (firstModelRequestStartedAt === null && requestStartedAt !== null) {
+                    firstModelRequestStartedAt = requestStartedAt;
+                    firstModelTtftMs = ttftMs;
+                }
+
                 modelStartedAt.set(callId, {
                     at: event.timestamp,
                     name: stringField(payload, "model") ?? "model",
+                    ttftMs,
                 });
                 break;
             }
@@ -231,6 +263,7 @@ export function buildRunTrace(
                         modelCallId: callId,
                         provider: stringField(payload, "provider"),
                         stopReason: stringField(payload, "stopReason"),
+                        ttftMs: started?.ttftMs ?? null,
                         inputTokens: callInput,
                         outputTokens: callOutput,
                         totalTokens: callTotal,
@@ -352,6 +385,11 @@ export function buildRunTrace(
         totals: {
             wallMs,
             queueWaitMs,
+            requestAssemblyMs: firstModelRequestStartedAt === null
+                || lastSessionInitializedAt === null
+                ? null
+                : elapsedMs(lastSessionInitializedAt, firstModelRequestStartedAt),
+            upstreamTtftMs: firstModelTtftMs,
             sandboxMs,
             modelMs,
             toolMs,

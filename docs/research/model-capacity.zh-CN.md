@@ -72,8 +72,8 @@ RUN_COMPLETED      03:39:33.570
 
 | 优先级 | 动作 | 说明 |
 |---|---|---|
-| P0 | `HARNESS_MAX_ACTIVE_RUNS` 30 → **6** | 用调度器当模型并发闸门，避免 70s 级 TTFT |
-| P0 | 排队可见 | 202 响应/查询接口返回排队位置与估算等待（数据已有：`QUEUE_BLOCKED.position` + 近期完成速率） |
+| P0（已做） | `HARNESS_MAX_ACTIVE_RUNS` 默认 30 → **6** | 用调度器当模型并发闸门，避免 70s 级 TTFT |
+| P0（已做） | 排队可见 | `GET /queue` 返回 `position` + `estimatedWaitMs`（按最近 15 分钟完成速率估算；样本 <3 时返回 null） |
 | P1 | provider 429/超时可见 | 网关目前把 429/5xx 归为 retryable，但用户看不到"在被限流" |
 | P1 | 专用模型端点 | 10–20 人并发的唯一可靠解；本地 vLLM + 连续批处理 |
 | P2 | 首轮 prompt 瘦身 | tools schema 与系统提示直接影响 TTFT（2k prompt + 8 tools 时 c=1 就要 3.4s） |
@@ -88,3 +88,25 @@ OPENCODE_API_KEY=... bun run scripts/model-ttft-probe.ts
 # 端到端 10 并发
 HARNESS_BASE_URL=... HARNESS_REGISTRATION_INVITE_CODE=... LOAD_RUNS=10 bun run scripts/load-test-runs.ts
 ```
+
+## 平台侧观测补充（同日）
+
+trace 新增两个字段，把 `SESSION_INITIALIZED → 首次 MODEL_STARTED` 拆成两段：
+
+| 字段 | 含义 | 归谁 |
+|---|---|---|
+| `requestAssemblyMs` | 会话就绪 → 请求真正发出 | **我们**（system prompt + tools + 历史序列化） |
+| `upstreamTtftMs` | 请求发出 → 响应头到达 | **provider**（排队 + prefill） |
+
+实现：`src/runtime/model-request-timing.ts` 旁路包装 `globalThis.fetch`，PiAdapter 在 `message_start` 时把两个时刻写进 `MODEL_STARTED` 事件；trace 聚合。
+
+**真机首测（10 并发、闸门=6）**：
+
+```
+requestAssemblyMs=28      ← 我们组装 prompt/tools 只花 28ms
+upstreamTtftMs=11069      ← provider 首字 11s
+unaccountedMs=16099
+wallMs=16317
+```
+
+结论：**"2.7s 空档"里我们只占 28ms，其余全是 provider**。payload 瘦身对总时延帮助有限（除非能减少轮次），真正的杠杆是并发闸门与推理侧容量。

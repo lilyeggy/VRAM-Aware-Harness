@@ -13,6 +13,7 @@ import type {
     SchedulerCapacity,
     TenantRunScheduler,
 } from "../scheduling/tenant-run-scheduler.ts";
+import { estimateWaitMs } from "../runs/queue-eta.ts";
 import { buildRunTrace, type RunTrace } from "../runs/run-trace.ts";
 import type {
     AgentRun,
@@ -59,6 +60,11 @@ export interface QueuePump {
  * 3. 后续统一处理interrupt/resume
  * 4. http 层只负责协议转换
  */
+/** 队列视图：blocker 事实 + 按近期吞吐估算的等待时间。 */
+export interface QueueViewEntry extends QueueBlocker {
+    estimatedWaitMs: number | null;
+}
+
 export class HarnessApplication {
     private started = false;
     private startPromise : Promise<void> | null = null;
@@ -272,8 +278,20 @@ export class HarnessApplication {
      * 而不是入队时记下的陈旧原因。QueueBlocker 是 QueueEntry 的超集，
      * 对外契约不变。
      */
-    getQueue():QueueBlocker[] {
-        return this.scheduler.listQueueBlockers();
+    getQueue():QueueViewEntry[] {
+        const blockers = this.scheduler.listQueueBlockers();
+        // 15 分钟窗口；样本太少（<3）时返回 null，避免刚重启时用
+        // 极低吞吐算出"等 5 分钟"这种误导性 ETA。
+        const windowMs = 15 * 60_000;
+        const since = new Date(Date.now() - windowMs).toISOString();
+        const completed = this.runStore.countCompletedSince(since);
+
+        return blockers.map((blocker) => ({
+            ...blocker,
+            estimatedWaitMs: completed < 3
+                ? null
+                : estimateWaitMs(blocker.position, completed, windowMs),
+        }));
     }
 
     getTenantCapacity(tenantId:string):SchedulerCapacity {

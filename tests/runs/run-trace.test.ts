@@ -53,6 +53,9 @@ test("把事件流折叠成分步时间线并做 token/成本归因", () => {
             modelCallId: "m1",
             provider: "opencode-go",
             model: "deepseek-v4.1-flash",
+            // 请求在会话就绪后 40ms 发出；provider 首字用了 900ms
+            requestStartedAt: at(190),
+            ttftMs: 900,
         }),
         event(6, "MODEL_COMPLETED", 1160, {
             modelCallId: "m1",
@@ -122,6 +125,8 @@ test("把事件流折叠成分步时间线并做 token/成本归因", () => {
         totalTokens: 450,
         // 从提交（RUN_CREATED）到首次 RUN_STARTED 的用户等待时间。
         queueWaitMs: 150,
+        // SESSION_INITIALIZED（本用例没有）时取不到组装时间，这里只校验 TTFT
+        upstreamTtftMs: 900,
         wallMs: 2700,
         lifecycleMs: 0,
         // 2700 墙钟 - 120 沙箱 - 2000 模型 - 300 工具 = 280 未归因
@@ -192,4 +197,31 @@ test("真实 Run 走完后，trace 能给出模型/工具调用数与成本归�
     expect(trace.steps.some((step) => step.kind === "tool")).toBe(true);
 
     db.close();
+});
+
+test("会话就绪到请求发出 = 我们自己的组装时间", () => {
+    const trace = buildRunTrace(run, [
+        event(1, "RUN_CREATED", 0),
+        event(2, "RUN_STARTED", 10),
+        event(3, "SESSION_INITIALIZED", 20, { durationMs: 6, mode: "NEW" }),
+        event(4, "MODEL_STARTED", 30, {
+            modelCallId: "m1",
+            model: "deepseek-v4.1-flash",
+            requestStartedAt: at(120),
+            ttftMs: 800,
+        }),
+        event(5, "MODEL_COMPLETED", 900, {
+            modelCallId: "m1",
+            durationMs: 780,
+            usage: {
+                inputTokens: 10,
+                outputTokens: 5,
+                totalTokens: 15,
+                cost: { total: 0.0001 },
+            },
+        }),
+    ]);
+
+    expect(trace.totals.requestAssemblyMs).toBe(100);
+    expect(trace.totals.upstreamTtftMs).toBe(800);
 });

@@ -135,7 +135,9 @@ VM 创建分阶段耗时埋点：设 `HARNESS_VM_PHASE_TRACE=1` 后每台 VM 会
 Durable Execution / 重试 / Run 幂等键（Phase 3，§9.8 v1.4）见 `.env.example` 的 `HARNESS_RUN_MAX_ATTEMPTS`、`HARNESS_RUN_RETRY_*`；提交 `POST /runs` 或会话消息时可带 `idempotencyKey`，终态后以 `RUN_ARTIFACTS_READY` 事件标记 artifacts 可读。
 MCP 工具接入（Phase 4，§9.8 v1.4）见 `.env.example` 的 `HARNESS_MCP_SERVERS`：stdio MCP server 的工具以 `mcp__<server>__<tool>` 暴露，调用仍经过 ToolGateway 的策略守卫、PREPARED 记账与审计；烟测脚本 `scripts/mcp-smoke.ts`。
 
-Run 分步时间线：`GET /runs/:id/trace` 把事件流折叠成「每步耗时 + token/成本归因」（沙箱获取、每次模型调用、每次工具调用的耗时与 usage，含排队等待、墙钟合计，以及**未归因时间 `unaccountedMs`**），只读聚合，不改变任何状态。真机实测一次 Run 有 95% 墙钟落在未归因区间（Pi 会话初始化 ~2.7s、工具到下一轮 ~1.2s），见 `docs/research/run-trace.zh-CN.md`。
+排队可见：`GET /queue` 返回每个排队 Run 的位置、阻塞原因与 `estimatedWaitMs`（按最近 5 分钟完成速率估算）。
+
+Run 分步时间线：`GET /runs/:id/trace` 把事件流折叠成「每步耗时 + token/成本归因」（沙箱获取、每次模型调用、每次工具调用的耗时与 usage，含排队等待、墙钟合计，以及**未归因时间 `unaccountedMs`**、**请求组装 `requestAssemblyMs`** 与 **provider 首字 `upstreamTtftMs`**），只读聚合，不改变任何状态。真机实测一次 Run 有 95% 墙钟落在未归因区间（Pi 会话初始化 ~2.7s、工具到下一轮 ~1.2s），见 `docs/research/run-trace.zh-CN.md`。
 
 最小可观测性：`GET /metrics` 返回 Prometheus 文本，需要 `metrics:read` scope（bootstrap key 的 `*` 可读），包含 `harness_runs{status}`、`harness_runs_queued`、`harness_sandbox_acquisitions_total{warm}`、`harness_http_requests_total{status}` 等。
 

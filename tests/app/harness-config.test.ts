@@ -19,7 +19,7 @@ test("loadHarnessConfig 提供本地安全默认值并派生 metrics URL", () =>
         piProvider:"local-vllm",
         piModelId:"qwen3.5-4b",
         piModelsPath:"/tmp/harness-project/.pi/spike/models.json",
-        maxActiveRuns:30,
+        maxActiveRuns:6,
         // 0 = 自动公平份额（全局并发 / 有需求租户数）。
         maxActiveRunsPerTenant:0,
         llmGatewayStrategy:"round-robin",
