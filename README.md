@@ -21,6 +21,8 @@
 2. **副作用与恢复**：工具调用先记账后执行，崩溃/中断后只自动重放安全操作。
 3. **隔离与身份边界**：API Key 派生 Tenant，工具与文件操作限制在 jailer + Firecracker microVM（生产）或 runsc Sandbox（开发）内。
 
+外部模型服务并发容量实测（10–20 人能不能撑、TTFT 曲线、建议并发值）：`docs/research/model-capacity.zh-CN.md`。
+
 调度层量化基准（容量利用率 / 公平性 / 批屏障提速）：`docs/research/scheduler-benchmark.zh-CN.md`，脚本 `scripts/scheduler-benchmark.ts`。
 
 技术栈：Bun + TypeScript + SQLite；沙箱使用 jailer + Firecracker microVM（生产）或 Docker/runsc（开发）；模型后端为外部 OpenAI 兼容服务（本地 vLLM 或 opencode-go 等），平台不观测推理侧 GPU/KV cache。
