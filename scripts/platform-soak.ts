@@ -225,7 +225,7 @@ console.log(`runs=${submitted.length} tenants=${tenantCount} maxActive=${maxActi
 console.log(`completed=${completed} failed=${failed} peakActive=${runtime.peak}`);
 console.log(`sessionViolations=${runtime.sessionViolations}`);
 console.log(`perTenantCompleted=${counts.join(",")} spread=${spread}`);
-console.log(`queueWait p50=${percentile(waits, 50).toFixed(1)}ms p95=${percentile(waits, 95).toFixed(1)}ms`);
+console.log(`queueWait p50=${percentile(waits, 50).toFixed(1)}ms p95=${percentile(waits, 95).toFixed(1)}ms p99=${percentile(waits, 99).toFixed(1)}ms`);
 console.log(`leak: activeRunCount=${capacity.activeRunCount} queuedLeft=${queueLeft}`);
 
 const ok = completed === submitted.length
