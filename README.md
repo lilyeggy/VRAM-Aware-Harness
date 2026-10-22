@@ -21,15 +21,11 @@
 2. **副作用与恢复**：工具调用先记账后执行，崩溃/中断后只自动重放安全操作。
 3. **隔离与身份边界**：API Key 派生 Tenant，工具与文件操作限制在 jailer + Firecracker microVM（生产）或 runsc Sandbox（开发）内。
 
-平台并发浸泡（1000 Run / 20 租户 / 零泄漏零串会话）：`docs/research/platform-concurrency-soak.zh-CN.md`。
 
-接入新的 Agent Harness（运行时适配契约、六个隐藏耦合、dsh 调研结论）：`docs/research/agent-runtime-integration.zh-CN.md`。
 
-Step 级复用（Run 并发 vs 模型调用并发分开，网关侧 FIFO 排队）：`docs/research/step-level-multiplexing.zh-CN.md`。
 
-外部模型服务并发容量实测（10–20 人能不能撑、TTFT 曲线、建议并发值）：`docs/research/model-capacity.zh-CN.md`。
 
-调度层量化基准（容量利用率 / 公平性 / 批屏障提速）：`docs/research/scheduler-benchmark.zh-CN.md`，脚本 `scripts/scheduler-benchmark.ts`。
+调度层量化基准：`scripts/scheduler-benchmark.ts`（容量利用率 / 公平性 / 批屏障提速）。
 
 技术栈：Bun + TypeScript + SQLite；沙箱使用 jailer + Firecracker microVM（生产）或 Docker/runsc（开发）；模型后端为外部 OpenAI 兼容服务（本地 vLLM 或 opencode-go 等），平台不观测推理侧 GPU/KV cache。
 
@@ -143,7 +139,7 @@ MCP 工具接入（Phase 4，§9.8 v1.4）见 `.env.example` 的 `HARNESS_MCP_SE
 
 排队可见：`GET /queue` 返回每个排队 Run 的位置、阻塞原因与 `estimatedWaitMs`（按最近 5 分钟完成速率估算）。
 
-Run 分步时间线：`GET /runs/:id/trace` 把事件流折叠成「每步耗时 + token/成本归因」（沙箱获取、每次模型调用、每次工具调用的耗时与 usage，含排队等待、墙钟合计，以及**未归因时间 `unaccountedMs`**、**请求组装 `requestAssemblyMs`** 与 **provider 首字 `upstreamTtftMs`**），只读聚合，不改变任何状态。真机实测一次 Run 有 95% 墙钟落在未归因区间（Pi 会话初始化 ~2.7s、工具到下一轮 ~1.2s），见 `docs/research/run-trace.zh-CN.md`。
+Run 分步时间线：`GET /runs/:id/trace` 把事件流折叠成「每步耗时 + token/成本归因」（沙箱获取、每次模型调用、每次工具调用的耗时与 usage，含排队等待、墙钟合计，以及**未归因时间 `unaccountedMs`**、**请求组装 `requestAssemblyMs`** 与 **provider 首字 `upstreamTtftMs`**），只读聚合，不改变任何状态。真机实测一次 Run 有 95% 墙钟落在未归因区间（Pi 会话初始化 ~2.7s、工具到下一轮 ~1.2s）。
 
 最小可观测性：`GET /metrics` 返回 Prometheus 文本，需要 `metrics:read` scope（bootstrap key 的 `*` 可读），包含 `harness_runs{status}`、`harness_runs_queued`、`harness_sandbox_acquisitions_total{warm}`、`harness_http_requests_total{status}` 等。
 

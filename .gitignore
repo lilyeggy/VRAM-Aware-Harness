@@ -87,3 +87,13 @@ scripts/philosophy_sisyphus_long.py
 # 注意：该目录下已有 8 个历史文件被跟踪，gitignore 不会自动取消跟踪；
 # 新生成的文件一律忽略，避免误提交。
 .tmp-ops/
+
+# 研究与分析笔记只保留在本地，不入库（GitHub 只放项目代码与面向项目的文档）。
+# 这些文件仍留在工作区，只是不再被 git 跟踪。
+/docs/research/agent-runtime-integration.zh-CN.md
+/docs/research/cloud-agent-scheduling-vs-round-robin.zh-CN.md
+/docs/research/model-capacity.zh-CN.md
+/docs/research/platform-concurrency-soak.zh-CN.md
+/docs/research/run-trace.zh-CN.md
+/docs/research/scheduler-benchmark.zh-CN.md
+/docs/research/step-level-multiplexing.zh-CN.md
