@@ -23,6 +23,8 @@
 
 平台并发浸泡（1000 Run / 20 租户 / 零泄漏零串会话）：`docs/research/platform-concurrency-soak.zh-CN.md`。
 
+接入新的 Agent Harness（运行时适配契约、六个隐藏耦合、dsh 调研结论）：`docs/research/agent-runtime-integration.zh-CN.md`。
+
 Step 级复用（Run 并发 vs 模型调用并发分开，网关侧 FIFO 排队）：`docs/research/step-level-multiplexing.zh-CN.md`。
 
 外部模型服务并发容量实测（10–20 人能不能撑、TTFT 曲线、建议并发值）：`docs/research/model-capacity.zh-CN.md`。
