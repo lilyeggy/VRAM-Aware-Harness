@@ -5,17 +5,17 @@ import type { RunService } from "../../src/runs/run-service.ts";
 import {
     RunScheduler,
 } from "../../src/scheduling/run-scheduler.ts";
-import { TenantRunScheduler } from "../../src/scheduling/tenant-run-scheduler.ts";
+import { UserRunScheduler } from "../../src/scheduling/user-run-scheduler.ts";
 
 test("Phase 3：retryAt 未到点的 QUEUED Run 不被 reconcile 重新入队", () => {
-    const scheduler = new TenantRunScheduler({
+    const scheduler = new UserRunScheduler({
         maxActiveRuns: 4,
-        maxActiveRunsPerTenant: 4,
+        maxActiveRunsPerUser: 4,
     });
     const retryAt = new Date(Date.now() + 60_000).toISOString();
     const run: AgentRun = {
         id: "run-retry",
-        tenantId: "tenant-a",
+        userId: "user-a",
         harnessSessionId: "session-a",
         status: "QUEUED",
         userInput: "retry later",
@@ -45,13 +45,13 @@ test("Phase 3：retryAt 未到点的 QUEUED Run 不被 reconcile 重新入队", 
 });
 
 test("Phase 3：retryAt 已过期的 QUEUED Run 会被 reconcile 重新入队", () => {
-    const scheduler = new TenantRunScheduler({
+    const scheduler = new UserRunScheduler({
         maxActiveRuns: 4,
-        maxActiveRunsPerTenant: 4,
+        maxActiveRunsPerUser: 4,
     });
     const run: AgentRun = {
         id: "run-retry-due",
-        tenantId: "tenant-a",
+        userId: "user-a",
         harnessSessionId: "session-a",
         status: "QUEUED",
         userInput: "retry now",

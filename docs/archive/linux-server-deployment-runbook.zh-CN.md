@@ -102,7 +102,7 @@ bun run test
 
 ## 5. 准备服务目录和 UID
 
-当前 Workspace 会由 Harness 自动创建，不需要人工按 Tenant 创建目录。
+当前 Workspace 会由 Harness 自动创建，不需要人工按 User 创建目录。
 
 关键约定是：Harness 服务用户和容器执行 UID 使用同一个非 root UID。这样 `WorkspaceService` 创建的 `0700` 目录可以直接被容器读取/写入，不需要让 Harness 进程以 root 运行或把目录放宽到 `777`。
 
@@ -181,7 +181,7 @@ HARNESS_CONTAINER_IMAGE=alpine:3.20
 HARNESS_CONTAINER_USER_ID=1001
 
 HARNESS_MAX_ACTIVE_RUNS=2
-HARNESS_MAX_ACTIVE_RUNS_PER_TENANT=1
+HARNESS_MAX_ACTIVE_RUNS_PER_USER=1
 HARNESS_GPU_IDS=0
 HARNESS_RESOURCE_TIMEOUT_MS=3000
 HARNESS_BOOTSTRAP_API_KEY=替换为至少16位的高熵随机Key
@@ -268,7 +268,7 @@ curl -sS http://127.0.0.1:3000/workspaces \
 然后使用返回的 `workspaceId` 提交任务。Workspace 目录会自动出现在：
 
 ```text
-/data/harness/workspaces/<tenant>/<workspace-id>
+/data/harness/workspaces/<user>/<workspace-id>
 ```
 
 真实 Sandbox 验收：
@@ -289,7 +289,7 @@ bun run benchmark:sandbox
 2. `bun run test` 通过；
 3. `/health` 返回成功；
 4. API Key 能创建 Workspace；
-5. Workspace 目录由服务自动创建，名称和 Tenant 边界正确；
+5. Workspace 目录由服务自动创建，名称和 User 边界正确；
 6. `server-preflight.sh` 返回 `RESULT: PASS`；
 7. `smoke:container` 能取得实际 runsc evidence；
 8. `smoke:container:attacks` 和 benchmark 的输出被保存；

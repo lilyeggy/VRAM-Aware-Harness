@@ -141,7 +141,7 @@ async function runSmoke() {
 
     const store = new MemorySandboxStore();
     const secrets: SecretProvider = {
-        get: (_tenant, name) => (name === "TEST_SECRET" ? "secret-value-phase1-proof" : null),
+        get: (_user, name) => (name === "TEST_SECRET" ? "secret-value-phase1-proof" : null),
     };
 
     const provider = new MicrovmSandboxProvider(store as unknown as SandboxStore, secrets, {
@@ -164,7 +164,7 @@ async function runSmoke() {
             ...unrestrictedPolicy,
             id: "policy-smoke-p1",
             runId: `run-smoke-${Date.now()}`,
-            tenantId: "tenant-smoke",
+            userId: "user-smoke",
             sandboxProfile: "strict",
             layers: [],
             createdAt: new Date().toISOString(),
@@ -277,7 +277,7 @@ async function runSmoke() {
                 ...unrestrictedPolicy,
                 id: "policy-net-boundary",
                 runId: `run-net-${Date.now()}`,
-                tenantId: "tenant-smoke-net",
+                userId: "user-smoke-net",
                 sandboxProfile: "strict",
                 layers: [],
                 createdAt: new Date().toISOString(),

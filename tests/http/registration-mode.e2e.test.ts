@@ -41,8 +41,8 @@ test("open 模式：无邀请码可注册（保持旧行为）", async () => {
             registerRequest("open@example.com"),
         );
         expect(response.status).toBe(201);
-        const body = (await response.json()) as { user:{ tenantId:string } };
-        expect(body.user.tenantId.length).toBeGreaterThan(0);
+        const body = (await response.json()) as { user:{ userId:string } };
+        expect(body.user.userId.length).toBeGreaterThan(0);
     } finally {
         await composition.close();
     }

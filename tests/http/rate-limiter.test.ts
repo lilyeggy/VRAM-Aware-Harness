@@ -5,7 +5,7 @@ import { RateLimiter } from "../../src/http/rate-limiter.ts";
 const options = {
     enabled: true,
     windowMs: 60_000,
-    maxRequestsPerTenant: 3,
+    maxRequestsPerUser: 3,
     maxRequestsPerIp: 2,
 };
 
@@ -35,17 +35,17 @@ describe("RateLimiter", () => {
         expect(limiter.consumeIp("1.1.1.1", now + options.windowMs).allowed).toBe(true);
     });
 
-    test("租户与 IP 使用各自独立的桶", () => {
+    test("用户与 IP 使用各自独立的桶", () => {
         const limiter = new RateLimiter(options);
         const now = 1_000_000;
 
-        expect(limiter.consumeTenant("tenant-a", now).allowed).toBe(true);
-        expect(limiter.consumeTenant("tenant-a", now).allowed).toBe(true);
-        expect(limiter.consumeTenant("tenant-a", now).allowed).toBe(true);
-        expect(limiter.consumeTenant("tenant-a", now).allowed).toBe(false);
+        expect(limiter.consumeUser("user-a", now).allowed).toBe(true);
+        expect(limiter.consumeUser("user-a", now).allowed).toBe(true);
+        expect(limiter.consumeUser("user-a", now).allowed).toBe(true);
+        expect(limiter.consumeUser("user-a", now).allowed).toBe(false);
 
-        // 另一个租户不受影响
-        expect(limiter.consumeTenant("tenant-b", now).allowed).toBe(true);
+        // 另一个用户不受影响
+        expect(limiter.consumeUser("user-b", now).allowed).toBe(true);
     });
 
     test("关闭时永远放行且不记录桶", () => {

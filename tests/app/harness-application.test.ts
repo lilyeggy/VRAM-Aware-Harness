@@ -16,8 +16,8 @@ import {
     RunScheduler,
 } from "../../src/scheduling/run-scheduler.ts";
 import {
-    TenantRunScheduler,
-} from "../../src/scheduling/tenant-run-scheduler.ts";
+    UserRunScheduler,
+} from "../../src/scheduling/user-run-scheduler.ts";
 import {
     openHarnessDatabase,
 } from "../../src/storage/database.ts";
@@ -48,9 +48,9 @@ function createApplication(
     const runStore = new RunStore(db);
     const runtime = new FakeAgentRuntime();
     const runService = new RunService(runStore, runtime);
-    const scheduler = new TenantRunScheduler({
+    const scheduler = new UserRunScheduler({
         maxActiveRuns: 1,
-        maxActiveRunsPerTenant: 1,
+        maxActiveRunsPerUser: 1,
     });
     const coordinator = new RunScheduler(
         runService,
@@ -228,7 +228,7 @@ test("submitRun 只在应用启动后接收任务，并立即触发调度", asyn
         lifecycleEvents,
     );
     const input = {
-        tenantId: "tenant-a",
+        userId: "user-a",
         harnessSessionId: "session-a",
         userInput: "完成 Day7 演示任务",
         workspacePath: "/workspace/demo",
@@ -267,7 +267,7 @@ test("应用门面统一查询 Run、事件、队列与容量", async () => {
     try {
         await application.start();
         const run = application.submitRun({
-            tenantId: "tenant-b",
+            userId: "user-b",
             harnessSessionId: "session-b",
             userInput: "查询门面",
             workspacePath: "/workspace/demo",
@@ -280,9 +280,9 @@ test("应用门面统一查询 Run、事件、队列与容量", async () => {
         expect(application.getRunEvents(run.id).map((event) => event.type))
             .toContain("RUN_CREATED");
         expect(application.getQueue()).toEqual([]);
-        expect(application.getTenantCapacity("tenant-b")).toEqual({
+        expect(application.getUserCapacity("user-b")).toEqual({
             activeRunCount: 0,
-            activeTenantRunCount: 0,
+            activeUserRunCount: 0,
         });
         expect(application.getRun("missing-run")).toBeNull();
         expect(application.getRunEvents("missing-run")).toEqual([]);
@@ -310,7 +310,7 @@ test("resumeRun 将中断任务提交到统一调度链并立即推进", async (
     };
     const interruptedRun: AgentRun = {
         id: checkpoint.runId,
-        tenantId: "tenant-resume",
+        userId: "user-resume",
         harnessSessionId: "session-resume",
         status: "INTERRUPTED",
         userInput: "恢复应用层任务",

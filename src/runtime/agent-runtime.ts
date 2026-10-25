@@ -19,7 +19,7 @@ export interface RuntimeRunRef{
     runId:string;
 
     /** 公平调度和资源配额的主体 */
-    tenantId:string;
+    userId:string;
     
     /** harnessSession Id,与 AgentSession 不一致 */
     harnessSessionId:string;
@@ -33,7 +33,7 @@ export interface RuntimeRunRef{
     /** 本次 Run 的推理深度，必须随 Run 持久化以支持恢复。 */
     thinkingLevel?: "off" | "minimal" | "low" | "medium" | "high";
 
-    /** 本次执行使用的 Workspace 工作目录；真正的 Tenant 隔离由上层负责校验 */
+    /** 本次执行使用的 Workspace 工作目录；真正的 User 隔离由上层负责校验 */
     workspacePath:string;
 
 }
@@ -74,7 +74,7 @@ export interface RuntimeExecutionContext {
     readonly sandboxEnforcement: SandboxEnforcementCapabilities;
     /**
      * 容器内 /workspace 对应的宿主目录。工具定义必须以它为前缀把宿主路径
-     * 换算成容器路径——它不一定等于 run.workspacePath（TENANT 视野下是租户根）。
+     * 换算成容器路径——它不一定等于 run.workspacePath（USER 视野下是用户根）。
      * HOST 边界（managed-local）不传，此时路径映射退化为恒等。
      */
     readonly sandboxMountRoot?: string;

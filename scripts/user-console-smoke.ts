@@ -64,7 +64,7 @@ try {
         body: JSON.stringify({ email, password: "password-123" }),
     }));
     assert(registered.status === 201 && "user" in registered.body, `注册失败 ${JSON.stringify(registered.body)}`);
-    console.log(`PASS  POST /auth/register → tenant ${JSON.stringify(registered.body.user)}`);
+    console.log(`PASS  POST /auth/register → user ${JSON.stringify(registered.body.user)}`);
 
     const loggedIn = await json(new Request(`${base}/auth/login`, {
         method: "POST",
@@ -122,7 +122,7 @@ try {
     assert(Array.isArray(conversation.body.runs) && (conversation.body.runs as unknown[]).length === 1, "对话应包含 1 个 Run");
     console.log("PASS  output / workspace-diff / artifacts / events / conversation 全部可读");
 
-    // 6. 租户边界：伪造凭证不能读。
+    // 6. 用户边界：伪造凭证不能读。
     const intruder = bearer(base, "not-a-real-token");
     const denied = await json(intruder(`/runs/${runId}`));
     assert(denied.status === 401, `无效凭证应被 401 拒绝，实际 ${denied.status}`);

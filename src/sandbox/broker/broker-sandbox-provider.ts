@@ -22,10 +22,10 @@ export interface BrokerSandboxProviderOptions {
     readonly store?: SandboxStore;
     readonly requestTimeoutMs?: number;
     /**
-     * 固定租户（Worker 侧）：每个 Run 的 Worker 只服务一个租户，直接把它作为
-     * execute/terminate 的请求租户。
+     * 固定用户（Worker 侧）：每个 Run 的 Worker 只服务一个用户，直接把它作为
+     * execute/terminate 的请求用户。
      */
-    readonly tenantId?: string;
+    readonly userId?: string;
     /**
      * Master 侧 create 所需的 Broker control token：Broker 用它确认调用方是
      * Master 而不是被污染的 Worker。Worker 侧不设置，因此无法 create sandbox。
@@ -37,22 +37,22 @@ export interface BrokerSandboxProviderOptions {
      */
     readonly capabilityToken?: string;
     /**
-     * 动态解析租户（Master 侧）：Master 可能为多个租户创建 sandbox，需要在
+     * 动态解析用户（Master 侧）：Master 可能为多个用户创建 sandbox，需要在
      * terminate 时从持久化记录反查归属。返回 null 表示无法确定，调用方应拒绝
      * 而不是猜测。
      */
-    readonly resolveTenantId?: (sandboxId: string) => string | null;
+    readonly resolveUserId?: (sandboxId: string) => string | null;
 }
 
 /**
  * Master/Worker 侧的 Broker 客户端。
  *
- * 它只持有 Unix socket 连接，不持有 Firecracker 进程、jailer 或 tenant secret；
+ * 它只持有 Unix socket 连接，不持有 Firecracker 进程、jailer 或 user secret；
  * create/execute/terminate 全部转发给特权 Broker。
  */
 export class BrokerSandboxProvider implements SandboxProvider, SandboxCommandExecutor {
-    /** sandboxId -> create 时已知的租户，避免每次 terminate 都回查 store。 */
-    private readonly tenantBySandbox = new Map<string, string>();
+    /** sandboxId -> create 时已知的用户，避免每次 terminate 都回查 store。 */
+    private readonly userBySandbox = new Map<string, string>();
     /** sandboxId -> capability token，create 时生成/记录，terminate 成功后删除。 */
     private readonly tokenBySandbox = new Map<string, string>();
 
@@ -76,17 +76,17 @@ export class BrokerSandboxProvider implements SandboxProvider, SandboxCommandExe
             op: "create",
             input: { ...input, controlToken, token },
         });
-        this.tenantBySandbox.set(result.record.id, input.policy.tenantId);
+        this.userBySandbox.set(result.record.id, input.policy.userId);
         this.tokenBySandbox.set(result.record.id, token);
         this.options.store?.create(result.record);
         return toHandle(result.handle, token);
     }
 
     async terminate(sandboxId: string): Promise<void> {
-        const tenantId = this.resolveTenant(sandboxId);
-        if (tenantId === null) {
+        const userId = this.resolveUser(sandboxId);
+        if (userId === null) {
             throw new Error(
-                "无法确定 sandbox " + sandboxId + " 的租户，拒绝 terminate（防止跨租户终止）",
+                "无法确定 sandbox " + sandboxId + " 的用户，拒绝 terminate（防止跨用户终止）",
             );
         }
         const token = this.resolveCapability(sandboxId, true);
@@ -99,10 +99,10 @@ export class BrokerSandboxProvider implements SandboxProvider, SandboxCommandExe
             id: crypto.randomUUID(),
             op: "terminate",
             sandboxId,
-            tenantId,
+            userId,
             token,
         });
-        this.tenantBySandbox.delete(sandboxId);
+        this.userBySandbox.delete(sandboxId);
         this.tokenBySandbox.delete(sandboxId);
         const store = this.options.store;
         if (store === undefined) {
@@ -123,10 +123,10 @@ export class BrokerSandboxProvider implements SandboxProvider, SandboxCommandExe
         command: readonly string[],
         options?: { readonly workdir?: string },
     ): Promise<{ exitCode: number; stdout: string; stderr: string }> {
-        const tenantId = this.resolveTenant(sandboxId);
-        if (tenantId === null) {
+        const userId = this.resolveUser(sandboxId);
+        if (userId === null) {
             throw new Error(
-                "无法确定 sandbox " + sandboxId + " 的租户，拒绝 execute（防止跨租户执行）",
+                "无法确定 sandbox " + sandboxId + " 的用户，拒绝 execute（防止跨用户执行）",
             );
         }
         const token = this.resolveCapability(sandboxId, false);
@@ -139,7 +139,7 @@ export class BrokerSandboxProvider implements SandboxProvider, SandboxCommandExe
             id: crypto.randomUUID(),
             op: "execute",
             sandboxId,
-            tenantId,
+            userId,
             token,
             command: [...command],
             ...(options === undefined ? {} : { options }),
@@ -163,10 +163,10 @@ export class BrokerSandboxProvider implements SandboxProvider, SandboxCommandExe
         // 每次请求独立连接，无需关闭长连接。
     }
 
-    private resolveTenant(sandboxId: string): string | null {
-        return this.tenantBySandbox.get(sandboxId)
-            ?? this.options.tenantId
-            ?? this.options.resolveTenantId?.(sandboxId)
+    private resolveUser(sandboxId: string): string | null {
+        return this.userBySandbox.get(sandboxId)
+            ?? this.options.userId
+            ?? this.options.resolveUserId?.(sandboxId)
             ?? null;
     }
 

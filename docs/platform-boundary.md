@@ -1,10 +1,10 @@
-# 个人版多租户 Agent 任务服务：定位与系统边界（v1.2-frozen；个人项目裁剪定档，2026-10-10 冻结）
+# 个人版多用户 Agent 任务服务：定位与系统边界（v1.2-frozen；个人项目裁剪定档，2026-10-10 冻结）
 
 > 本文档是项目的**唯一权威边界定义**；个人项目裁剪边界见 §9。实现、评审、测试以此为对齐基准；
 > 与本文件冲突的代码视为缺陷。实现完成后更新 README 指向本文。
 >
 > 定档结论（2026-10-10 个人项目裁剪；详见 §9）：
-> - 产品形态：**个人版多租户 Agent 任务服务**——每任务一台 ephemeral microVM，不做 Grok/Manus 式完整平台；
+> - 产品形态：**个人版多用户 Agent 任务服务**——每任务一台 ephemeral microVM，不做 Grok/Manus 式完整平台；
 > - 部署形态：单台 Linux + KVM，systemd 管理，SQLite 本地持久化；不做多节点、高可用、公网 SaaS 与计费结算；
 > - 模型推理：外部 OpenAI 兼容服务（opencode-go / 自建 vLLM 等）；平台不承载模型、不做路由、不做显存调度；
 > - Agent 运行时：沿用 Pi；Agent 无网络权限，工具执行进 jailer + Firecracker microVM。
@@ -15,7 +15,7 @@
 
 ## 1. 产品一句话
 
-为个人 / 小团队提供一个多租户 Agent 任务服务：每个任务（Run）获得一台**临时的、硬件隔离的虚拟机**作为执行环境，Agent（Pi）在其中跑代码、操作文件，产出文件与结果，任务结束虚拟机即销毁。
+为个人 / 小团队提供一个多用户 Agent 任务服务：每个任务（Run）获得一台**临时的、硬件隔离的虚拟机**作为执行环境，Agent（Pi）在其中跑代码、操作文件，产出文件与结果，任务结束虚拟机即销毁。
 
 对标参考：Manus 的 ephemeral 任务沙箱形态；不追求 Grok/Devin 式完整云桌面。
 
@@ -25,12 +25,12 @@
 
 ```
 用户 (User)
- └── 租户 (Tenant)          —— 与 user 1:1（私有部署，注册即租户）
-      ├── 工作区 (Workspace) —— 持久文件归属地，租户可见
+ └── 用户 (User)          —— 与 user 1:1（私有部署，注册即用户）
+      ├── 工作区 (Workspace) —— 持久文件归属地，用户可见
       ├── 会话 (Session)    —— 对话上下文容器
       │    └── 任务 (Run)   —— 一次执行
       │         └── 沙箱 VM —— ephemeral，随 Run 生灭 ★隔离单元
-      └── Secret            —— 租户命名空间下的凭据
+      └── Secret            —— 用户命名空间下的凭据
 ```
 
 **关键约束：隔离单元是 Run 级 VM，不是用户级常驻 VM。** 同一用户的多个任务获得各自独立的 VM；持久性由"工作区"提供，而不是由"VM 常驻"提供。VM 是消耗品，工作区是资产。
@@ -42,7 +42,7 @@
 ### B1 隔离边界：硬件虚拟化，fail-closed
 - 每个 Run 一台独立 Firecracker microVM，独立 Guest 内核；guest 内 root 不构成越权。
 - 任何无法验证隔离成立的链路必须拒绝执行（Phase 0 已落实），**禁止**静默降级到宿主或容器执行。
-- 例外：显式的 `development` profile（单租户本地开发），且该 profile 在多租户部署中禁用。
+- 例外：显式的 `development` profile（单用户本地开发），且该 profile 在多用户部署中禁用。
 
 ### B2 网络边界：VM 一律无网卡（2026-10-06 定档）
 - **MicroVM 不提供网卡服务**：guest 内不存在任何网络设备（不挂 `network-interfaces`、不建 netns/tap）。
@@ -52,22 +52,22 @@
 - 容器链路（runsc）的 `restricted-egress` 能力不受本边界约束，仅约束 microVM strict 档。
 
 ### B3 凭据边界：Secret 最小注入
-- Secret 按租户命名空间解析；只有策略显式允许的 Secret 注入 VM；宿主凭据（vLLM key、平台 master key）**永不**进 VM（已有测试保障）。
+- Secret 按用户命名空间解析；只有策略显式允许的 Secret 注入 VM；宿主凭据（vLLM key、平台 master key）**永不**进 VM（已有测试保障）。
 - Secret 值不落盘、不入库、不出现在日志与审计（只记名称）。
 
 ### B4 认证与权限边界：凭据即身份
-- 用户经邮箱+密码登录获得会话 token；API key 按租户绑定；tenantId 只允许来自凭据，**禁止**客户端自报（已有实现）。
+- 用户经邮箱+密码登录获得会话 token；API key 按用户绑定；userId 只允许来自凭据，**禁止**客户端自报（已有实现）。
 - 用户会话 scope 当前为 `["*"]`——属已知债务，私有化部署可接受，公开化前必须细化。
 
-### B5 资源边界：限额强制、租户公平
+### B5 资源边界：限额强制、用户公平
 - 每 VM 的 CPU/内存由宿主侧 cgroup 强制（VM 外侧，guest root 改不了）。
-- 租户并发、全局并发、排队 TTL、调度老化已有（`run-scheduler`/`tenant-run-scheduler`），microVM 路径必须接入同一套准入。
-- 磁盘：每 Run 工作区盘有上限；平台总配额（租户存储）为 v1 目标。
+- 用户并发、全局并发、排队 TTL、调度老化已有（`run-scheduler`/`user-run-scheduler`），microVM 路径必须接入同一套准入。
+- 磁盘：每 Run 工作区盘有上限；平台总配额（用户存储）为 v1 目标。
 
 ### B6 数据边界：工作区是资产，VM 磁盘是消耗品
-- 持久数据只有两类：SQLite 平台库 + 租户工作区目录。
+- 持久数据只有两类：SQLite 平台库 + 用户工作区目录。
 - Run 结束：VM 磁盘中的用户产物**导回工作区**后才算完成；VM 磁盘副本随即销毁（目标：一次性密钥加密盘，丢钥即清零）。
-- 禁止在 `/tmp` 等共享位置留存任何租户数据（P1 jailer 改造解决）。
+- 禁止在 `/tmp` 等共享位置留存任何用户数据（P1 jailer 改造解决）。
 
 ### B7 生命周期边界：生灭必须闭环
 - VM 由 Run 创建、随 Run 终止销毁；启动协调器在进程重启后回收孤儿（已有机制，microVM 需补齐同名文件/进程清理）。
@@ -75,7 +75,7 @@
 
 ### B8 能力边界：本平台明确不做什么
 - 不做常驻云桌面（无 always-on per-user VM；升级方向留接口不实现）；
-- 不做公开计量计费（私有部署，配额按租户管理即可）；
+- 不做公开计量计费（私有部署，配额按用户管理即可）；
 - 不做 Agent 能力深度定制（沿用 Pi，平台负责编排/隔离/审计）；
 - 不保证 VM 内实时持久（落盘语义是"任务结束时导出"）。
 
@@ -111,10 +111,10 @@ HTTP API ──> Master (调度/审计/策略/LLM网关)
                │          │                                            └ snapshot/restore（预热）
                │          └─ default ──> ContainerSandboxProvider (runsc)  ★迁移期双轨
                │
-               └─ SQLite（平台库）+ workspaces/（租户文件）+ snapshots/（VM 快照池）
+               └─ SQLite（平台库）+ workspaces/（用户文件）+ snapshots/（VM 快照池）
 ```
 
-迁移期策略：**strict=microVM 与 default=runsc 双轨并行，按租户灰度**；每步可回退。
+迁移期策略：**strict=microVM 与 default=runsc 双轨并行，按用户灰度**；每步可回退。
 
 ---
 
@@ -124,7 +124,7 @@ HTTP API ──> Master (调度/审计/策略/LLM网关)
 |---|---|---|---|
 | ✅ Phase 0 | 封死假执行/假证据，fail-closed | B1 | 已完成 |
 | ✅ Phase 1 | vsock guest agent + jailer（含 /tmp→私有目录） | B1、B6、B7 | 已完成 |
-| ✅ Phase 2 | 工作区导出 + 磁盘限额 + microVM 接入租户准入 | B5、B6 | 已完成 |
+| ✅ Phase 2 | 工作区导出 + 磁盘限额 + microVM 接入用户准入 | B5、B6 | 已完成 |
 | ✅ Phase 3 | microVM 快照加速池（jailer）+ 异步复制（去阻塞）+ CoW 盘；预热池已由 M4 删除 | B5（性能） | 已完成 |
 | ✅ Phase 3b | snapshot/restore 加速 | B5（性能） | 已完成（jailer 模式真机 23/23：恢复 368ms vs 冷启动 2519ms）。**无需自建 Firecracker**——此前"官方未编译 pause/resume"的结论基于错误探测信号（grep 了从不存在的 `InstancePause`），已推翻；官方 v1.17.0 二进制实测可用。详见验收报告 §3.1、§5 |
 | 🚫 Phase 4（作废） | ~~出口网关 + controlled-egress~~ | — | **产品决策取消**：VM 一律无网卡（B2），相关代码已删除 |
@@ -135,8 +135,8 @@ HTTP API ──> Master (调度/审计/策略/LLM网关)
 
 ## 7. v1 成功标准
 
-1. 两租户并发跑任务，A 无法以任何手段读到 B 的文件/进程/网络（**已验证**：`scripts/microvm-attack-smoke.ts` 在 jailer 模式真机 37/37 通过，覆盖容器版 9 项等价攻击 + 11 项 microVM 特有逃逸面，见 `microvm-live-validation.md` §6）；
-2. 单租户 10 并发 Run，P95 启动延迟 < 3s（snapshot restore 后目标 < 500ms）；
+1. 两用户并发跑任务，A 无法以任何手段读到 B 的文件/进程/网络（**已验证**：`scripts/microvm-attack-smoke.ts` 在 jailer 模式真机 37/37 通过，覆盖容器版 9 项等价攻击 + 11 项 microVM 特有逃逸面，见 `microvm-live-validation.md` §6）；
+2. 单用户 10 并发 Run，P95 启动延迟 < 3s（snapshot restore 后目标 < 500ms）；
 3. Run 结束 60s 内，宿主无该 Run 的进程、socket、磁盘、内存残留（启动协调器 + 巡检脚本验证）；
 4. 宿主进程崩溃重启后，平台自动收敛到一致状态，无需人工清理；
 5. 所有 sandboxes 表记录的 `runtimeEvidence` 可由巡检脚本独立复验为真；
@@ -158,7 +158,7 @@ HTTP API ──> Master (调度/审计/策略/LLM网关)
 
 ### 9.1 产品定位
 
-单机、自托管的**多租户 Agent 宿主层（host layer）**：在共享的一台 Linux 机器上，为每个用户提供互相隔离的 Agent 运行环境（每 Run 一台 jailer + Firecracker microVM），并按租户**等权**分配执行容量。
+单机、自托管的**多用户 Agent 宿主层（host layer）**：在共享的一台 Linux 机器上，为每个用户提供互相隔离的 Agent 运行环境（每 Run 一台 jailer + Firecracker microVM），并按用户**等权**分配执行容量。
 
 宿主层只承担四件事，其余都不属于它：
 
@@ -171,15 +171,15 @@ HTTP API ──> Master (调度/审计/策略/LLM网关)
 
 模型推理由外部 OpenAI 兼容服务提供；平台不承载模型、不做路由、不做显存调度。
 
-多租户的目的是**隔离与等权共享**，不是协作：不提供共享空间、团队空间或多人协作。
+多用户的目的是**隔离与等权共享**，不是协作：不提供共享空间、团队空间或多人协作。
 
 不是：Grok / Manus 式完整 Agent 产品（不做浏览器自动化的产品体验、多 Agent 市场、计费结算），不是公网 SaaS，不是多节点集群，不是模型训练/推理平台。
 
 ### 9.2 范围内（In scope）
 
-1. 多租户身份与隔离：API Key 派生 Tenant；Run/Workspace/Sandbox 归属校验；跨租户操作 fail-closed。
+1. 多用户身份与隔离：API Key 派生 User；Run/Workspace/Sandbox 归属校验；跨用户操作 fail-closed。
 2. 任务生命周期：提交、排队、Run/Attempt、状态与事件查询、中断/恢复、输出与产物导出。
-3. 调度与配额（宿主层职责 1+2）：全局/每租户并发上限、Queue TTL、**会话锁**（同一会话同一时刻最多一个 Run）、执行超时强杀；租户间**等权**轮转 + 老化防饿死；每租户并发默认取**公平份额** `floor(全局并发 / 有需求租户数)`（空闲份额可借用，显式配置为正数时作为硬上限）。**无优先级/档位/权重**；准入只有提交时配额与排队深度，不存在「资源观测 → 分类 → 策略」的第二道门禁（v1.6 删除）。
+3. 调度与配额（宿主层职责 1+2）：全局/每用户并发上限、Queue TTL、**会话锁**（同一会话同一时刻最多一个 Run）、执行超时强杀；用户间**等权**轮转 + 老化防饿死；每用户并发默认取**公平份额** `floor(全局并发 / 有需求用户数)`（空闲份额可借用，显式配置为正数时作为硬上限）。**无优先级/档位/权重**；准入只有提交时配额与排队深度，不存在「资源观测 → 分类 → 策略」的第二道门禁（v1.6 删除）。
 4. 执行隔离：jailer + Firecracker microVM，无网卡，工作区盘独立，Broker 只暴露 create/execute/terminate。
 5. 工具治理：bash/file 等工具、路径围栏、副作用账本、崩溃/中断后安全重放。
 6. 外部模型接入：OpenAI 兼容 endpoint（opencode-go / 自建 vLLM 等）经 Pi runtime；平台只调用。
@@ -194,26 +194,26 @@ HTTP API ──> Master (调度/审计/策略/LLM网关)
 - 不做 Agent 网络访问：microVM 无网卡；allowNetwork=true 一律拒绝。
 - 不做企业身份（SSO/SCIM）、合规认证、复杂 RBAC 后台。
 - 不做完整插件生态、GUI 工作流编排、成本结算系统。
-- 不做共享 / 协作 / 团队空间：产品定位是单用户个人云端 Agent 助手（类 Grok bot / Manus cue / Muse）；多租户隔离是让每个人用自己的账号，不是多人协作平台。
-- 不做租户优先级、档位、权重或任何「谁能插队」的机制（所有租户等权；v1.6 删除全栈 priority）。
+- 不做共享 / 协作 / 团队空间：产品定位是单用户个人云端 Agent 助手（类 Grok bot / Manus cue / Muse）；多用户隔离是让每个人用自己的账号，不是多人协作平台。
+- 不做用户优先级、档位、权重或任何「谁能插队」的机制（所有用户等权；v1.6 删除全栈 priority）。
 - 不做「资源观测 → 分类 → 策略」的第二道准入门禁（模型服务在平台外，观测不到也不该猜；v1.6 删除）。
 - 不做常驻空闲 Agent：不为闲置 Agent 保留算力；会话级沙箱亲和只做「有活才占槽」的复用。
 
 ### 9.4 验收标准（裁剪版）
 
-1. 两个租户并发提交任务：无法读/写/终止对方 sandbox/workspace，跨租户操作被 Broker 拒绝。
+1. 两个用户并发提交任务：无法读/写/终止对方 sandbox/workspace，跨用户操作被 Broker 拒绝。
 2. 一条真实 Run 走通 HTTP -> 调度 -> Worker -> Broker -> jailer microVM -> 外部模型 -> 工具执行 -> 输出/产物导出，事件完整。
 3. Agent 内无网络；allowNetwork 请求 fail-closed。
 4. 中断/超时/崩溃后无 sandbox 残留，Run 进入终态；安全操作可恢复。
 5. 单机重启后队列与 RunStore 可从 SQLite 恢复。
-6. 每租户并发上限与 Queue TTL 生效；不依赖预热池或 GPU 观测。
+6. 每用户并发上限与 Queue TTL 生效；不依赖预热池或 GPU 观测。
 
 ### 9.5 当前状态与剩余 P0
 
 已完成：
 
-- 多租户 microVM 隔离与 jailer + 快照并发真机验证；
-- Broker 租户隔离 + capability token；systemd worker 专用 UID/cgroup；
+- 多用户 microVM 隔离与 jailer + 快照并发真机验证；
+- Broker 用户隔离 + capability token；systemd worker 专用 UID/cgroup；
 - 外部模型服务 observer；M4 删除 VRAM/GPU 观测与预热池（提交 7684287）；
 - 队列 pump 连续并发：submit 后 kick 独立抢 slot，drain 批次不再串行化后提交（src/scheduling/run-scheduler.ts）。
 - §9.4.4 中断清理真机复验：Run `b0751de3-acaf-49e7-abbd-c597c69efe31` 在 `SANDBOX_ACQUIRED` 后收到 `USER_REQUEST` 中断，终态 `INTERRUPTED`；结束后无 firecracker/jailer/worker 进程，`vm-runtime` 为空（工作区按数据资产保留）。
@@ -224,18 +224,18 @@ HTTP API ──> Master (调度/审计/策略/LLM网关)
 - 已无未完成项。2026-10-10 收口：
   - M4 已同步 172.17.43.193，远程 `bun test ./tests` = 464 pass / 0 fail；
   - 单机 systemd 部署文档 `docs/deployment-single-node-systemd.zh-CN.md`，部署示例 `deploy/harness-broker.service.example`、`deploy/harness.service.example`、`deploy/harness-worker-launcher.sudoers.example`；
-  - `scripts/p0-e2e-smoke.ts` 真机通过：串行 maxActive=1；并发 maxActive=2 且事件重叠；跨租户 GET run/events/output + interrupt + 在对方 workspace 提交全部 404；
+  - `scripts/p0-e2e-smoke.ts` 真机通过：串行 maxActive=1；并发 maxActive=2 且事件重叠；跨用户 GET run/events/output + interrupt + 在对方 workspace 提交全部 404；
   - README 已对齐外部模型边界与测试基线。
 
 实验室接入维护记录（2026-10-10，不新增 §9.2 能力）：
 
 - 注册收口（安全加固）：`HARNESS_REGISTRATION_MODE=open|invite|closed` 默认 `open` 保持旧部署兼容；`invite` 必须配置 `HARNESS_REGISTRATION_INVITE_CODE`，比较走 SHA-256 + `timingSafeEqual`；策略拒绝返回 403。交给实验室/他人使用前应显式设为 `invite` 或 `closed`。
 - 单机运维脚本（部署兼容）：`src/ops/harness-maintenance.ts` + `scripts/harness-ops.ts` 提供 `disk-check`、`backup`（SQLite `VACUUM INTO`，保留最近 N 份）、`restore`（清理旧 WAL/SHM，覆盖需 `--force`）、`cleanup`（VM runtime 与快照池按年龄/条目数清理，默认 dry-run）。
-- HTTP 入口限流（安全加固）：`src/http/rate-limiter.ts` + `HarnessHttpApi` 固定窗口限流；默认开启，每租户 600/分钟、每 IP 1200/分钟（`HARNESS_RATE_LIMIT_*` 可调），超限 429 + `Retry-After`；`/health`、`/ready` 不参与；`HARNESS_TRUST_PROXY` 仅在可信反向代理后开启。
-  - 2026-10-12 修正：per-IP 默认值由 120 提到 **1200**。真机复验时 `scripts/p0-e2e-smoke.ts` 被 429 拦住，根因是实验室内十几个人（含烟测脚本自身的 Run 轮询）共用同一个 NAT 出口 IP，全部记在同一个 per-IP 桶上；per-IP 桶的职责是挡未认证洪水与注册爆破，租户配额由 per-tenant 桶负责。
+- HTTP 入口限流（安全加固）：`src/http/rate-limiter.ts` + `HarnessHttpApi` 固定窗口限流；默认开启，每用户 600/分钟、每 IP 1200/分钟（`HARNESS_RATE_LIMIT_*` 可调），超限 429 + `Retry-After`；`/health`、`/ready` 不参与；`HARNESS_TRUST_PROXY` 仅在可信反向代理后开启。
+  - 2026-10-12 修正：per-IP 默认值由 120 提到 **1200**。真机复验时 `scripts/p0-e2e-smoke.ts` 被 429 拦住，根因是实验室内十几个人（含烟测脚本自身的 Run 轮询）共用同一个 NAT 出口 IP，全部记在同一个 per-IP 桶上；per-IP 桶的职责是挡未认证洪水与注册爆破，用户配额由 per-user 桶负责。
 - 用户控制台美化（产品打磨）：`src/http/harness-user-console.ts` + `web/app.js` / `web/app.css` 保持 same-origin 无构建；本轮增加注册邀请码入口与样式改进。
 - TLS / 反向代理（部署安全）：`docs/tls-reverse-proxy.zh-CN.md` + `deploy/harness-caddy.example` + `deploy/harness-nginx.example`；Master 继续只监听 loopback，外部入口由 Caddy/Nginx 终止 TLS，只放行 443（可选 80），不放行 3100。无 Caddy/Nginx 时可用 `scripts/dev-tls-proxy.ts` 做临时验证。
-- 真机 HTTPS 全链路验证（2026-10-10）：在 172.17.43.193 用 `scripts/dev-tls-proxy.ts`（自签证书）反代 Master，`NODE_EXTRA_CA_CERTS=... HARNESS_BASE_URL=https://127.0.0.1:8443 bun run scripts/p0-e2e-smoke.ts` 通过 `P0_E2E_SMOKE_OK label=f3ac25a8`（serial maxActive=1、concurrent maxActive=2 overlap=true、跨租户 404）；随后清理 broker/master/proxy、`data/live-full-flow`、`snapshots-mt`、`/run/harness` 与 `/tmp/harness-tls`，无残留。
+- 真机 HTTPS 全链路验证（2026-10-10）：在 172.17.43.193 用 `scripts/dev-tls-proxy.ts`（自签证书）反代 Master，`NODE_EXTRA_CA_CERTS=... HARNESS_BASE_URL=https://127.0.0.1:8443 bun run scripts/p0-e2e-smoke.ts` 通过 `P0_E2E_SMOKE_OK label=f3ac25a8`（serial maxActive=1、concurrent maxActive=2 overlap=true、跨用户 404）；随后清理 broker/master/proxy、`data/live-full-flow`、`snapshots-mt`、`/run/harness` 与 `/tmp/harness-tls`，无残留。
 - 升级/回滚 runbook（部署兼容）：`docs/upgrade-rollback-runbook.zh-CN.md` + `deploy/harness-logrotate.example`；迁移向前执行，回滚必须先 `harness-ops.ts backup` 再 `restore`，并附升级后验收命令。
 - 补充审查报告第一批修复（2026-10-11，安全/可靠性加固，不新增 §9.2 能力）：
   - F1 Firecracker API 超时：`src/sandbox/microvm/firecracker-sandbox-driver.ts` 的 `putSocket` 增加 `timeoutMs`（默认 10s，`/snapshot/load` 与 `/snapshot/create` 为 60s），API 卡死时 `req.destroy` 并 reject，create/terminate 不再无限挂起；新增 `tests/sandbox/firecracker-api-timeout.test.ts`。
@@ -244,11 +244,11 @@ HTTP API ──> Master (调度/审计/策略/LLM网关)
   - F10 HTTP 内部错误收口：`src/http/harness-http-api.ts` catch-all 由 409 + 原始 message 改为 500 + 通用文案 + requestId，原始异常只进服务端日志；`src/http/routes/auth.ts` 重复邮箱映射为 409 “该邮箱已被注册”，已知输入校验错误映射为 400；新增 HTTP/注册回归测试。
   - F12 三项小修：`src/auth/api-credential-store.ts` 新增 `pruneSessions`（启动时清理过期会话与超过 7 天保留期的已撤销会话）；`src/sandbox/broker/sandbox-broker-server.ts` control token / capability token 改为 SHA-256 + `timingSafeEqual` 恒时比较；`src/http/routes/system.ts` 审计分页 `limit`/`offset` 显式校验（1..500 / 0..1,000,000），非法值返回 400。
   - 本地 `bun test ./tests` = 524 pass / 7 skip / 0 fail；typecheck 保持既有 9 条基线错误。
-  - 真机验证（2026-10-11，172.17.43.193）：rsync 后远程 `bun test ./tests` = 531 pass / 0 fail；重启 `harness-broker.service`/`harness.service` 后 `/health` 200；`/data/harness/live-full-flow/harness.sqlite-wal`/`-shm` 出现；重复注册 `lab@demo.local` 返回 409 “该邮箱已被注册”；`/audit?limit=abc` 与 `/audit?offset=-1` 返回 400、`/audit?limit=1&offset=0` 返回 200；`scripts/p0-e2e-smoke.ts` 带 `HARNESS_SMOKE_INVITE_CODE=lab-harness-2026` 通过 `P0_E2E_SMOKE_OK label=61c8ab85`（serial maxActive=1、concurrent maxActive=2 overlap=true、跨租户 404）。
+  - 真机验证（2026-10-11，172.17.43.193）：rsync 后远程 `bun test ./tests` = 531 pass / 0 fail；重启 `harness-broker.service`/`harness.service` 后 `/health` 200；`/data/harness/live-full-flow/harness.sqlite-wal`/`-shm` 出现；重复注册 `lab@demo.local` 返回 409 “该邮箱已被注册”；`/audit?limit=abc` 与 `/audit?offset=-1` 返回 400、`/audit?limit=1&offset=0` 返回 200；`scripts/p0-e2e-smoke.ts` 带 `HARNESS_SMOKE_INVITE_CODE=lab-harness-2026` 通过 `P0_E2E_SMOKE_OK label=61c8ab85`（serial maxActive=1、concurrent maxActive=2 overlap=true、跨用户 404）。
   - F4 宿主侧输出截断（2026-10-11）：`src/sandbox/microvm/firecracker-vsock-bridge.ts` 新增 `boundedAppend`，按 `maxOutputBytes`（默认 1 MiB）在宿主侧硬截断 stdout/stderr，guest 谎报 `truncated:false` 时仍置 `truncated:true`；新增 `tests/sandbox/firecracker-vsock-bridge.test.ts` 回归。
   - F9 workspace 快照/artifact 限额（2026-10-11）：`src/workspaces/workspace-snapshot.ts` 新增 `WorkspaceSnapshotOptions`/`WorkspaceSnapshotLimitError`，默认 `maxFiles=20000`、`maxDepth=32`，超限 fail-closed；`src/workspaces/run-artifact-store.ts` 默认每 Run `maxFiles=200`、`maxBytes=50 MiB`，超限停止捕获并 warning；`src/ops/harness-maintenance.ts` 新增 `pruneArtifacts`，`scripts/harness-ops.ts cleanup --artifacts <目录> --database <sqlite>` 按年龄清理 artifact 目录与索引行（默认 dry-run）；配置项 `HARNESS_WORKSPACE_SNAPSHOT_MAX_FILES`、`HARNESS_WORKSPACE_SNAPSHOT_MAX_DEPTH`、`HARNESS_ARTIFACT_MAX_FILES_PER_RUN`、`HARNESS_ARTIFACT_MAX_BYTES_PER_RUN`；新增快照/artifact/prune 回归测试。
   - F4/F9 本地 `bun test ./tests` = 530 pass / 7 skip / 0 fail；typecheck 保持既有 9 条基线错误。
-  - F4/F9 真机验证（2026-10-11，172.17.43.193）：rsync 后远程 `bun test ./tests` = 537 pass / 0 fail；重启 `harness.service` 后 `/health` 200；`scripts/p0-e2e-smoke.ts` 带 `HARNESS_SMOKE_INVITE_CODE=lab-harness-2026` 通过 `P0_E2E_SMOKE_OK label=ace9c14b`（serial maxActive=1、concurrent maxActive=2 overlap=true、跨租户 404）；`harness-ops.ts cleanup --artifacts /data/harness/live-full-flow/artifacts --database /data/harness/live-full-flow/harness.sqlite --max-age-hours 24` 输出 `HARNESS_OPS_CLEANUP_OK ... artifactsRemoved=0`。
+  - F4/F9 真机验证（2026-10-11，172.17.43.193）：rsync 后远程 `bun test ./tests` = 537 pass / 0 fail；重启 `harness.service` 后 `/health` 200；`scripts/p0-e2e-smoke.ts` 带 `HARNESS_SMOKE_INVITE_CODE=lab-harness-2026` 通过 `P0_E2E_SMOKE_OK label=ace9c14b`（serial maxActive=1、concurrent maxActive=2 overlap=true、跨用户 404）；`harness-ops.ts cleanup --artifacts /data/harness/live-full-flow/artifacts --database /data/harness/live-full-flow/harness.sqlite --max-age-hours 24` 输出 `HARNESS_OPS_CLEANUP_OK ... artifactsRemoved=0`。
 - **工作区跨 Run 持久（F-K 缺陷修复，2026-10-13，不新增 §9.2 能力）**：全方位验证发现 guest 每个 Run 都从静态工作区模板新建可写盘，宿主工作区目录只在 Run 结束时接收导出，从未回灌 —— 与 §9.1 承诺的“工作区是持久文件归属地”直接冲突（矩阵里 `tool.write → tool.edit` 跨 Run 序列、`workspace.persistence` 失败）。
   - 修复：`src/sandbox/microvm/firecracker-sandbox-driver.ts` 导出 `WORKSPACE_SEED_ENV = "HARNESS_VM_WORKSPACE_SEED"`、`workspaceSeedRequiredBytes()`、`computeWorkspaceImageBlocks()`、`summarizeSeedDirectory()`、`prepareWorkspaceDiskFromHost()`：宿主工作区目录非空时用 `mke2fs -d <workspacePath>` 播种本 Run 的盘（真机 3ms），空目录/`HARNESS_VM_WORKSPACE_SEED=0`/宿主缺 e2fsprogs 时退回模板复制；容量不符 fail-closed（盘块数恒等于模板容量，快照 drive geometry 不得现场放大）。Provider 经 `workspaceSeedPath: input.workspacePath` 传入。
   - 真机硬约束（本轮踩到）：播种盘的 ext4 布局与黄金快照时的工作区盘不同，恢复快照的 guest 内存里持有旧盘缓存 → 第二轮 `cat` 报 `Bad message`、`workspace-diff` 全空。故 `prepareWorkspaceDiskFromHost()` 返回 `{ seeded }`，`canRestore` 与 make-snapshot 闸门都加 `workspaceDiskSeeded === false`：**播种 Run 一律冷启动**（不恢复、不制作快照），空工作区仍走热恢复。代价：播种 Run 210ms vs 热恢复 98ms；恢复热路径需 guest 侧 remount / vsock 播种（改 `guest/agent/agent.c` + 升 `HARNESS_GUEST_AGENT_VERSION`），列为后续优化。
@@ -258,7 +258,7 @@ HTTP API ──> Master (调度/审计/策略/LLM网关)
 
 暂缓的增强（不在当前边界内）：
 
-- 已在 §9.7 v1.3 解冻并实现：Broker SO_PEERCRED、worker seccomp/Landlock/只读 rootfs、控制面 egress ACL、不可变审计存储、租户成本账单；
+- 已在 §9.7 v1.3 解冻并实现：Broker SO_PEERCRED、worker seccomp/Landlock/只读 rootfs、控制面 egress ACL、不可变审计存储、用户成本账单；
 - 五项均已实现（真机证据见 §9.7）。
 
 ### 9.6 边界冻结与变更流程
@@ -275,22 +275,22 @@ HTTP API ──> Master (调度/审计/策略/LLM网关)
   2. Worker seccomp/Landlock/只读 rootfs；
   3. 控制面 egress ACL；
   4. 不可变审计存储；
-  5. 租户成本账单。
+  5. 用户成本账单。
 - 理由：Agent 平台即使只做个人 Demo，控制面与执行面的凭据/进程/网络边界仍需要纵深防御；先补安全项，再做审计与计费。
 - 边界影响：上述条目不再按 §9.3 默认拒绝；§9.3 其余条目仍默认不做。
 - 验收要求：每一项必须有单元/集成测试，并在 172.17.43.193 真机留下验证记录；未完成前该项仍视为暂缓。
 - 代码引用：涉及代码/文档变更必须在提交信息或注释中引用“§9.7 v1.3”。
 - 实施进度（2026-10-10）：
   - 1) Broker SO_PEERCRED：已实现。`src/sandbox/broker/peer-credentials.ts` 用 `bun:ffi` 读 Linux `SO_PEERCRED`；`SandboxBrokerServer` 新增 `allowedPeerUids` / `masterPeerUid` / `workerPeerUid`，create/terminate 只认 Master UID、execute 只认 Worker UID，白名单外或读不到凭据一律 fail-closed；`broker-main.ts` 读取 `HARNESS_SANDBOX_BROKER_PEER_UIDS` / `MASTER_UID` / `WORKER_UID`，生产环境至少配置一项。
-  - 真机 172.17.43.193 验证（broker root pid 2170523，master cxr pid 2170704）：`scripts/p0-e2e-smoke.ts` 通过 `P0_E2E_SMOKE_OK label=0d6ae207`（serial maxActive=1；concurrent maxActive=2 overlap=true；跨租户 404）；直接探针：uid=1004 发 execute 被拒“要求 uid=998”，uid=0 发 create/ping 被拒“不在 SO_PEERCRED 白名单内”。
+  - 真机 172.17.43.193 验证（broker root pid 2170523，master cxr pid 2170704）：`scripts/p0-e2e-smoke.ts` 通过 `P0_E2E_SMOKE_OK label=0d6ae207`（serial maxActive=1；concurrent maxActive=2 overlap=true；跨用户 404）；直接探针：uid=1004 发 execute 被拒“要求 uid=998”，uid=0 发 create/ping 被拒“不在 SO_PEERCRED 白名单内”。
   - 2) Worker seccomp/Landlock/只读 rootfs：已实现。`scripts/harness-worker-run.sh` 增加 `PrivateDevices`、`ProtectKernelTunables/Modules/ControlGroups/Clock/Hostname`、`ProtectProc=invisible`、`ProcSubset=pid`、`RestrictRealtime`、`RestrictSUIDSGID`、`RemoveIPC`、`LockPersonality`、`SystemCallFilter=@system-service` 并显式放行三个 Landlock syscall、`SystemCallErrorNumber=EPERM`；Worker 内 `src/worker/worker-landlock.ts` 以 `HARNESS_WORKER_LANDLOCK=required` 调 `landlock_create_ruleset` / `landlock_add_rule` / `landlock_restrict_self`，根目录只读、仅 `/tmp`、`$HOME`、`/run/harness` 与 `/dev/null` 等可写，失败即退出 78。
-  - 真机 172.17.43.193 验证：`scripts/p0-e2e-smoke.ts` 通过 `P0_E2E_SMOKE_OK label=c21abe78`（serial maxActive=1、concurrent maxActive=2 overlap=true、跨租户 404）；Worker stderr 打印 `[worker] landlock=on abi=4`；`systemctl show harness-worker-<runId>.service` 确认 UID=998、MemoryMax=2G、CPUQuota=200%、TasksMax=256、ProtectSystem=strict、ProtectHome=read-only、SystemCallFilter 含三个 Landlock syscall、ReadWritePaths=/var/lib/harness-worker；中断后无 firecracker/jailer/worker 残留。
+  - 真机 172.17.43.193 验证：`scripts/p0-e2e-smoke.ts` 通过 `P0_E2E_SMOKE_OK label=c21abe78`（serial maxActive=1、concurrent maxActive=2 overlap=true、跨用户 404）；Worker stderr 打印 `[worker] landlock=on abi=4`；`systemctl show harness-worker-<runId>.service` 确认 UID=998、MemoryMax=2G、CPUQuota=200%、TasksMax=256、ProtectSystem=strict、ProtectHome=read-only、SystemCallFilter 含三个 Landlock syscall、ReadWritePaths=/var/lib/harness-worker；中断后无 firecracker/jailer/worker 残留。
   - 3) 控制面 egress ACL：已实现。`deploy/harness-broker.service.example` 加 `IPAddressDeny=any`；`deploy/harness.service.example` 加 `IPAddressDeny=any` + `IPAddressAllow=127.0.0.0/8`；`scripts/harness-worker-run.sh` 用 `IPAddressDeny=any` + `IPAddressAllow=$WORKER_EGRESS_ALLOW`（默认 `127.0.0.0/8`，配置文件可放行模型服务 CIDR，opencode.ai 的 Cloudflare 段为 `172.64.0.0/13`），并把 Worker 限制为 `RestrictAddressFamilies=AF_UNIX AF_INET`（不创建 IPv6 套接字）。`tests/deploy/control-plane-egress.test.ts` 覆盖单元/launcher/配置示例。
-  - 真机 172.17.43.193 验证：`scripts/p0-e2e-smoke.ts` 通过 `P0_E2E_SMOKE_OK label=59e3ed52`（serial maxActive=1、concurrent maxActive=2 overlap=true、跨租户 404）；Worker 单元 `systemctl show` 显示 `IPAddressDeny=::/0 0.0.0.0/0`、`IPAddressAllow=172.64.0.0/13 127.0.0.0/8`、`RestrictAddressFamilies=AF_INET AF_UNIX`、UID/GID=998；同 ACL 的探针单元连接 `opencode.ai:443` 成功，连接 `1.1.1.1:443` 超时（被 ACL 丢弃）。
+  - 真机 172.17.43.193 验证：`scripts/p0-e2e-smoke.ts` 通过 `P0_E2E_SMOKE_OK label=59e3ed52`（serial maxActive=1、concurrent maxActive=2 overlap=true、跨用户 404）；Worker 单元 `systemctl show` 显示 `IPAddressDeny=::/0 0.0.0.0/0`、`IPAddressAllow=172.64.0.0/13 127.0.0.0/8`、`RestrictAddressFamilies=AF_INET AF_UNIX`、UID/GID=998；同 ACL 的探针单元连接 `opencode.ai:443` 成功，连接 `1.1.1.1:443` 超时（被 ACL 丢弃）。
   - 4) 不可变审计存储：已实现。`src/storage/migrations.ts` 新增 v2 `immutable_audit_chain`：给 `access_audit_events` 增加 `prev_hash`/`hash` 列，并创建 `BEFORE UPDATE`/`BEFORE DELETE` 触发器（`RAISE(ABORT, 'access_audit_events 是只追加审计存储，禁止 UPDATE/DELETE')`）。`src/audit/access-audit-store.ts` 写入时计算 SHA-256 hash 链（`prev_hash` 取上一行 `hash`，链首为 `GENESIS_HASH = "0".repeat(64)`），新增 `verifyChain()` 返回 `{ok,checked,legacy,brokenAt?,reason?}`；旧库中 hash 为 NULL 的历史行作为 pre-chain legacy 跳过，链开始后出现 NULL 或 `prev_hash`/`hash` 不匹配即失败。`tests/audit/access-audit-store.test.ts` 新增 3 用例覆盖只追加、内容篡改检测、删除中间行检测；`scripts/audit-chain-smoke.ts` 支持内存自检与 `--database <path>` 校验真实库。
-  - 真机 172.17.43.193 验证：master 重启后 migration v2 生效；`scripts/p0-e2e-smoke.ts` 通过 `P0_E2E_SMOKE_OK label=f6a94cd4`（serial maxActive=1、concurrent maxActive=2 overlap=true、跨租户 404）。`bun run scripts/audit-chain-smoke.ts` 输出 `AUDIT_CHAIN_SMOKE_OK`（updateRejected=true、deleteRejected=true、tamperDetected=true）；对 live `data/live-full-flow/harness.sqlite` 运行 `bun run scripts/audit-chain-smoke.ts --database data/live-full-flow/harness.sqlite` 输出 `{"ok":true,"checked":95,"legacy":1591}` 与 `AUDIT_CHAIN_VERIFY_OK`。直连 live 库探针确认触发器 `access_audit_events_no_update`/`access_audit_events_no_delete` 存在，`UPDATE`/`DELETE` 分别被拒绝为 `access_audit_events 是只追加审计存储，禁止 UPDATE` / `...禁止 DELETE`。
-  - 5) 租户成本账单：已实现。新增 `src/billing/tenant-billing.ts`：`TenantBillingStore.summarize(tenantId)` 只读聚合 `run_events`（`MODEL_COMPLETED` 的 `usage.inputTokens`/`outputTokens`/`totalTokens`/`cost.total`）、`sandboxes`（`TERMINATED`/`LOST`/`FAILED` 的 `julianday` 时长）与 `tool_executions`（`SUCCEEDED`/`FAILED` 计数），默认金额等于 Provider 上报成本，不凭空定价；平台可用 `HARNESS_BILLING_CURRENCY`、`HARNESS_BILLING_MODEL_INPUT_PER_MTOK`、`HARNESS_BILLING_MODEL_OUTPUT_PER_MTOK`、`HARNESS_BILLING_SANDBOX_SECOND`、`HARNESS_BILLING_TOOL_CALL` 叠加 token/沙箱秒/工具调用费用。`GET /billing` 要求 `billing:read`，按 Principal Tenant 收口，未装配时返回 501。`tests/billing/tenant-billing.test.ts` 覆盖租户隔离、金额、token 单价、空租户与非法环境变量；`tests/http/tenant-boundary.test.ts` 覆盖 `GET /billing` 的租户收口与 scope 拒绝；`scripts/tenant-billing-smoke.ts` 支持内存自检与 `--database <path> [--tenant <id>]` 校验真实库。
-  - 真机 172.17.43.193 验证：master 重启 pid 2202461；`bun run scripts/tenant-billing-smoke.ts` 输出 `TENANT_BILLING_SMOKE_OK`；`bun run scripts/tenant-billing-smoke.ts --database data/live-full-flow/harness.sqlite` 输出前 5 个租户账单（providerCost 0.00036~0.00068、sandboxSeconds 8.635~287.65、toolCalls 2）与 `TENANT_BILLING_VERIFY_OK`；`curl -H "Authorization: Bearer live-flow-key-2026" http://127.0.0.1:3100/billing` 返回 200 与 `tenantId=bootstrap` 账单；`scripts/p0-e2e-smoke.ts` 通过 `P0_E2E_SMOKE_OK label=00453468`（serial maxActive=1、concurrent maxActive=2 overlap=true、跨租户 404）。
+  - 真机 172.17.43.193 验证：master 重启后 migration v2 生效；`scripts/p0-e2e-smoke.ts` 通过 `P0_E2E_SMOKE_OK label=f6a94cd4`（serial maxActive=1、concurrent maxActive=2 overlap=true、跨用户 404）。`bun run scripts/audit-chain-smoke.ts` 输出 `AUDIT_CHAIN_SMOKE_OK`（updateRejected=true、deleteRejected=true、tamperDetected=true）；对 live `data/live-full-flow/harness.sqlite` 运行 `bun run scripts/audit-chain-smoke.ts --database data/live-full-flow/harness.sqlite` 输出 `{"ok":true,"checked":95,"legacy":1591}` 与 `AUDIT_CHAIN_VERIFY_OK`。直连 live 库探针确认触发器 `access_audit_events_no_update`/`access_audit_events_no_delete` 存在，`UPDATE`/`DELETE` 分别被拒绝为 `access_audit_events 是只追加审计存储，禁止 UPDATE` / `...禁止 DELETE`。
+  - 5) 用户成本账单：已实现。新增 `src/billing/user-billing.ts`：`UserBillingStore.summarize(userId)` 只读聚合 `run_events`（`MODEL_COMPLETED` 的 `usage.inputTokens`/`outputTokens`/`totalTokens`/`cost.total`）、`sandboxes`（`TERMINATED`/`LOST`/`FAILED` 的 `julianday` 时长）与 `tool_executions`（`SUCCEEDED`/`FAILED` 计数），默认金额等于 Provider 上报成本，不凭空定价；平台可用 `HARNESS_BILLING_CURRENCY`、`HARNESS_BILLING_MODEL_INPUT_PER_MTOK`、`HARNESS_BILLING_MODEL_OUTPUT_PER_MTOK`、`HARNESS_BILLING_SANDBOX_SECOND`、`HARNESS_BILLING_TOOL_CALL` 叠加 token/沙箱秒/工具调用费用。`GET /billing` 要求 `billing:read`，按 Principal User 收口，未装配时返回 501。`tests/billing/user-billing.test.ts` 覆盖用户隔离、金额、token 单价、空用户与非法环境变量；`tests/http/user-boundary.test.ts` 覆盖 `GET /billing` 的用户收口与 scope 拒绝；`scripts/user-billing-smoke.ts` 支持内存自检与 `--database <path> [--user <id>]` 校验真实库。
+  - 真机 172.17.43.193 验证：master 重启 pid 2202461；`bun run scripts/user-billing-smoke.ts` 输出 `USER_BILLING_SMOKE_OK`；`bun run scripts/user-billing-smoke.ts --database data/live-full-flow/harness.sqlite` 输出前 5 个用户账单（providerCost 0.00036~0.00068、sandboxSeconds 8.635~287.65、toolCalls 2）与 `USER_BILLING_VERIFY_OK`；`curl -H "Authorization: Bearer live-flow-key-2026" http://127.0.0.1:3100/billing` 返回 200 与 `userId=bootstrap` 账单；`scripts/p0-e2e-smoke.ts` 通过 `P0_E2E_SMOKE_OK label=00453468`（serial maxActive=1、concurrent maxActive=2 overlap=true、跨用户 404）。
 
 ### 9.8 解冻决策：v1.4（2026-10-11）
 
@@ -314,13 +314,13 @@ HTTP API ──> Master (调度/审计/策略/LLM网关)
   - Phase 1 补（共享只读基础文件，2026-10-12）：按上述官方结论把“逐 VM 复制”改为硬链接共享——新增 `src/sandbox/microvm/shared-base-files.ts`（`SHARED_BASE_FILE_MODE = 0o444`、`shareBaseFile(src, dst, {link?, fallbackCopy?, mode?})` 返回 `linked`/`copied`/`already-present`，跨设备自动退化复制），`VmSnapshotManager` 改为 staging 目录 + `publishStaging` 原子发布（先 `rmSync` 旧目录再 `renameSync`，保证正在被恢复读取的旧 inode 内容不变），驱动新增 `HARNESS_VM_SHARE_BASE_FILES`（默认开，`0` 关：内核 + 快照文件硬链接共享）与 `HARNESS_VM_SHARE_ROOTFS`（默认关，`1` 开：rootfs 也共享，同时把 `/drives/rootfs` 置为 `is_read_only: true`）。真机 A/B（172.17.43.193，jailer + fc117，1 冷 + 10 热，`HARNESS_BENCH_EXEC_PROBE=true`）：热恢复 median legacy **498.3ms** → 共享基础文件 **175.9ms** → 再加 rootfs 共享 **101.3ms**；热恢复后 guest 执行 `uname -r` 分别 11.5 / 11.4 / 10.6ms；首次（冷启动 + 建快照）2767 / 2755 / 2639ms。分阶段（legacy → 共享基础文件 → 再共享 rootfs）：`copy-disks` 102 → 87 → 14ms、`copy-snapshot` 304 → 0 → 0ms、`snapshot-load` 7 → 4 → 4ms、`vsock-handshake` 56~59ms、`api-socket-wait` 21ms。生产（systemd + broker + jailer，默认配置）实测 `SANDBOX_ACQUIRED {durationMs: 202, warmHit: true}`，清池后首台 `{durationMs: 2440, warmHit: false}`。仅读 rootfs 的代价已实测（`HARNESS_VM_SHARE_ROOTFS=1`）：`SANDBOX_ACQUIRED 106ms`，但 guest 内写 `/tmp` 失败（`sh: can't create /tmp/harness-probe: Read-only file system`，`TOOL_FAILED isError=true`），写 `/workspace` 与 artifacts 正常。真机踩坑：① 硬链接要求模板与 VM 运行时根目录同一文件系统，否则 EXDEV 退化复制（生产已把 `FIRECRACKER_KERNEL_PATH`/`FIRECRACKER_ROOTFS_PATH`/`FIRECRACKER_WORKSPACE_DISK_TEMPLATE_PATH` 指向 `/data/harness/images/`）；② 绝不能 chmod 硬链接出来的模板（共用 inode，0444 会污染后续复制路径，导致降权 Firecracker 以 O_RDWR 打开 `is_read_only: false` 的盘时 `Permission denied (os error 13)`），故 `mode` 只用于驱动自有、可重建的快照文件；③ rootfs 只读标志必须跟随“是否请求共享”而非“硬链接是否成功”。本地 `bun test ./tests` = 612 pass / 7 skip / 0 fail，typecheck 9 条既有基线错误；远程 172.17.43.193 `bun test ./tests` = 614 pass / 0 fail，p0 smoke `P0_E2E_SMOKE_OK label=2c916489`。
   - Phase 1 补（O4 rootfs 共享 + guest tmpfs / O5 冷启动拆解与预热，2026-10-12）：rootfs 也纳入硬链接共享（`HARNESS_VM_SHARE_ROOTFS=1`，`/drives/rootfs` 置 `is_read_only: true`），并给 guest 镜像的 `inittab` 加 `/tmp`/`/run`/`/var/tmp` 三个 tmpfs（构建脚本 `scripts/microvm/build-guest-rootfs.sh`，生产镜像用 debugfs 原地打补丁并留 `.bak-tmpfs`）。真机（172.17.43.193，jailer + fc117，256MB）实测：热恢复 `copy-disks` 102 → **14ms**、端到端 median **101.3ms**（p95 118.7ms）；guest 内 `df -h /tmp` 为 64MB tmpfs 且 `cp` 可写，未打补丁时报 `sh: can't create /tmp/harness-probe: Read-only file system`。冷启动拆解（新增 `serial-first-line`/`snapshot-reuse` 埋点 + `HARNESS_VM_BOOT_VERBOSE`）：纯冷启动 n=3 median **1334ms**，其中 `vsock-handshake` 1281ms（guest 用户态就绪）而 `serial-first-line` 仅 **15ms** → 慢在 guest init 链 + socat + agent 加载，不在内核/进程启动；建快照模式首台 2254~2416ms = 冷启动 1.28s + `make-snapshot` 908~918ms（256MB 内存镜像写盘）；`quiet loglevel=3` 与 verbose 无时间差（1334ms vs 1334ms）。并发冷启动 N=10（池空同模板）总墙钟 2341~2472ms、真写快照 **1 台**、`snapshot-reuse` **9 台**（早先"`canRestore` 在门控前计算导致不复用"的判断作废）；预热后并发热恢复 N=10 总墙钟 206~222ms。新增 `scripts/vm-snapshot-prewarm.ts`（幂等）+ `deploy/harness-vm-prewarm.{service,timer}.example`（`OnBootSec=20s` + `OnCalendar=hourly` 自检），生产验证：清池后 `VM_PREWARM_OK template=2d686647... firstCreateMs=2235`、再跑 `VM_PREWARM_SKIP`，随后首个真实 Run `SANDBOX_ACQUIRED {durationMs:166, warmHit:true}`（预热前为 2440ms / warmHit=false）。台账与完整数字见 `docs/vm-startup-optimizations.zh-CN.md`（O4/O5）。附带修复：per-IP 限流默认 120 → **1200**（实验室共用 NAT 出口 IP 时 120/min 会把正常使用打成 429，p0 smoke 首轮即命中）。本地 `bun test ./tests` = 619 pass / 7 skip / 0 fail，typecheck 9 条既有基线错误。
 - Phase 1 最小 `/metrics` 已完成：新增 `src/observability/metrics.ts` 与 `GET /metrics`（需 `metrics:read` scope），暴露 `harness_up`、`harness_uptime_seconds`、`harness_runs_queued`、`harness_runs{status}`、`harness_sandbox_acquisitions_total{warm}`、`harness_sandbox_acquire_duration_ms_sum`、`harness_http_requests_total{status}`；数据来自 `RunStore.countByStatus()`、`RunStore.sandboxAcquisitionStats()` 与进程内 HTTP 状态计数。本地 `bun test ./tests` = 536 pass / 7 skip / 0 fail；远程 172.17.43.193 `bun test ./tests` = 543 pass / 0 fail。真机 `harness.service` 重启后 `GET /metrics` 返回 200，`harness_up 1`、`harness_runs{status="COMPLETED"} 24`、`harness_http_requests_total` 正常累计。提交 `4d4f1e1`。
-- Phase 2 队列与 Worker 已完成（本地）：migration v3 `queue_priority_and_run_lease`（`agent_runs.priority`、`run_attempts.lease_owner/lease_expires_at/heartbeat_at`）；`TenantRunScheduler` 支持 priority（跨租户优先于轮转/老化，同优先级 FIFO）；`RunScheduler` 增加 `maxQueuedRuns`/`maxQueuedRunsPerTenant` backpressure，超限抛 `QueueBackpressureError` 并由 HTTP 映射 429 + Retry-After；新增 `RunLeaseManager`（acquire/heartbeat/release/reapExpired）接入 `RunExecutor` 与 `RunScheduler`，过期租约回收为 INTERRUPTED 并释放 slot。本地 `bun test ./tests` = 544 pass / 7 skip / 0 fail，typecheck 9 条既有基线错误。 远程 172.17.43.193：`bun test ./tests` = 553 pass / 0 fail；`harness.service` 重启后 migration v3 生效（`agent_runs.priority`、`run_attempts.lease_owner/lease_expires_at/heartbeat_at`），`p0-e2e-smoke` 通过 `label=f88ea967`（serial maxActive=1、concurrent maxActive=2 overlap=true、跨租户 404）；真实 Run 的 `run_attempts` 显示 `heartbeat_at` 已写入、`lease_owner` 结束后清空（acquire/release 生效）。提交 `c6f620e`。
-- Phase 3 Durable Execution / Retry / 幂等（本地完成，待真机复验）：migration v4 `run_idempotency_and_retry`（`agent_runs.idempotency_key` + 租户内部分唯一索引、`retry_count`、`retry_at`）；`RunStore.findByTenantIdempotencyKey` 与 `RunService.createQueuedRun` 幂等返回既有 Run；`POST /runs` 与会话消息接受可选 `idempotencyKey`（>200 字符 400）；无任何 PREPARED 工具副作用时可重试失败按指数退避回到 QUEUED（事件 `RUN_QUEUED` reason `RETRY`），达到 `HARNESS_RUN_MAX_ATTEMPTS` 或有副作用证据时保持 INTERRUPTED；确定性策略拒绝（`PolicyRejectionError`）不重试；`RunScheduler.reconcileQueuedRuns` 跳过未到 `retryAt` 的 QUEUED Run；`RecoveryService.planForInterruptedRun` + 组合根租约过期处理器把 Worker 崩溃的 Run 交给 `RecoveryExecutor`（AUTO_RESUME / MANUAL_REVIEW）；终态后追加 `RUN_ARTIFACTS_READY` 事件消除 artifacts 读取一致性窗口。本地 `bun test ./tests` = 558 pass / 7 skip / 0 fail，typecheck 9 条既有基线错误。 真机 172.17.43.193 已复验：migration 版本 `[1,2,3,4]`、`agent_runs` 含 `idempotency_key/retry_count/retry_at`、部分唯一索引存在；`POST /runs` 同 `idempotencyKey` 重放两次均 202 且返回同一 Run id（修复重复入队 500）；Run `26fcc090-d1ad-4637-8161-6856711e3f56` COMPLETED，事件尾部含 `RUN_ARTIFACTS_READY`；远程 `bun test ./tests` = 565 pass / 0 fail；p0 smoke `P0_E2E_SMOKE_OK label=d3af9012`。
+- Phase 2 队列与 Worker 已完成（本地）：migration v3 `queue_priority_and_run_lease`（`agent_runs.priority`、`run_attempts.lease_owner/lease_expires_at/heartbeat_at`）；`UserRunScheduler` 支持 priority（跨用户优先于轮转/老化，同优先级 FIFO）；`RunScheduler` 增加 `maxQueuedRuns`/`maxQueuedRunsPerUser` backpressure，超限抛 `QueueBackpressureError` 并由 HTTP 映射 429 + Retry-After；新增 `RunLeaseManager`（acquire/heartbeat/release/reapExpired）接入 `RunExecutor` 与 `RunScheduler`，过期租约回收为 INTERRUPTED 并释放 slot。本地 `bun test ./tests` = 544 pass / 7 skip / 0 fail，typecheck 9 条既有基线错误。 远程 172.17.43.193：`bun test ./tests` = 553 pass / 0 fail；`harness.service` 重启后 migration v3 生效（`agent_runs.priority`、`run_attempts.lease_owner/lease_expires_at/heartbeat_at`），`p0-e2e-smoke` 通过 `label=f88ea967`（serial maxActive=1、concurrent maxActive=2 overlap=true、跨用户 404）；真实 Run 的 `run_attempts` 显示 `heartbeat_at` 已写入、`lease_owner` 结束后清空（acquire/release 生效）。提交 `c6f620e`。
+- Phase 3 Durable Execution / Retry / 幂等（本地完成，待真机复验）：migration v4 `run_idempotency_and_retry`（`agent_runs.idempotency_key` + 用户内部分唯一索引、`retry_count`、`retry_at`）；`RunStore.findByUserIdempotencyKey` 与 `RunService.createQueuedRun` 幂等返回既有 Run；`POST /runs` 与会话消息接受可选 `idempotencyKey`（>200 字符 400）；无任何 PREPARED 工具副作用时可重试失败按指数退避回到 QUEUED（事件 `RUN_QUEUED` reason `RETRY`），达到 `HARNESS_RUN_MAX_ATTEMPTS` 或有副作用证据时保持 INTERRUPTED；确定性策略拒绝（`PolicyRejectionError`）不重试；`RunScheduler.reconcileQueuedRuns` 跳过未到 `retryAt` 的 QUEUED Run；`RecoveryService.planForInterruptedRun` + 组合根租约过期处理器把 Worker 崩溃的 Run 交给 `RecoveryExecutor`（AUTO_RESUME / MANUAL_REVIEW）；终态后追加 `RUN_ARTIFACTS_READY` 事件消除 artifacts 读取一致性窗口。本地 `bun test ./tests` = 558 pass / 7 skip / 0 fail，typecheck 9 条既有基线错误。 真机 172.17.43.193 已复验：migration 版本 `[1,2,3,4]`、`agent_runs` 含 `idempotency_key/retry_count/retry_at`、部分唯一索引存在；`POST /runs` 同 `idempotencyKey` 重放两次均 202 且返回同一 Run id（修复重复入队 500）；Run `26fcc090-d1ad-4637-8161-6856711e3f56` COMPLETED，事件尾部含 `RUN_ARTIFACTS_READY`；远程 `bun test ./tests` = 565 pass / 0 fail；p0 smoke `P0_E2E_SMOKE_OK label=d3af9012`。
 - Phase 4 MCP 接入已完成（真机复验）：新增 `src/mcp/mcp-protocol.ts`（`McpServerConfig` / `McpToolDescriptor` / `parseMcpServers` / `sanitizeMcpToolSegment`）、`src/mcp/mcp-stdio-client.ts`（stdio JSON-RPC：initialize / notifications/initialized / tools/list / tools/call，默认 10s 超时）、`src/mcp/mcp-tool-registry.ts`（多 server 启动、单个失败跳过、`callTool` fail-closed）、`src/mcp/mcp-pi-tools.ts`（工具名 `mcp__<server>__<tool>`，`readOnlyHint` → `READ_ONLY` 否则 `UNKNOWN_EFFECT`，经 `ToolGateway.execute` 记账）；`HarnessConfig.mcpServers` 解析 `HARNESS_MCP_SERVERS`，in-process 路径由 Master 持有注册表并传给 `PiAdapterConfig.mcpTools`，process/systemd 路径随 `WorkerRuntimeConfig.mcpServers` 下发、由 Worker 拉起并继承其 seccomp/Landlock/egress ACL。测试：`tests/mcp/mcp-protocol.test.ts`、`tests/mcp/mcp-stdio-client.test.ts`、`tests/mcp/mcp-tool-registry.test.ts`、`tests/mcp/mcp-pi-tools.test.ts`、`tests/app/create-harness-application.test.ts`（in-process 启动 MCP）、`tests/deploy/mcp-phase4.test.ts`；烟测 `scripts/mcp-smoke.ts` 输出 `MCP_SMOKE_OK servers=1 tools=2 call=echo:smoke`。本地 `bun test ./tests` = 577 pass / 7 skip / 0 fail，typecheck 9 条既有基线错误。 真机 172.17.43.193（production systemd worker + jailer，`HARNESS_MCP_SERVERS` 指向 fixture）：`scripts/mcp-smoke.ts` 输出 `MCP_SMOKE_OK servers=1 tools=2 call=echo:smoke`；Run `f1dc66c9-cddc-4a7b-9d18-be64963a3a98` COMPLETED，事件 `TOOL_STARTED {"toolName":"mcp__echo__echo","arguments":{"text":"mcp-live"}}` → `TOOL_COMPLETED {"content":[{"type":"text","text":"echo:mcp-live"}],"isError":false}`，finalText `echo:mcp-live`；远程 `bun test ./tests` = 585 pass / 0 fail。真机发现并修复缺陷：Pi SDK `agent-session.js` 的 `_refreshToolRegistry` 用 `allowedToolNames` 过滤 customTools，而 `PiAdapter` 原只传 `tools:[...config.tools]`，导致 MCP 工具对模型不可见（首轮 Run `06cf4e7e-a3c8-49d6-8514-fc1371189185` 模型只看到 read/bash/edit/write/grep/find/ls）；修复为 `tools:[...new Set([...config.tools, ...customTools.map((tool) => tool.name)])]`（两处 `createAgentSession` 调用），并以 `tests/deploy/mcp-phase4.test.ts` 守卫。
 
 ### 9.9 解冻决策：v1.5（2026-10-11）
 
-- 决策：在 §9.8 v1.4 的 Phase 1-4 之后，用户确认追加 Phase 5「生产级故障注入与恢复验收」。这不是新增产品能力，而是对既有能力（§9.8 的 3/5/6/8 + 最小可观测性）做对抗性验收：在真实故障下证明租约回收、恢复决策、重试退避、幂等、backpressure、备份一致性、跨租户隔离不退化。
+- 决策：在 §9.8 v1.4 的 Phase 1-4 之后，用户确认追加 Phase 5「生产级故障注入与恢复验收」。这不是新增产品能力，而是对既有能力（§9.8 的 3/5/6/8 + 最小可观测性）做对抗性验收：在真实故障下证明租约回收、恢复决策、重试退避、幂等、backpressure、备份一致性、跨用户隔离不退化。
 - 范围（仅用于验收，不新增产品能力）：
   - F1 Worker 崩溃：kill systemd worker 后，RunAttempt 租约过期 → reaper 回收 → Run INTERRUPTED → `RecoveryService.planForInterruptedRun` → AUTO_RESUME（无副作用）或 MANUAL_REVIEW（UNKNOWN_EFFECT / NO_CHECKPOINT）→ scheduler slot 释放、无孤儿 microVM/worker。
   - F2 Broker 不可达：停止 Broker 后提交 Run → fail-closed INTERRUPTED，无孤儿 sandbox 记录与残留 VM；Broker 恢复后新 Run 正常。
@@ -328,7 +328,7 @@ HTTP API ──> Master (调度/审计/策略/LLM网关)
   - F4 幂等键并发重放：同 `idempotencyKey` 并发 N 次 `POST /runs` → 只创建 1 个 Run，全部返回同一 runId，无 500。
   - F5 队列 backpressure：超过 `HARNESS_MAX_QUEUED_RUNS` → 429 + `Retry-After`/`x-queue-limit`/`x-queue-current`；被拒请求不落库。
   - F6 运行中备份一致性：Run 执行中 `harness-ops backup` → 备份可打开、`audit-chain-smoke` 校验通过、无 `SQLITE_BUSY`。
-  - F7 故障态跨租户隔离：F1/F2 故障期间跨租户 run/events/output/artifacts/interrupt/workspace 提交仍全部 404。
+  - F7 故障态跨用户隔离：F1/F2 故障期间跨用户 run/events/output/artifacts/interrupt/workspace 提交仍全部 404。
 - 理由：§9.8 的验收只证明「正常路径可用」；面试叙事需要「故障下仍可解释、可恢复、不重复副作用」。不做 1/2/4/7/10/12 的结论不变。
 - 边界影响：仅新增验收脚本与测试，不新增产品能力；不改变 Agent 无网络（B2）与单机定位（§9.3）。
 - 验收要求：F1-F7 每项必须有测试；F1/F2/F4/F5/F6/F7 需在 172.17.43.193 留下验证记录；未完成前该项视为暂缓。
@@ -345,9 +345,9 @@ HTTP API ──> Master (调度/审计/策略/LLM网关)
   - F2：`tests/runtime/broker-unreachable.test.ts`——Broker socket 缺失时 Run fail-closed 为 INTERRUPTED（`START_FAILED`），`SandboxStore.listUnsettled()` 为空、队列为空。
   - F3：沿用 Phase 3 的 `tests/runs/run-service-retry.test.ts`（无副作用退避重试、PREPARED 副作用不重试、maxAttempts 后 INTERRUPTED）、`tests/scheduling/run-scheduler-retry-at.test.ts`（retryAt 门控）与 `tests/app/create-harness-application.test.ts`（PolicyRejectionError 不重试，Run 直接 INTERRUPTED）。
   - F4：`tests/http/idempotency-concurrency.e2e.test.ts`——同 idempotencyKey 并发 8 次提交只创建 1 个 Run，全部返回同一 id。
-  - F5：`tests/scheduling/queue-backpressure-fault.test.ts`——占满 active slot 并排队 1 个 Run 后，第三个提交抛 `QueueBackpressureError` 且 `listForTenant` 为空（被拒请求不落库）。
+  - F5：`tests/scheduling/queue-backpressure-fault.test.ts`——占满 active slot 并排队 1 个 Run 后，第三个提交抛 `QueueBackpressureError` 且 `listForUser` 为空（被拒请求不落库）。
   - F6：`tests/ops/backup-consistency.test.ts`——另一连接持写事务（WAL）时 `VACUUM INTO` 备份成功；备份 `schema_migrations` = [1,2,3,4]、`access_audit_events` 非空且 `AccessAuditStore.verifyChain()` ok。
-  - F7：`tests/http/fault-isolation.e2e.test.ts`——故障态 Run（租约过期 INTERRUPTED）对其它租户的 run/events/output/artifacts/interrupt 与「在对方 workspace 提交」全部 404。
+  - F7：`tests/http/fault-isolation.e2e.test.ts`——故障态 Run（租约过期 INTERRUPTED）对其它用户的 run/events/output/artifacts/interrupt 与「在对方 workspace 提交」全部 404。
   - 本地 `bun test ./tests` = 585 pass / 7 skip / 0 fail；typecheck 9 条既有基线错误。真机 172.17.43.193 验证记录见提交与部署文档。
 
 - 真机 172.17.43.193 发现（2026-10-11，Phase 5 验收期间）：
@@ -356,24 +356,36 @@ HTTP API ──> Master (调度/审计/策略/LLM网关)
   - 该现象同时说明：F3「模型调用失败」在真实网络下更可能是**挂起**而非快速报错，退避重试（Phase 3）覆盖的是抛错路径。
 
 - 真机 172.17.43.193 验收记录（2026-10-11，jailer + Firecracker v1.17.0 + systemd Worker + 外部 opencode-go）：
-  - F4/F5/F7：`scripts/phase5-fault-injection.ts` → `PHASE5_FAULT_INJECTION_OK label=4ab31c49 f4=COMPLETED f5=skipped f7=ok`；再以 backpressure 配置（`HARNESS_MAX_ACTIVE_RUNS=1`、`HARNESS_MAX_ACTIVE_RUNS_PER_TENANT=1`、`HARNESS_MAX_QUEUED_RUNS=2`）复跑 → `label=516e858a f4=COMPLETED f5=accepted=2 f7=ok`（第 3 个提交 429 + `Retry-After`）。
+  - F4/F5/F7：`scripts/phase5-fault-injection.ts` → `PHASE5_FAULT_INJECTION_OK label=4ab31c49 f4=COMPLETED f5=skipped f7=ok`；再以 backpressure 配置（`HARNESS_MAX_ACTIVE_RUNS=1`、`HARNESS_MAX_ACTIVE_RUNS_PER_USER=1`、`HARNESS_MAX_QUEUED_RUNS=2`）复跑 → `label=516e858a f4=COMPLETED f5=accepted=2 f7=ok`（第 3 个提交 429 + `Retry-After`）。
   - F1/F2：`scripts/phase5-worker-crash.ts` → `PHASE5_WORKER_CRASH_OK label=7b664a2e f1=path=supervisor unit=harness-worker-98fb75a9-997a-4ca6-bb9a-8532cc02d44d.service run=98fb75a9-997a-4ca6-bb9a-8532cc02d44d f2=recoveredRun=be6e832b-d5d6-4e0d-9772-ba009b6a95f7`。
-    - F1 真实有两条路径：systemd/process 隔离下 Master 能观察到 Worker 进程退出，走 supervisor 路径收尾为 `FAILED`（`WORKER_CRASHED`）；租约回收路径（`LEASE_EXPIRED` + `MANUAL_REVIEW_REQUIRED`/`AUTO_RECOVERY`）只在 Master 观察不到 Worker 之死时生效（例如 Master 自身重启）。两条路径都验证了「不残留 microVM 进程」与「故障态对其它租户 404」。
+    - F1 真实有两条路径：systemd/process 隔离下 Master 能观察到 Worker 进程退出，走 supervisor 路径收尾为 `FAILED`（`WORKER_CRASHED`）；租约回收路径（`LEASE_EXPIRED` + `MANUAL_REVIEW_REQUIRED`/`AUTO_RECOVERY`）只在 Master 观察不到 Worker 之死时生效（例如 Master 自身重启）。两条路径都验证了「不残留 microVM 进程」与「故障态对其它用户 404」。
     - F2 要求 Master 单元用 `Wants=harness-broker.service` 而不是 `Requires=`：`Requires=` 会让 `systemctl stop harness-broker` 连带停掉 Master，F2 场景无法成立。已改为 `Wants=`（`deploy/harness.service.example`、单机部署文档与线上单元同步）。
   - F6：真机在 Run 处于 `RUNNING` 时执行 `harness-ops.ts backup`（产物 `/data/harness/backups/harness-20261011T124518Z.sqlite`，3,616,768 bytes），再用 `audit-chain-smoke.ts --database <备份>` 校验 → `AUDIT_CHAIN_VERIFY_OK`（`ok:true, checked:2461, legacy:0`）。
-  - 回归：`p0-e2e-smoke` → `P0_E2E_SMOKE_OK label=4aa71edd`（serial maxActive=1、concurrent maxActive=2 overlap=true、跨租户 run/events/output/interrupt/对方 workspace 提交全部 404）；远程 `bun test ./tests` = 592 pass / 0 fail。
+  - 回归：`p0-e2e-smoke` → `P0_E2E_SMOKE_OK label=4aa71edd`（serial maxActive=1、concurrent maxActive=2 overlap=true、跨用户 run/events/output/interrupt/对方 workspace 提交全部 404）；远程 `bun test ./tests` = 592 pass / 0 fail。
   - 环境备注：校园网到 opencode.ai 的 IPv4 Cloudflare 段（172.65.90.0/24）不可达而 IPv6 可达，线上 `/etc/hosts` 临时固定 `2606:4700:78::90:0:141` / `...:143 opencode.ai`（注释 `harness-model-pin`），并在 Worker egress 放行 `2606:4700:78::/48`；IPv4 恢复后可移除该固定。
 
 ### 9.10 解冻决策：v1.6（2026-10-21）宿主层边界收敛
 
-- 决策：把产品定位收敛为「单机、自托管的多租户 Agent 宿主层」，宿主层只保留 **准入 / 调度 / 隔离 / 溯源** 四职责，并据此删掉两处越界实现：
+- 决策：把产品定位收敛为「单机、自托管的多用户 Agent 宿主层」，宿主层只保留 **准入 / 调度 / 隔离 / 溯源** 四职责，并据此删掉两处越界实现：
   1. **删除资源观测 → 分类 → 策略的第二道门禁**（`resource-observer` / `resource-classifier` / `execution-policy` / `resource-admission-service` / `policy-decision-store` / `resource-metrics-sampler`）。外部模型模式下 `ExternalModelServiceResourceObserver` 恒返回 `NORMAL`，这一层等价于常量函数；删除后 `RunScheduler` 路径为 `claimNext()` → 直接执行。准入只剩「提交时配额 + 排队深度」，超限仍是 `QueueBackpressureError` → HTTP 429 + `Retry-After`。
-  2. **删除显式优先级（priority）全栈链路**：HTTP body 字段、`agent_runs.priority` 读取/排序、`TenantRunScheduler.claimPriority()`、恢复时 `ORDER BY priority DESC`。等权定位下它是唯一的不等权来源，且唯一来源是调用方自己填的数字；DB 列保留（`DEFAULT 0`）但代码不再读取，migration 注释标 deprecated。
-  3. **会话串行升级为 session 锁**：同一 session 是有互斥语义的资源（一把锁），不是「排队原因」。调度器在租户队列内**跳过被锁住的队首**，取第一个可 claim 的 Run；老化插队同样跳过被锁队首。`QUEUE_TIMEOUT` 只对「资源/并发」类阻塞计时，**会话锁等待不计入 TTL**（默认 5min TTL < 30min 执行超时，否则同会话追问必然被误杀）。
-- 理由：宿主层要尽可能简单，四职责之外的东西都应删除；两条越界实现各自带来真实的公平性缺陷（优先级可无限期饿死低优先级租户；队首阻塞让同租户后面的 Run 永远轮不到，已用可运行测试复现）。
+  2. **删除显式优先级（priority）全栈链路**：HTTP body 字段、`agent_runs.priority` 读取/排序、`UserRunScheduler.claimPriority()`、恢复时 `ORDER BY priority DESC`。等权定位下它是唯一的不等权来源，且唯一来源是调用方自己填的数字；DB 列保留（`DEFAULT 0`）但代码不再读取，migration 注释标 deprecated。
+  3. **会话串行升级为 session 锁**：同一 session 是有互斥语义的资源（一把锁），不是「排队原因」。调度器在用户队列内**跳过被锁住的队首**，取第一个可 claim 的 Run；老化插队同样跳过被锁队首。`QUEUE_TIMEOUT` 只对「资源/并发」类阻塞计时，**会话锁等待不计入 TTL**（默认 5min TTL < 30min 执行超时，否则同会话追问必然被误杀）。
+- 理由：宿主层要尽可能简单，四职责之外的东西都应删除；两条越界实现各自带来真实的公平性缺陷（优先级可无限期饿死低优先级用户；队首阻塞让同用户后面的 Run 永远轮不到，已用可运行测试复现）。
 - 边界影响：§9.2 第 3 条改写、§9.3 新增三条「不做」；`README.md` 与 `.env.example` 同步去掉优先级表述；全覆盖 smoke 删除 `run.priority` phase。
 - 简化（随 v1.6 一并落地，2026-10-21/22）：
   1. 删除已无写入的两张表 `policy_decisions`、`resource_snapshots`（schema.sql 净减 87 行）；`agent_runs.priority` 不再出现在新库 schema，旧库保留该列但代码不读写；删除未使用的原因码 `INSTANCE_NOT_READY`。
   2. 推进路径收敛：`drainPromise` / `drainRequested` / `inFlight` / `backgroundAttempts` 四个状态字段收敛为 `activePass` / `rerunRequested` / `inlineDispatches`；`drain` + `runDrainLoop` 合并为单个 `runPass`，同一时刻只有一个推进循环。
   3. 降低空转：pump 兜底轮询 1s → 2s（提交走 `kick()`、完成走 slot 释放补位）；DB 对账从"每次推进都查库"改为 5s 低频兜底。稳态下每秒不再有"全队列拷贝 + SQLite 查询"。
 - 验收：`bun test ./tests` = 638 pass / 10 skip / 0 fail；`bun run typecheck` 保持既有 10 条基线错误（scripts/ 与 firecracker-serial-bridge，均非本次改动引入）；`tests/scheduling/session-lock.test.ts`、`tests/scheduling/aging-skip-blocked-head.test.ts`、`tests/scheduling/queue-ttl.test.ts` 覆盖三条决策。
+
+### 9.11 解冻决策：v1.7（2026-10-23）隔离域从 tenant 收敛到 user
+
+- 决策：把隔离域的命名与模型统一为 **user**，不再保留 tenant 这一层。
+- 事实依据：仓库里从来没有 `tenants` 表，也没有组织/成员关系，隔离列只有 `user_id`（旧名 `tenant_id`）一个，取值恒等于 `users.id`；`tenantId` 与 `userId` 是同一个字符串的两个名字。保留两层名字的唯一效果是让读代码的人以为存在「一个 tenant 下有多个 user」的关系，而代码从未表达过这个关系。
+- 改动范围（一次全量，不做半改）：
+  1. 存储层：`agent_runs` / `workspaces` / `harness_sessions` / `api_credentials` / `access_audit_events` / `effective_policy_snapshots` 六张表的隔离列统一为 `user_id`；`schema.sql` 直接建 `user_id`。
+  2. 旧库升级：migration **v5**（`scope_column_user_id`）。v5 是第一个「函数式迁移」——先按 `pragma_table_info` 判断该表是否还叫 `tenant_id`，是才 `ALTER TABLE ... RENAME COLUMN ... TO user_id`，因此新库（已是 `user_id`）自动跳过、旧库原地改名且保留数据；`schema_migrations` 记录到 5。
+  3. 代码/配置命名：`tenantId` → `userId`、`HARNESS_MAX_ACTIVE_RUNS_PER_TENANT` / `HARNESS_MAX_QUEUED_RUNS_PER_TENANT` → `..._PER_USER`、`UserRunScheduler` / `UserBillingStore` 等同族标识符；文件与测试同步改名（`src/scheduling/user-run-scheduler.ts`、`src/billing/user-billing.ts`、`scripts/broker-user-check.ts` 等）。
+  4. 文档：`README.md`、`docs/platform-boundary.md`、部署与环境样例里的「租户」统一为「用户」；ADR 文件名同步改名（历史 ADR 正文保留原措辞的除外）。
+- 不做：不引入 `tenant_id` 兼容列、不保留双读路径、不做数据搬迁脚本——v5 的原地改名就是升级路径。
+- 验收：`bun test` = 669 tests / 659 pass / 10 skip / 0 fail；`tsc --noEmit` 0 错误；`tests/storage/database.test.ts` 新增「v5 把旧库 tenant_id 原地改名为 user_id」用例（回退列名 + 删版本记录 → 重跑迁移 → 列名与数据都在，版本到 5）。

@@ -1,5 +1,5 @@
 import { openHarnessDatabase } from "../src/storage/database.ts";
-import { TenantBillingStore, type TenantBillingPricing } from "../src/billing/tenant-billing.ts";
+import { UserBillingStore, type UserBillingPricing } from "../src/billing/user-billing.ts";
 
 function readFlag(name: string): string | null {
     const index = process.argv.indexOf(name);
@@ -11,15 +11,15 @@ function readFlag(name: string): string | null {
 
 function seedSelfTestData(db: ReturnType<typeof openHarnessDatabase>): void {
     db.query(`INSERT INTO agent_runs (
-        id, tenant_id, harness_session_id, status, user_input, workspace_path,
+        id, user_id, harness_session_id, status, user_input, workspace_path,
         created_at, updated_at, started_at, finished_at, checkpoint_id,
         failure_reason, run_policy_json, thinking_level
-    ) VALUES ('smoke-run', 'smoke-tenant', 'smoke-session', 'COMPLETED', 'task', '/w',
+    ) VALUES ('smoke-run', 'smoke-user', 'smoke-session', 'COMPLETED', 'task', '/w',
         '2026-10-10T00:00:00.000Z', '2026-10-10T00:00:10.000Z',
         '2026-10-10T00:00:00.000Z', '2026-10-10T00:00:10.000Z', NULL, NULL, NULL, 'off')`).run();
     db.query(`INSERT INTO effective_policy_snapshots (
-        id, run_id, tenant_id, layers_json, effective_json, created_at
-    ) VALUES ('smoke-snapshot', 'smoke-run', 'smoke-tenant', '[]', '{}', '2026-10-10T00:00:00.000Z')`).run();
+        id, run_id, user_id, layers_json, effective_json, created_at
+    ) VALUES ('smoke-snapshot', 'smoke-run', 'smoke-user', '[]', '{}', '2026-10-10T00:00:00.000Z')`).run();
     db.query(`INSERT INTO sandboxes (
         id, run_id, policy_snapshot_id, provider, status, workspace_path,
         secret_names_json, created_at, updated_at, failure_reason, profile,
@@ -60,14 +60,14 @@ function runSelfTest(): void {
     const db = openHarnessDatabase(":memory:");
     try {
         seedSelfTestData(db);
-        const pricing: TenantBillingPricing = {
+        const pricing: UserBillingPricing = {
             currency: "USD",
             modelInputPerMillionTokens: 0,
             modelOutputPerMillionTokens: 0,
             sandboxSecond: 0.01,
             toolCall: 0.001,
         };
-        const summary = new TenantBillingStore(db, pricing).summarize("smoke-tenant");
+        const summary = new UserBillingStore(db, pricing).summarize("smoke-user");
         const expectedAmount = 0.25 + 10 * 0.01 + 3 * 0.001;
         if (summary.totals.amount !== expectedAmount) {
             throw new Error(`账单金额不符合预期：期望 ${expectedAmount}，实际 ${summary.totals.amount}`);
@@ -76,31 +76,31 @@ function runSelfTest(): void {
             throw new Error(`账单计数不符合预期：${JSON.stringify(summary.totals)}`);
         }
         console.log(JSON.stringify({ summary }, null, 2));
-        console.log("TENANT_BILLING_SMOKE_OK");
+        console.log("USER_BILLING_SMOKE_OK");
     } finally {
         db.close();
     }
 }
 
-function runDatabaseVerification(databasePath: string, tenantId: string | null): void {
+function runDatabaseVerification(databasePath: string, userId: string | null): void {
     const db = openHarnessDatabase(databasePath);
     try {
-        const store = new TenantBillingStore(db);
-        if (tenantId !== null) {
-            console.log(JSON.stringify(store.summarize(tenantId), null, 2));
+        const store = new UserBillingStore(db);
+        if (userId !== null) {
+            console.log(JSON.stringify(store.summarize(userId), null, 2));
         } else {
-            const tenants = db.query<{ tenantId: string; runs: number }, []>(`
-                SELECT tenant_id AS tenantId, COUNT(*) AS runs
+            const users = db.query<{ userId: string; runs: number }, []>(`
+                SELECT user_id AS userId, COUNT(*) AS runs
                 FROM agent_runs
-                GROUP BY tenant_id
-                ORDER BY runs DESC, tenant_id ASC
+                GROUP BY user_id
+                ORDER BY runs DESC, user_id ASC
                 LIMIT 5;
             `).all();
-            for (const tenant of tenants) {
-                console.log(JSON.stringify(store.summarize(tenant.tenantId)));
+            for (const user of users) {
+                console.log(JSON.stringify(store.summarize(user.userId)));
             }
         }
-        console.log("TENANT_BILLING_VERIFY_OK");
+        console.log("USER_BILLING_VERIFY_OK");
     } finally {
         db.close();
     }
@@ -110,5 +110,5 @@ const databasePath = readFlag("--database");
 if (databasePath === null) {
     runSelfTest();
 } else {
-    runDatabaseVerification(databasePath, readFlag("--tenant"));
+    runDatabaseVerification(databasePath, readFlag("--user"));
 }

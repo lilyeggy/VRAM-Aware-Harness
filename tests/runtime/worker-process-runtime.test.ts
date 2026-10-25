@@ -21,7 +21,7 @@ function createSampleStartRequest(runId: string, sandboxId?: string): RuntimeSta
     return {
         run: {
             runId,
-            tenantId: "tenant-test",
+            userId: "user-test",
             harnessSessionId: "session-test",
             workspacePath: "/tmp/workspace-test",
             thinkingLevel: "low",
@@ -61,7 +61,7 @@ function createSampleResumeRequest(runId: string): RuntimeResumeRequest {
     return {
         run: {
             runId,
-            tenantId: "tenant-test",
+            userId: "user-test",
             harnessSessionId: "session-test",
             workspacePath: "/tmp/workspace-test",
         },

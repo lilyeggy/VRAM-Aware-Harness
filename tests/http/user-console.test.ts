@@ -21,8 +21,8 @@ test("userConsoleResponse 返回带 CSP 的中文 HTML 页面", () => {
         expect(html).toContain("authInvite");
         expect(html).toContain('href="/health"');
         expect(html).not.toContain("运营控制台");
-        // 页面绝不接受客户端自报 tenantId：租户只能由服务端凭证派生。
-        expect(html).not.toMatch(/tenantId\s*[=:]/);
+        // 页面绝不接受客户端自报 userId：用户只能由服务端凭证派生。
+        expect(html).not.toMatch(/userId\s*[=:]/);
         // 模板字符串必须完整闭合，防止把 TS 源码片段发给浏览器。
         expect(html.trim().endsWith("</html>")).toBe(true);
     });
@@ -97,7 +97,7 @@ test("GET /app 返回用户工作台，/ 重定向到 /app", async () => {
             throw new Error("not used");
         },
         getRun: () => null,
-        getRunsForTenant: () => [],
+        getRunsForUser: () => [],
         getRunEvents: () => [], getRunTrace: () => null,
         getRunOutput: () => ({ chunks: [], finalText: "" }),
         getRunWorkspaceDiff: () => null,

@@ -138,9 +138,14 @@ export function runMigrations(db: Database): void {
 
     const applyPendingMigrations = db.transaction(() => {
         for (const migration of pendingMigrations) {
-            // migration.up 是一整段 DDL，里面可能包含多条 CREATE TABLE / CREATE INDEX。
-            // db.exec 适合执行这种“不需要返回行”的 SQL。
-            db.exec(migration.up);
+            // migration.up 通常是一整段 DDL（CREATE TABLE / CREATE INDEX），
+            // 用 db.exec 执行；少数需要“先看列是否存在再改”的迁移写成函数，
+            // 由函数自己拿 db 判断（例如从旧列名迁移到新列名）。
+            if (typeof migration.up === "string") {
+                db.exec(migration.up);
+            } else {
+                migration.up(db);
+            }
 
             // 业务 schema 创建成功之后，再把版本写入 migration 账本。
             // 这里使用参数绑定，而不是字符串拼接，保持 SQL 写法一致且避免注入风险。

@@ -80,11 +80,11 @@ async function withBroker(
         readonly client: BrokerSandboxProvider;
         readonly terminated: string[];
         readonly makeClient: (
-            tenantId: string,
+            userId: string,
             extra?: Partial<BrokerSandboxProviderOptions>,
         ) => BrokerSandboxProvider;
     }) => Promise<void>,
-    options: { readonly tenantId?: string } = {},
+    options: { readonly userId?: string } = {},
     serverOptions: Partial<SandboxBrokerServerOptions> = {},
 ): Promise<void> {
     const dir = mkdtempSync(join(tmpdir(), "broker-test-"));
@@ -99,15 +99,15 @@ async function withBroker(
     });
     await server.start();
     const makeClient = (
-        tenantId: string,
+        userId: string,
         extra: Partial<BrokerSandboxProviderOptions> = {},
     ): BrokerSandboxProvider => new BrokerSandboxProvider({
         socketPath,
         requestTimeoutMs: 5000,
-        tenantId,
+        userId,
         ...extra,
     });
-    const client = makeClient(options.tenantId ?? "tenant-1", { controlToken: CONTROL_TOKEN });
+    const client = makeClient(options.userId ?? "user-1", { controlToken: CONTROL_TOKEN });
     try {
         await fn({ client, terminated: fake.terminated, makeClient });
     } finally {
@@ -122,7 +122,7 @@ test("Broker 服务器只暴露 create/execute/terminate，客户端可完成一
             id: "sandbox-1",
             runId: "run-1",
             workspacePath: "/tmp/workspace-1",
-            policy: { tenantId: "tenant-1" } as never,
+            policy: { userId: "user-1" } as never,
         });
         expect(handle.id).toBe("sandbox-1");
         expect(handle.workspacePath).toBe("/tmp/workspace-1");
@@ -141,30 +141,30 @@ test("Broker 服务器只暴露 create/execute/terminate，客户端可完成一
 
 test("Broker 客户端把 Broker 错误转成 reject", async () => {
     await withBroker(async ({ makeClient }) => {
-        const client = makeClient("tenant-1", { capabilityToken: "token-for-missing" });
+        const client = makeClient("user-1", { capabilityToken: "token-for-missing" });
         await expect(client.execute("missing-sandbox", ["echo", "hi"])).rejects.toThrow(
             "Broker 不认识 sandbox：missing-sandbox",
         );
     });
 });
 
-test("Broker 拒绝跨租户 execute/terminate", async () => {
+test("Broker 拒绝跨用户 execute/terminate", async () => {
     await withBroker(async ({ client, makeClient }) => {
         const handle = await client.create({
             id: "sandbox-cross",
             runId: "run-cross",
             workspacePath: "/tmp/workspace-cross",
-            policy: { tenantId: "tenant-1" } as never,
+            policy: { userId: "user-1" } as never,
         });
 
-        const otherTenant = makeClient("tenant-2", {
+        const otherUser = makeClient("user-2", {
             capabilityToken: handle.capabilityToken,
         });
-        await expect(otherTenant.execute("sandbox-cross", ["echo", "hi"])).rejects.toThrow(
-            "Broker 拒绝跨租户操作",
+        await expect(otherUser.execute("sandbox-cross", ["echo", "hi"])).rejects.toThrow(
+            "Broker 拒绝跨用户操作",
         );
-        await expect(otherTenant.terminate("sandbox-cross")).rejects.toThrow(
-            "Broker 拒绝跨租户操作",
+        await expect(otherUser.terminate("sandbox-cross")).rejects.toThrow(
+            "Broker 拒绝跨用户操作",
         );
     });
 });
@@ -175,10 +175,10 @@ test("Broker 拒绝 capability token 不匹配的 execute", async () => {
             id: "sandbox-token",
             runId: "run-token",
             workspacePath: "/tmp/workspace-token",
-            policy: { tenantId: "tenant-1" } as never,
+            policy: { userId: "user-1" } as never,
         });
 
-        const wrongToken = makeClient("tenant-1", { capabilityToken: "wrong-token" });
+        const wrongToken = makeClient("user-1", { capabilityToken: "wrong-token" });
         await expect(wrongToken.execute("sandbox-token", ["echo", "hi"])).rejects.toThrow(
             "capability token 不匹配",
         );
@@ -187,24 +187,24 @@ test("Broker 拒绝 capability token 不匹配的 execute", async () => {
 
 test("Broker 拒绝 control token 不匹配的 create", async () => {
     await withBroker(async ({ makeClient }) => {
-        const badMaster = makeClient("tenant-1", { controlToken: "wrong-control" });
+        const badMaster = makeClient("user-1", { controlToken: "wrong-control" });
         await expect(badMaster.create({
             id: "sandbox-bad-create",
             runId: "run-bad-create",
             workspacePath: "/tmp/workspace-bad-create",
-            policy: { tenantId: "tenant-1" } as never,
+            policy: { userId: "user-1" } as never,
         })).rejects.toThrow("Broker 拒绝 create：control token 不匹配");
     });
 });
 
 test("Worker 侧缺少 control token 时拒绝 create", async () => {
     await withBroker(async ({ makeClient }) => {
-        const worker = makeClient("tenant-1");
+        const worker = makeClient("user-1");
         await expect(worker.create({
             id: "sandbox-worker-create",
             runId: "run-worker-create",
             workspacePath: "/tmp/workspace-worker-create",
-            policy: { tenantId: "tenant-1" } as never,
+            policy: { userId: "user-1" } as never,
         })).rejects.toThrow("缺少 controlToken");
     });
 });
@@ -215,10 +215,10 @@ test("Master 丢失 per-sandbox token 后可用 control token terminate", async 
             id: "sandbox-recover",
             runId: "run-recover",
             workspacePath: "/tmp/workspace-recover",
-            policy: { tenantId: "tenant-1" } as never,
+            policy: { userId: "user-1" } as never,
         });
 
-        const recoveredMaster = makeClient("tenant-1", { controlToken: CONTROL_TOKEN });
+        const recoveredMaster = makeClient("user-1", { controlToken: CONTROL_TOKEN });
         await recoveredMaster.terminate("sandbox-recover");
         expect(terminated).toEqual(["sandbox-recover"]);
     });
@@ -230,10 +230,10 @@ test("control token 不能替代 per-sandbox token 执行命令", async () => {
             id: "sandbox-exec-control",
             runId: "run-exec-control",
             workspacePath: "/tmp/workspace-exec-control",
-            policy: { tenantId: "tenant-1" } as never,
+            policy: { userId: "user-1" } as never,
         });
 
-        const recoveredMaster = makeClient("tenant-1", { controlToken: CONTROL_TOKEN });
+        const recoveredMaster = makeClient("user-1", { controlToken: CONTROL_TOKEN });
         await expect(recoveredMaster.execute("sandbox-exec-control", ["echo", "hi"]))
             .rejects.toThrow("capability token");
     });
@@ -246,7 +246,7 @@ test("Broker 用 SO_PEERCRED 把 create/terminate 绑定到 Master UID、execute
             id: "sandbox-peer",
             runId: "run-peer",
             workspacePath: "/tmp/workspace-peer",
-            policy: { tenantId: "tenant-1" } as never,
+            policy: { userId: "user-1" } as never,
         });
 
         // 同一连接/UID 1004 是 Master：execute 要求 Worker UID 998，拒绝。
@@ -257,7 +257,7 @@ test("Broker 用 SO_PEERCRED 把 create/terminate 绑定到 Master UID、execute
         // 切到 Worker UID 998：execute 通过，create 被拒绝。
         peer.uid = 998;
         peer.gid = 998;
-        const worker = makeClient("tenant-1", {
+        const worker = makeClient("user-1", {
             capabilityToken: handle.capabilityToken,
             controlToken: CONTROL_TOKEN,
         });
@@ -267,13 +267,13 @@ test("Broker 用 SO_PEERCRED 把 create/terminate 绑定到 Master UID、execute
             id: "sandbox-peer-worker-create",
             runId: "run-peer-worker-create",
             workspacePath: "/tmp/workspace-peer-worker-create",
-            policy: { tenantId: "tenant-1" } as never,
+            policy: { userId: "user-1" } as never,
         })).rejects.toThrow("Broker 拒绝 create：对端 uid=998，要求 uid=1004");
 
         // 切回 Master UID 1004：terminate 通过。
         peer.uid = 1004;
         peer.gid = 1004;
-        const master = makeClient("tenant-1", { controlToken: CONTROL_TOKEN });
+        const master = makeClient("user-1", { controlToken: CONTROL_TOKEN });
         await master.terminate("sandbox-peer");
         expect(terminated).toEqual(["sandbox-peer"]);
     }, {}, {
@@ -289,7 +289,7 @@ test("Broker 在配置 peer UID 但读不到 SO_PEERCRED 时 fail-closed", async
             id: "sandbox-peer-null",
             runId: "run-peer-null",
             workspacePath: "/tmp/workspace-peer-null",
-            policy: { tenantId: "tenant-1" } as never,
+            policy: { userId: "user-1" } as never,
         })).rejects.toThrow("无法读取对端 SO_PEERCRED 凭据");
     }, {}, {
         readPeerCredentials: () => null,
@@ -303,7 +303,7 @@ test("Broker 连接白名单拒绝非授权 UID", async () => {
             id: "sandbox-peer-denied",
             runId: "run-peer-denied",
             workspacePath: "/tmp/workspace-peer-denied",
-            policy: { tenantId: "tenant-1" } as never,
+            policy: { userId: "user-1" } as never,
         })).rejects.toThrow();
     }, {}, {
         readPeerCredentials: () => ({ pid: 1, uid: 998, gid: 998 }),
@@ -317,7 +317,7 @@ test("Broker create 后 readRecord 失败时回收 sandbox，避免不可寻址�
             id: "sandbox-orphan",
             runId: "run-orphan",
             workspacePath: "/tmp/workspace-orphan",
-            policy: { tenantId: "tenant-1" } as never,
+            policy: { userId: "user-1" } as never,
         })).rejects.toThrow("record is missing");
         expect(terminated).toEqual(["sandbox-orphan"]);
     }, {}, { readRecord: () => null });

@@ -18,15 +18,15 @@
 | 故障注入与恢复（p0 e2e、F1/F2、F4/F5/F7） | p0 `P0_E2E_SMOKE_OK label=48ae079c`；`PHASE5_FAULT_INJECTION_OK f4=COMPLETED f5=skipped f7=ok`；F1/F2 `PHASE5_WORKER_CRASH_OK label=batteryD f1=path=supervisor f2=recoveredRun=97803846-…`；F-K 修复后复跑 F1/F2 `PHASE5_WORKER_CRASH_OK label=postfk f1=path=supervisor unit=harness-worker-552e8a67-… f2=recoveredRun=c736f676-…`（`waitForWorkerUnit(90_000)` 竞态修复后首次稳定通过） |
 | 持久化与审计 | RUNNING 期间备份 + 备份上审计链校验 `ok:true checked=7962 legacy=0` |
 | 运维 | `disk-check`、`cleanup`（含新增 fail-closed 保护）、`backup`、maintenance timer 全部可用 |
-| HTTPS 全链路 | `P0_E2E_SMOKE_OK label=d09cc195`（经 `127.0.0.1:8443` 自签 TLS 反代）；F-K 修复后复跑 `P0_E2E_SMOKE_OK label=tls-postfk`（2026-10-13 01:00；`concurrent maxActive=2 overlap=true`、跨租户 404 全集） |
+| HTTPS 全链路 | `P0_E2E_SMOKE_OK label=d09cc195`（经 `127.0.0.1:8443` 自签 TLS 反代）；F-K 修复后复跑 `P0_E2E_SMOKE_OK label=tls-postfk`（2026-10-13 01:00；`concurrent maxActive=2 overlap=true`、跨用户 404 全集） |
 | 平台侧隔离性 | `SANDBOX_SECURITY_PROBE_OK` 13/13 |
 | 本地/远程单测 | 675 pass / 10 skip / 0 fail；typecheck 仅 9 条既有基线错误 |
 
 ## 2. 方法与分工
 
-1. **生产用户旅程**（`/tmp/prod-journey.py`，36 项）：注册/登录/会话/workspace/发消息/Run 轮询/events/output/workspace-diff/artifacts/decisions/limitations/queue/resources/billing/audit/metrics/跨租户 404 全集/终态中断。
+1. **生产用户旅程**（`/tmp/prod-journey.py`，36 项）：注册/登录/会话/workspace/发消息/Run 轮询/events/output/workspace-diff/artifacts/decisions/limitations/queue/resources/billing/audit/metrics/跨用户 404 全集/终态中断。
 2. **独立测试实例全覆盖矩阵**（`scripts/full-coverage-smoke.ts` + `scripts/run-full-coverage-phases.sh`）：同一实例按 phase 重启 Master，覆盖 happy path、7 个内置工具、幂等、priority、backpressure、限流、MCP。
-3. **平台侧探针与故障电池**（`scripts/sandbox-security-probe.ts`、`scripts/p0-e2e-smoke.ts`、`scripts/phase5-fault-injection.ts`、`scripts/phase5-worker-crash.ts`、`scripts/audit-chain-smoke.ts`、`scripts/tenant-billing-smoke.ts`、`scripts/harness-ops.ts`、`scripts/dev-tls-proxy.ts`）。
+3. **平台侧探针与故障电池**（`scripts/sandbox-security-probe.ts`、`scripts/p0-e2e-smoke.ts`、`scripts/phase5-fault-injection.ts`、`scripts/phase5-worker-crash.ts`、`scripts/audit-chain-smoke.ts`、`scripts/user-billing-smoke.ts`、`scripts/harness-ops.ts`、`scripts/dev-tls-proxy.ts`）。
 
 ## 3. 全覆盖矩阵（`scripts/full-coverage-smoke.ts`）
 
@@ -40,7 +40,7 @@ phase 由 `scripts/run-full-coverage-phases.sh` 编排（每个 phase 重启一�
 | ratelimit | `HARNESS_RATE_LIMIT_MAX_PER_IP=2` + `FULLCOVER_ONLY=system.ratelimit` + `FULLCOVER_SKIP_BOOTSTRAP=1` | PASS（此前脚本自身注册撞 429） |
 | mcp | `HARNESS_MCP_SERVERS` 指向 `tests/mcp/fixtures/echo-mcp-server.ts` | PASS |
 
-base 覆盖：health/ready/metrics；注册（无/错邀请码 403、弱密码 400、重复邮箱 409、正确 201）；登录/登出/DELETE sessions；workspace；conversation（两种创建路径）；消息 → Run → 终态；`/runs/:id` 的 events/output/workspace-diff/artifacts/decisions/limitations/unknown-effects；`/queue`、`/resources`（HOST_WIDE）；7 个内置工具各一个 Run（bash/read/write/edit/grep/find/ls）；跨租户 404 全集；UI 等价旅程。
+base 覆盖：health/ready/metrics；注册（无/错邀请码 403、弱密码 400、重复邮箱 409、正确 201）；登录/登出/DELETE sessions；workspace；conversation（两种创建路径）；消息 → Run → 终态；`/runs/:id` 的 events/output/workspace-diff/artifacts/decisions/limitations/unknown-effects；`/queue`、`/resources`（HOST_WIDE）；7 个内置工具各一个 Run（bash/read/write/edit/grep/find/ls）；跨用户 404 全集；UI 等价旅程。
 7 个 SKIP 为 `run.subroute.{decisions,limitations,unknown-effects}`（平台无独立路由，数据在 `GET /runs/:id` 内联，由 `run.detail.inline` 覆盖）、`run.priority`、`run.backpressure`、`system.ratelimit`、`mcp.echo`（分别在对应 phase 中启用，属设计内跳过）。
 
 ## 4. 故障注入与恢复
@@ -50,7 +50,7 @@ base 覆盖：health/ready/metrics；注册（无/错邀请码 403、弱密码 4
 `scripts/phase5-fault-injection.ts`：
 
 - 默认配置：`PHASE5_FAULT_INJECTION_OK label=faultops-1791819332 f4=COMPLETED f5=skipped f7=ok`。
-- backpressure 配置（`HARNESS_MAX_ACTIVE_RUNS=1`、`HARNESS_MAX_ACTIVE_RUNS_PER_TENANT=1`、`HARNESS_MAX_QUEUED_RUNS=2`）：F5 第 3 个提交被拒 429 + `Retry-After`。
+- backpressure 配置（`HARNESS_MAX_ACTIVE_RUNS=1`、`HARNESS_MAX_ACTIVE_RUNS_PER_USER=1`、`HARNESS_MAX_QUEUED_RUNS=2`）：F5 第 3 个提交被拒 429 + `Retry-After`。
 
 ### 4.2 Worker 崩溃（F1/F2）
 
@@ -141,4 +141,4 @@ PHASE5_WORKER_CRASH_OK label=batteryD f1=path=supervisor \
 - 网络：Agent 无 egress 是**设计内**能力边界，未做“允许出网”验证。
 - 多机/HA：单机部署，无 lease/replication/故障转移验证（§9.8 v1.4 明确不做）。
 - 大模型并发：矩阵 N 级并发已在 `docs/vm-lifecycle-benchmark.zh-CN.md` 覆盖 VM 侧；本轮矩阵的并发压力集中在调度/队列语义。
-- 密码/MFA/管理员后台、租户配额与计费强制力：边界外（见 `docs/platform-boundary.md` §9.3）。
+- 密码/MFA/管理员后台、用户配额与计费强制力：边界外（见 `docs/platform-boundary.md` §9.3）。

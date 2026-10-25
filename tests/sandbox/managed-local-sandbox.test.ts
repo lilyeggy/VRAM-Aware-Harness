@@ -21,7 +21,7 @@ function snapshot(
         ...unrestrictedPolicy,
         id: "policy-1",
         runId: "run-1",
-        tenantId: "tenant-1",
+        userId: "user-1",
         layers: [],
         workspaceRoots: ["/tmp/workspace"],
         createdAt: "2026-08-10T10:00:00.000Z",
@@ -33,7 +33,7 @@ test("Secret 只在 Handle 回调中出现，持久化记录只保存名称", as
     const store = new MemorySandboxStore();
     const provider = new ManagedLocalSandboxProvider(
         store as unknown as SandboxStore,
-        { get: (tenantId, name) => tenantId === "tenant-1" && name === "API_TOKEN" ? "super-secret-value" : null },
+        { get: (userId, name) => userId === "user-1" && name === "API_TOKEN" ? "super-secret-value" : null },
     );
     const handle = await provider.create({
         id: "sandbox-1",
@@ -59,16 +59,16 @@ test("Secret 只在 Handle 回调中出现，持久化记录只保存名称", as
         .toBeUndefined();
 });
 
-test("环境 Secret 使用无碰撞的 Tenant namespace，不回退到全局变量", () => {
+test("环境 Secret 使用无碰撞的 User namespace，不回退到全局变量", () => {
     const provider = new EnvironmentSecretProvider({
-        HARNESS_SECRET_74656E616E742D61_API_TOKEN: "tenant-a-value",
-        HARNESS_SECRET_74656E616E745F61_API_TOKEN: "tenant_a-value",
+        HARNESS_SECRET_757365722D61_API_TOKEN: "user-a-value",
+        HARNESS_SECRET_757365725F61_API_TOKEN: "user_a-value",
         API_TOKEN: "unsafe-global-value",
     });
-    expect(provider.get("tenant-a", "API_TOKEN")).toBe("tenant-a-value");
-    expect(provider.get("tenant_a", "API_TOKEN")).toBe("tenant_a-value");
-    expect(provider.get("tenant-b", "API_TOKEN")).toBeNull();
-    expect(() => provider.get("tenant-a", "bad-name")).toThrow("Secret 名称");
+    expect(provider.get("user-a", "API_TOKEN")).toBe("user-a-value");
+    expect(provider.get("user_a", "API_TOKEN")).toBe("user_a-value");
+    expect(provider.get("user-b", "API_TOKEN")).toBeNull();
+    expect(() => provider.get("user-a", "bad-name")).toThrow("Secret 名称");
 });
 
 test("本地 Provider 无法落实硬资源限制时 fail closed", async () => {

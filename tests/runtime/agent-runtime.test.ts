@@ -17,7 +17,7 @@ test("start 会记录请求并按顺序发送事件", async () => {
     const request: RuntimeStartRequest = {
         run: {
             runId: "run-1",
-            tenantId: "tenant-1",
+            userId: "user-1",
             harnessSessionId: "session-1",
             workspacePath: "/tmp/workspace",
         },
@@ -59,7 +59,7 @@ test("resume 会记录恢复请求并按顺序发送事件", async () => {
     const request: RuntimeResumeRequest = {
         run: {
             runId: "run-2",
-            tenantId: "tenant-1",
+            userId: "user-1",
             harnessSessionId: "session-1",
             workspacePath: "/tmp/workspace",
         },
@@ -127,7 +127,7 @@ test("取消订阅后不会继续收到事件", async () => {
     const request: RuntimeStartRequest = {
         run: {
             runId: "run-1",
-            tenantId: "tenant-1",
+            userId: "user-1",
             harnessSessionId: "session-1",
             workspacePath: "/tmp/workspace",
         },
@@ -176,7 +176,7 @@ test("不同 runId 的事件不会发送给错误的订阅者", async () => {
     const run1Request: RuntimeStartRequest = {
         run: {
             runId: "run-1",
-            tenantId: "tenant-1",
+            userId: "user-1",
             harnessSessionId: "session-1",
             workspacePath: "/tmp/workspace",
         },
@@ -186,7 +186,7 @@ test("不同 runId 的事件不会发送给错误的订阅者", async () => {
     const run2Request: RuntimeStartRequest = {
         run: {
             runId: "run-2",
-            tenantId: "tenant-1",
+            userId: "user-1",
             harnessSessionId: "session-1",
             workspacePath: "/tmp/workspace",
         },

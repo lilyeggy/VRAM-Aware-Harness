@@ -2,7 +2,7 @@
 
 对象：`172.17.43.193` 上的**生产实例**（不是测试实例）——`harness.service`（Master，`0.0.0.0:3100`，非 root，systemd 每 Run worker）+ `harness-broker.service`（root，jailer + Firecracker v1.17.0，启用快照）+ `harness-vm-prewarm.timer` + `harness-maintenance.timer`，`HARNESS_ENV=production`、`HARNESS_REGISTRATION_MODE=invite`，模型为外部 `opencode-go/deepseek-v4.1-flash`。
 
-方法：用 Python 标准库按**用户可见顺序**离线跑一遍完整旅程（注册 → 登录 → 建 Workspace → 建会话 → 发消息 → 轮询 Run → 读 events/output/workspace-diff/artifacts/artifact 内容 → 队列/资源/账单/审计/指标 → 跨租户拒绝 → 中断/恢复 → 登出），共 36 项断言；随后对两次 Run 直接只读查询 SQLite 取时间线证据。
+方法：用 Python 标准库按**用户可见顺序**离线跑一遍完整旅程（注册 → 登录 → 建 Workspace → 建会话 → 发消息 → 轮询 Run → 读 events/output/workspace-diff/artifacts/artifact 内容 → 队列/资源/账单/审计/指标 → 跨用户拒绝 → 中断/恢复 → 登出），共 36 项断言；随后对两次 Run 直接只读查询 SQLite 取时间线证据。
 
 ## 1. 结果
 
@@ -19,14 +19,14 @@
 | Run 事件 | `SANDBOX_ACQUIRED`、`TOOL_STARTED/COMPLETED`、`RUN_ARTIFACTS_READY` 均在 | PASS |
 | Run 产物 | output 含 `4.14.174`、workspace-diff `added=result.txt`、artifacts 1 条、按 path 取内容含 `prod-flow-ok` | PASS |
 | Run 明细 | `/runs/:id` 含 `decisions`/`limitations` | PASS |
-| 租户视图 | `/queue`、`/resources`、`/billing`、`/audit` 均 200 | PASS |
+| 用户视图 | `/queue`、`/resources`、`/billing`、`/audit` 均 200 | PASS |
 | 指标 | `/metrics` 200（bootstrap key） | PASS |
-| 跨租户 | 另一个租户读 run/events/output/artifacts 全 404、interrupt 404 | PASS |
+| 跨用户 | 另一个用户读 run/events/output/artifacts 全 404、interrupt 404 | PASS |
 | 终端态语义 | 终态 Run 的 interrupt/resume 返回 409（修复前 500） | PASS（修复后） |
 
 ## 2. 真机时间线证据（SQLite 只读查询）
 
-Run `8dbdd1be-456a-4750-b336-1ca145a2c0ec`（invite 模式、新租户、`bash` 工具建文件）：总墙钟 7563ms。
+Run `8dbdd1be-456a-4750-b336-1ca145a2c0ec`（invite 模式、新用户、`bash` 工具建文件）：总墙钟 7563ms。
 
 ```
 +   0 RUN_CREATED
@@ -52,7 +52,7 @@ Run `42bfd88e-4768-44da-ad27-72098d65bc0c`（修复后复验）：总墙钟 1329
 要点：
 - 用户可见链路（HTTP → 调度 → RunAttempt 租约 → broker → jailer microVM → 工具 → 模型 → 产物导出 → 审计/账单/指标）在 production 模式下端到端可用，**热恢复夺取沙箱 56~73ms（warmHit=true）**。
 - 工具调用一次只有一条 `TOOL_STARTED`/`TOOL_COMPLETED`，网关记账是独立的 `TOOL_DISPATCHED`/`TOOL_SETTLED`——此前"同一 toolCallId 重复 TOOL_*"缺陷在生产实测中未再出现。
-- 并发/跨租户语义与 p0 smoke、Phase 1-5 的结论一致。
+- 并发/跨用户语义与 p0 smoke、Phase 1-5 的结论一致。
 
 ## 3. 发现
 
@@ -85,8 +85,8 @@ Run `42bfd88e-4768-44da-ad27-72098d65bc0c`（修复后复验）：总墙钟 1329
 ### 5.2 探针
 `scripts/sandbox-security-probe.ts`（与生产 broker 同一构造：`FirecrackerSandboxDriver` + `MicrovmSandboxProvider` + `InMemorySandboxStore`，jailer + 快照 + 共享只读基础文件），建两台沙箱：
 
-- `security-probe-a`（tenant `probe-a`，`allowedSecrets=["PROBE_TOKEN"]`，环境里种入 `HARNESS_SECRET_<HEX(probe-a)>_PROBE_TOKEN=planted-secret-value`）
-- `security-probe-b`（tenant `probe-b`，无 secret）
+- `security-probe-a`（user `probe-a`，`allowedSecrets=["PROBE_TOKEN"]`，环境里种入 `HARNESS_SECRET_<HEX(probe-a)>_PROBE_TOKEN=planted-secret-value`）
+- `security-probe-b`（user `probe-b`，无 secret）
 - 同时把 `OPENCODE_API_KEY`/`PI_AUTH_TOKEN` 设为哨兵值 `should-never-reach-guest-model-key`，用于证明宿主模型凭据不进沙箱。
 
 输出 `SANDBOX_SECURITY_PROBE_OK` / `_FAIL failed=[…]`，结束 terminate 两台并清理工作区。
@@ -116,4 +116,4 @@ Run `42bfd88e-4768-44da-ad27-72098d65bc0c`（修复后复验）：总墙钟 1329
 - 探针脚本的类型兼容处理与生产一致：`broker-main.ts:136-138` 也用 `store as unknown as SandboxStore`（`SandboxStore` 带私有字段，`InMemorySandboxStore` 只能这样传）。
 
 ### 5.5 与业界对照
-业界方案常见的"隔离性声明"（无网卡 / 只读根 / 跨租户不可见 / secret 按租户注入）在本轮全部**用平台侧真机证据**落到了同一张表里，而不是靠模型自述或文档推断；这也是 `docs/agent-sandbox-landscape.zh-CN.md` §5 逐维对照里我们"已对齐"的那一列。
+业界方案常见的"隔离性声明"（无网卡 / 只读根 / 跨用户不可见 / secret 按用户注入）在本轮全部**用平台侧真机证据**落到了同一张表里，而不是靠模型自述或文档推断；这也是 `docs/agent-sandbox-landscape.zh-CN.md` §5 逐维对照里我们"已对齐"的那一列。

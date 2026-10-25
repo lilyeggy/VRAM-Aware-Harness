@@ -8,7 +8,7 @@ import { Semaphore, KeyedSemaphore } from "../../src/sandbox/microvm/vm-concurre
  *
  * 多台 VM 同时首次启动且 kernel/rootfs 相同 → templateHash 相同 → 会**并发写
  * 同一个快照文件**，且各自 pause/resume 触发 vsock 断连重连。真机 10 并发下
- * 稳定复现"vsock agent 20s 未就绪"（两次分别 tenant-02 / tenant-04）；关闭
+ * 稳定复现"vsock agent 20s 未就绪"（两次分别 user-02 / user-04）；关闭
  * 快照后 10/10 通过，确认是快照路径的并发竞态。
  *
  * 这些用例确保闸门真的做到：同一模板串行、不同模板并行、许可不泄漏。

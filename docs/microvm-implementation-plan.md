@@ -20,7 +20,7 @@
 | 阶段 | 目标 | 预计交付物 | 验收 |
 |---|---|---|---|
 | Phase 1 | jailer + vsock agent + 私有运行目录 | §1.1–§1.5 全部新文件 + 改造清单 | §1.6 测试清单全绿 |
-| Phase 2 | 工作区导出 + 磁盘限额 + 租户准入接入 | §2 全部 | §2.4 验收 |
+| Phase 2 | 工作区导出 + 磁盘限额 + 用户准入接入 | §2 全部 | §2.4 验收 |
 | Phase 3 | snapshot/restore + CoW + microVM 预热池 | §3 全部 | §3.4 验收 |
 | Phase 4 | 出口网关 + controlled-egress + GPU ACL | §4 全部 | §4.4 验收 |
 
@@ -339,7 +339,7 @@ export class FirecrackerVsockBridge {
 
 ---
 
-# Phase 2：工作区导出 + 磁盘限额 + 租户准入
+# Phase 2：工作区导出 + 磁盘限额 + 用户准入
 
 ## 2.1 工作区导出（终止时回写）
 
@@ -371,11 +371,11 @@ export class WorkspaceDiskExporter {
 
 - workspace 模板扩容到可配置大小：`HARNESS_VM_WORKSPACE_DISK_MIB`（默认 512）；构建脚本参数化；
 - jailer cgroup 在策略无显式限额时也必须下发默认值（cpu 2 核、内存 512MB），防止无限制 VM；
-- 磁盘用量观测：导出时统计，超配额（`HARNESS_TENANT_STORAGE_QUOTA_MIB`，Phase 2 可只做观测+审计，不强制）记 `policy_decisions` 或审计事件。
+- 磁盘用量观测：导出时统计，超配额（`HARNESS_USER_STORAGE_QUOTA_MIB`，Phase 2 可只做观测+审计，不强制）记 `policy_decisions` 或审计事件。
 
-## 2.3 租户准入接入
+## 2.3 用户准入接入
 
-`run-scheduler.ts` 与 `tenant-run-scheduler.ts` 已按 run 数准入；Phase 2 只需把 microVM 的**内存占用预估**纳入：`resource-admission-service.ts` 增加 `estimateSandboxMemoryMiB(profile)`——strict profile 返回 `memoryMb + 64`（VMM 开销），容器返回现状值。准入判定照常。【不要动】调度器其余逻辑。
+`run-scheduler.ts` 与 `user-run-scheduler.ts` 已按 run 数准入；Phase 2 只需把 microVM 的**内存占用预估**纳入：`resource-admission-service.ts` 增加 `estimateSandboxMemoryMiB(profile)`——strict profile 返回 `memoryMb + 64`（VMM 开销），容器返回现状值。准入判定照常。【不要动】调度器其余逻辑。
 
 ## 2.4 Phase 2 验收
 
@@ -418,7 +418,7 @@ smoke 新增计时输出：冷启动（无快照）与 restore 启动分别打�
 
 ## 4.2 白名单策略
 - 策略模型扩展：`effective-policy.ts` 的 allowNetwork 细化暂不做；Phase 4 用部署级白名单文件 `config/egress-allowlist.json`：`{"allowed": [{"host": "127.0.0.1", "port": 3000, "purpose": "llm-gateway"}, ...]}`；
-- 网关对每个连接记录审计事件（tenantId 经 netns ↔ VM ↔ sandboxId 反查）；
+- 网关对每个连接记录审计事件（userId 经 netns ↔ VM ↔ sandboxId 反查）；
 - 禁止名单（永远拒绝，代码常量）：`169.254.169.254`、`169.254.0.0/16`、宿主内网段（可配 `HARNESS_EGRESS_DENY_CIDRS`，默认 RFC1918 全段）。
 
 ## 4.3 GPU 服务 ACL（此节允许动 `src/llm-gateway` 之外的部署文件）
@@ -477,7 +477,7 @@ bash scripts/microvm/build-guest-rootfs.sh build/guest-agent build/rootfs.ext4 b
 
 修改前 `npx tsc --noEmit` 已存在以下错误（与本次无关，禁止"顺手修"引入新风险，也禁止新增错误）：
 - `scripts/benchmark-docker-vs-microvm.ts`：TS6133 ×2
-- `scripts/test-multi-tenant-agent.ts`：TS18048 ×5
+- `scripts/test-multi-user-agent.ts`：TS18048 ×5
 - `src/sandbox/microvm/firecracker-serial-bridge.ts`：TS2345/TS2532 ×2
 
 ## 附录 E：已知限制（写进 docs/platform-boundary.md 附录，不视为缺陷）

@@ -7,7 +7,7 @@
 ```text
 旧 submitRun 输入
   → DefaultPiControlPlane
-      → Tenant 默认 HarnessTemplateVersion
+      → User 默认 HarnessTemplateVersion
       → HarnessInstance
       → HarnessSession
   → AgentRun 固定 templateVersionId / harnessInstanceId
@@ -23,7 +23,7 @@
       → 完成 Attempt / Sandbox / Instance 状态
 ```
 
-旧 HTTP 和应用调用方不需要立即提供 Template/Instance ID。兼容入口按 Tenant 懒创建
+旧 HTTP 和应用调用方不需要立即提供 Template/Instance ID。兼容入口按 User 懒创建
 默认对象，但正式应用创建的新 Run 一定写入不可变版本和 Instance 引用。直接构造
 `RunService` 的旧单元测试仍可不启用控制面，用于保护 Stage 0 契约。
 
@@ -31,12 +31,12 @@
 
 ### HarnessInstance
 
-`HarnessInstance` 绑定 Tenant、TemplateVersion、Runtime 类型和能力声明。
+`HarnessInstance` 绑定 User、TemplateVersion、Runtime 类型和能力声明。
 
 ```ts
 export interface HarnessInstance {
     readonly id: string;
-    readonly tenantId: string;
+    readonly userId: string;
     readonly templateVersionId: string;
     readonly capabilityProfileId: string;
     readonly runtimeKind: "PI";
@@ -98,7 +98,7 @@ PiAdapter 报告自己的部署能力。TemplateVersion 分别声明 required �
 有效策略严格由以下五层交集产生：
 
 ```text
-Platform ∩ Tenant ∩ Template ∩ Workspace ∩ Run
+Platform ∩ User ∩ Template ∩ Workspace ∩ Run
 ```
 
 集合权限取交集，布尔权限取 AND，资源上限取最小值：
@@ -133,7 +133,7 @@ Compiler 将控制面意图变成 Pi 的具体配置：
 - Skill 通过 Pi `DefaultResourceLoader.skillsOverride` 真正过滤；
 - 编译配置放进 `RuntimeStartRequest.execution`，PiAdapter 不再只读取进程级全局配置。
 
-因此同一个 PiAdapter 可以为两个 Tenant 创建不同 Tool/Skill 配置的 Session。
+因此同一个 PiAdapter 可以为两个 User 创建不同 Tool/Skill 配置的 Session。
 
 ## 5. ToolGateway 强制边界
 
@@ -214,7 +214,7 @@ Migration v7 新增：
 
 它证明：
 
-1. 两个 Tenant 使用同一 Runtime 得到不同 Tool 配置；
+1. 两个 User 使用同一 Runtime 得到不同 Tool 配置；
 2. Run 可追溯到 TemplateVersion、Instance、Session 和 Attempt；
 3. 排队后发布 Template v2 不改变 Run 已固定的 v1；
 4. 强制能力缺失时 Runtime/Sandbox 启动次数为零；

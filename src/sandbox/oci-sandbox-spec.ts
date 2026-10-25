@@ -17,12 +17,12 @@ export interface OciSandboxCompilerConfig {
     readonly runtime: SandboxRuntime;
     /**
      * RUN：容器 /workspace 只挂本 Run 的工作区（默认）。
-     * TENANT：挂租户工作区根，同租户所有 Run 共享同一挂载点——池因此可以
-     * 跨工作区复用，代价是同租户跨 Run 的文件隔离由物理视野降为策略约束。
+     * USER：挂用户工作区根，同用户所有 Run 共享同一挂载点——池因此可以
+     * 跨工作区复用，代价是同用户跨 Run 的文件隔离由物理视野降为策略约束。
      */
-    readonly workspaceScope?: "run" | "tenant";
-    /** TENANT 视野下租户工作区的根目录（即 Harness 的 workspaceRoot）。 */
-    readonly tenantWorkspaceRoot?: string;
+    readonly workspaceScope?: "run" | "user";
+    /** USER 视野下用户工作区的根目录（即 Harness 的 workspaceRoot）。 */
+    readonly userWorkspaceRoot?: string;
     /**
      * N14：容器 PID 上限（docker --pids-limit）。未配置时沿用 128。
      * gVisor（runsc）在触达该上限时会**终结整个沙箱**，runsc 的全局进程
@@ -77,9 +77,9 @@ export class OciSandboxSpecCompiler {
             throw new Error(`Sandbox Workspace 超出策略范围：${workspacePath}`);
         }
         const workspaceScope: SandboxWorkspaceScope =
-            this.config.workspaceScope === "tenant" ? "TENANT" : "RUN";
-        const mountedRoot = workspaceScope === "TENANT"
-            ? resolveTenantRoot(this.config.tenantWorkspaceRoot, policy.tenantId, workspacePath)
+            this.config.workspaceScope === "user" ? "USER" : "RUN";
+        const mountedRoot = workspaceScope === "USER"
+            ? resolveUserRoot(this.config.userWorkspaceRoot, policy.userId, workspacePath)
             : workspacePath;
         if (policy.resourceLimits.diskMiB !== null) {
             throw new Error("Container bind mount 无法强制磁盘配额，拒绝执行");
@@ -158,29 +158,29 @@ export class OciSandboxSpecCompiler {
 }
 
 /**
- * 解析租户工作区根，并校验它确实是本 Run 工作区的祖先。
+ * 解析用户工作区根，并校验它确实是本 Run 工作区的祖先。
  *
  * 两道校验都在编译期做，不留到运行期：
- *  ① 租户 ID 若含路径分隔符会解析到根之外，必须拒绝；
- *  ② Run 工作区必须落在租户根之下，否则容器挂上去也看不见自己的工作区。
+ *  ① 用户 ID 若含路径分隔符会解析到根之外，必须拒绝；
+ *  ② Run 工作区必须落在用户根之下，否则容器挂上去也看不见自己的工作区。
  */
-function resolveTenantRoot(
+function resolveUserRoot(
     configuredRoot: string | undefined,
-    tenantId: string,
+    userId: string,
     workspacePath: string,
 ): string {
     if (configuredRoot === undefined) {
-        throw new Error("TENANT 工作区视野必须配置租户工作区根目录");
+        throw new Error("USER 工作区视野必须配置用户工作区根目录");
     }
     const root = resolve(configuredRoot);
-    const tenantRoot = resolve(root, tenantId);
-    if (!tenantRoot.startsWith(`${root}${sep}`)) {
-        throw new Error(`租户工作区根越界：${tenantId}`);
+    const userRoot = resolve(root, userId);
+    if (!userRoot.startsWith(`${root}${sep}`)) {
+        throw new Error(`用户工作区根越界：${userId}`);
     }
-    if (!isWithin(workspacePath, tenantRoot)) {
-        throw new Error(`Run 工作区不在租户挂载根内：${workspacePath}`);
+    if (!isWithin(workspacePath, userRoot)) {
+        throw new Error(`Run 工作区不在用户挂载根内：${workspacePath}`);
     }
-    return tenantRoot;
+    return userRoot;
 }
 
 export function stripResourceLimitArgs(args: readonly string[]): string[] {

@@ -1,10 +1,10 @@
 # 异构 Agent Harness 控制面：MVP 后实施路线图
 
 > **历史方案，不是当前实施入口。** 本路线图最初由 ADR 0008 暂停，当前由
-> [ADR 0009](adr/0009-build-a-multi-tenant-agent-task-service.md) 取代。Template、
+> [ADR 0009](adr/0009-build-a-multi-user-agent-task-service.md) 取代。Template、
 > Instance、Policy 和 Sandbox 抽象可作为内部实现继续使用，但不再扩张 Claude、
 > 异构 ResourcePool 或大型控制面。当前唯一实施顺序见
-> [多租户 Agent 任务服务路线图](multi-tenant-agent-task-service-roadmap.zh-CN.md)。
+> [多用户 Agent 任务服务路线图](multi-user-agent-task-service-roadmap.zh-CN.md)。
 
 > 文档版本：v1.0
 > 决策日期：2026-08-05
@@ -13,7 +13,7 @@
 
 ## 1. 目标与完成定义
 
-后续阶段的目标不是把当前服务扩张成普通多租户后台，而是完成：
+后续阶段的目标不是把当前服务扩张成普通多用户后台，而是完成：
 
 > **面向异构 Agent Harness 的资源感知、可恢复执行控制面。**
 
@@ -23,8 +23,8 @@
 
 最终代表性场景：
 
-1. Tenant A 使用 Pi + 本地 Qwen/vLLM，只允许只读 Tool/Skill，受 A6000 资源池约束；
-2. Tenant B 使用 Claude，使用另一组 Tool/Skill 和更严格的 Sandbox，受远程模型
+1. User A 使用 Pi + 本地 Qwen/vLLM，只允许只读 Tool/Skill，受 A6000 资源池约束；
+2. User B 使用 Claude，使用另一组 Tool/Skill 和更严格的 Sandbox，受远程模型
    速率与费用预算约束；
 3. 本地 GPU 压力只让依赖该资源池的 Pi Run 排队，不错误阻塞 Claude Run；
 4. 违反有效策略的工具调用在真实执行前被拒绝，并留下策略版本和理由；
@@ -37,7 +37,7 @@
 
 ### 2.1 控制面负责
 
-- Tenant 归属和逻辑隔离；
+- User 归属和逻辑隔离；
 - HarnessTemplate 版本和期望状态；
 - HarnessInstance 与 Sandbox 生命周期；
 - Runtime Capability 发现和执行保证计算；
@@ -64,7 +64,7 @@
 
 | 对象 | 规范含义 | 明确不等于 |
 | --- | --- | --- |
-| Tenant | 策略、资源、数据和审计归属边界 | 一个永久进程 |
+| User | 策略、资源、数据和审计归属边界 | 一个永久进程 |
 | HarnessTemplate | 版本化期望配置 | 就地修改的运行实例 |
 | HarnessInstance | 绑定 Runtime、Template、Sandbox、策略和资源池的受管执行环境 | Session 或 Run |
 | Session | Runtime 可表达的对话与上下文关系 | 一次实际执行 |
@@ -78,7 +78,7 @@
 
 1. **先迁移现有 Pi 纵向切片，再接第二个 Runtime。** 新抽象必须被真实代码使用，
    不提前建设空泛框架。
-2. **安全能力 fail closed。** 无法落实 Tenant 隔离、Tool 权限或 Sandbox 硬约束时
+2. **安全能力 fail closed。** 无法落实 User 隔离、Tool 权限或 Sandbox 硬约束时
    拒绝执行，不静默降级。
 3. **能力差异显式化。** 统一保证和审计，不假装 Runtime 语义相同。
 4. **配置必须进入执行路径。** Template 或 Policy 只有真实改变 Runtime、Gateway
@@ -122,7 +122,7 @@
 
 退出条件：
 
-- 每个新 Run 可追溯到 Tenant、Template version、Instance、Session 和 Attempt；
+- 每个新 Run 可追溯到 User、Template version、Instance、Session 和 Attempt；
 - 修改 Template 不影响已经启动 Run 的执行证据；
 - Pi 路径不绕过新对象；
 - 不支持的强制能力会在执行前得到明确拒绝。
@@ -132,11 +132,11 @@
 
 ### Stage 2：有效策略与 Sandbox 强制执行
 
-目标：证明多租户配置不是 CRUD，而是可以在真实执行路径上被强制落实。
+目标：证明多用户配置不是 CRUD，而是可以在真实执行路径上被强制落实。
 
 任务：
 
-- 建立平台、Tenant、Template、Workspace 和 Run 策略的交集规则；
+- 建立平台、User、Template、Workspace 和 Run 策略的交集规则；
 - 持久化 EffectivePolicySnapshot、编译结果和拒绝原因；
 - 将 Pi Tool/Skill/模型配置编译到 Runtime；
 - 让 ToolGateway 作为所有受管工具调用的外层强制边界；
@@ -147,7 +147,7 @@
 
 退出条件：
 
-- 同一 Runtime 在两个 Tenant 下产生不同且可验证的 Tool/Skill/模型权限；
+- 同一 Runtime 在两个 User 下产生不同且可验证的 Tool/Skill/模型权限；
 - 被拒绝的调用没有发生真实副作用；
 - Sandbox 退出或失联能够改变 Instance/Run 状态；
 - 所有允许、拒绝和显式降级都可按策略快照解释。
@@ -209,7 +209,7 @@ CPU/内存/磁盘硬限制采用 fail closed，不冒充容器隔离。完整本
 - 增加远程模型 token、rate limit、并发和费用预算资源池；
 - 增加 Sandbox CPU、内存和实例容量资源池；
 - 让 HarnessTemplate 和 Run 声明资源需求与约束；
-- 将 Tenant quota、公平性和 ResourcePool capacity 共同纳入 claim；
+- 将 User quota、公平性和 ResourcePool capacity 共同纳入 claim；
 - 保留原子占位、幂等释放、single-flight drain 和资源恢复自动推进；
 - 对估计 token 和实际 usage 分别记录，使用误差区间，不作任务完成保证。
 
@@ -218,7 +218,7 @@ CPU/内存/磁盘硬限制采用 fail closed，不冒充容器隔离。完整本
 - GPU 压力只阻塞依赖本地 vLLM 池的 Run；
 - 远程模型限流或预算能够独立形成可解释背压；
 - 多资源 claim 不会部分占用后失败泄漏；
-- 两个 Tenant、两个 Runtime、多个资源池下无永久饥饿。
+- 两个 User、两个 Runtime、多个资源池下无永久饥饿。
 
 ### Stage 6：生产深度与验证
 
@@ -228,7 +228,7 @@ CPU/内存/磁盘硬限制采用 fail closed，不冒充容器隔离。完整本
 
 - 将持久化迁移到支持并发 claim 和 lease 的数据库；
 - 支持多个 Coordinator/Worker 的幂等竞争；
-- 建立认证、Tenant 授权和服务身份；
+- 建立认证、User 授权和服务身份；
 - 接入结构化日志、指标和分布式 trace；
 - 建立策略、Template 和 Adapter 版本兼容及迁移规则；
 - 压测 noisy neighbor、公平性、恢复时间、审计完整性和策略拒绝；
@@ -271,12 +271,12 @@ CPU/内存/磁盘硬限制采用 fail closed，不冒充容器隔离。完整本
 
 | 维度 | 必须回答的问题 |
 | --- | --- |
-| 正确性 | 状态、租户归属、策略和资源占用是否原子且可重建？ |
+| 正确性 | 状态、用户归属、策略和资源占用是否原子且可重建？ |
 | 安全 | 被拒绝的工具、文件、网络和 Secret 访问是否真的没有发生？ |
 | 恢复 | 恢复了哪一层，为什么可以自动恢复，副作用是否重复？ |
 | 异构性 | Pi 与 Claude 的差异是否被诚实表达并影响执行？ |
 | 资源 | 哪个资源池阻塞了 Run，资源恢复后是否自动推进？ |
-| 公平性 | Tenant 和大任务是否会造成永久饥饿？ |
+| 公平性 | User 和大任务是否会造成永久饥饿？ |
 | 审计 | 能否从 Template 一直解释到最终结果，并下钻原始证据？ |
 | 可运维 | 控制面重启、Runtime 退出和 Sandbox 丢失后能否收敛？ |
 

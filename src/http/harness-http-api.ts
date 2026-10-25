@@ -43,8 +43,8 @@ export class HarnessHttpApi implements HttpRouteContext {
         readonly trustProxy = false,
     ) {}
 
-    /** 同一请求可能多次 requirePrincipal（例如先读 run 再读 events）；租户限流只记一次。 */
-    private readonly tenantRateLimited = new WeakSet<Request>();
+    /** 同一请求可能多次 requirePrincipal（例如先读 run 再读 events）；用户限流只记一次。 */
+    private readonly userRateLimited = new WeakSet<Request>();
 
     /** §9.8 v1.4：进程内 HTTP 状态码计数，供 /metrics 渲染。 */
     readonly httpRequestCounts = new Map<number, number>();
@@ -97,16 +97,16 @@ export class HarnessHttpApi implements HttpRouteContext {
         }
     }
 
-    private enforceTenantRateLimit(request: Request, tenantId: string): void {
+    private enforceUserRateLimit(request: Request, userId: string): void {
         if (this.rateLimiter === undefined || this.rateLimiter.enabled === false) {
             return;
         }
-        if (this.tenantRateLimited.has(request)) return;
-        this.tenantRateLimited.add(request);
+        if (this.userRateLimited.has(request)) return;
+        this.userRateLimited.add(request);
 
-        const decision = this.rateLimiter.consumeTenant(tenantId);
+        const decision = this.rateLimiter.consumeUser(userId);
         if (decision.allowed === false) {
-            throw new HttpError(429, "租户请求过于频繁，请稍后再试", {
+            throw new HttpError(429, "用户请求过于频繁，请稍后再试", {
                 "retry-after": String(decision.retryAfterSeconds),
                 "x-ratelimit-limit": String(decision.limit),
                 "x-ratelimit-remaining": "0",
@@ -164,7 +164,7 @@ export class HarnessHttpApi implements HttpRouteContext {
         }
         if (request !== undefined && this.accessControl !== undefined) {
             const principal = this.requirePrincipal(request, scope);
-            if (run.tenantId !== principal.tenantId) {
+            if (run.userId !== principal.userId) {
                 throw new HttpError(404, `找不到 AgentRun：${runId}`);
             }
         }
@@ -175,8 +175,8 @@ export class HarnessHttpApi implements HttpRouteContext {
     requirePrincipal(request: Request, scope: string): RequestPrincipal {
         if (this.accessControl === undefined) {
             // Retained only for direct legacy unit tests; composition always injects auth.
-            this.enforceTenantRateLimit(request, "legacy");
-            return { tenantId: "legacy", scopes: ["*"] };
+            this.enforceUserRateLimit(request, "legacy");
+            return { userId: "legacy", scopes: ["*"] };
         }
         const rawKey = bearerToken(request)
             ?? request.headers.get("x-api-key")?.trim();
@@ -186,8 +186,8 @@ export class HarnessHttpApi implements HttpRouteContext {
         }
         const principal = this.accessControl.authenticate(rawKey);
         if (principal === null) {
-            // D4：DENY 记录被尝试密钥的摘要（不存明文），租户归属对
-            // 无效密钥天然不可知，因此 tenantId 保持 NULL。
+            // D4：DENY 记录被尝试密钥的摘要（不存明文），用户归属对
+            // 无效密钥天然不可知，因此 userId 保持 NULL。
             this.audit("AUTHENTICATE", "DENY", null, "invalid_or_revoked_api_key", {
                 attemptedKeyDigest: digest(rawKey),
             });
@@ -197,7 +197,7 @@ export class HarnessHttpApi implements HttpRouteContext {
             this.audit(scope, "DENY", principal, "missing_scope");
             throw new HttpError(403, `缺少权限：${scope}`);
         }
-        this.enforceTenantRateLimit(request, principal.tenantId);
+        this.enforceUserRateLimit(request, principal.userId);
         this.audit(scope, "ALLOW", principal, "scope_granted");
         return principal;
     }
@@ -211,7 +211,7 @@ export class HarnessHttpApi implements HttpRouteContext {
     ): void {
         this.accessControl?.auditStore?.record({
             action, outcome,
-            tenantId: principal?.tenantId ?? null,
+            userId: principal?.userId ?? null,
             resourceType: "HTTP_REQUEST",
             resourceId: extra.resourceId ?? null,
             reason,
@@ -228,12 +228,12 @@ export class HarnessHttpApi implements HttpRouteContext {
         resourceId: string | null,
         action: string,
         outcome: "ALLOW" | "DENY",
-        tenantId: string | null,
+        userId: string | null,
         reason: string,
     ): void {
         this.accessControl?.auditStore?.record({
             action, outcome,
-            tenantId,
+            userId,
             resourceType,
             resourceId,
             reason,

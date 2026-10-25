@@ -14,8 +14,8 @@
  *
  * 对照容器版覆盖的 9 项：
  *   runsc_runtime_evidence → microvm_runtime_evidence
- *   cross_tenant_workspace / host_path / path_traversal
- *   tenant_secret / unauthorized_secret
+ *   cross_user_workspace / host_path / path_traversal
+ *   user_secret / unauthorized_secret
  *   network_none
  *   pid_limit / tmpfs_limit → 改为 fork bomb 与磁盘熔断
  *   sandbox_lost → VM 进程被杀后状态收敛
@@ -131,8 +131,8 @@ function assert(condition: boolean, message: string): asserts condition {
 }
 
 const root = mkdtempSync(join(tmpdir(), "harness-microvm-attacks-"));
-const workspaceA = join(root, "tenant-a");
-const workspaceB = join(root, "tenant-b");
+const workspaceA = join(root, "user-a");
+const workspaceB = join(root, "user-b");
 // 宿主"机密"文件：VM 内绝不可见（用于验证 guest 看不到宿主文件系统）
 const hostSentinel = join(root, "host-secret");
 mkdirSync(workspaceA, { recursive: true, mode: 0o700 });
@@ -141,14 +141,14 @@ writeFileSync(join(workspaceA, "marker"), "A");
 writeFileSync(join(workspaceB, "marker"), "B");
 writeFileSync(hostSentinel, "host-only");
 
-const tenantA = "tenant-a";
-const tenantB = "tenant-b";
+const userA = "user-a";
+const userB = "user-b";
 const store = new MemorySandboxStore();
 
-// 每个租户只注入自己的 secret（key 按租户 hex 编码，与容器版一致）
+// 每个用户只注入自己的 secret（key 按用户 hex 编码，与容器版一致）
 const secrets: SecretProvider = {
-    get: (tenantId: string, name: string) => (
-        name === "TOKEN" ? `${tenantId}-secret` : null
+    get: (userId: string, name: string) => (
+        name === "TOKEN" ? `${userId}-secret` : null
     ),
 };
 
@@ -181,11 +181,11 @@ async function main(): Promise<void> {
 
     await provider.create({
         id: sandboxA, runId: "run-a", workspacePath: workspaceA,
-        policy: policy("run-a", tenantA, workspaceA),
+        policy: policy("run-a", userA, workspaceA),
     });
     await provider.create({
         id: sandboxB, runId: "run-b", workspacePath: workspaceB,
-        policy: policy("run-b", tenantB, workspaceB),
+        policy: policy("run-b", userB, workspaceB),
     });
 
     // ---- 1. 隔离证据真实（非伪装的"已验证"）----
@@ -213,16 +213,16 @@ async function main(): Promise<void> {
         "host_prepared_file_not_visible：宿主预置文件不出现在 guest 工作区",
     );
 
-    // ---- 3. 跨租户工作区不可见 ----
+    // ---- 3. 跨用户工作区不可见 ----
     // A 的 VM 内不应存在指向 B 的任何路径
     assert(
-        (await provider.execute(sandboxA, ["sh", "-c", "test ! -e /workspace/tenant-b/marker"])).exitCode === 0,
-        "cross_tenant_workspace：A 看不到 B 的 workspace",
+        (await provider.execute(sandboxA, ["sh", "-c", "test ! -e /workspace/user-b/marker"])).exitCode === 0,
+        "cross_user_workspace：A 看不到 B 的 workspace",
     );
     // 宿主绝对路径在 guest 内不存在（无共享挂载）
     assert(
         (await provider.execute(sandboxA, ["sh", "-c", `test ! -e ${workspaceB}/marker`])).exitCode === 0,
-        "cross_tenant_workspace：A 看不到 B 的宿主绝对路径",
+        "cross_user_workspace：A 看不到 B 的宿主绝对路径",
     );
     // A 的 guest 内搜索 B 的 marker 内容（内容级隔离，非仅路径级）。
     // 只扫 /workspace（唯一的数据盘）：全盘 grep / 会遍历整个 rootfs，
@@ -231,7 +231,7 @@ async function main(): Promise<void> {
         (await provider.execute(sandboxA, [
             "sh", "-c", "grep -rq 'B-ONLY-MARKER' /workspace 2>/dev/null && echo LEAK || echo CLEAN",
         ])).stdout.includes("CLEAN"),
-        "cross_tenant_workspace：A 的工作区搜不到 B 的内容",
+        "cross_user_workspace：A 的工作区搜不到 B 的内容",
     );
 
     // ---- 4. 宿主路径不可见（microVM 无共享挂载）----
@@ -306,10 +306,10 @@ async function main(): Promise<void> {
     );
 
     // ---- 6. Secret 隔离 ----
-    assert((await stdout(sandboxA, ["sh", "-c", "printf %s \"$TOKEN\""])).trim() === "tenant-a-secret",
-        "tenant_secret：A 拿到自己的 secret");
-    assert((await stdout(sandboxB, ["sh", "-c", "printf %s \"$TOKEN\""])).trim() === "tenant-b-secret",
-        "tenant_secret：B 拿到自己的 secret");
+    assert((await stdout(sandboxA, ["sh", "-c", "printf %s \"$TOKEN\""])).trim() === "user-a-secret",
+        "user_secret：A 拿到自己的 secret");
+    assert((await stdout(sandboxB, ["sh", "-c", "printf %s \"$TOKEN\""])).trim() === "user-b-secret",
+        "user_secret：B 拿到自己的 secret");
     assert(
         (await provider.execute(sandboxA, ["sh", "-c", "test -z \"$OTHER_TOKEN\""])).exitCode === 0,
         "unauthorized_secret：未授权 secret 不可见",
@@ -488,13 +488,13 @@ async function main(): Promise<void> {
     }, null, 2));
 }
 
-function policy(runId: string, tenantId: string, workspacePath: string) {
+function policy(runId: string, userId: string, workspacePath: string) {
     return {
         ...unrestrictedPolicy,
         layers: [],
-        id: `policy-${tenantId}`,
+        id: `policy-${userId}`,
         runId,
-        tenantId,
+        userId,
         createdAt: new Date().toISOString(),
         workspaceRoots: [workspacePath],
         allowNetwork: false,

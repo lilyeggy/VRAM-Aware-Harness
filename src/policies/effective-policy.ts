@@ -7,7 +7,7 @@ export { isWithin } from "../utils/path-utils.ts";
 
 export type PolicyLayerKind =
     | "PLATFORM"
-    | "TENANT"
+    | "USER"
     | "TEMPLATE"
     | "WORKSPACE"
     | "RUN";
@@ -39,7 +39,7 @@ export interface PolicyLayer extends PolicyConstraints {
 export interface EffectivePolicySnapshot extends PolicyConstraints {
     readonly id: string;
     readonly runId: string;
-    readonly tenantId: string;
+    readonly userId: string;
     readonly layers: readonly PolicyLayer[];
     readonly createdAt: string;
 }
@@ -78,12 +78,12 @@ export function createPolicyLayer(
 export function computeEffectivePolicy(input: {
     id: string;
     runId: string;
-    tenantId: string;
+    userId: string;
     layers: readonly PolicyLayer[];
     createdAt: string;
 }): EffectivePolicySnapshot {
     const kinds = new Set(input.layers.map((layer) => layer.kind));
-    for (const kind of ["PLATFORM", "TENANT", "TEMPLATE", "WORKSPACE", "RUN"] as const) {
+    for (const kind of ["PLATFORM", "USER", "TEMPLATE", "WORKSPACE", "RUN"] as const) {
         if (!kinds.has(kind)) {
             throw new Error(`缺少策略层：${kind}`);
         }
@@ -96,7 +96,7 @@ export function computeEffectivePolicy(input: {
     return Object.freeze({
         id: input.id,
         runId: input.runId,
-        tenantId: input.tenantId,
+        userId: input.userId,
         layers: Object.freeze([...input.layers]),
         createdAt: input.createdAt,
         ...freezeConstraints(effective),
@@ -154,7 +154,7 @@ function intersectRoots(
 }
 
 /**
- * B2 网络边界：请求级策略显式要求联网，而平台/租户交集后的有效策略不允许联网时，
+ * B2 网络边界：请求级策略显式要求联网，而平台/用户交集后的有效策略不允许联网时，
  * 必须 fail-closed 拒绝该 Run，而不是静默降级为“无网运行”。
  *
  * 背景：`computeEffectivePolicy` 对布尔权限取交集（deny wins），因此

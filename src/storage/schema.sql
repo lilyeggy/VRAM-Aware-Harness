@@ -3,7 +3,7 @@ CREATE TABLE "access_audit_events" (
                 timestamp TEXT NOT NULL,
                 action TEXT NOT NULL,
                 outcome TEXT NOT NULL CHECK (outcome IN ('ALLOW', 'DENY')),
-                tenant_id TEXT,
+                user_id TEXT,
                 resource_type TEXT,
                 resource_id TEXT,
                 reason TEXT NOT NULL
@@ -13,9 +13,9 @@ CREATE TABLE agent_runs (
                 -- Harness 自己生成的 run ID，作为业务主键。
                 id TEXT PRIMARY KEY,
 
-                -- tenant_id 用来支持未来多租户隔离。
-                -- 即使 Day 2 还没有真正多租户，先把字段放进 schema 可以避免后续大改。
-                tenant_id TEXT NOT NULL,
+                -- user_id 用来支持未来多用户隔离。
+                -- 即使 Day 2 还没有真正多用户，先把字段放进 schema 可以避免后续大改。
+                user_id TEXT NOT NULL,
 
                 -- harness_session_id 表示这个 run 属于哪个 Harness 会话。
                 -- 一个 session 里可能会有多个 run。
@@ -69,7 +69,7 @@ CREATE TABLE agent_runs (
 CREATE TABLE "api_credentials" (
                 id TEXT PRIMARY KEY,
                 key_digest TEXT NOT NULL UNIQUE,
-                tenant_id TEXT NOT NULL,
+                user_id TEXT NOT NULL,
                 scopes_json TEXT NOT NULL CHECK (json_valid(scopes_json)),
                 created_at TEXT NOT NULL,
                 revoked_at TEXT
@@ -96,7 +96,7 @@ CREATE TABLE checkpoints (
 CREATE TABLE effective_policy_snapshots (
                 id TEXT PRIMARY KEY,
                 run_id TEXT NOT NULL,
-                tenant_id TEXT NOT NULL,
+                user_id TEXT NOT NULL,
                 layers_json TEXT NOT NULL CHECK (json_valid(layers_json)),
                 effective_json TEXT NOT NULL CHECK (json_valid(effective_json)),
                 created_at TEXT NOT NULL,
@@ -105,7 +105,7 @@ CREATE TABLE effective_policy_snapshots (
 
 CREATE TABLE harness_sessions (
                 id TEXT PRIMARY KEY,
-                tenant_id TEXT NOT NULL,
+                user_id TEXT NOT NULL,
                 workspace_id TEXT,
                 title TEXT,
                 runtime_session_ref TEXT,
@@ -324,24 +324,24 @@ CREATE TABLE users (
 
 CREATE TABLE workspaces (
                 id TEXT PRIMARY KEY,
-                tenant_id TEXT NOT NULL,
+                user_id TEXT NOT NULL,
                 name TEXT NOT NULL,
                 root_path TEXT NOT NULL UNIQUE,
                 created_at TEXT NOT NULL,
-                UNIQUE (tenant_id, name)
+                UNIQUE (user_id, name)
             );;
 
-CREATE INDEX idx_access_audit_tenant_timestamp
-                ON access_audit_events(tenant_id, timestamp);
+CREATE INDEX idx_access_audit_user_timestamp
+                ON access_audit_events(user_id, timestamp);
 
 CREATE INDEX idx_agent_runs_session
                 ON agent_runs(harness_session_id);
 
-CREATE INDEX idx_agent_runs_tenant_status
-                ON agent_runs(tenant_id, status);
+CREATE INDEX idx_agent_runs_user_status
+                ON agent_runs(user_id, status);
 
-CREATE INDEX idx_api_credentials_tenant
-                ON api_credentials(tenant_id, revoked_at);
+CREATE INDEX idx_api_credentials_user
+                ON api_credentials(user_id, revoked_at);
 
 CREATE INDEX idx_checkpoints_run_created
                 ON checkpoints(run_id, created_at);
@@ -371,5 +371,5 @@ CREATE INDEX idx_tool_executions_run_status
 CREATE INDEX idx_user_sessions_token
                 ON user_sessions(token_digest, revoked_at, expires_at);
 
-CREATE INDEX idx_workspaces_tenant
-                ON workspaces(tenant_id, created_at);
+CREATE INDEX idx_workspaces_user
+                ON workspaces(user_id, created_at);

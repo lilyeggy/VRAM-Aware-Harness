@@ -13,7 +13,7 @@ import { McpToolRegistry } from "../mcp/mcp-tool-registry.ts";
 import { ApiCredentialStore } from "../auth/api-credential-store.ts";
 import { assertRegistrationAllowed } from "../auth/registration-policy.ts";
 import { AccessAuditStore } from "../audit/access-audit-store.ts";
-import { TenantBillingStore } from "../billing/tenant-billing.ts";
+import { UserBillingStore } from "../billing/user-billing.ts";
 import { WorkspaceStore } from "../workspaces/workspace-store.ts";
 import { WorkspaceService } from "../workspaces/workspace-service.ts";
 import { RunWorkspaceResultCoordinator } from "../workspaces/run-workspace-result.ts";
@@ -71,8 +71,8 @@ import {
     RunScheduler,
 } from "../scheduling/run-scheduler.ts";
 import {
-    TenantRunScheduler,
-} from "../scheduling/tenant-run-scheduler.ts";
+    UserRunScheduler,
+} from "../scheduling/user-run-scheduler.ts";
 import { openHarnessDatabase } from "../storage/database.ts";
 import { ModelRouter } from "../llm-gateway/model-router.ts";
 import { LlmGateway } from "../llm-gateway/llm-gateway.ts";
@@ -118,8 +118,8 @@ export interface HarnessComposition {
     workspaceStore:WorkspaceStore;
     workspaceService:WorkspaceService;
     accessAuditStore:AccessAuditStore;
-    tenantBillingStore:TenantBillingStore;
-    scheduler:TenantRunScheduler;
+    userBillingStore:UserBillingStore;
+    scheduler:UserRunScheduler;
     queuePump:RunScheduler;
     runtime:AgentRuntime;
     /** 支柱 2：双卡 vLLM 网关（未配置后端时为 undefined）。 */
@@ -166,7 +166,7 @@ export async function createHarnessApplication(
     // 避免 user_sessions 随每次登录无限增长。
     credentialStore.pruneSessions();
     const accessAuditStore = new AccessAuditStore(database);
-    const tenantBillingStore = new TenantBillingStore(database);
+    const userBillingStore = new UserBillingStore(database);
     const workspaceStore = new WorkspaceStore(database);
     const workspaceService = new WorkspaceService(
         config.workspaceRoot,
@@ -195,7 +195,7 @@ export async function createHarnessApplication(
         try {
             credentialStore.create({
                 rawKey: config.bootstrapApiKey,
-                tenantId: "bootstrap",
+                userId: "bootstrap",
                 scopes: ["*"],
             });
         } catch (error) {
@@ -210,7 +210,7 @@ export async function createHarnessApplication(
         try {
             credentialStore.create({
                 rawKey: config.agentApiKey,
-                tenantId: "agent-runtime",
+                userId: "agent-runtime",
                 scopes: ["models:generate"],
             });
         } catch (error) {
@@ -242,14 +242,14 @@ export async function createHarnessApplication(
                 ...(config.sandboxBrokerControlToken === undefined
                     ? {}
                     : { controlToken: config.sandboxBrokerControlToken }),
-                // Master 可能同时服务多个租户；terminate 时从 sandbox -> run
-                // 反查归属，Broker 再用它做跨租户校验。
-                resolveTenantId: (sandboxId) => {
+                // Master 可能同时服务多个用户；terminate 时从 sandbox -> run
+                // 反查归属，Broker 再用它做跨用户校验。
+                resolveUserId: (sandboxId) => {
                     const record = sandboxStore.get(sandboxId);
                     if (record === null) {
                         return null;
                     }
-                    return runStore.get(record.runId)?.tenantId ?? null;
+                    return runStore.get(record.runId)?.userId ?? null;
                 },
             })
             : config.sandboxProvider === "container" || config.sandboxProvider === "microvm"
@@ -381,10 +381,10 @@ export async function createHarnessApplication(
         },
     );
     runServiceRef = runService;
-    const scheduler = new TenantRunScheduler({
+    const scheduler = new UserRunScheduler({
         maxActiveRuns:config.maxActiveRuns,
-        maxActiveRunsPerTenant:config.maxActiveRunsPerTenant,
-        // N10：老化插队，给被洪泛租户挡住的正常租户一个确定的等待上界。
+        maxActiveRunsPerUser:config.maxActiveRunsPerUser,
+        // N10：老化插队，给被洪泛用户挡住的正常用户一个确定的等待上界。
         agingMs:config.schedulerAgingMs ?? 0,
     });
     const coordinator = new RunScheduler(
@@ -392,13 +392,13 @@ export async function createHarnessApplication(
         scheduler,
         {
             // 支柱 3：排队 TTL——队列等待超过门限的 Run 安全熔断为
-            // FAILED(QUEUE_TIMEOUT)，防止多租户调度器被死等任务拖垮。
+            // FAILED(QUEUE_TIMEOUT)，防止多用户调度器被死等任务拖垮。
             queueTtlMs: config.queueTtlMs,
             // §9.8 v1.4 Phase 2：租约回收 + 队列深度 backpressure（0 = 不启用）。
             leaseManager,
             maxQueuedRuns: config.maxQueuedRuns > 0 ? config.maxQueuedRuns : undefined,
-            maxQueuedRunsPerTenant: config.maxQueuedRunsPerTenant > 0
-                ? config.maxQueuedRunsPerTenant
+            maxQueuedRunsPerUser: config.maxQueuedRunsPerUser > 0
+                ? config.maxQueuedRunsPerUser
                 : undefined,
             // B4/B5：DB 对账——孤儿 QUEUED Run 重入队 + TTL 不依赖 pump 存活。
             queuedRunReader: runStore,
@@ -551,7 +551,7 @@ export async function createHarnessApplication(
     const rateLimiter = new RateLimiter({
         enabled: config.rateLimitEnabled,
         windowMs: config.rateLimitWindowMs,
-        maxRequestsPerTenant: config.rateLimitMaxPerTenant,
+        maxRequestsPerUser: config.rateLimitMaxPerUser,
         maxRequestsPerIp: config.rateLimitMaxPerIp,
     });
     const httpApi = new HarnessHttpApi(
@@ -573,7 +573,7 @@ export async function createHarnessApplication(
             revokeAllSessions: (userId) => credentialStore.revokeAllSessions(userId),
             workspaceService,
             auditStore: accessAuditStore,
-            billingStore: tenantBillingStore,
+            billingStore: userBillingStore,
         },
         llmGateway,
         // N8：提交期输入上界。
@@ -607,7 +607,7 @@ export async function createHarnessApplication(
         workspaceStore,
         workspaceService,
         accessAuditStore,
-        tenantBillingStore,
+        userBillingStore,
         scheduler,
         queuePump,
         runtime,
@@ -742,9 +742,9 @@ function createContainerSandboxRouter(
         ...(config.containerPidsLimit === undefined
             ? {}
             : { pidsLimit: config.containerPidsLimit }),
-        // TENANT 视野：容器挂租户工作区根。
-        ...(config.sandboxWorkspaceScope === "tenant"
-            ? { workspaceScope: "tenant" as const, tenantWorkspaceRoot: config.workspaceRoot }
+        // USER 视野：容器挂用户工作区根。
+        ...(config.sandboxWorkspaceScope === "user"
+            ? { workspaceScope: "user" as const, userWorkspaceRoot: config.workspaceRoot }
             : {}),
     });
     return new SandboxProviderRouter({

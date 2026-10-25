@@ -2484,7 +2484,7 @@
           <p id="mechanismSummary">系统首先要能回答：“这是谁的哪一项工作？这次尝试和上次尝试是否相同？”没有稳定身份，后续的状态、重试、审计都无从挂载。</p>
           <div class="detail-list">
             <div class="detail-item"><strong>故障模型</strong><span id="mechanismFailure">请求重发、客户端断线、Worker 重启后，系统无法判断看到的是新任务还是旧任务。</span></div>
-            <div class="detail-item"><strong>常见机制</strong><span id="mechanismTools">Tenant ID、Session ID、Task ID、Run ID、Attempt ID、Tool Call ID、Correlation ID。</span></div>
+            <div class="detail-item"><strong>常见机制</strong><span id="mechanismTools">User ID、Session ID、Task ID、Run ID、Attempt ID、Tool Call ID、Correlation ID。</span></div>
             <div class="detail-item"><strong>重要取舍</strong><span id="mechanismTradeoff">业务任务与执行尝试要不要分开？如果 Run 重试，是同一个 Run 还是新的 Attempt？</span></div>
             <div class="detail-item"><strong>验证方式</strong><span id="mechanismTest">让请求断线重发，再检查是否能准确关联到原任务且不会重复创建。</span></div>
           </div>
@@ -2520,7 +2520,7 @@
           </label>
           <label class="switch">
             <input type="checkbox" id="guardIsolation" checked />
-            <span><strong>工具权限隔离</strong><span>只能访问当前租户允许的数据</span></span>
+            <span><strong>工具权限隔离</strong><span>只能访问当前用户允许的数据</span></span>
           </label>
           <button class="control" id="simulateFailure" type="button">注入故障并运行</button>
         </div>
@@ -2530,7 +2530,7 @@
             <div class="health" id="healthMoney"><strong>1×</strong><span>退款执行次数</span></div>
             <div class="health" id="healthRecovery"><strong>可恢复</strong><span>Worker 崩溃后</span></div>
             <div class="health" id="healthLoad"><strong>稳定</strong><span>突发流量下</span></div>
-            <div class="health" id="healthAccess"><strong>隔离</strong><span>租户数据边界</span></div>
+            <div class="health" id="healthAccess"><strong>隔离</strong><span>用户数据边界</span></div>
           </div>
           <div class="system-flow">
             <div class="system-node" id="failureIngress"><span class="warning-pulse"></span><div><strong>请求入口</strong><span>重复提交 + 突发流量</span></div></div>
@@ -2543,7 +2543,7 @@
           </div>
           <div class="incident" id="incidentText">
             <strong>系统当前具备四层防护</strong>
-            注入故障后，重复请求会被识别；未完成任务能从检查点恢复；突发流量进入队列；工具只能读取当前租户的数据。
+            注入故障后，重复请求会被识别；未完成任务能从检查点恢复；突发流量进入队列；工具只能读取当前用户的数据。
           </div>
         </div>
       </div>
@@ -2635,7 +2635,7 @@
             <span class="pattern-no">04</span><span><strong>事件驱动分布式 Harness</strong><span>组件通过队列和事件解耦</span></span><span><strong>适合</strong><span>高吞吐、异步、多下游消费者</span></span><span><strong>主要代价</strong><span>顺序、一致性、重复消费更难</span></span>
           </button>
           <button class="pattern-button" type="button" data-pattern="platform">
-            <span class="pattern-no">05</span><span><strong>多租户 Agent Platform</strong><span>统一治理多种 Agent 与 Runtime</span></span><span><strong>适合</strong><span>组织级共享、配额、合规与成本治理</span></span><span><strong>主要代价</strong><span>平台复杂度和团队投入最高</span></span>
+            <span class="pattern-no">05</span><span><strong>多用户 Agent Platform</strong><span>统一治理多种 Agent 与 Runtime</span></span><span><strong>适合</strong><span>组织级共享、配额、合规与成本治理</span></span><span><strong>主要代价</strong><span>平台复杂度和团队投入最高</span></span>
           </button>
         </div>
 
@@ -2885,7 +2885,7 @@
         <article class="method-step">
           <span class="method-no">02</span>
           <strong>定义工作单元与身份</strong>
-          <span>区分 Tenant、Session、Task、Run、Attempt、Turn、Tool Call。明确它们的归属和生命周期。</span>
+          <span>区分 User、Session、Task、Run、Attempt、Turn、Tool Call。明确它们的归属和生命周期。</span>
           <span class="deliverable">产物：领域模型 + ID 关系图</span>
         </article>
         <article class="method-step">
@@ -2903,7 +2903,7 @@
         <article class="method-step">
           <span class="method-no">05</span>
           <strong>用故障验证保证</strong>
-          <span>杀 Worker、重复投递、制造超时、压满队列、伪造租户身份，验证系统是否仍守住承诺。</span>
+          <span>杀 Worker、重复投递、制造超时、压满队列、伪造用户身份，验证系统是否仍守住承诺。</span>
           <span class="deliverable">产物：测试、指标、演练与改进闭环</span>
         </article>
       </div>
@@ -3019,7 +3019,7 @@
         summary: "工具把 Agent 的文字决策变成真实世界动作，因此这是风险、权限和副作用最集中的边界。",
         owns: "工具目录、参数模式、凭据、沙箱、浏览器、代码执行、外部 API、数据访问。",
         contract: "最小权限、参数校验、超时、结果上限、幂等键、审计；危险动作需要审批或补偿。",
-        failure: "提示注入诱导越权、重复扣款、工具无限运行、跨租户读数据或把秘密写入模型上下文。",
+        failure: "提示注入诱导越权、重复扣款、工具无限运行、跨用户读数据或把秘密写入模型上下文。",
         question: "这个工具是只读还是写操作？是否可逆？重复调用会怎样？凭据属于谁？"
       },
       platform: {
@@ -3201,7 +3201,7 @@
         label: "FOUNDATION 01", title: "身份与工作单元",
         summary: "系统首先要能回答：“这是谁的哪一项工作？这次尝试和上次尝试是否相同？”没有稳定身份，后续的状态、重试、审计都无从挂载。",
         failure: "请求重发、客户端断线、Worker 重启后，系统无法判断看到的是新任务还是旧任务。",
-        tools: "Tenant ID、Session ID、Task ID、Run ID、Attempt ID、Tool Call ID、Correlation ID。",
+        tools: "User ID、Session ID、Task ID、Run ID、Attempt ID、Tool Call ID、Correlation ID。",
         tradeoff: "业务任务与执行尝试要不要分开？如果 Run 重试，是同一个 Run 还是新的 Attempt？",
         test: "让请求断线重发，再检查是否能准确关联到原任务且不会重复创建。",
         guarantee: "每个重要事实都有稳定归属，跨进程仍可关联。"
@@ -3236,19 +3236,19 @@
       backpressure: {
         label: "FOUNDATION 05", title: "并发与背压",
         summary: "资源永远有限。背压是在系统不能继续以当前速度消费时，主动排队、限流、降级或拒绝。",
-        failure: "一百个请求同时启动模型、浏览器和工具，导致内存耗尽、延迟雪崩并拖垮所有租户。",
+        failure: "一百个请求同时启动模型、浏览器和工具，导致内存耗尽、延迟雪崩并拖垮所有用户。",
         tools: "有界队列、并发信号量、令牌桶、优先级、公平调度、熔断、Admission Control。",
         tradeoff: "排队多久后拒绝？优先级会不会造成饥饿？公平与吞吐如何平衡？",
-        test: "持续压入超过容量的任务，验证队列有界、延迟可测、关键租户不会永久饥饿。",
+        test: "持续压入超过容量的任务，验证队列有界、延迟可测、关键用户不会永久饥饿。",
         guarantee: "负载超过容量时，系统以可预测方式变慢或拒绝，而不是整体失控。"
       },
       isolation: {
         label: "FOUNDATION 06", title: "隔离与权限",
         summary: "Agent 生成的动作不能被天然信任。工具边界需要按身份、上下文、风险和最小权限重新校验。",
-        failure: "提示注入诱导 Agent 读取其他租户文件、泄露密钥、执行危险命令或越权退款。",
-        tools: "RBAC/ABAC、租户隔离、沙箱、Capability Token、审批、参数 Schema、输出过滤。",
+        failure: "提示注入诱导 Agent 读取其他用户文件、泄露密钥、执行危险命令或越权退款。",
+        tools: "RBAC/ABAC、用户隔离、沙箱、Capability Token、审批、参数 Schema、输出过滤。",
         tradeoff: "隔离越强，工具能力和开发体验可能越受限；需要按风险分级。",
-        test: "伪造 tenant_id、注入越权路径、请求危险参数，验证在工具执行前被拒绝并留下审计。",
+        test: "伪造 user_id、注入越权路径、请求危险参数，验证在工具执行前被拒绝并留下审计。",
         guarantee: "Agent 的错误决定被限制在明确的权限与故障域内。"
       },
       observability: {
@@ -3263,10 +3263,10 @@
       economics: {
         label: "FOUNDATION 08", title: "配额、成本与公平",
         summary: "多用户系统不只追求最高吞吐，还要决定谁先得到稀缺资源、谁为成本负责、怎样避免一个主体占满系统。",
-        failure: "一个租户提交大量长任务，其他用户永远等待；预算失控但无法归因到具体任务。",
+        failure: "一个用户提交大量长任务，其他用户永远等待；预算失控但无法归因到具体任务。",
         tools: "Quota、Budget、Rate Limit、Weighted Fair Queue、优先级老化、成本归因、资源估算。",
         tradeoff: "效率、公平、优先级与 SLA 常常冲突；策略需要可解释并能审计。",
-        test: "同时压入不同租户和优先级任务，验证配额、等待上限和成本归因符合策略。",
+        test: "同时压入不同用户和优先级任务，验证配额、等待上限和成本归因符合策略。",
         guarantee: "有限资源按可解释策略分配，成本能够归属和约束。"
       }
     };
@@ -3327,7 +3327,7 @@
         access.querySelector("strong").textContent = "越权";
         access.classList.add("bad");
         document.getElementById("failureTool").classList.add("danger");
-        failures.push("工具相信了 Agent 传来的租户参数，读取了不属于当前用户的订单。");
+        failures.push("工具相信了 Agent 传来的用户参数，读取了不属于当前用户的订单。");
       }
 
       const incident = document.getElementById("incidentText");
@@ -3362,7 +3362,7 @@
       },
       {
         label: "STEP 04 · SCHEDULING", title: "决定何时以及在哪里执行",
-        summary: "调度器根据容量、优先级、租户配额、数据位置和 Worker 能力授予执行租约。",
+        summary: "调度器根据容量、优先级、用户配额、数据位置和 Worker 能力授予执行租约。",
         question: "工程问题：Worker 领取任务后崩溃，谁发现租约过期并重新分配？",
         record: "lease:\n  run_id: run_91_a1\n  worker_id: worker_12\n  expires_at: 10:31:00Z",
         creates: "Lease / Assignment / RUN_STARTED", notYet: "Agent 已经做出正确决策。"
@@ -3377,8 +3377,8 @@
       {
         label: "STEP 06 · TOOL GOVERNANCE", title: "在副作用边界重新校验",
         summary: "工具层不盲目信任模型。它检查 Schema、授权范围、风险、审批、预算和幂等键。",
-        question: "工程问题：提示注入让 Agent 请求其他租户订单时，在哪一层阻止？",
-        record: "tool_policy:\n  scope: tenant_8/orders\n  risk: financial_write\n  approval: granted",
+        question: "工程问题：提示注入让 Agent 请求其他用户订单时，在哪一层阻止？",
+        record: "tool_policy:\n  scope: user_8/orders\n  risk: financial_write\n  approval: granted",
         creates: "Policy Decision / TOOL_APPROVED", notYet: "退款已经在支付系统完成。"
       },
       {
@@ -3459,7 +3459,7 @@
         ops: "高", durability: "高", scale: "大型"
       },
       platform: {
-        label: "SHAPE 05", title: "多租户 Agent Platform",
+        label: "SHAPE 05", title: "多用户 Agent Platform",
         summary: "组织级平台统一承载不同 Agent、模型、工具和产品，提供标准身份、治理、成本、观测与执行接口。",
         truth: "平台控制面与各业务域共同拥有不同层次的事实，需要清晰数据所有权。",
         failure: "抽象过早会限制业务；治理太弱又会使平台只剩一层昂贵代理。",

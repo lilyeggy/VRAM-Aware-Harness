@@ -133,11 +133,11 @@ PUT /actions {"action_type":"InstancePause"}
 结论：快照/恢复在官方二进制上**完全可用**，实测恢复 3 ms（设计目标 ~10 ms 以内）。  
 回归测试见 `tests/sandbox/microvm-snapshot-and-warm-pool.test.ts` 的「pause/resume 协议」用例，用真实 Unix socket 断言请求方法与路径，防止回退到已失效的 `InstancePause`。
 
-### 3.1.1 ⚠️ 多租户约束：快照加速必须搭配 jailer（2026-10-09 真机补充）
+### 3.1.1 ⚠️ 多用户约束：快照加速必须搭配 jailer（2026-10-09 真机补充）
 
 非 jailer 模式下，`vm.snap` 会把黄金 VM 的宿主绝对块设备路径固化进快照。此前驱动
 只复制每 Run 的 `workspace.ext4`，但 `/snapshot/load` 并不会用该副本；10 台恢复 VM
-实际共用黄金 VM 的工作区磁盘，表现为跨租户串写、terminate 导出 0/10。
+实际共用黄金 VM 的工作区磁盘，表现为跨用户串写、terminate 导出 0/10。
 
 jailer 模式下每个 VM 有独立 chroot 与 mount namespace，快照内固化的是
 `/workspace.ext4` 这类 chroot 内路径，因此每台 VM 仍能各自独立。
@@ -552,10 +552,10 @@ cgroup 限额此前**从未被验证过**。实测 jailer 为每台 VM 建独立
 | 容器版断言                       | microVM 版对应                                | 结果      |
 | --------------------------- | --------------------------------------- | ------- |
 | `runsc_runtime_evidence`   | `microvm_runtime_evidence`                | ✅       |
-| `cross_tenant_workspace`   | 路径级 + 内容级 grep 双查                        | ✅ 3/3   |
+| `cross_user_workspace`   | 路径级 + 内容级 grep 双查                        | ✅ 3/3   |
 | `host_path`                | 目录 + 文件名对照 + **块设备层**                   | ✅ 6/6   |
 | `path_traversal`           | `../` 穿越 + 合法路径未被误封                       | ✅ 2/2   |
-| `tenant_secret` / `unauthorized_secret` | 各租户只拿到自己的 secret        | ✅ 3/3   |
+| `user_secret` / `unauthorized_secret` | 各用户只拿到自己的 secret        | ✅ 3/3   |
 | `network_none`            | 无 eth0、无云元数据地址                             | ✅ 2/2   |
 | `pid_limit`               | → fork 风暴止于 guest 边界                      | ✅       |
 | `tmpfs_limit`             | → 工作区磁盘熔断                                 | ✅       |
@@ -632,21 +632,21 @@ bun run scripts/day7-http-smoke.ts
 
 
 
-## 8. 2026-10-09 补验：Broker 租户隔离 + 外部模型服务模式（历史；M4 后外部观察器为唯一默认）
+## 8. 2026-10-09 补验：Broker 用户隔离 + 外部模型服务模式（历史；M4 后外部观察器为唯一默认）
 
 ### 8.1 目标
 
-- 修复方案 B 的两个 P0/P1 缺口：Broker 无租户归属校验、平台强依赖同机
+- 修复方案 B 的两个 P0/P1 缺口：Broker 无用户归属校验、平台强依赖同机
   vLLM `/metrics` 做资源准入。
 - 约束：不引入 root 依赖；Agent 仍无网络；模型服务仍在平台外。
 
 ### 8.2 改动
 
-- **Broker 租户隔离**：`execute` / `terminate` 请求新增必填 `tenantId`；
-  Broker 在 `create` 时按 `input.policy.tenantId` 记录 sandbox 归属，后续
-  操作校验 owner，不匹配返回 `Broker 拒绝跨租户操作`，未知 sandbox 返回
-  `Broker 不认识 sandbox`。Worker 侧用当前 Run 的 `tenantId` 固定租户；
-  Master 侧在 `terminate` 时通过 `sandbox -> run` 反查租户。
+- **Broker 用户隔离**：`execute` / `terminate` 请求新增必填 `userId`；
+  Broker 在 `create` 时按 `input.policy.userId` 记录 sandbox 归属，后续
+  操作校验 owner，不匹配返回 `Broker 拒绝跨用户操作`，未知 sandbox 返回
+  `Broker 不认识 sandbox`。Worker 侧用当前 Run 的 `userId` 固定用户；
+  Master 侧在 `terminate` 时通过 `sandbox -> run` 反查用户。
 - **外部模型服务模式（历史；M4 后为唯一默认）**：曾新增 `HARNESS_MODEL_SERVICE_MODE=external` 与
   `ExternalModelServiceResourceObserver`；资源快照 `sources` 为 `["EXTERNAL_MODEL_SERVICE"]`、
   GPU/KV 字段为 `null`、并发计数为 0、压力固定 `NORMAL`；平台不要求同机 vLLM `/metrics` 或 `nvidia-smi`。
@@ -665,14 +665,14 @@ bun run scripts/day7-http-smoke.ts
   policy decision `START / RESOURCE_NORMAL`；sandbox `TERMINATED`；
   TOOL `bash uname -r` → `4.14.174`（guest 内核，宿主 6.8.0-136-generic）；
   结束后无 Firecracker/worker 残留，vm-runtime 目录为空。
-- 结论：Broker 租户校验在真实 worker → Broker → microVM 链路上生效；
+- 结论：Broker 用户校验在真实 worker → Broker → microVM 链路上生效；
   external 模式不再依赖同机推理侧指标，且没有给 Agent 增加网络权限。
 
 ### 8.4 本地验证
 
 - `bun test ./tests`：480 pass / 7 skip / 0 fail。
 - `bun run typecheck`：仅既有 9 条基线错误，无新增。
-- 新增测试：`tests/sandbox/sandbox-broker.test.ts`（含跨租户拒绝）、
+- 新增测试：`tests/sandbox/sandbox-broker.test.ts`（含跨用户拒绝）、
   `tests/resources/external-model-service-observer.test.ts`、
   `tests/app/harness-config.test.ts`（默认外部观察器 + production 防线）。
 

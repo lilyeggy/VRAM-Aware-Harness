@@ -150,7 +150,7 @@
     <h3>你的 Agent 视角</h3>
     <p>一次 <b>Run</b> = 一次任务执行。Run 里 Agent 会调用工具：<code>bash</code>、读写文件。</p>
     <p>问题是：这些工具调用<b>不可信</b>。模型可能被提示注入，可能跑出 <code>rm -rf</code>，可能读别人的文件。</p>
-    <p>所以要给每个 Run 配一个<b>沙箱（Sandbox）</b>：工具调用只能在沙箱里发生，沙箱出事不能殃及宿主和其他租户。</p>
+    <p>所以要给每个 Run 配一个<b>沙箱（Sandbox）</b>：工具调用只能在沙箱里发生，沙箱出事不能殃及宿主和其他用户。</p>
   </div>
   <div class="card">
     <h3>沙箱的三种档位</h3>
@@ -367,7 +367,7 @@ agent → 宿主:  {"v":1,"type":"exec_result","id":"…","exitCode":0,"timedOut
   <p><b>要解决的问题：</b>上层（RunService、工具网关）不应该关心底下是 runsc 还是 Firecracker。</p>
   <ul>
     <li><b>统一接口</b>：<code>SandboxProvider</code> 定义 create / terminate / 生命周期事件；<code>SandboxCommandExecutor</code> 定义 execute。</li>
-    <li><b>Broker 进程（生产部署）</b>：Firecracker/jailer 需要 root，不能放在 Master 里。生产由独立的 <code>sandbox-broker</code> 进程持有 Firecracker 与租户 secret；Master 的 <code>BrokerSandboxProvider</code> 通过 Unix socket 调它。Broker 用 <code>SO_PEERCRED</code> 读取对端 uid、用控制 token 拒绝非 Master 的 create，并要求 root 才能启用 jailer。</li>
+    <li><b>Broker 进程（生产部署）</b>：Firecracker/jailer 需要 root，不能放在 Master 里。生产由独立的 <code>sandbox-broker</code> 进程持有 Firecracker 与用户 secret；Master 的 <code>BrokerSandboxProvider</code> 通过 Unix socket 调它。Broker 用 <code>SO_PEERCRED</code> 读取对端 uid、用控制 token 拒绝非 Master 的 create，并要求 root 才能启用 jailer。</li>
     <li><b>按档位路由</b>：<code>SandboxProviderRouter</code> 按 profile 分发。<code>strict</code> 走 <code>MicrovmSandboxProvider</code>，<code>default</code> 走 runsc 容器。两条链路可以灰度并存，出问题可回退。</li>
     <li><b>驱动可替换</b>：<code>MicrovmDriver</code> 是接口，实现有 <code>firecracker</code>（真实）、<code>mock</code>（测试桩）、<code>e2b</code>（未实现，声明为不提供硬件隔离）。</li>
     <li><b>诚实的隔离证据</b>：驱动必须声明 <code>providesHardwareIsolation</code>。只有真实 Firecracker 才会把 <code>runtimeEvidence.verified</code> 置为 true；mock 永远是 false。这杜绝了"假隔离被报告为已验证"。</li>
@@ -388,9 +388,9 @@ agent → 宿主:  {"v":1,"type":"exec_result","id":"…","exitCode":0,"timedOut
          ▼
 Master 进程（非特权）：BrokerSandboxProvider      ──Unix socket（控制 token）──┐
    · create / execute / terminate 转发给 Broker                                  │
-   · terminate 时反查 sandbox→run→tenant，Broker 做跨租户校验                     │
+   · terminate 时反查 sandbox→run→user，Broker 做跨用户校验                     │
                                                                                 ▼
-Sandbox Broker 进程（root，唯一持有 Firecracker/jailer 与租户 secret）
+Sandbox Broker 进程（root，唯一持有 Firecracker/jailer 与用户 secret）
    · SO_PEERCRED 校验对端 uid；拒绝非 Master 的 create
    · 启动时先回收孤儿 VM，再开始服务
    · 内部：MicrovmSandboxProvider → FirecrackerSandboxDriver（即本文 M1–M7）
@@ -398,7 +398,7 @@ Sandbox Broker 进程（root，唯一持有 Firecracker/jailer 与租户 secret�
                                                                                 ▼
                                                               microVM（vsock 命令通道 → guest agent）</pre>
 </div>
-<p class="kv">注意：Master 和 Worker <b>不直接持有 Firecracker</b>。这样即使 Master/Worker 被打穿，也拿不到 root 权限或其他租户的 secret。开发环境（非 broker 配置）则直接在同一进程内装配，并通过 <code>SandboxProviderRouter</code> 把 strict 与 default 两条链路并存。</p>
+<p class="kv">注意：Master 和 Worker <b>不直接持有 Firecracker</b>。这样即使 Master/Worker 被打穿，也拿不到 root 权限或其他用户的 secret。开发环境（非 broker 配置）则直接在同一进程内装配，并通过 <code>SandboxProviderRouter</code> 把 strict 与 default 两条链路并存。</p>
 
 <h3>3.1 组装总图</h3>
 <div class="card">

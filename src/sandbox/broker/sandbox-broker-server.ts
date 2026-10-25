@@ -54,11 +54,11 @@ export class SandboxBrokerServer {
     private readonly server: Server;
     private readonly sockets = new Set<Socket>();
     /**
-     * sandboxId -> 归属租户。create 时从 policy.tenantId 记录；execute/terminate
-     * 必须携带同一 tenantId，否则拒绝。它把“同一 Broker 服务多租户”从约定
-     * 变成协议级校验，防止一个租户的 Worker 拿 sandboxId 操作另一个租户的 VM。
+     * sandboxId -> 归属用户。create 时从 policy.userId 记录；execute/terminate
+     * 必须携带同一 userId，否则拒绝。它把“同一 Broker 服务多用户”从约定
+     * 变成协议级校验，防止一个用户的 Worker 拿 sandboxId 操作另一个用户的 VM。
      */
-    private readonly tenantBySandbox = new Map<string, string>();
+    private readonly userBySandbox = new Map<string, string>();
     /** sandboxId -> capability token；execute/terminate 必须携带匹配 token。 */
     private readonly tokenBySandbox = new Map<string, string>();
     /** capability token -> sandboxId；用于拒绝重复 token。 */
@@ -199,8 +199,8 @@ export class SandboxBrokerServer {
                 const record = this.options.readRecord(handle.id);
                 if (record === null) {
                     // F6：create 已经真实建好 VM，但 readRecord 失败时如果不回收，
-                    // Broker 侧不会登记 tenantBySandbox/tokenBySandbox，后续
-                    // terminate 会在 assertTenant 处直接报“Broker 不认识 sandbox”，
+                    // Broker 侧不会登记 userBySandbox/tokenBySandbox，后续
+                    // terminate 会在 assertUser 处直接报“Broker 不认识 sandbox”，
                     // 连 controlToken 兜底都走不通——变成不可寻址孤儿 VM。
                     try {
                         await this.options.provider.terminate(handle.id);
@@ -209,7 +209,7 @@ export class SandboxBrokerServer {
                     }
                     throw new Error("Broker created sandbox but record is missing: " + handle.id);
                 }
-                this.tenantBySandbox.set(handle.id, request.input.policy.tenantId);
+                this.userBySandbox.set(handle.id, request.input.policy.userId);
                 this.tokenBySandbox.set(handle.id, request.input.token);
                 this.sandboxByToken.set(request.input.token, handle.id);
                 const result: BrokerCreateResult = {
@@ -219,16 +219,16 @@ export class SandboxBrokerServer {
                 return result;
             }
             case "execute":
-                this.assertCapability(request.sandboxId, request.tenantId, request.token, false);
+                this.assertCapability(request.sandboxId, request.userId, request.token, false);
                 return await this.options.provider.execute(
                     request.sandboxId,
                     request.command,
                     request.options,
                 );
             case "terminate":
-                this.assertCapability(request.sandboxId, request.tenantId, request.token, true);
+                this.assertCapability(request.sandboxId, request.userId, request.token, true);
                 await this.options.provider.terminate(request.sandboxId);
-                this.tenantBySandbox.delete(request.sandboxId);
+                this.userBySandbox.delete(request.sandboxId);
                 {
                     const token = this.tokenBySandbox.get(request.sandboxId);
                     if (token !== undefined) {
@@ -275,15 +275,15 @@ export class SandboxBrokerServer {
         }
     }
 
-    private assertTenant(sandboxId: string, tenantId: string): void {
-        const owner = this.tenantBySandbox.get(sandboxId);
+    private assertUser(sandboxId: string, userId: string): void {
+        const owner = this.userBySandbox.get(sandboxId);
         if (owner === undefined) {
             throw new Error("Broker 不认识 sandbox：" + sandboxId);
         }
-        if (owner !== tenantId) {
+        if (owner !== userId) {
             throw new Error(
-                "Broker 拒绝跨租户操作：sandbox " + sandboxId
-                + " 属于租户 " + owner + "，请求租户 " + tenantId,
+                "Broker 拒绝跨用户操作：sandbox " + sandboxId
+                + " 属于用户 " + owner + "，请求用户 " + userId,
             );
         }
     }
@@ -301,11 +301,11 @@ export class SandboxBrokerServer {
      */
     private assertCapability(
         sandboxId: string,
-        tenantId: string,
+        userId: string,
         token: string,
         allowControlToken: boolean,
     ): void {
-        this.assertTenant(sandboxId, tenantId);
+        this.assertUser(sandboxId, userId);
         const expected = this.tokenBySandbox.get(sandboxId);
         if (expected !== undefined && constantTimeEqual(token, expected)) {
             return;

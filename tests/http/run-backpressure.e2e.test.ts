@@ -30,7 +30,7 @@ test("队列深度 backpressure 映射为 429 + Retry-After", async () => {
             method: "POST",
             headers: { "content-type": "application/json" },
             body: JSON.stringify({
-                tenantId: "tenant-a",
+                userId: "user-a",
                 userInput: "排队",
                 workspacePath: "/tmp/a",
             }),

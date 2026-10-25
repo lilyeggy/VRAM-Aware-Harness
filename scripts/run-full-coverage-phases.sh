@@ -125,7 +125,7 @@ phase_base() {
 
 phase_backpressure() {
   stop_master
-  start_master backpressure HARNESS_MAX_ACTIVE_RUNS=1 HARNESS_MAX_ACTIVE_RUNS_PER_TENANT=1 HARNESS_MAX_QUEUED_RUNS=1 || return 1
+  start_master backpressure HARNESS_MAX_ACTIVE_RUNS=1 HARNESS_MAX_ACTIVE_RUNS_PER_USER=1 HARNESS_MAX_QUEUED_RUNS=1 || return 1
   run_matrix backpressure FULLCOVER_BACKPRESSURE=1 FULLCOVER_ONLY=run.backpressure
 }
 

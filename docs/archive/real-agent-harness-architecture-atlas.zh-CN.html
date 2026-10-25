@@ -1536,7 +1536,7 @@
         <div class="layer-stack">
           <div class="layer">
             <span class="layer-name">Product</span>
-            <span class="layer-desc">团队、租户、远程工作区、部署、计费与运营界面</span>
+            <span class="layer-desc">团队、用户、远程工作区、部署、计费与运营界面</span>
           </div>
           <div class="layer active">
             <span class="layer-name">Harness</span>
@@ -1603,9 +1603,9 @@
           <article class="definition">
             <span class="definition-label">Layer 04</span>
             <h3>平台 / Fleet</h3>
-            <p>在 Harness 之上管理多人、多租户、远程环境、配额、合规、部署和运营。</p>
+            <p>在 Harness 之上管理多人、多用户、远程环境、配额、合规、部署和运营。</p>
             <div class="product-strip">
-              <span class="product-tag">Tenant</span>
+              <span class="product-tag">User</span>
               <span class="product-tag">Workspace</span>
               <span class="product-tag">SLO</span>
             </div>
@@ -1856,7 +1856,7 @@
           </div>
           <div class="layer-row">
             <div class="row-layer">Product / Fleet</div>
-            <div class="row-examples">Tenant · remote workspace · quota · audit · SLO</div>
+            <div class="row-examples">User · remote workspace · quota · audit · SLO</div>
             <div class="row-job">管理大量 Harness 实例和用户承诺，是从“单个 Agent 可工作”走向“服务可运营”的一层。</div>
           </div>
         </div>
@@ -1927,7 +1927,7 @@
         tagline: "以仓库上下文、工具权限和生命周期 hooks 为中心的交互式编码 Harness。",
         center: "让模型在真实代码库中高频迭代，同时让用户和组织能明确控制它可以读取、修改和执行什么。",
         signature: "CLAUDE.md / rules / skills 的分层上下文，加上 permission modes、hooks 和隔离上下文的 subagents。",
-        tradeoff: "它主要面向编码工作流；跨消息渠道的长期人格、自主演化技能和多租户远程工作区不是其核心抽象。",
+        tradeoff: "它主要面向编码工作流；跨消息渠道的长期人格、自主演化技能和多用户远程工作区不是其核心抽象。",
         borrow: "把“上下文来源”和“动作权限”都做成显式、可分层、可覆盖的配置系统。",
         source: "https://code.claude.com/docs/en/features-overview",
         flows: [
@@ -1989,7 +1989,7 @@
         tagline: "把本地编码 Agent 的 thread、工具、沙箱、审批和客户端协议做成清晰分层的 Harness。",
         center: "在操作真实开发环境时，把模型意图、进程隔离、用户审批和客户端事件拆成可以独立演进的边界。",
         signature: "sandbox policy 与 approval policy 分离；app-server 以 threads、turns、items 和事件连接不同客户端。",
-        tradeoff: "协议化边界和安全分层带来更多状态与事件语义；远程多租户资源调度仍属于其外层平台，而非单次 thread。",
+        tradeoff: "协议化边界和安全分层带来更多状态与事件语义；远程多用户资源调度仍属于其外层平台，而非单次 thread。",
         borrow: "不要把“进程能不能做到”和“用户是否授权”混成一个布尔值；沙箱限制能力，审批授予例外。",
         source: "https://github.com/openai/codex/blob/main/codex-rs/app-server/README.md",
         flows: [
@@ -2114,7 +2114,7 @@
         center: "保留一个可理解、可嵌入的最小核心，把工作流偏好交给 extensions、skills、packages 和宿主应用。",
         signature: "Session branching、compaction、context files、skills、extensions 与 SDK / JSON / RPC 多种嵌入方式。",
         tradeoff: "Pi 有意不内置一整套 permissions、subagents、MCP、plan mode 或后台 shell；需要宿主或扩展自己定义这些承诺。",
-        borrow: "把稳定内核与变化策略分开：Agent loop / session 留在核心，治理、资源、租户和恢复语义放在外层 Harness。",
+        borrow: "把稳定内核与变化策略分开：Agent loop / session 留在核心，治理、资源、用户和恢复语义放在外层 Harness。",
         source: "https://github.com/badlogic/pi-mono/blob/main/packages/coding-agent/README.md",
         flows: [
           ["CLI / RPC / SDK", "终端交互，或宿主通过 createAgentSession 嵌入", "surface"],
@@ -2133,7 +2133,7 @@
           extension: "Extensions、skills、packages、programmatic SDK",
           optimize: "最小、可理解、可替换的内核"
         },
-        compare: ["“没有内置”是边界选择，而不是遗漏：核心拒绝替宿主决定治理策略", "AgentSession 是可嵌入运行单元，不等于租户或资源调度器", "extensions 是主要变化点，适合被更大的 Harness 包裹"]
+        compare: ["“没有内置”是边界选择，而不是遗漏：核心拒绝替宿主决定治理策略", "AgentSession 是可嵌入运行单元，不等于用户或资源调度器", "extensions 是主要变化点，适合被更大的 Harness 包裹"]
       }
     ];
 

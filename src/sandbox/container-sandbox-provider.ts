@@ -38,13 +38,13 @@ export interface ContainerSandboxConfig {
     readonly profile?: SandboxProfile;
     readonly userId?: number;
     /**
-     * `tenant` 让容器挂租户工作区根：同租户所有 Run 共用一个挂载点，
-     * 代价是同租户跨 Run 的文件隔离由物理视野降为策略约束。
+     * `user` 让容器挂用户工作区根：同用户所有 Run 共用一个挂载点，
+     * 代价是同用户跨 Run 的文件隔离由物理视野降为策略约束。
      * 默认 `run`：容器只挂本 Run 的工作区。
      */
-    readonly workspaceScope?: "run" | "tenant";
-    /** `tenant` 视野下租户工作区的根目录（Harness 的 workspaceRoot）。 */
-    readonly tenantWorkspaceRoot?: string;
+    readonly workspaceScope?: "run" | "user";
+    /** `user` 视野下用户工作区的根目录（Harness 的 workspaceRoot）。 */
+    readonly userWorkspaceRoot?: string;
     /** N14：容器 PID 上限（docker --pids-limit），未配置时 128。 */
     readonly pidsLimit?: number;
 }
@@ -108,9 +108,9 @@ export class ContainerSandboxProvider implements SandboxProvider, SandboxCommand
             runtime: this.runtime,
             ...(config.pidsLimit === undefined ? {} : { pidsLimit: config.pidsLimit }),
             ...(config.workspaceScope === undefined ? {} : { workspaceScope: config.workspaceScope }),
-            ...(config.tenantWorkspaceRoot === undefined
+            ...(config.userWorkspaceRoot === undefined
                 ? {}
-                : { tenantWorkspaceRoot: config.tenantWorkspaceRoot }),
+                : { userWorkspaceRoot: config.userWorkspaceRoot }),
         });
     }
 
@@ -127,7 +127,7 @@ export class ContainerSandboxProvider implements SandboxProvider, SandboxCommand
         // 2. 根据 secret 取出 key
         const environment: Record<string, string> = {};
         for (const name of input.policy.allowedSecrets ?? []) {
-            const value = this.secrets.get(input.policy.tenantId, name);
+            const value = this.secrets.get(input.policy.userId, name);
             if (value === null) throw new Error(`授权 Secret 不存在：${name}`);
             environment[name] = value;
         }
@@ -206,7 +206,7 @@ export class ContainerSandboxProvider implements SandboxProvider, SandboxCommand
         return Object.freeze({
             id: input.id, workspacePath: input.workspacePath, secretNames: record.secretNames,
             mountRoot: compiled.spec.mountedRoot,
-            containerWorkdir: compiled.spec.workspaceScope === "TENANT"
+            containerWorkdir: compiled.spec.workspaceScope === "USER"
                 ? containerWorkdirFor(compiled.spec.mountedRoot, input.workspacePath)
                 : "/workspace",
             acquisition: Object.freeze({
@@ -242,8 +242,8 @@ export class ContainerSandboxProvider implements SandboxProvider, SandboxCommand
         // 也不会写进容器 Config.Env（docker 组成员可用 docker inspect 读出）。
         const authorizedSecrets = this.secretValues.get(sandboxId) ?? {};
         const secretArgs = Object.keys(authorizedSecrets).flatMap((secretName) => ["--env", secretName]);
-        // TENANT 视野下容器 /workspace 是整个租户根，工具的 cwd 必须显式落到
-        // 本 Run 的工作区子目录，否则 bash 的相对路径会落在租户根上。
+        // USER 视野下容器 /workspace 是整个用户根，工具的 cwd 必须显式落到
+        // 本 Run 的工作区子目录，否则 bash 的相对路径会落在用户根上。
         const workdir = options?.workdir ?? "/workspace";
         const result = await this.commands.run([
             this.docker, "exec", "--workdir", workdir, ...secretArgs, name, ...command,
@@ -326,7 +326,7 @@ export class BunContainerCommandRuntime implements ContainerCommandRuntime {
     }
 }
 
-/** TENANT 视野下，本 Run 的工作区在容器内的绝对路径。 */
+/** USER 视野下，本 Run 的工作区在容器内的绝对路径。 */
 function containerWorkdirFor(mountedRoot: string, workspacePath: string): string {
     const suffix = relative(mountedRoot, workspacePath).split(sep).join("/");
     return suffix === "" || suffix === "." ? "/workspace" : `/workspace/${suffix}`;

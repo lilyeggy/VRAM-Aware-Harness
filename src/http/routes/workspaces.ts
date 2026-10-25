@@ -18,7 +18,7 @@ export async function handleWorkspacesRoute(
         const body = await readJsonObject(request);
         return jsonResponse({
             workspace: ctx.accessControl.workspaceService.create(
-                principal.tenantId,
+                principal.userId,
                 requiredString(body, "name"),
             ),
         }, 201);
@@ -30,8 +30,8 @@ export async function handleWorkspacesRoute(
             throw new HttpError(501, "未配置受管 Workspace 服务");
         }
         return jsonResponse({
-            workspaces: ctx.accessControl.workspaceService.listForTenant(
-                principal.tenantId,
+            workspaces: ctx.accessControl.workspaceService.listForUser(
+                principal.userId,
             ),
         });
     }

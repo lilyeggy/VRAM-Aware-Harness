@@ -70,7 +70,50 @@ test("重复运行 migration 不会重复应用已有版本", () => {
             `)
             .all();
 
-        expect(rows.map((row) => row.version)).toEqual([1, 2, 3, 4]);
+        expect(rows.map((row) => row.version)).toEqual([1, 2, 3, 4, 5]);
+    } finally {
+        db.close();
+    }
+});
+
+
+test("v5 migration 把旧库的 tenant_id 列原地改名为 user_id", () => {
+    // 构造一个 v1.6 时代的旧库：把列名回退成 tenant_id，并删掉 v5 的版本记录。
+    const db = openHarnessDatabase(":memory:");
+
+    try {
+        const legacyTables = [
+            "agent_runs",
+            "workspaces",
+            "harness_sessions",
+            "api_credentials",
+            "access_audit_events",
+            "effective_policy_snapshots",
+        ];
+
+        for (const table of legacyTables) {
+            db.exec("ALTER TABLE " + table + " RENAME COLUMN user_id TO tenant_id;");
+        }
+        db.exec("DELETE FROM schema_migrations WHERE version = 5;");
+
+        runMigrations(db);
+
+        const columns = (table: string) =>
+            db
+                .query<{ name: string }, [string]>("SELECT name FROM pragma_table_info(?)")
+                .all(table)
+                .map((column) => column.name);
+
+        for (const table of legacyTables) {
+            expect(columns(table)).toContain("user_id");
+            expect(columns(table)).not.toContain("tenant_id");
+        }
+
+        const versions = db
+            .query<MigrationVersionRow, []>("SELECT version FROM schema_migrations ORDER BY version ASC")
+            .all()
+            .map((row) => row.version);
+        expect(versions).toEqual([1, 2, 3, 4, 5]);
     } finally {
         db.close();
     }

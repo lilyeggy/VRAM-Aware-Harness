@@ -28,7 +28,7 @@ function seedRunningRun(db:Database):AgentRun{
 
     const queuedRun : AgentRun = {
         id : "run-1",
-        tenantId : "tenant-1",
+        userId : "user-1",
         harnessSessionId : "session-1",
         status : "QUEUED",
         userInput : "读取 README",

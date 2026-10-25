@@ -33,17 +33,17 @@ function ok(label: string, response: Record<string, unknown>): void {
     console.log(label, JSON.stringify(response));
 }
 
-const ws = resolve("data/live-full-flow/tenant-check");
+const ws = resolve("data/live-full-flow/user-check");
 rmSync(ws, { recursive: true, force: true });
 mkdirSync(ws, { recursive: true, mode: 0o700 });
-const sandboxId = "tenant-check-sb";
-const runId = "tenant-check-run";
+const sandboxId = "user-check-sb";
+const runId = "user-check-run";
 const capabilityToken = crypto.randomUUID();
 const policy = {
     ...unrestrictedPolicy,
-    id: "policy-tenant-A",
+    id: "policy-user-A",
     runId,
-    tenantId: "tenant-A",
+    userId: "user-A",
     workspaceRoots: [ws],
     allowNetwork: false,
     allowedSecrets: [],
@@ -53,7 +53,7 @@ const badCreate = await request({
     id: "c-bad",
     op: "create",
     input: {
-        id: "tenant-check-bad-sb",
+        id: "user-check-bad-sb",
         runId,
         workspacePath: ws,
         policy,
@@ -74,9 +74,9 @@ const crossExec = await request({
     id: "e-b",
     op: "execute",
     sandboxId,
-    tenantId: "tenant-B",
+    userId: "user-B",
     token: capabilityToken,
-    command: ["sh", "-c", "echo CROSS-TENANT"],
+    command: ["sh", "-c", "echo CROSS-USER"],
 });
 ok("EXEC_AS_B_WITH_A_TOKEN", crossExec);
 
@@ -84,7 +84,7 @@ const wrongExec = await request({
     id: "e-wrong",
     op: "execute",
     sandboxId,
-    tenantId: "tenant-A",
+    userId: "user-A",
     token: "wrong-token",
     command: ["sh", "-c", "echo WRONG-TOKEN"],
 });
@@ -94,7 +94,7 @@ const controlExec = await request({
     id: "e-control",
     op: "execute",
     sandboxId,
-    tenantId: "tenant-A",
+    userId: "user-A",
     token: CONTROL_TOKEN,
     command: ["sh", "-c", "echo CONTROL-TOKEN"],
 });
@@ -104,7 +104,7 @@ const ownExec = await request({
     id: "e-a",
     op: "execute",
     sandboxId,
-    tenantId: "tenant-A",
+    userId: "user-A",
     token: capabilityToken,
     command: ["sh", "-c", "echo HELLO-FROM-A"],
 });
@@ -114,7 +114,7 @@ const crossTerm = await request({
     id: "t-b",
     op: "terminate",
     sandboxId,
-    tenantId: "tenant-B",
+    userId: "user-B",
     token: capabilityToken,
 });
 ok("TERM_AS_B_WITH_A_TOKEN", crossTerm);
@@ -123,9 +123,9 @@ const ownTerm = await request({
     id: "t-a",
     op: "terminate",
     sandboxId,
-    tenantId: "tenant-A",
+    userId: "user-A",
     token: capabilityToken,
 });
 ok("TERM_AS_A", ownTerm);
 
-console.log("TENANT_CHECK_DONE");
+console.log("USER_CHECK_DONE");

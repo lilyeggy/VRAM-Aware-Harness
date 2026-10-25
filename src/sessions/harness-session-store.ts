@@ -7,7 +7,7 @@ export class HarnessSessionStore {
     create(session: HarnessSession): void {
         const parameters = {
             id: session.id,
-            tenantId: session.tenantId,
+            userId: session.userId,
             workspaceId: session.workspaceId,
             title: session.title,
             runtimeSessionRef: session.runtimeSessionRef,
@@ -16,10 +16,10 @@ export class HarnessSessionStore {
         };
         this.db.query<unknown, typeof parameters>(`
             INSERT INTO harness_sessions (
-                id, tenant_id, workspace_id, title, runtime_session_ref,
+                id, user_id, workspace_id, title, runtime_session_ref,
                 created_at, updated_at
             ) VALUES (
-                $id, $tenantId, $workspaceId, $title, $runtimeSessionRef,
+                $id, $userId, $workspaceId, $title, $runtimeSessionRef,
                 $createdAt, $updatedAt
             );
         `).run(parameters);
@@ -27,7 +27,7 @@ export class HarnessSessionStore {
 
     get(id: string): HarnessSession | null {
         return this.db.query<HarnessSession, { id: string }>(`
-            SELECT id, tenant_id AS tenantId,
+            SELECT id, user_id AS userId,
                 workspace_id AS workspaceId, title,
                 runtime_session_ref AS runtimeSessionRef,
                 created_at AS createdAt, updated_at AS updatedAt
@@ -35,27 +35,27 @@ export class HarnessSessionStore {
         `).get({ id });
     }
 
-    getForTenant(id: string, tenantId: string): Conversation | null {
-        return this.db.query<Conversation, { id: string; tenantId: string }>(`
-            SELECT id, tenant_id AS tenantId,
+    getForUser(id: string, userId: string): Conversation | null {
+        return this.db.query<Conversation, { id: string; userId: string }>(`
+            SELECT id, user_id AS userId,
                 workspace_id AS workspaceId, title,
                 created_at AS createdAt, updated_at AS updatedAt
             FROM harness_sessions
-            WHERE id = $id AND tenant_id = $tenantId
+            WHERE id = $id AND user_id = $userId
                 AND workspace_id IS NOT NULL AND title IS NOT NULL;
-        `).get({ id, tenantId });
+        `).get({ id, userId });
     }
 
-    listForWorkspace(tenantId: string, workspaceId: string): Conversation[] {
-        return this.db.query<Conversation, { tenantId: string; workspaceId: string }>(`
-            SELECT id, tenant_id AS tenantId,
+    listForWorkspace(userId: string, workspaceId: string): Conversation[] {
+        return this.db.query<Conversation, { userId: string; workspaceId: string }>(`
+            SELECT id, user_id AS userId,
                 workspace_id AS workspaceId, title,
                 created_at AS createdAt, updated_at AS updatedAt
             FROM harness_sessions
-            WHERE tenant_id = $tenantId AND workspace_id = $workspaceId
+            WHERE user_id = $userId AND workspace_id = $workspaceId
                 AND title IS NOT NULL
             ORDER BY updated_at DESC, rowid DESC;
-        `).all({ tenantId, workspaceId });
+        `).all({ userId, workspaceId });
     }
 
     update(session: HarnessSession): void {
@@ -72,10 +72,10 @@ export class HarnessSessionStore {
         `).run(parameters);
     }
 
-    touch(id: string, tenantId: string, updatedAt = new Date().toISOString()): void {
+    touch(id: string, userId: string, updatedAt = new Date().toISOString()): void {
         this.db.query(`
             UPDATE harness_sessions SET updated_at = $updatedAt
-            WHERE id = $id AND tenant_id = $tenantId;
-        `).run({ id, tenantId, updatedAt });
+            WHERE id = $id AND user_id = $userId;
+        `).run({ id, userId, updatedAt });
     }
 }

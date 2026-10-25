@@ -65,7 +65,7 @@ export interface RunTraceTotals {
 
 export interface RunTrace {
     runId: string;
-    tenantId: string;
+    userId: string;
     status: string;
     createdAt: string;
     finishedAt: string | null;
@@ -101,7 +101,7 @@ function elapsedMs(startedAt: string, endedAt: string): number | null {
 }
 
 export function buildRunTrace(
-    run: Pick<AgentRun, "id" | "tenantId" | "status" | "createdAt" | "finishedAt">,
+    run: Pick<AgentRun, "id" | "userId" | "status" | "createdAt" | "finishedAt">,
     events: readonly RunEvent[],
 ): RunTrace {
     const ordered = [...events].sort(
@@ -168,7 +168,7 @@ export function buildRunTrace(
                     durationMs: null,
                     detail: {
                         position: numberField(payload, "position"),
-                        tenantPosition: numberField(payload, "tenantPosition"),
+                        userPosition: numberField(payload, "userPosition"),
                     },
                 });
                 break;
@@ -377,7 +377,7 @@ export function buildRunTrace(
 
     return {
         runId: run.id,
-        tenantId: run.tenantId,
+        userId: run.userId,
         status: run.status,
         createdAt: run.createdAt,
         finishedAt: run.finishedAt ?? finishedAt,

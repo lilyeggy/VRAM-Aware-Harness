@@ -24,7 +24,7 @@ function createInterruptedRun(
 
     return {
         id: runId,
-        tenantId: "tenant-1",
+        userId: "user-1",
         harnessSessionId: "session-1",
         status: "INTERRUPTED",
         userInput: "完成恢复测试",

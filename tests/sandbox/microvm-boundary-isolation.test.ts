@@ -132,8 +132,8 @@ describe("MicroVM 架构与系统边界隔离测试 (Inside vs Outside Boundarie
         function setupProvider() {
             const store = new MemorySandboxStore();
             const secrets: SecretProvider = {
-                get(tenantId, name) {
-                    if (name === "ALLOWED_CLIENT_TOKEN") return `secret_val_for_${tenantId}`;
+                get(userId, name) {
+                    if (name === "ALLOWED_CLIENT_TOKEN") return `secret_val_for_${userId}`;
                     return null;
                 },
             };
@@ -151,7 +151,7 @@ describe("MicroVM 架构与系统边界隔离测试 (Inside vs Outside Boundarie
             const mockPolicy: EffectivePolicySnapshot = {
                 id: "policy-1",
                 runId: "run-1",
-                tenantId: "tenant-corp-a",
+                userId: "user-corp-a",
                 layers: [],
                 allowedTools: null,
                 allowedSkills: null,
@@ -169,7 +169,7 @@ describe("MicroVM 架构与系统边界隔离测试 (Inside vs Outside Boundarie
             const handle = await provider.create({
                 id: "sandbox-boundary-1",
                 runId: "run-1",
-                workspacePath: "/data/workspaces/tenant-corp-a/run-1",
+                workspacePath: "/data/workspaces/user-corp-a/run-1",
                 policy: mockPolicy,
             });
 
@@ -178,7 +178,7 @@ describe("MicroVM 架构与系统边界隔离测试 (Inside vs Outside Boundarie
             expect(createdInstance).toBeDefined();
 
             // 1. 业务 Secret 成功送达
-            expect(createdInstance?.environment["ALLOWED_CLIENT_TOKEN"]).toBe("secret_val_for_tenant-corp-a");
+            expect(createdInstance?.environment["ALLOWED_CLIENT_TOKEN"]).toBe("secret_val_for_user-corp-a");
 
             // 2. 宿主机的敏感大模型凭证绝对不存在于虚拟机的环境中
             expect(createdInstance?.environment["VLLM_API_KEY"]).toBeUndefined();

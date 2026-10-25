@@ -10,7 +10,7 @@ function snapshot(): EffectivePolicySnapshot {
         ...unrestrictedPolicy,
         id: "policy-1",
         runId: "run-1",
-        tenantId: "tenant-1",
+        userId: "user-1",
         layers: [],
         allowProcess: true,
         allowNetwork: false,

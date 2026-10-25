@@ -17,14 +17,14 @@ test("五层策略对集合、布尔权限和资源上限取交集", () => {
     const snapshot = computeEffectivePolicy({
         id: "snapshot-1",
         runId: "run-1",
-        tenantId: "tenant-1",
+        userId: "user-1",
         layers: [
             createPolicyLayer("platform", "PLATFORM", constraints({
                 allowedTools: ["read", "write", "bash"],
                 allowedModels: ["local/qwen", "remote/other"],
                 resourceLimits: { cpuCores: 8, memoryMiB: 8192, diskMiB: 20480 },
             })),
-            createPolicyLayer("tenant", "TENANT", constraints({
+            createPolicyLayer("user", "USER", constraints({
                 allowedTools: ["read", "write"],
                 allowedModels: ["local/qwen"],
                 allowNetwork: false,
@@ -60,10 +60,10 @@ test("Sandbox profile 进入不可变快照，冲突时 fail closed", () => {
     const snapshot = computeEffectivePolicy({
         id: "profile-snapshot",
         runId: "run-profile",
-        tenantId: "tenant-profile",
+        userId: "user-profile",
         layers: [
             createPolicyLayer("platform", "PLATFORM"),
-            createPolicyLayer("tenant", "TENANT", constraints({ sandboxProfile: "strict" })),
+            createPolicyLayer("user", "USER", constraints({ sandboxProfile: "strict" })),
             createPolicyLayer("template", "TEMPLATE"),
             createPolicyLayer("workspace", "WORKSPACE"),
             createPolicyLayer("run", "RUN"),
@@ -75,10 +75,10 @@ test("Sandbox profile 进入不可变快照，冲突时 fail closed", () => {
     expect(() => computeEffectivePolicy({
         id: "conflict",
         runId: "run-conflict",
-        tenantId: "tenant-conflict",
+        userId: "user-conflict",
         layers: [
             createPolicyLayer("platform", "PLATFORM", constraints({ sandboxProfile: "default" })),
-            createPolicyLayer("tenant", "TENANT", constraints({ sandboxProfile: "strict" })),
+            createPolicyLayer("user", "USER", constraints({ sandboxProfile: "strict" })),
             createPolicyLayer("template", "TEMPLATE"),
             createPolicyLayer("workspace", "WORKSPACE"),
             createPolicyLayer("run", "RUN"),
@@ -91,22 +91,22 @@ test("缺少任一规范策略层时拒绝生成有效快照", () => {
     expect(() => computeEffectivePolicy({
         id: "snapshot-1",
         runId: "run-1",
-        tenantId: "tenant-1",
+        userId: "user-1",
         layers: [createPolicyLayer("platform", "PLATFORM")],
         createdAt: "2026-08-10T10:00:00.000Z",
-    })).toThrow("缺少策略层：TENANT");
+    })).toThrow("缺少策略层：USER");
 });
 
 test("B2：请求级 allowNetwork=true 被有效策略拒绝时必须 fail-closed", () => {
     const snapshot = computeEffectivePolicy({
         id: "network-snapshot",
         runId: "run-network",
-        tenantId: "tenant-network",
+        userId: "user-network",
         layers: [
             createPolicyLayer("platform", "PLATFORM", constraints({
                 allowNetwork: false,
             })),
-            createPolicyLayer("tenant", "TENANT"),
+            createPolicyLayer("user", "USER"),
             createPolicyLayer("template", "TEMPLATE"),
             createPolicyLayer("workspace", "WORKSPACE"),
             createPolicyLayer("run", "RUN"),
@@ -130,10 +130,10 @@ test("B2：开发档允许联网时，请求级 allowNetwork=true 不被拒绝",
     const snapshot = computeEffectivePolicy({
         id: "network-snapshot-development",
         runId: "run-network-development",
-        tenantId: "tenant-network-development",
+        userId: "user-network-development",
         layers: [
             createPolicyLayer("platform", "PLATFORM"),
-            createPolicyLayer("tenant", "TENANT"),
+            createPolicyLayer("user", "USER"),
             createPolicyLayer("template", "TEMPLATE"),
             createPolicyLayer("workspace", "WORKSPACE"),
             createPolicyLayer("run", "RUN"),

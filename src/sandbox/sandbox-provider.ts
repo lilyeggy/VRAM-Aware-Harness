@@ -37,13 +37,13 @@ export interface SandboxHandle {
     readonly enforcement: SandboxEnforcementCapabilities;
     /**
      * 宿主侧挂载根：容器内 /workspace 实际对应的宿主目录。
-     * RUN 视野下等于本 Run 的工作区；TENANT 视野下等于租户工作区根。
+     * RUN 视野下等于本 Run 的工作区；USER 视野下等于用户工作区根。
      * 工具路径映射必须以它为前缀换算，不能假定它等于 workspacePath。
      */
     readonly mountRoot: string;
     /**
      * 容器内工作目录（bash 等工具的 cwd）。RUN 视野下是 /workspace，
-     * TENANT 视野下是 /workspace/<本 Run 工作区相对租户根的路径>。
+     * USER 视野下是 /workspace/<本 Run 工作区相对用户根的路径>。
      * HOST 边界下没有容器路径语义，等于 workspacePath。
      */
     readonly containerWorkdir: string;
@@ -69,11 +69,11 @@ export interface SandboxEnforcementCapabilities {
     readonly diskLimitEnforced: boolean;
     readonly pidLimitEnforced: boolean;
     /**
-     * 工作区视野粒度。RUN：容器只能看见本 Run 的工作区，同租户跨 Run 物理不可见。
-     * TENANT：容器挂租户工作区根，同租户跨 Run 靠策略约束而非物理视野隔离，
-     * 换来同租户全量复用。策略守卫据此判断文件系统隔离是否满足要求。
+     * 工作区视野粒度。RUN：容器只能看见本 Run 的工作区，同用户跨 Run 物理不可见。
+     * USER：容器挂用户工作区根，同用户跨 Run 靠策略约束而非物理视野隔离，
+     * 换来同用户全量复用。策略守卫据此判断文件系统隔离是否满足要求。
      */
-    readonly workspaceScope: "RUN" | "TENANT" | "NONE";
+    readonly workspaceScope: "RUN" | "USER" | "NONE";
 }
 
 export interface SandboxLifecycleEvent {
@@ -108,6 +108,6 @@ export interface SandboxCommandExecutor {
 }
 
 export interface SecretProvider {
-    /** Secret values are resolved in a Tenant namespace, never by a global name. */
-    get(tenantId: string, name: string): string | null;
+    /** Secret values are resolved in a User namespace, never by a global name. */
+    get(userId: string, name: string): string | null;
 }

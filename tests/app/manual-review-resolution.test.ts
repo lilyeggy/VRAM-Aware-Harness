@@ -3,7 +3,7 @@ import { expect, test } from "bun:test";
 import { HarnessApplication, type QueuePump } from "../../src/app/harness-application.ts";
 import type { AgentRun, RunEvent } from "../../src/runs/agent-run.ts";
 import type { RunScheduler } from "../../src/scheduling/run-scheduler.ts";
-import type { TenantRunScheduler } from "../../src/scheduling/tenant-run-scheduler.ts";
+import type { UserRunScheduler } from "../../src/scheduling/user-run-scheduler.ts";
 import type { RunStore } from "../../src/runs/runstore.ts";
 import type { ToolExecution } from "../../src/tools/tool-execution.ts";
 
@@ -12,7 +12,7 @@ const TIMESTAMP = "2026-09-11T00:00:00.000Z";
 function makeRun(overrides: Partial<AgentRun> = {}): AgentRun {
     return {
         id: "run-1",
-        tenantId: "tenant-1",
+        userId: "user-1",
         harnessSessionId: "session-1",
         status: "INTERRUPTED",
         userInput: "清理临时文件",
@@ -77,7 +77,7 @@ function makeApp(run: AgentRun, prepared: readonly ToolExecution[]) {
         {} as unknown as RunScheduler,
         {} as unknown as QueuePump,
         store as unknown as RunStore,
-        {} as unknown as TenantRunScheduler,
+        {} as unknown as UserRunScheduler,
         { async recover() {} },
         undefined,
         undefined,
@@ -95,7 +95,7 @@ test("N16：确认无副作用 → 作废 PREPARED 执行，Run 仍可恢复", (
     const result = app.resolveUnknownEffect("run-1", {
         resolution: "NO_EFFECT",
         note: "人工核对：目标目录未创建",
-        actor: "tenant-1",
+        actor: "user-1",
     });
 
     expect(result.resolvedExecutionIds).toEqual(["tool-exec-1"]);
@@ -117,7 +117,7 @@ test("N16：确认副作用已发生 → 作废执行并把 Run 明确终结为 
 
     const result = app.resolveUnknownEffect("run-1", {
         resolution: "EFFECT_OCCURRED",
-        actor: "tenant-1",
+        actor: "user-1",
     });
 
     expect(failed[0]!.errorMessage).toContain("副作用已发生");
@@ -133,7 +133,7 @@ test("N16：非 INTERRUPTED 的 Run 拒绝人工消解", () => {
 
     expect(() => app.resolveUnknownEffect("run-1", {
         resolution: "NO_EFFECT",
-        actor: "tenant-1",
+        actor: "user-1",
     })).toThrow("只有 INTERRUPTED");
 });
 
@@ -142,7 +142,7 @@ test("N16：没有待核对的不确定副作用时拒绝消解", () => {
 
     expect(() => app.resolveUnknownEffect("run-1", {
         resolution: "NO_EFFECT",
-        actor: "tenant-1",
+        actor: "user-1",
     })).toThrow("没有待人工核对");
 });
 
@@ -151,7 +151,7 @@ test("N16：未装配工具执行库时读数为空（不伪装成已装配）",
         {} as unknown as RunScheduler,
         {} as unknown as QueuePump,
         {} as unknown as RunStore,
-        {} as unknown as TenantRunScheduler,
+        {} as unknown as UserRunScheduler,
         { async recover() {} },
     );
 

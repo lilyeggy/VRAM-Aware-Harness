@@ -8,8 +8,8 @@ import type { Workspace, WorkspaceStore } from "../../src/workspaces/workspace-s
 class MemoryWorkspaceStore {
     created: Workspace[] = [];
     create(workspace: Workspace): void { this.created.push(workspace); }
-    getForTenant(): Workspace | null { return null; }
-    listForTenant(): Workspace[] { return []; }
+    getForUser(): Workspace | null { return null; }
+    listForUser(): Workspace[] { return []; }
 }
 
 test("容器模式 Workspace 在创建时交给实际容器 UID", () => {
@@ -19,7 +19,7 @@ test("容器模式 Workspace 在创建时交给实际容器 UID", () => {
         const uid = process.getuid?.();
         if (uid === undefined) return;
         const service = new WorkspaceService(root, store as unknown as WorkspaceStore, uid);
-        const workspace = service.create("tenant-a", "project");
+        const workspace = service.create("user-a", "project");
         expect(statSync(workspace.rootPath).uid).toBe(uid);
         expect(store.created).toHaveLength(1);
     } finally {

@@ -1,4 +1,4 @@
-# ADR 0009：建设可供团队使用的多租户 Agent 任务服务
+# ADR 0009：建设可供团队使用的多用户 Agent 任务服务
 
 ## 状态
 
@@ -11,7 +11,7 @@
 ## 背景
 
 项目已经完成 Pi + 自托管 vLLM 的可靠执行纵向切片：Run/Attempt 状态机、工具
-副作用记录、Checkpoint、安全恢复、GPU/vLLM 资源准入、Tenant 公平队列、有效
+副作用记录、Checkpoint、安全恢复、GPU/vLLM 资源准入、User 公平队列、有效
 策略、最小 Sandbox 生命周期和审计事件。ADR 0008 正确收敛了异构 Runtime 和
 通用 ResourcePool，但错误地把“用于秋招展示”以及“执行控制面”本身当成产品定义。
 
@@ -20,17 +20,17 @@ Agent Infra 层，不代表用户要购买或操作一套抽象基础设施。�
 可以登录、创建 Workspace、提交 Agent 任务、查看过程、获得修改结果并在失败后
 继续的服务。隔离环境、调度、状态机和恢复是实现这段体验的核心机制。
 
-多租户也不能只停留在 `tenantId`、公平队列和策略快照。若服务面向真实团队，身份
-必须可信，数据访问必须按 Tenant 收口，Agent 的文件、进程、网络和 Secret 必须在
+多用户也不能只停留在 `userId`、公平队列和策略快照。若服务面向真实团队，身份
+必须可信，数据访问必须按 User 收口，Agent 的文件、进程、网络和 Secret 必须在
 真实执行环境中隔离。
 
 ## 决策
 
 当前产品定位调整为：
 
-> **VRAM-Aware Agent Harness 是一个支持团队共享本地大模型的多租户 Agent 任务
+> **VRAM-Aware Agent Harness 是一个支持团队共享本地大模型的多用户 Agent 任务
 > 服务。用户可以为项目创建独立 Workspace、提交 Agent 任务、查看执行过程和文件
-> 修改，并中断或恢复任务；系统在后台为每次执行分配受 Tenant 策略约束的隔离
+> 修改，并中断或恢复任务；系统在后台为每次执行分配受 User 策略约束的隔离
 > 环境，根据 GPU 与 vLLM 状态公平调度，并通过工具副作用和 Checkpoint 保证故障后
 > 的安全恢复。**
 
@@ -43,7 +43,7 @@ Agent Infra 层，不代表用户要购买或操作一套抽象基础设施。�
 - Agent 任务提交、列表、详情、排队状态和取消；
 - 执行输出、工具过程、文件 Diff 和最终结果；
 - 中断后的恢复，以及不确定副作用的人工确认；
-- Tenant 管理员可配置的并发、模型、工具、环境和 Secret 权限。
+- User 管理员可配置的并发、模型、工具、环境和 Secret 权限。
 
 对内部实现，项目重点覆盖：
 
@@ -55,7 +55,7 @@ Agent Infra 层，不代表用户要购买或操作一套抽象基础设施。�
 
 ### 2. 每次执行使用独立 Sandbox
 
-Tenant 拥有版本化 `ExecutionProfile`，描述镜像、工具、网络、Secret 和资源上限；
+User 拥有版本化 `ExecutionProfile`，描述镜像、工具、网络、Secret 和资源上限；
 每个 Run/Attempt 默认获得独立 `SandboxInstance`。Sandbox 销毁不等于删除
 Workspace、Checkpoint 或审计证据。
 
@@ -79,7 +79,7 @@ Workspace、Checkpoint 或审计证据。
 不可信代码隔离。本项目不自研 Firecracker 或虚拟机管理器；下一迭代保留现有
 `SandboxProvider` 生命周期合同，把执行运行时选择显式化：
 
-- `development`：仅用于本地开发与测试的 `ManagedLocal`，不得承载多租户执行；
+- `development`：仅用于本地开发与测试的 `ManagedLocal`，不得承载多用户执行；
 - `default`：OCI 镜像 + gVisor/runsc，每个 Attempt 一个 Sandbox，适用于通常的
   Agent 文件、Shell、Git 与测试工具；
 - `strict`：预留给 Kata/Firecracker/托管 microVM Provider。仅路由高风险或需要
@@ -90,11 +90,11 @@ Workspace、Checkpoint 或审计证据。
 这使产品继续使用统一的 Sandbox 生命周期、审计和结果接口，同时能在面试中诚实地区分
 “容器硬化”“用户态内核隔离”和“独立 guest kernel”三种边界。
 
-### 3. 身份是多租户隔离的起点
+### 3. 身份是多用户隔离的起点
 
-外部请求不再把请求体中的 `tenantId` 当作可信身份。认证成功后生成不可伪造的
-`RequestPrincipal`，由服务端派生 Tenant 与权限。Run、Session、Workspace、事件、
-Checkpoint、ToolExecution、Template 和 Secret 的外部访问必须 Tenant-scoped。
+外部请求不再把请求体中的 `userId` 当作可信身份。认证成功后生成不可伪造的
+`RequestPrincipal`，由服务端派生 User 与权限。Run、Session、Workspace、事件、
+Checkpoint、ToolExecution、Template 和 Secret 的外部访问必须 User-scoped。
 
 第一版可以使用高熵 API Key，不建设密码、OAuth 或完整 IAM；但必须区分认证与
 授权，支持最小 scope，并记录允许和拒绝决定。
@@ -131,11 +131,11 @@ KV；本项目不把模型 Serving 变成自身产品范围。
 ## 与既有决策的关系
 
 - ADR 0001 仍成立：Pi 提供 Agent Loop；
-- ADR 0004 被补全：Tenant 不仅参与公平调度，还必须形成身份、数据和执行隔离；
+- ADR 0004 被补全：User 不仅参与公平调度，还必须形成身份、数据和执行隔离；
 - ADR 0005 仍成立：vLLM 是外部推理层；
 - ADR 0006 仍定义可靠执行与资源准入合同；
 - ADR 0007 继续作为异构控制面历史方案；
-- ADR 0008 的“保留多租户、暂停异构”继续成立，但其“面试项目/控制面即产品”定义
+- ADR 0008 的“保留多用户、暂停异构”继续成立，但其“面试项目/控制面即产品”定义
   和“真实容器 Sandbox 秋招后再做”被本 ADR 取代。
 
 ## 后果
@@ -149,7 +149,7 @@ KV；本项目不把模型 Serving 变成自身产品范围。
 
 代价：
 
-- 需要补齐当前 HTTP API 的可信身份和 Tenant-scoped 访问；
+- 需要补齐当前 HTTP API 的可信身份和 User-scoped 访问；
 - 需要让工具真正进入隔离环境，而不只是持久化 Sandbox 元数据；
 - 需要增加用户可消费的任务结果、Diff/Artifact 和最小交互界面；
 - gVisor 运行时与 Linux A6000 环境成为真实集成验证的一部分；严格 microVM 后端
@@ -158,4 +158,4 @@ KV；本项目不把模型 Serving 变成自身产品范围。
 ## 实施入口
 
 当前唯一产品实施顺序和验收条件见
-[`multi-tenant-agent-task-service-roadmap.zh-CN.md`](../multi-tenant-agent-task-service-roadmap.zh-CN.md)。
+[`multi-user-agent-task-service-roadmap.zh-CN.md`](../multi-user-agent-task-service-roadmap.zh-CN.md)。

@@ -5,7 +5,7 @@ import { RuntimeExecutionTimeoutError, SupervisedAgentRuntime } from "../../src/
 import type { SandboxProvider } from "../../src/sandbox/sandbox-provider.ts";
 
 const request: RuntimeStartRequest = {
-    run: { runId: "run-1", tenantId: "tenant-1", harnessSessionId: "session-1", workspacePath: "/tmp/workspace" },
+    run: { runId: "run-1", userId: "user-1", harnessSessionId: "session-1", workspacePath: "/tmp/workspace" },
     input: "work",
     execution: {
         attemptId: "attempt-1", policySnapshotId: "policy-1", sandboxId: "sandbox-1",

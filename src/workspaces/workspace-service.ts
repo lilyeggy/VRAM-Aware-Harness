@@ -3,7 +3,7 @@ import { resolve } from "node:path";
 import { isWithin } from "../utils/path-utils.ts";
 import type { Workspace, WorkspaceStore } from "./workspace-store.ts";
 
-/** Maps a tenant-owned opaque ID to a server-controlled host directory. */
+/** Maps a user-owned opaque ID to a server-controlled host directory. */
 export class WorkspaceService {
     private readonly root: string;
 
@@ -15,16 +15,16 @@ export class WorkspaceService {
         this.root = resolve(rootPath);
     }
 
-    create(tenantId: string, name: string): Workspace {
+    create(userId: string, name: string): Workspace {
         if (!/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$/.test(name)) {
             throw new Error("Workspace 名称只能包含字母、数字、_ 或 -，且最长 64 位");
         }
         const id = crypto.randomUUID();
         const workspace: Workspace = {
             id,
-            tenantId,
+            userId,
             name,
-            rootPath: resolve(this.root, tenantId, id),
+            rootPath: resolve(this.root, userId, id),
             createdAt: new Date().toISOString(),
         };
         // D6：路径围栏统一走 isWithin（resolve + path.sep），
@@ -49,11 +49,11 @@ export class WorkspaceService {
         return workspace;
     }
 
-    getForTenant(id: string, tenantId: string): Workspace | null {
-        return this.store.getForTenant(id, tenantId);
+    getForUser(id: string, userId: string): Workspace | null {
+        return this.store.getForUser(id, userId);
     }
 
-    listForTenant(tenantId: string): Workspace[] {
-        return this.store.listForTenant(tenantId);
+    listForUser(userId: string): Workspace[] {
+        return this.store.listForUser(userId);
     }
 }

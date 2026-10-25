@@ -1,7 +1,7 @@
 /**
  * 极简固定窗口限流器（单机内存版）。
  *
- * 目标：在单机、单 Master 的实验室部署里挡住单租户/单 IP 的突发流量，
+ * 目标：在单机、单 Master 的实验室部署里挡住单用户/单 IP 的突发流量，
  * 返回 429 + Retry-After。不做分布式限流、不依赖 Redis；进程重启即清零。
  *
  * 固定窗口的取舍：实现简单、内存可控；代价是窗口边界可能瞬时放行 2x。
@@ -11,7 +11,7 @@
 export interface RateLimitOptions {
     enabled: boolean;
     windowMs: number;
-    maxRequestsPerTenant: number;
+    maxRequestsPerUser: number;
     maxRequestsPerIp: number;
 }
 
@@ -39,8 +39,8 @@ export class RateLimiter {
         return this.options.enabled;
     }
 
-    consumeTenant(tenantId: string, now = Date.now()): RateLimitDecision {
-        return this.consume(`tenant:${tenantId}`, this.options.maxRequestsPerTenant, now);
+    consumeUser(userId: string, now = Date.now()): RateLimitDecision {
+        return this.consume(`user:${userId}`, this.options.maxRequestsPerUser, now);
     }
 
     consumeIp(ip: string, now = Date.now()): RateLimitDecision {

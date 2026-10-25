@@ -10,20 +10,20 @@ export class PolicyRegistry {
         "platform:default",
         "PLATFORM",
     );
-    private readonly tenantPolicies = new Map<string, PolicyLayer>();
+    private readonly userPolicies = new Map<string, PolicyLayer>();
 
     setPlatformPolicy(id: string, policy: PolicyConstraints): void {
         this.platform = createPolicyLayer(id, "PLATFORM", policy);
     }
 
-    setTenantPolicy(
-        tenantId: string,
+    setUserPolicy(
+        userId: string,
         id: string,
         policy: PolicyConstraints,
     ): void {
-        this.tenantPolicies.set(
-            tenantId,
-            createPolicyLayer(id, "TENANT", policy),
+        this.userPolicies.set(
+            userId,
+            createPolicyLayer(id, "USER", policy),
         );
     }
 
@@ -31,11 +31,11 @@ export class PolicyRegistry {
         return this.platform;
     }
 
-    getTenantPolicy(tenantId: string): PolicyLayer {
-        return this.tenantPolicies.get(tenantId)
+    getUserPolicy(userId: string): PolicyLayer {
+        return this.userPolicies.get(userId)
             ?? createPolicyLayer(
-                `tenant:${tenantId}:default`,
-                "TENANT",
+                `user:${userId}:default`,
+                "USER",
                 unrestrictedPolicy,
             );
     }

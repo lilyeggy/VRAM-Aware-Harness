@@ -14,13 +14,13 @@ function makePolicy(overrides: Partial<EffectivePolicySnapshot> = {}): Effective
     return {
         id: "policy-1",
         runId: "run",
-        tenantId: "tenant",
+        userId: "user",
         createdAt: "2026-08-18T00:00:00.000Z",
         sandboxProfile: "default",
         allowedTools: null,
         allowedSkills: null,
         allowedModels: null,
-        workspaceRoots: ["/srv/workspaces/tenant"],
+        workspaceRoots: ["/srv/workspaces/user"],
         allowNetwork: false,
         allowProcess: false,
         allowedSecrets: ["TOKEN"],
@@ -47,7 +47,7 @@ test("策略边界指纹：相同边界 -> 相同指纹，业务身份字段不�
     const b = policyBoundaryFingerprint(makePolicy({
         id: "different",
         runId: "different-run",
-        tenantId: "another-tenant",
+        userId: "another-user",
         createdAt: "2099-01-01",
     }));
     expect(a).toBe(b);
@@ -75,7 +75,7 @@ test("isolation-triple：真实编译器同一策略编译 -> spec 指纹稳定�
         profile: "default",
         runtime: "runsc",
     });
-    const ws = "/srv/workspaces/tenant/run";
+    const ws = "/srv/workspaces/user/run";
     const secrets = policy.allowedSecrets ?? [];
     const compiledA = compiler.compile("a", ws, policy, secrets);
     const compiledB = compiler.compile("b", ws, policy, secrets);
@@ -102,7 +102,7 @@ test("isolation-triple：被限制的策略编译出的 spec 指纹与默认策�
         profile: "default",
         runtime: "runsc",
     });
-    const ws = "/srv/workspaces/tenant/run";
+    const ws = "/srv/workspaces/user/run";
     const baseSpec = compiler.compile("a", ws, makePolicy(), ["TOKEN"]).spec;
     const cappedSpec = compiler.compile("b", ws, makePolicy({
         resourceLimits: { cpuCores: 2, memoryMiB: 512, diskMiB: null },

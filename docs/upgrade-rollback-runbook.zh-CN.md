@@ -50,10 +50,10 @@ curl -fsS http://127.0.0.1:3100/ready
 cd /srv/VRAM-Aware-Harness
 bun run scripts/p0-e2e-smoke.ts
 bun run scripts/audit-chain-smoke.ts --database /var/lib/harness/harness.sqlite
-bun run scripts/tenant-billing-smoke.ts --database /var/lib/harness/harness.sqlite
+bun run scripts/user-billing-smoke.ts --database /var/lib/harness/harness.sqlite
 ```
 
-期望：`P0_E2E_SMOKE_OK`、`AUDIT_CHAIN_VERIFY_OK`、`TENANT_BILLING_VERIFY_OK`。任一步失败就按第 3 节回滚。
+期望：`P0_E2E_SMOKE_OK`、`AUDIT_CHAIN_VERIFY_OK`、`USER_BILLING_VERIFY_OK`。任一步失败就按第 3 节回滚。
 
 ## 3. 回滚步骤
 

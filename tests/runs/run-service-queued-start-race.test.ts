@@ -65,7 +65,7 @@ test("排队中被中断的 Run 调度启动时放弃执行（重入队毒丸防
 
     try {
         const run = service.createQueuedRun({
-            tenantId: "tenant-1",
+            userId: "user-1",
             harnessSessionId: "session-1",
             userInput: "排队中被打断",
             workspacePath: "/tmp/workspace",
@@ -93,7 +93,7 @@ test("QUEUED->RUNNING 写入与并发中断竞争时放弃启动并保留中断�
 
     try {
         const run = service.createQueuedRun({
-            tenantId: "tenant-1",
+            userId: "user-1",
             harnessSessionId: "session-1",
             userInput: "启动瞬间被打断",
             workspacePath: "/tmp/workspace",
@@ -120,7 +120,7 @@ test("排队超时熔断（FAILED）后的调度启动同样放弃执行", async
 
     try {
         const run = service.createQueuedRun({
-            tenantId: "tenant-1",
+            userId: "user-1",
             harnessSessionId: "session-1",
             userInput: "排队超时",
             workspacePath: "/tmp/workspace",
@@ -144,7 +144,7 @@ test("等待恢复执行的 QUEUED Run 被中断后，恢复启动放弃执行",
 
     try {
         const run = service.createQueuedRun({
-            tenantId: "tenant-1",
+            userId: "user-1",
             harnessSessionId: "session-1",
             userInput: "恢复排队中被打断",
             workspacePath: "/tmp/workspace",
@@ -215,7 +215,7 @@ test("恢复的 QUEUED->RUNNING 写入与并发中断竞争时放弃恢复", asy
 
     try {
         const run = service.createQueuedRun({
-            tenantId: "tenant-1",
+            userId: "user-1",
             harnessSessionId: "session-1",
             userInput: "恢复瞬间被打断",
             workspacePath: "/tmp/workspace",

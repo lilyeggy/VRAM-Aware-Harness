@@ -17,7 +17,7 @@ const scryptAsync = promisify(scrypt) as (
 
 export interface ApiCredential {
     readonly id: string;
-    readonly tenantId: string;
+    readonly userId: string;
     readonly scopes: readonly string[];
     readonly createdAt: string;
     readonly revokedAt: string | null;
@@ -28,35 +28,35 @@ interface CredentialRow extends ApiCredential {
     scopesJson: string;
 }
 
-/** Credentials are tenant bindings, never a client-supplied tenant selector. */
+/** Credentials are user bindings, never a client-supplied user selector. */
 export class ApiCredentialStore {
     constructor(private readonly db: Database) {}
 
     create(input: {
         rawKey: string;
-        tenantId: string;
+        userId: string;
         scopes: readonly string[];
     }): ApiCredential {
         if (input.rawKey.trim().length < 16) {
             throw new Error("API Key 至少需要 16 个字符");
         }
-        if (!/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$/.test(input.tenantId)) {
-            throw new Error("tenantId 只能包含字母、数字、_ 或 -，且最长 64 位");
+        if (!/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$/.test(input.userId)) {
+            throw new Error("userId 只能包含字母、数字、_ 或 -，且最长 64 位");
         }
         const credential: ApiCredential = {
             id: crypto.randomUUID(),
-            tenantId: input.tenantId,
+            userId: input.userId,
             scopes: Object.freeze([...new Set(input.scopes)]),
             createdAt: new Date().toISOString(),
             revokedAt: null,
         };
         this.db.query<unknown, {
-            id: string; keyDigest: string; tenantId: string;
+            id: string; keyDigest: string; userId: string;
             scopesJson: string; createdAt: string;
         }>(`
             INSERT INTO api_credentials (
-                id, key_digest, tenant_id, scopes_json, created_at, revoked_at
-            ) VALUES ($id, $keyDigest, $tenantId, $scopesJson, $createdAt, NULL);
+                id, key_digest, user_id, scopes_json, created_at, revoked_at
+            ) VALUES ($id, $keyDigest, $userId, $scopesJson, $createdAt, NULL);
         `).run({
             ...credential,
             keyDigest: digest(input.rawKey),
@@ -71,7 +71,7 @@ export class ApiCredentialStore {
         const keyDigest = digest(rawKey);
         const row = this.db.query<CredentialRow, { keyDigest: string }>(`
             SELECT id, key_digest AS keyDigest,
-                tenant_id AS tenantId, scopes_json AS scopesJson,
+                user_id AS userId, scopes_json AS scopesJson,
                 created_at AS createdAt, revoked_at AS revokedAt
             FROM api_credentials
             WHERE key_digest = $keyDigest AND revoked_at IS NULL;
@@ -83,12 +83,12 @@ export class ApiCredentialStore {
             return null;
         }
         return Object.freeze({
-            tenantId: row.tenantId,
+            userId: row.userId,
             scopes: Object.freeze(JSON.parse(row.scopesJson) as string[]),
         });
     }
 
-    async registerUser(email: string, password: string): Promise<{ userId: string; tenantId: string }> {
+    async registerUser(email: string, password: string): Promise<{ userId: string }> {
         const normalized = email.trim().toLowerCase();
         if (!/^\S+@\S+\.\S+$/.test(normalized)) throw new Error("邮箱格式无效");
         if (password.length < 8) throw new Error("密码至少需要 8 个字符");
@@ -97,10 +97,10 @@ export class ApiCredentialStore {
         const hash = await passwordHash(password);
         this.db.query(`INSERT INTO users (id, email, password_hash, created_at) VALUES ($id, $email, $hash, $createdAt)`)
             .run({ id, email: normalized, hash, createdAt: now });
-        return { userId: id, tenantId: id };
+        return { userId: id };
     }
 
-    async loginUser(email: string, password: string): Promise<{ token: string; userId: string; tenantId: string; expiresAt: string } | null> {
+    async loginUser(email: string, password: string): Promise<{ token: string; userId: string; expiresAt: string } | null> {
         const row = this.db.query<{ id: string; passwordHash: string }, { email: string }>(
             `SELECT id, password_hash AS passwordHash FROM users WHERE email = $email`,
         ).get({ email: email.trim().toLowerCase() });
@@ -116,7 +116,7 @@ export class ApiCredentialStore {
         const expiresAt = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000).toISOString();
         this.db.query(`INSERT INTO user_sessions (id, user_id, token_digest, created_at, expires_at, revoked_at) VALUES ($id, $userId, $digest, $createdAt, $expiresAt, NULL)`)
             .run({ id: crypto.randomUUID(), userId: row.id, digest: digest(token), createdAt: now.toISOString(), expiresAt });
-        return { token, userId: row.id, tenantId: row.id, expiresAt };
+        return { token, userId: row.id, expiresAt };
     }
 
     /**
@@ -170,7 +170,7 @@ export class ApiCredentialStore {
             `SELECT user_id AS userId, expires_at AS expiresAt FROM user_sessions WHERE token_digest = $digest AND revoked_at IS NULL`,
         ).get({ digest: digest(rawToken) });
         if (row === null || Date.parse(row.expiresAt) <= Date.now()) return null;
-        return Object.freeze({ tenantId: row.userId, scopes: Object.freeze(["*"]) });
+        return Object.freeze({ userId: row.userId, scopes: Object.freeze(["*"]) });
     }
 
     revoke(id: string): void {

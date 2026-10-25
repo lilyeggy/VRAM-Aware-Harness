@@ -39,7 +39,7 @@ test("Run 执行期间备份：WAL 下 VACUUM INTO 不与写入冲突，备份�
         composition.accessAuditStore.record({
             action: "run.submit",
             outcome: "ALLOW",
-            tenantId: "tenant-backup",
+            userId: "user-backup",
             resourceType: "run",
             resourceId: "run-backup",
             reason: "phase5-f6",
@@ -72,7 +72,7 @@ test("Run 执行期间备份：WAL 下 VACUUM INTO 不与写入冲突，备份�
                 )
                 .all()
                 .map((row) => row.version);
-            expect(migrations).toEqual([1, 2, 3, 4]);
+            expect(migrations).toEqual([1, 2, 3, 4, 5]);
 
             const auditCount = backup
                 .query<{ count: number }, []>(

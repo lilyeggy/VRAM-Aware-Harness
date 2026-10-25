@@ -8,11 +8,11 @@ import { VmCidAllocator } from "../../src/sandbox/microvm/vm-cid-allocator";
  * ## 为什么需要
  *
  * 此前全仓库**没有任何测试同时跑两台以上 microVM**：唯一的 Promise.all 是串口桥
- * 在同一 bridge 上跑两条命令，不是两台 VM。而产品核心承诺是"多租户每人一台云
+ * 在同一 bridge 上跑两条命令，不是两台 VM。而产品核心承诺是"多用户每人一台云
  * 电脑"——唯一没有证据的维度恰好是卖点。
  *
  * 并发下最危险的是**号段分配竞争**：
- * - guest CID：重复会导致 vsock 连错 VM（数据串租户，最严重）
+ * - guest CID：重复会导致 vsock 连错 VM（数据串用户，最严重）
  * - UID/GID：重复会让两个 VM 以同一宿主身份运行，jailer 隔离被削弱
  *
  * 这些分配器在同步代码里看似安全，但一旦被放进 `await` 交错的异步流程
@@ -24,7 +24,7 @@ async function withConcurrency<T>(items: T[], fn: (item: T, i: number) => Promis
     await Promise.all(items.map((item, i) => fn(item, i)));
 }
 
-describe("并发分配：guest CID 唯一性（防 vsock 串租户）", () => {
+describe("并发分配：guest CID 唯一性（防 vsock 串用户）", () => {
     it("50 个 VM 并发分配，CID 全部唯一且无空洞泄漏", async () => {
         const alloc = new VmCidAllocator();
         const ids = Array.from({ length: 50 }, (_, i) => `vm-${i}`);
@@ -39,7 +39,7 @@ describe("并发分配：guest CID 唯一性（防 vsock 串租户）", () => {
         const cids = ids.map((id) => alloc.get(id));
         // 每个 VM 都必须拿到 CID
         expect(cids.every((c) => c !== undefined)).toBe(true);
-        // 唯一性 —— 重复 CID 会导致 vsock 连错 VM（跨租户数据泄漏）
+        // 唯一性 —— 重复 CID 会导致 vsock 连错 VM（跨用户数据泄漏）
         expect(new Set(cids).size).toBe(50);
         // 从 base(3) 起连续分配，不应有空洞
         const sorted = [...cids].sort((a, b) => a! - b!);

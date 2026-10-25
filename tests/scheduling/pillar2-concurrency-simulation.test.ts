@@ -1,8 +1,8 @@
 import { describe, expect, it } from "bun:test";
 
 import {
-    TenantRunScheduler,
-} from "../../src/scheduling/tenant-run-scheduler.ts";
+    UserRunScheduler,
+} from "../../src/scheduling/user-run-scheduler.ts";
 
 /**
  * 支柱 2 验收门禁：高并发调度模拟。
@@ -13,30 +13,30 @@ import {
  */
 describe("支柱 2：高并发调度模拟（maxActiveRuns=30）", () => {
     function enqueueRuns(
-        scheduler: TenantRunScheduler,
-        runs: { runId: string; tenantId: string }[],
+        scheduler: UserRunScheduler,
+        runs: { runId: string; userId: string }[],
     ): void {
         for (const run of runs) {
             scheduler.enqueue({
                 runId: run.runId,
-                tenantId: run.tenantId,
+                userId: run.userId,
             });
         }
     }
 
-    it("30 个槽位全部放行给单租户，队列剩余依序补位", () => {
-        const scheduler = new TenantRunScheduler({
+    it("30 个槽位全部放行给单用户，队列剩余依序补位", () => {
+        const scheduler = new UserRunScheduler({
             maxActiveRuns: 30,
-            // 每租户可配：放开到与全局一致时，单租户可吃满全部槽位。
-            maxActiveRunsPerTenant: 30,
+            // 每用户可配：放开到与全局一致时，单用户可吃满全部槽位。
+            maxActiveRunsPerUser: 30,
         });
 
-        // 单租户灌入 40 个 Run。
+        // 单用户灌入 40 个 Run。
         enqueueRuns(
             scheduler,
             Array.from({ length: 40 }, (_, i) => ({
                 runId: `r${i}`,
-                tenantId: "tenant-a",
+                userId: "user-a",
             })),
         );
 
@@ -51,8 +51,8 @@ describe("支柱 2：高并发调度模拟（maxActiveRuns=30）", () => {
 
         // 全局 30 槽位全部放行；剩余 10 个留在队列。
         expect(claimed).toHaveLength(30);
-        expect(scheduler.getCapacity("tenant-a").activeRunCount).toBe(30);
-        expect(scheduler.getCapacity("tenant-a").activeTenantRunCount).toBe(30);
+        expect(scheduler.getCapacity("user-a").activeRunCount).toBe(30);
+        expect(scheduler.getCapacity("user-a").activeUserRunCount).toBe(30);
         expect(scheduler.listQueue()).toHaveLength(10);
 
         // 逐个释放后，队列里的 Run 依序补位。
@@ -63,16 +63,16 @@ describe("支柱 2：高并发调度模拟（maxActiveRuns=30）", () => {
         expect(refill).not.toBeNull();
     });
 
-    it("每租户上限独立生效：单租户最多同时 10 个", () => {
-        const scheduler = new TenantRunScheduler({
+    it("每用户上限独立生效：单用户最多同时 10 个", () => {
+        const scheduler = new UserRunScheduler({
             maxActiveRuns: 30,
-            maxActiveRunsPerTenant: 10,
+            maxActiveRunsPerUser: 10,
         });
         enqueueRuns(
             scheduler,
             Array.from({ length: 40 }, (_, i) => ({
                 runId: `r${i}`,
-                tenantId: "tenant-a",
+                userId: "user-a",
             })),
         );
 
@@ -85,59 +85,59 @@ describe("支柱 2：高并发调度模拟（maxActiveRuns=30）", () => {
             claimed.push(run.runId);
         }
 
-        // 每租户上限 10 先于全局 30 卡住：租户隔离防止独占。
+        // 每用户上限 10 先于全局 30 卡住：用户隔离防止独占。
         expect(claimed).toHaveLength(10);
-        expect(scheduler.getCapacity("tenant-a").activeTenantRunCount).toBe(10);
+        expect(scheduler.getCapacity("user-a").activeUserRunCount).toBe(10);
         expect(scheduler.listQueue()).toHaveLength(30);
         const blockers = scheduler.listQueueBlockers();
-        expect(blockers[0]!.reasonCode).toBe("TENANT_CONCURRENCY_LIMIT");
+        expect(blockers[0]!.reasonCode).toBe("USER_CONCURRENCY_LIMIT");
     });
 
-    it("两租户公平共享 30 个槽位（各 15）", () => {
-        const scheduler = new TenantRunScheduler({
+    it("两用户公平共享 30 个槽位（各 15）", () => {
+        const scheduler = new UserRunScheduler({
             maxActiveRuns: 30,
-            maxActiveRunsPerTenant: 10,
+            maxActiveRunsPerUser: 10,
         });
         enqueueRuns(
             scheduler,
             Array.from({ length: 20 }, (_, i) => ({
                 runId: `a${i}`,
-                tenantId: "tenant-a",
+                userId: "user-a",
             })),
         );
         enqueueRuns(
             scheduler,
             Array.from({ length: 20 }, (_, i) => ({
                 runId: `b${i}`,
-                tenantId: "tenant-b",
+                userId: "user-b",
             })),
         );
 
-        const perTenant = { "tenant-a": 0, "tenant-b": 0 };
+        const perUser = { "user-a": 0, "user-b": 0 };
         while (true) {
             const run = scheduler.claimNext();
             if (run === null) {
                 break;
             }
-            perTenant[run.tenantId as keyof typeof perTenant] += 1;
+            perUser[run.userId as keyof typeof perUser] += 1;
         }
 
-        expect(perTenant).toEqual({ "tenant-a": 10, "tenant-b": 10 });
-        // 每租户上限 10 先卡住，全局 30 只用了 20 —— 公平优先于吞满。
-        expect(scheduler.getCapacity("tenant-a").activeRunCount).toBe(20);
+        expect(perUser).toEqual({ "user-a": 10, "user-b": 10 });
+        // 每用户上限 10 先卡住，全局 30 只用了 20 —— 公平优先于吞满。
+        expect(scheduler.getCapacity("user-a").activeRunCount).toBe(20);
     });
 
     it("模拟 30 并发 Run 全生命周期：领取、执行、释放、补位无泄漏", async () => {
-        const scheduler = new TenantRunScheduler({
+        const scheduler = new UserRunScheduler({
             maxActiveRuns: 30,
-            maxActiveRunsPerTenant: 30,
+            maxActiveRunsPerUser: 30,
         });
         const total = 60;
         enqueueRuns(
             scheduler,
             Array.from({ length: total }, (_, i) => ({
                 runId: `run-${i}`,
-                tenantId: i % 2 === 0 ? "tenant-a" : "tenant-b",
+                userId: i % 2 === 0 ? "user-a" : "user-b",
             })),
         );
 
@@ -158,7 +158,7 @@ describe("支柱 2：高并发调度模拟（maxActiveRuns=30）", () => {
 
         await Promise.all(Array.from({ length: 30 }, worker));
         expect(completed).toBe(total);
-        expect(scheduler.getCapacity("tenant-a").activeRunCount).toBe(0);
+        expect(scheduler.getCapacity("user-a").activeRunCount).toBe(0);
         expect(scheduler.listQueue()).toHaveLength(0);
     });
 });

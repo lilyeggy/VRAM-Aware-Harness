@@ -38,7 +38,7 @@ test("启动恢复重建输入时携带原始任务与 Checkpoint", () => {
         const createdAt = new Date().toISOString();
 
         const run = runService.createQueuedRun({
-            tenantId:"tenant-a",
+            userId:"user-a",
             harnessSessionId:"session-a",
             userInput:"先读取 README，然后总结其中的部署步骤",
             workspacePath:"/tmp/ws-a",
@@ -93,7 +93,7 @@ test("启动恢复重建输入时携带原始任务与 Checkpoint", () => {
 
         // 对照组：普通排队 Run（无恢复语义）。
         const plainRun = runService.createQueuedRun({
-            tenantId:"tenant-a",
+            userId:"user-a",
             harnessSessionId:"session-a",
             userInput:"全新任务",
             workspacePath:"/tmp/ws-a",

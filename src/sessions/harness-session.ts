@@ -1,6 +1,6 @@
 export interface HarnessSession {
     readonly id: string;
-    readonly tenantId: string;
+    readonly userId: string;
     readonly workspaceId: string | null;
     readonly title: string | null;
     readonly runtimeSessionRef: string | null;
@@ -11,7 +11,7 @@ export interface HarnessSession {
 /** 用户前端语境中的 Conversation；存储在 harness_sessions 表。 */
 export interface Conversation {
     readonly id: string;
-    readonly tenantId: string;
+    readonly userId: string;
     readonly workspaceId: string;
     readonly title: string;
     readonly createdAt: string;
@@ -30,8 +30,8 @@ export function createHarnessSession(
     if (input.id.trim().length === 0) {
         throw new Error("id 不能为空");
     }
-    if (input.tenantId.trim().length === 0) {
-        throw new Error("tenantId 不能为空");
+    if (input.userId.trim().length === 0) {
+        throw new Error("userId 不能为空");
     }
     const workspaceId = input.workspaceId ?? null;
     const title = input.title ?? null;
@@ -52,13 +52,13 @@ export function createHarnessSession(
 
 export function createConversation(input: {
     id?: string;
-    tenantId: string;
+    userId: string;
     workspaceId: string;
     title?: string;
     createdAt?: string;
 }): Conversation {
-    if (input.tenantId.trim().length === 0) {
-        throw new Error("tenantId 不能为空");
+    if (input.userId.trim().length === 0) {
+        throw new Error("userId 不能为空");
     }
     if (input.workspaceId.trim().length === 0) {
         throw new Error("workspaceId 不能为空");
@@ -70,7 +70,7 @@ export function createConversation(input: {
     }
     return Object.freeze({
         id: input.id ?? crypto.randomUUID(),
-        tenantId: input.tenantId,
+        userId: input.userId,
         workspaceId: input.workspaceId,
         title,
         createdAt: now,

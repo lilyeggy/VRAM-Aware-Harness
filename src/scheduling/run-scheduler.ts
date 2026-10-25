@@ -26,8 +26,8 @@ import type { RunStore } from "../runs/runstore.ts";
 import type {
     QueuedRun,
     QueueReasonCode,
-    TenantRunScheduler,
-}   from "./tenant-run-scheduler.ts";
+    UserRunScheduler,
+}   from "./user-run-scheduler.ts";
 
 
 
@@ -42,12 +42,12 @@ export type SchedulerDrainResult =
 
 /**
  * §9.8 v1.4 Phase 2：队列深度 backpressure。submit 在创建 Run 之前
- * 检查全局/租户排队深度，超限直接拒绝，避免队列无限增长。
+ * 检查全局/用户排队深度，超限直接拒绝，避免队列无限增长。
  */
 export class QueueBackpressureError extends Error {
     constructor(
         message: string,
-        readonly scope: "GLOBAL" | "TENANT",
+        readonly scope: "GLOBAL" | "USER",
         readonly limit: number,
         readonly current: number,
         readonly retryAfterSeconds: number,
@@ -64,8 +64,8 @@ export interface RunSchedulerOptions {
     queueTtlMs?: number;
     /** §9.8 v1.4 Phase 2：全局排队深度上限，超限 submit 抛 QueueBackpressureError。 */
     readonly maxQueuedRuns?: number;
-    /** §9.8 v1.4 Phase 2：单租户排队深度上限，超限 submit 抛 QueueBackpressureError。 */
-    readonly maxQueuedRunsPerTenant?: number;
+    /** §9.8 v1.4 Phase 2：单用户排队深度上限，超限 submit 抛 QueueBackpressureError。 */
+    readonly maxQueuedRunsPerUser?: number;
     /** 时钟（测试注入）。 */
     now?: () => number;
     /**
@@ -150,7 +150,7 @@ function getRecoveryCheckpointId(
 export class RunScheduler  {
     constructor(
         private readonly runService:RunService,
-        private readonly scheduler:TenantRunScheduler,
+        private readonly scheduler:UserRunScheduler,
         private readonly options: RunSchedulerOptions = {},
     ) {}
 
@@ -308,9 +308,9 @@ export class RunScheduler  {
             this.runService.recordQueueBlocked(blocker.runId, {
                 reasonCode: blocker.reasonCode,
                 position: blocker.position,
-                tenantPosition: blocker.tenantPosition,
+                userPosition: blocker.userPosition,
                 activeRunCount: blocker.activeRunCount,
-                activeTenantRunCount: blocker.activeTenantRunCount,
+                activeUserRunCount: blocker.activeUserRunCount,
             });
             this.lastQueueBlockerByRunId.set(blocker.runId, blocker.reasonCode);
         }
@@ -342,8 +342,8 @@ export class RunScheduler  {
         // §9.8 v1.4 Phase 3：幂等键命中时直接返回既有 Run，不重复入队、
         // 也不应被 backpressure 拒绝——重放同一请求是客户端重试语义。
         if (input.idempotencyKey !== undefined) {
-            const existing = this.runService.findByTenantIdempotencyKey(
-                input.tenantId,
+            const existing = this.runService.findByUserIdempotencyKey(
+                input.userId,
                 input.idempotencyKey,
             );
             if (existing !== null) {
@@ -352,7 +352,7 @@ export class RunScheduler  {
         }
 
         // §9.8 v1.4 Phase 2：先做队列深度 backpressure，再创建 Run。
-        this.assertQueueCapacity(input.tenantId);
+        this.assertQueueCapacity(input.userId);
 
         // 接收到用户任务输入后，创建对应持久化的Queued Run
         const run = this.runService.createQueuedRun(input);
@@ -363,7 +363,7 @@ export class RunScheduler  {
             // 把对应的 run 入队
             this.scheduler.enqueue({
                 runId:run.id,
-                tenantId:run.tenantId,
+                userId:run.userId,
                 sessionId:run.harnessSessionId,
                             })
         }
@@ -373,11 +373,11 @@ export class RunScheduler  {
         return run;
     }
 
-    private assertQueueCapacity(tenantId: string): void {
+    private assertQueueCapacity(userId: string): void {
         const maxQueuedRuns = this.options.maxQueuedRuns;
-        const maxQueuedRunsPerTenant = this.options.maxQueuedRunsPerTenant;
+        const maxQueuedRunsPerUser = this.options.maxQueuedRunsPerUser;
 
-        if (maxQueuedRuns === undefined && maxQueuedRunsPerTenant === undefined) {
+        if (maxQueuedRuns === undefined && maxQueuedRunsPerUser === undefined) {
             return;
         }
 
@@ -393,17 +393,17 @@ export class RunScheduler  {
             );
         }
 
-        if (maxQueuedRunsPerTenant !== undefined) {
-            const tenantQueued = queue.filter(
-                (entry) => entry.tenantId === tenantId,
+        if (maxQueuedRunsPerUser !== undefined) {
+            const userQueued = queue.filter(
+                (entry) => entry.userId === userId,
             ).length;
 
-            if (tenantQueued >= maxQueuedRunsPerTenant) {
+            if (userQueued >= maxQueuedRunsPerUser) {
                 throw new QueueBackpressureError(
-                    `租户 ${tenantId} 排队深度已达上限：${tenantQueued}/${maxQueuedRunsPerTenant}`,
-                    "TENANT",
-                    maxQueuedRunsPerTenant,
-                    tenantQueued,
+                    `用户 ${userId} 排队深度已达上限：${userQueued}/${maxQueuedRunsPerUser}`,
+                    "USER",
+                    maxQueuedRunsPerUser,
+                    userQueued,
                     5,
                 );
             }
@@ -417,7 +417,7 @@ export class RunScheduler  {
 
         this.scheduler.enqueue({
             runId:run.id,
-            tenantId:run.tenantId,
+            userId:run.userId,
             sessionId:run.harnessSessionId,
                         // B4：排队时间取 DB updatedAt（进入/回到 QUEUED 的时刻），
             // 重启恢复不重置 TTL 时钟，等待时间跨重启累计。
@@ -503,7 +503,7 @@ export class RunScheduler  {
 
             this.scheduler.enqueue({
                 runId:run.id,
-                tenantId:run.tenantId,
+                userId:run.userId,
                 sessionId:run.harnessSessionId,
                                 enqueuedAt:run.updatedAt,
             });
@@ -525,7 +525,7 @@ export class RunScheduler  {
         this.scheduler.release(run.runId);
         this.scheduler.enqueue({
             runId: run.runId,
-            tenantId: run.tenantId,
+            userId: run.userId,
             ...(run.sessionId === undefined ? {} : { sessionId: run.sessionId }),
             reasonCode,
             enqueuedAt: run.enqueuedAt,
@@ -607,7 +607,7 @@ export class RunScheduler  {
             });
         };
 
-        // 初始按队列深度铺开；claimNext 会按全局 slot / 租户公平份额自然限流。
+        // 初始按队列深度铺开；claimNext 会按全局 slot / 用户公平份额自然限流。
         const initialAttempts = this.scheduler.listQueue().length;
         // 异常补位预算：最坏情况下每条初次尝试只额外重试一次，避免
         // "执行一直失败 -> 一直补位" 的忙等。
@@ -753,7 +753,7 @@ export class RunScheduler  {
         try {
             this.scheduler.enqueue({
                 runId:run.id,
-                tenantId:run.tenantId,
+                userId:run.userId,
                 sessionId:run.harnessSessionId,
                                 // B4：与 restoreQueuedRun 一致，重启/恢复不重置 TTL 时钟。
                 enqueuedAt:run.updatedAt,

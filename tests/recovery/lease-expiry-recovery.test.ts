@@ -80,7 +80,7 @@ function insertRunningRun(
     composition.runStore.create(
         {
             id: runId,
-            tenantId: "tenant-lease",
+            userId: "user-lease",
             harnessSessionId: `session-${runId}`,
             status: "RUNNING",
             userInput: "验证租约过期恢复",

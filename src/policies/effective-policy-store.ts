@@ -9,7 +9,7 @@ import {
 interface SnapshotRow {
     id: string;
     runId: string;
-    tenantId: string;
+    userId: string;
     layersJson: string;
     effectiveJson: string;
     createdAt: string;
@@ -40,17 +40,17 @@ export class EffectivePolicyStore {
         const parameters = {
             id: snapshot.id,
             runId: snapshot.runId,
-            tenantId: snapshot.tenantId,
+            userId: snapshot.userId,
             layersJson: JSON.stringify(snapshot.layers),
             effectiveJson: JSON.stringify(effective),
             createdAt: snapshot.createdAt,
         };
         this.db.query<unknown, typeof parameters>(`
             INSERT INTO effective_policy_snapshots (
-                id, run_id, tenant_id,
+                id, run_id, user_id,
                 layers_json, effective_json, created_at
             ) VALUES (
-                $id, $runId, $tenantId,
+                $id, $runId, $userId,
                 $layersJson, $effectiveJson, $createdAt
             );
         `).run(parameters);
@@ -60,7 +60,7 @@ export class EffectivePolicyStore {
         const cached = this.snapshotCache.get(id);
         if (cached !== undefined) return cached;
         const row = this.db.query<SnapshotRow, { id: string }>(`
-            SELECT id, run_id AS runId, tenant_id AS tenantId,
+            SELECT id, run_id AS runId, user_id AS userId,
                 layers_json AS layersJson, effective_json AS effectiveJson,
                 created_at AS createdAt
             FROM effective_policy_snapshots WHERE id = $id;
@@ -71,7 +71,7 @@ export class EffectivePolicyStore {
 
     listSnapshotsForRun(runId: string): EffectivePolicySnapshot[] {
         const rows = this.db.query<SnapshotRow, { runId: string }>(`
-            SELECT id, run_id AS runId, tenant_id AS tenantId,
+            SELECT id, run_id AS runId, user_id AS userId,
                 layers_json AS layersJson, effective_json AS effectiveJson,
                 created_at AS createdAt
             FROM effective_policy_snapshots
@@ -92,7 +92,7 @@ export class EffectivePolicyStore {
         const computedSnapshot = computeEffectivePolicy({
             id: row.id,
             runId: row.runId,
-            tenantId: row.tenantId,
+            userId: row.userId,
             layers,
             createdAt: row.createdAt,
         });

@@ -54,12 +54,12 @@ export async function handleSystemRoute(
                     queue: ctx.accessControl === undefined
                         ? ctx.application.getQueue()
                         : ctx.application.getQueue().filter((entry) =>
-                            entry.tenantId === principal.tenantId),
+                            entry.userId === principal.userId),
                 });
             }
             case "metrics": {
                 // §9.8 v1.4：最小可观测性；只暴露进程内计数与 RunStore 聚合，
-                // 不引入 Prometheus SDK，也不泄漏租户级明细。
+                // 不引入 Prometheus SDK，也不泄漏用户级明细。
                 ctx.requirePrincipal(request, "metrics:read");
                 const snapshot = ctx.application.getMetricsSnapshot?.();
                 if (snapshot === undefined) {
@@ -85,7 +85,7 @@ export async function handleSystemRoute(
                 const limit = readPageParam(url, "limit", 1, 500);
                 const offset = readPageParam(url, "offset", 0, 1_000_000);
                 return jsonResponse({
-                    events: ctx.accessControl.auditStore.listForTenant(principal.tenantId, {
+                    events: ctx.accessControl.auditStore.listForUser(principal.userId, {
                         ...(limit === undefined ? {} : { limit }),
                         ...(offset === undefined ? {} : { offset }),
                     }),
@@ -94,10 +94,10 @@ export async function handleSystemRoute(
             case "billing": {
                 const principal = ctx.requirePrincipal(request, "billing:read");
                 if (ctx.accessControl?.billingStore === undefined) {
-                    throw new HttpError(501, "未配置租户账单服务");
+                    throw new HttpError(501, "未配置用户账单服务");
                 }
                 return jsonResponse({
-                    billing: ctx.accessControl.billingStore.summarize(principal.tenantId),
+                    billing: ctx.accessControl.billingStore.summarize(principal.userId),
                 });
             }
         }

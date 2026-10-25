@@ -8,12 +8,12 @@
 
 本文冻结 Day 1–7 MVP 的真实行为，而不是为未来对象预先设计接口。Stage 1–2 已
 引入 HarnessTemplate、HarnessInstance、CapabilityProfile、Attempt 与 Sandbox；
-当前多租户 Agent 任务服务继续保留这些合同。任何改变都必须有明确 migration、
+当前多用户 Agent 任务服务继续保留这些合同。任何改变都必须有明确 migration、
 事件版本和 ADR；新增认证、Workspace 与容器 Sandbox 时，不能绕过原有恢复语义。
 
 真实 A6000 上的直接 Pi / Harness 对照实验仍按照
 [`day7-a6000-baseline-runbook.zh-CN.md`](day7-a6000-baseline-runbook.zh-CN.md)
-独立执行。按照 ADR 0009，真实数据和跨租户隔离攻击测试都是产品完成条件；缺少
+独立执行。按照 ADR 0009，真实数据和跨用户隔离攻击测试都是产品完成条件；缺少
 数据时不允许声明性能、资源收益或生产级隔离。
 
 ## 2. 可复现入口
@@ -48,7 +48,7 @@ Fake 演示输出 `RESULT: PASS`。进程级 HTTP 测试需要允许在 `127.0.0
 
 | 版本 | 主要内容 |
 | --- | --- |
-| v1 | `agent_runs`、`run_events`、Tenant/Session 查询索引 |
+| v1 | `agent_runs`、`run_events`、User/Session 查询索引 |
 | v2 | `run_events.dedupe_key` 和 Run 内部分唯一索引 |
 | v3 | `tool_executions`、`checkpoints` 及工具结果/恢复边界约束 |
 | v4 | `resource_snapshots`、`policy_decisions` 及审计一致性约束 |
@@ -132,8 +132,8 @@ ToolGateway 在真实执行前保存 `PREPARED` ToolExecution：
 
 - ResourceObserver 只产生资源事实，ExecutionPolicy 负责决策；
 - `CRITICAL`、`UNKNOWN` 和观测失败都让新 Run 排队；
-- `BUSY` 保留全局上限，并限制同 Tenant 并发；
-- Tenant 内 FIFO，Tenant 间 round-robin；
+- `BUSY` 保留全局上限，并限制同 User 并发；
+- User 内 FIFO，User 间 round-robin；
 - `claimNext` 选择 Run 时同步登记 Run 级 slot；
 - Run 在工具执行期间仍占用 slot，直到完成、失败、中断或启动失败；
 - slot 释放幂等，单个 Run 失败不能阻塞后续 Run；
@@ -151,7 +151,7 @@ ToolGateway 在真实执行前保存 `PREPARED` ToolExecution：
 | 工具执行前持久化、结果复用和 fail closed | `tests/tools/tool-execution.test.ts`、`tests/tools/tool-execution-store.test.ts`、`tests/tools/tool-gateway.test.ts` |
 | Checkpoint、恢复决定和恢复任务隔离 | `tests/checkpoints/recovery-decision.test.ts`、`tests/checkpoints/recovery-service.test.ts`、`tests/checkpoints/recovery-executor.test.ts` |
 | 资源观测、分类、准入和决策证据 | `tests/resources/*.test.ts` |
-| Tenant 公平性、slot、drain 和资源恢复推进 | `tests/scheduling/*.test.ts` |
+| User 公平性、slot、drain 和资源恢复推进 | `tests/scheduling/*.test.ts` |
 | 应用组装、启动恢复、HTTP 与进程生命周期 | `tests/app/*.test.ts`、`tests/http/*.test.ts`、`tests/integration/*.test.ts` |
 
 Stage 1 的新测试应继续复用这些合同，并新增 Template version、Instance、Session、

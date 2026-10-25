@@ -252,8 +252,8 @@ function createSandboxedPiToolDefinition(
 ): AnyPiToolDefinition {
     const shell = (command: string) =>
         executor.execute(sandboxId, ["sh", "-lc", command], { workdir: containerWorkdir });
-    // 路径换算以**挂载根**为基准，而不是工作区。TENANT 视野下容器的 /workspace
-    // 是整个租户根，本 Run 的工作区只是它下面的一个子目录；用工作区做基准会把
+    // 路径换算以**挂载根**为基准，而不是工作区。USER 视野下容器的 /workspace
+    // 是整个用户根，本 Run 的工作区只是它下面的一个子目录；用工作区做基准会把
     // 兄弟 Run 的目录误判为"越界"（而它们其实是策略允许范围内可见的）。
     const containerPath = (hostPath: string) => {
         if (hostPath === mountRoot) return "/workspace";

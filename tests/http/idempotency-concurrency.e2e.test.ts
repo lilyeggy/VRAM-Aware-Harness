@@ -34,7 +34,7 @@ test("同 idempotencyKey 并发提交只创建一个 Run 且都返回同一 id",
         const submitted = await Promise.all(
             Array.from({ length: 8 }, () => Promise.resolve().then(() =>
                 composition.application.submitRun({
-                    tenantId: "tenant-idempotency",
+                    userId: "user-idempotency",
                     harnessSessionId: "session-idempotency",
                     userInput: "并发幂等提交",
                     workspacePath,
@@ -46,10 +46,10 @@ test("同 idempotencyKey 并发提交只创建一个 Run 且都返回同一 id",
         const uniqueRunIds = new Set(submitted.map((run) => run.id));
         expect(uniqueRunIds.size).toBe(1);
         expect(composition.runStore
-            .listForTenant("tenant-idempotency", 50)).toHaveLength(1);
+            .listForUser("user-idempotency", 50)).toHaveLength(1);
         expect(composition.runStore
-            .findByTenantIdempotencyKey(
-                "tenant-idempotency",
+            .findByUserIdempotencyKey(
+                "user-idempotency",
                 "phase5-idempotency-key",
             )?.id).toBe(submitted[0]?.id);
     } finally {

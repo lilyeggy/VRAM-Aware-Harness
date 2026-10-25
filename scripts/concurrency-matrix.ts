@@ -31,7 +31,7 @@ async function api(path: string, token: string | null, init: RequestInit = {}): 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
-async function register(email: string, password: string): Promise<{ token: string; tenantId: string; userId: string }> {
+async function register(email: string, password: string): Promise<{ token: string; userId: string }> {
   const r = await api("/auth/register", null, { method: "POST", body: JSON.stringify({ email, password, inviteCode: INVITE }) });
   if (r.status === 201) {
     // ok
@@ -44,7 +44,7 @@ async function register(email: string, password: string): Promise<{ token: strin
   } else {
     throw new Error(`login ${email} failed ${l.status} ${JSON.stringify(l.body)}`);
   }
-  return { token: l.body.token, tenantId: l.body.tenantId, userId: l.body.userId };
+  return { token: l.body.token, userId: l.body.userId };
 }
 async function createWorkspace(token: string, name: string): Promise<{ id: string; rootPath: string }> {
   const r = await api("/workspaces", token, { method: "POST", body: JSON.stringify({ name }) });
@@ -213,7 +213,7 @@ async function runRound(n: number, round: number): Promise<any> {
     clearInterval(sampler);
   }
   const after = hostMetrics();
-  const crossTenant: Array<{ from: number; to: number; check: string; status: number; ok: boolean }> = [];
+  const crossUser: Array<{ from: number; to: number; check: string; status: number; ok: boolean }> = [];
   for (let i = 0; i < users.length; i++) {
     const actor = users[i];
     const victim = users[(i + 1) % users.length];
@@ -232,9 +232,9 @@ async function runRound(n: number, round: number): Promise<any> {
       const fn = entry[1];
       try {
         const r = await fn();
-        crossTenant.push({ from: actor.user, to: victim.user, check: name, status: r.status, ok: r.status === 404 });
+        crossUser.push({ from: actor.user, to: victim.user, check: name, status: r.status, ok: r.status === 404 });
       } catch {
-        crossTenant.push({ from: actor.user, to: victim.user, check: name, status: -1, ok: false });
+        crossUser.push({ from: actor.user, to: victim.user, check: name, status: -1, ok: false });
       }
     }
   }
@@ -247,11 +247,11 @@ async function runRound(n: number, round: number): Promise<any> {
     allSandbox: users.every((u) => u.events.includes("SANDBOX_ACQUIRED")),
     allToolCompleted: users.every((u) => u.events.includes("TOOL_COMPLETED")),
     allArtifacts: users.every((u) => u.artifacts.some((p) => p === "result.txt" || p.endsWith("/result.txt"))),
-    crossTenantAll404: crossTenant.length > 0 && crossTenant.every((c) => c.ok),
+    crossUserAll404: crossUser.length > 0 && crossUser.every((c) => c.ok),
     noErrors: users.every((u) => u.error === null),
   };
   const pass = Object.values(validations).every((v) => v);
-  return { n, round, stamp, users: users.map((u) => ({ user: u.user, email: u.email, runId: u.runId, status: u.status, durationMs: u.completedAt === null ? null : u.completedAt - u.submitAt, finalText: u.finalText, events: u.events, artifacts: u.artifacts, error: u.error, sandboxWarmHit: u.sandboxWarmHit, sandboxDurationMs: u.sandboxDurationMs })), wallClockMs, p50Ms: percentile(durations, 50), p95Ms: percentile(durations, 95), maxConcurrentFirecracker: maxConcurrent, hostBefore: before, hostAfter: after, hostSamples: samples, crossTenant, validations, pass };
+  return { n, round, stamp, users: users.map((u) => ({ user: u.user, email: u.email, runId: u.runId, status: u.status, durationMs: u.completedAt === null ? null : u.completedAt - u.submitAt, finalText: u.finalText, events: u.events, artifacts: u.artifacts, error: u.error, sandboxWarmHit: u.sandboxWarmHit, sandboxDurationMs: u.sandboxDurationMs })), wallClockMs, p50Ms: percentile(durations, 50), p95Ms: percentile(durations, 95), maxConcurrentFirecracker: maxConcurrent, hostBefore: before, hostAfter: after, hostSamples: samples, crossUser, validations, pass };
 }
 async function main(): Promise<void> {
   const startedAt = new Date().toISOString();
@@ -263,7 +263,7 @@ async function main(): Promise<void> {
       rounds.push(result);
       console.log(`[matrix] n=${n} round=${round} pass=${result.pass} wall=${result.wallClockMs}ms p50=${result.p50Ms} p95=${result.p95Ms} maxFC=${result.maxConcurrentFirecracker}`);
       if (result.pass === false) {
-        console.log(`[matrix] failures: ${JSON.stringify(result.validations)} crossTenantBad=${result.crossTenant.filter((c: any) => c.ok === false).length}`);
+        console.log(`[matrix] failures: ${JSON.stringify(result.validations)} crossUserBad=${result.crossUser.filter((c: any) => c.ok === false).length}`);
       }
     }
   }

@@ -5,7 +5,7 @@
 
 ## 0. 结论先行
 
-- 在**当前这台无 KVM / 无 CPU 虚拟化扩展**的真机上，**`runsc`（gVisor user-space kernel）是最合适的多租户默认**：
+- 在**当前这台无 KVM / 无 CPU 虚拟化扩展**的真机上，**`runsc`（gVisor user-space kernel）是最合适的多用户默认**：
   隔离 9 项攻击测试全 PASS，冷启动仅比 runc 慢 ~22%，运行期命令/IO 开销持平，且部署只需要 runsc 一个二进制（无 KVM 门槛）。
 - **虚拟机级（Kata / Firecracker / microVM）是本架构 `strict` 档的演进方向**，但它**硬性依赖 KVM**，在这台真机上连进程都起不来。在取得 KVM 环境的真机证据之前，不把它当作"已通过"。
 
@@ -49,10 +49,10 @@ runsc/runc 比值          1.225x          0.856x       0.997x      1.078x
 
 ```
 runsc_runtime_evidence   runtime 证据（点击 runsc）       PASS
-cross_tenant_workspace   跨租户 Workspace 不可见          PASS
+cross_user_workspace   跨用户 Workspace 不可见          PASS
 host_path                宿主路径不可访问                 PASS
 path_traversal           路径穿越被拦                    PASS
-tenant_secret            他租户 Secret 读不到            PASS
+user_secret            他用户 Secret 读不到            PASS
 network_none             无外部网络                      PASS
 pid_limit                PID 数受限                     PASS
 tmpfs_limit              tmpfs 容量受限                 PASS
@@ -78,8 +78,8 @@ sandbox_lost             容器被杀 → LOST 收敛            PASS
 
 ## 4. 为什么这里选 runsc
 
-1. **隔离到位**：9 项真机攻击测试全 PASS，覆盖跨租户文件/Secret、宿主路径、路径穿越、网络、PID/tmpfs。
-2. **性能可接受**：冷启动 1.22x，运行期持平；对多租户「few 常驻 sandbox」模型足够。
+1. **隔离到位**：9 项真机攻击测试全 PASS，覆盖跨用户文件/Secret、宿主路径、路径穿越、网络、PID/tmpfs。
+2. **性能可接受**：冷启动 1.22x，运行期持平；对多用户「few 常驻 sandbox」模型足够。
 3. **无 KVM 也能真跑**：这是当前按量收费（~¥1.6/h）AMD 实例上唯一拿得到真机证据的强隔离方案。
 4. **fail-closed 一致**：runtime 不符就拒绝，从不静默降级。
 

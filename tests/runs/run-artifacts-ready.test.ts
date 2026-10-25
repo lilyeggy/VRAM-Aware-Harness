@@ -23,7 +23,7 @@ test("Phase 3：终态后写入 RUN_ARTIFACTS_READY 事件", async () => {
             workspaceResults,
         );
         const run = service.createQueuedRun({
-            tenantId: "tenant-a",
+            userId: "user-a",
             harnessSessionId: "session-a",
             userInput: "artifacts",
             workspacePath: "/tmp/a",

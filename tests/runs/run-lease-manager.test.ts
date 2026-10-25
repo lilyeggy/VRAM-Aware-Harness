@@ -11,11 +11,11 @@ import { openHarnessDatabase } from "../../src/storage/database.ts";
 function createRunRow(db: ReturnType<typeof openHarnessDatabase>): void {
     db.run(`
         INSERT INTO agent_runs (
-            id, tenant_id, harness_session_id, status, user_input,
+            id, user_id, harness_session_id, status, user_input,
             workspace_path, created_at, updated_at, started_at, finished_at,
             checkpoint_id, failure_reason, run_policy_json, thinking_level
         ) VALUES (
-            'run-1', 'tenant-1', 'session-1', 'QUEUED', 'input',
+            'run-1', 'user-1', 'session-1', 'QUEUED', 'input',
             '/tmp/run-1', '2026-10-11T00:00:00.000Z', '2026-10-11T00:00:00.000Z',
             NULL, NULL, NULL, NULL, NULL, 'off'
         );

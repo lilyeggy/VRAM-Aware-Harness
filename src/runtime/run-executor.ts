@@ -110,19 +110,19 @@ export class RunExecutor implements AgentRuntime {
             throw new Error(`找不到 AgentRun：${request.run.runId}`);
         }
 
-        const session = this.ensureSession(run.tenantId, run.harnessSessionId);
+        const session = this.ensureSession(run.userId, run.harnessSessionId);
         const now = new Date().toISOString();
         const snapshot = withSandboxProfile(
             computeEffectivePolicy({
                 id: crypto.randomUUID(),
                 runId: run.id,
-                tenantId: run.tenantId,
+                userId: run.userId,
                 layers: this.policyLayers(run),
                 createdAt: now,
             }),
             this.sandboxProfile,
         );
-        // B2：请求级 allowNetwork=true 若被平台/租户交集拒绝，必须在创建 VM
+        // B2：请求级 allowNetwork=true 若被平台/用户交集拒绝，必须在创建 VM
         // 之前 fail-closed，不能静默降级为无网运行。
         assertNetworkRequestAllowed(run.runPolicy, snapshot);
         this.policies.saveSnapshot(snapshot);
@@ -267,17 +267,17 @@ export class RunExecutor implements AgentRuntime {
         }
     }
 
-    private ensureSession(tenantId: string, sessionId: string) {
+    private ensureSession(userId: string, sessionId: string) {
         const existing = this.sessions.get(sessionId);
         if (existing !== null) {
-            if (existing.tenantId !== tenantId) {
+            if (existing.userId !== userId) {
                 throw new Error(`HarnessSession 归属不匹配：${sessionId}`);
             }
             return existing;
         }
         const created = createHarnessSession({
             id: sessionId,
-            tenantId,
+            userId,
             createdAt: new Date().toISOString(),
         });
         this.sessions.create(created);
@@ -305,7 +305,7 @@ export class RunExecutor implements AgentRuntime {
 
         return [
             platformForSandbox,
-            this.policyRegistry.getTenantPolicy(run.tenantId),
+            this.policyRegistry.getUserPolicy(run.userId),
             createPolicyLayer("template:default", "TEMPLATE", templatePolicy),
             createPolicyLayer(`workspace:${run.workspacePath}`, "WORKSPACE", workspacePolicy),
             createPolicyLayer(`run:${run.id}`, "RUN", run.runPolicy ?? unrestrictedPolicy),

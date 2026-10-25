@@ -3,10 +3,10 @@
 > **定位说明（2026-08-12 起稿，2026-08-19 更新）**：本文用于学习和解释现有实现，不定义当前开发优先级。
 > 文中 Claude Adapter、异构 ResourcePool 和大型控制面章节保留为历史设计材料；
 > 当前唯一实施路线见
-> [多租户 Agent 任务服务路线图](multi-tenant-agent-task-service-roadmap.zh-CN.md)。
+> [多用户 Agent 任务服务路线图](multi-user-agent-task-service-roadmap.zh-CN.md)。
 > 2026-08-12 之后的 P0.5 真机验收、Eval/Observe/LLM Gateway 三个差异化方向、
 > 完成定义闭合及面试准备指南，见本文第八部分与
-> [实现日志](implementation-log/2026-08-p0-tenant-sandbox.zh-CN.md)。
+> [实现日志](implementation-log/2026-08-p0-user-sandbox.zh-CN.md)。
 
 > 目标：读完后，你不只是能复述架构图，而是能够从任意一个 HTTP 请求、数据库行、
 > RuntimeEvent 或失败日志出发，沿真实代码定位它的创建者、消费者、状态变化、事务
@@ -63,7 +63,7 @@
 | Control Plane | 哪个任务能运行、使用什么权限、失败后怎样恢复 | 本 Harness |
 | Infrastructure Plane | 模型推理、GPU、文件系统、进程环境 | vLLM、GPU、Sandbox Provider |
 
-一个具体例子：模型决定调用 `write` 是 Behavior Plane；Tenant 是否允许 `write` 是
+一个具体例子：模型决定调用 `write` 是 Behavior Plane；User 是否允许 `write` 是
 Control Plane；真正把字节写进文件系统是 Infrastructure Plane。
 
 控制面不替模型做工具选择，但必须在写入发生前有最终否决权。
@@ -74,7 +74,7 @@ Control Plane；真正把字节写进文件系统是 Infrastructure Plane。
 
 - 一个 Bun 进程；
 - 一个 SQLite 数据库；
-- 内存 Tenant 公平队列；
+- 内存 User 公平队列；
 - Pi Runtime；
 - vLLM/NVIDIA 资源观测；
 - ManagedLocal Sandbox；
@@ -191,7 +191,7 @@ Command:
   Pi 请求执行 write
 
 Decision:
-  ToolPolicyDecision = DENY，因为 Tenant 只允许 read
+  ToolPolicyDecision = DENY，因为 User 只允许 read
 
 RuntimeEvent:
   可能出现 Pi 的 tool_execution_start，因为 SDK 可能在调用包装器前报告“进入工具分发”
@@ -284,7 +284,7 @@ Composition Root 决定使用 SQLite Store、PiAdapter、ManagedLocalSandbox 和
 
 ```json
 {
-  "tenantId": "tenant-a",
+  "userId": "user-a",
   "sessionId": "session-42",
   "userInput": "读取 README 并总结架构",
   "workspacePath": "/workspaces/project-a"
@@ -298,7 +298,7 @@ PI_PROVIDER=local-vllm
 VLLM_MODEL_ID=qwen3.5-9b
 PI_TOOLS=read,write,bash
 HARNESS_MAX_ACTIVE_RUNS=2
-HARNESS_MAX_ACTIVE_RUNS_PER_TENANT=1
+HARNESS_MAX_ACTIVE_RUNS_PER_USER=1
 ```
 
 为了阅读方便，假设生成的 ID 为：
@@ -337,7 +337,7 @@ const config = options.config ?? loadHarnessConfig(
 - `VLLM_MODEL_ID` 必须存在；
 - 端口必须合法；
 - 并发必须是正整数；
-- 单 Tenant 并发不能大于全局并发；
+- 单 User 并发不能大于全局并发；
 -阈值和超时必须可解析。
 
 这叫 fail fast：配置错误应该让启动失败，而不是运行到第一个请求时才暴露。
@@ -429,7 +429,7 @@ QueuePump = running
 Scheduler queues = empty
 Scheduler active slots = empty
 数据库 schema version = 7
-尚无 Template/Instance/Session，因为它们按 Tenant 懒创建
+尚无 Template/Instance/Session，因为它们按 User 懒创建
 ```
 
 ---
@@ -465,7 +465,7 @@ HTTP 层不负责：
 ```ts
 const body = await request.json();
 const run = this.application.submitRun({
-    tenantId: requiredString(body, "tenantId"),
+    userId: requiredString(body, "userId"),
     harnessSessionId:
         optionalString(body, "sessionId") ?? crypto.randomUUID(),
     userInput: requiredString(body, "userInput"),
@@ -520,7 +520,7 @@ submit(input: StartRunInput): AgentRun {
     const run = this.runService.createQueuedRun(input);
     this.scheduler.enqueue({
         runId: run.id,
-        tenantId: run.tenantId,
+        userId: run.userId,
     });
     return run;
 }
@@ -548,7 +548,7 @@ const controlBinding = this.controlBindingResolver?.resolve(input);
 CapabilityProfile 已存在
 Template 和不可变 v1 已存在
 Instance 已存在且 READY
-Session 已存在且 Tenant/Instance 匹配
+Session 已存在且 User/Instance 匹配
 ```
 
 然后才创建 Run：
@@ -556,7 +556,7 @@ Session 已存在且 Tenant/Instance 匹配
 ```ts
 const run: AgentRun = {
     id: runId,
-    tenantId: input.tenantId,
+    userId: input.userId,
     harnessSessionId: input.harnessSessionId,
     status: "QUEUED",
     userInput: input.userInput,
@@ -632,7 +632,7 @@ PRAGMA foreign_keys = ON;
 ```text
 agent_runs:
   id                    run-100
-  tenant_id             tenant-a
+  user_id             user-a
   status                QUEUED
   template_version_id   tpl-a-v1
   harness_instance_id   instance-a
@@ -645,54 +645,54 @@ run_events:
 内存 Scheduler：
 
 ```text
-queuesByTenant = {
-  "tenant-a": [{ runId: "run-100", reasonCode: "AWAITING_SCHEDULING" }]
+queuesByUser = {
+  "user-a": [{ runId: "run-100", reasonCode: "AWAITING_SCHEDULING" }]
 }
-tenantOrder = ["tenant-a"]
-activeTenantByRunId = {}
+userOrder = ["user-a"]
+activeUserByRunId = {}
 ```
 
 # 第四部分：调度、slot 与资源准入
 
-## 第 9 章：TenantRunScheduler 的三个内存结构
+## 第 9 章：UserRunScheduler 的三个内存结构
 
-源码：`src/scheduling/tenant-run-scheduler.ts`
+源码：`src/scheduling/user-run-scheduler.ts`
 
 ```ts
-private readonly queuesByTenant = new Map<string, QueuedRun[]>();
-private readonly tenantOrder: string[] = [];
-private readonly activeTenantByRunId = new Map<string, string>();
+private readonly queuesByUser = new Map<string, QueuedRun[]>();
+private readonly userOrder: string[] = [];
+private readonly activeUserByRunId = new Map<string, string>();
 ```
 
 每个结构只负责一件事：
 
 | 结构 | 内容 | 解决的问题 |
 | --- | --- | --- |
-| queuesByTenant | 每个 Tenant 内 FIFO | 同一 Tenant 保持提交顺序 |
-| tenantOrder | Tenant 轮转队列 | Tenant 间 round-robin |
-| activeTenantByRunId | 已占 slot 的 Run → Tenant | 全局与 Tenant 并发计数 |
+| queuesByUser | 每个 User 内 FIFO | 同一 User 保持提交顺序 |
+| userOrder | User 轮转队列 | User 间 round-robin |
+| activeUserByRunId | 已占 slot 的 Run → User | 全局与 User 并发计数 |
 
 为什么不使用一个全局数组？考虑：
 
 ```text
 提交顺序：A1, A2, A3, B1
 全局 FIFO：A1, A2, A3, B1
-Tenant 公平：A1, B1, A2, A3
+User 公平：A1, B1, A2, A3
 ```
 
-如果 Tenant A 连续提交很多任务，单一 FIFO 会让 B 长时间饥饿。
+如果 User A 连续提交很多任务，单一 FIFO 会让 B 长时间饥饿。
 
 ### 9.1 enqueue
 
 ```ts
 enqueue(input: EnqueueRunInput): QueuedRun {
-    if (this.activeTenantByRunId.has(input.runId)) {
+    if (this.activeUserByRunId.has(input.runId)) {
         throw new Error(`Run 正在执行中：${input.runId}`);
     }
     if (this.findQueuedRun(input.runId) !== null) {
         throw new Error(`Run 已经在队列中：${input.runId}`);
     }
-    // 创建 QueuedRun，放入 Tenant FIFO
+    // 创建 QueuedRun，放入 User FIFO
 }
 ```
 
@@ -701,7 +701,7 @@ enqueue(input: EnqueueRunInput): QueuedRun {
 - active Run 被重复排队，造成同一 Run 并发执行；
 - waiting Run 重复出现，未来被 claim 两次。
 
-新 Tenant 首次入队时加入 `tenantOrder`；已有 Tenant 只追加到自己的 FIFO。
+新 User 首次入队时加入 `userOrder`；已有 User 只追加到自己的 FIFO。
 
 ### 9.2 claimNext 是“选择 + 原子占位”
 
@@ -709,7 +709,7 @@ enqueue(input: EnqueueRunInput): QueuedRun {
 
 ```text
 离开 waiting queue
-+ 写入 activeTenantByRunId
++ 写入 activeUserByRunId
 = 占用了逻辑 slot
 ```
 
@@ -733,52 +733,52 @@ maxActiveRuns = 1
 假设：
 
 ```text
-queuesByTenant:
+queuesByUser:
   A → [A1, A2]
   B → [B1, B2]
-tenantOrder = [A, B]
+userOrder = [A, B]
 ```
 
 第一次 claim：
 
 ```text
-shift tenant A
+shift user A
 shift A1
 A 仍有 A2，所以 push A
-tenantOrder = [B, A]
+userOrder = [B, A]
 active = {A1 → A}
 ```
 
 第二次 claim：
 
 ```text
-shift tenant B
+shift user B
 shift B1
 B 仍有 B2，所以 push B
-tenantOrder = [A, B]
+userOrder = [A, B]
 active = {A1 → A, B1 → B}
 ```
 
 得到 `A1 → B1`。A1 释放后下一次是 A2。
 
-### 9.4 Tenant 并发上限
+### 9.4 User 并发上限
 
-如果 Tenant A 已达到 `maxActiveRunsPerTenant`，它不会被删除，而是放回轮转队尾：
+如果 User A 已达到 `maxActiveRunsPerUser`，它不会被删除，而是放回轮转队尾：
 
 ```ts
-if (activeTenantRunCount >= maxActiveRunsPerTenant) {
-    this.tenantOrder.push(tenantId);
+if (activeUserRunCount >= maxActiveRunsPerUser) {
+    this.userOrder.push(userId);
     continue;
 }
 ```
 
-循环最多检查本轮开始时的 Tenant 数量，防止所有 Tenant 都达上限时无限旋转。
+循环最多检查本轮开始时的 User 数量，防止所有 User 都达上限时无限旋转。
 
 ### 9.5 release 必须在 finally
 
 ```ts
 release(runId: string): boolean {
-    return this.activeTenantByRunId.delete(runId);
+    return this.activeUserByRunId.delete(runId);
 }
 ```
 
@@ -794,7 +794,7 @@ release 是幂等的。Coordinator 把它放进 finally，覆盖：
 ### 9.6 listQueue 为什么操作副本
 
 查询队列位置要模拟 round-robin，但不能改变真实顺序。因此它复制 Map 中的数组和
-tenantOrder，在副本上 shift。查询接口改变调度结果是典型的隐蔽 bug。
+userOrder，在副本上 shift。查询接口改变调度结果是典型的隐蔽 bug。
 
 ---
 
@@ -814,10 +814,10 @@ if (queuedRun === null) return { kind: "EMPTY" };
 ### 10.2 为什么 capacity 要减 1
 
 ```ts
-const capacity = this.scheduler.getCapacity(queuedRun.tenantId);
+const capacity = this.scheduler.getCapacity(queuedRun.userId);
 const admissionRequest = {
     activeRunCount: capacity.activeRunCount - 1,
-    activeTenantRunCount: capacity.activeTenantRunCount - 1,
+    activeUserRunCount: capacity.activeUserRunCount - 1,
 };
 ```
 
@@ -843,7 +843,7 @@ try {
     this.scheduler.release(runId);
     this.scheduler.enqueue({
         runId,
-        tenantId,
+        userId,
         reasonCode: "RESOURCE_OBSERVATION_FAILED",
         enqueuedAt: queuedRun.enqueuedAt,
     });
@@ -909,7 +909,7 @@ const roundPromises = Array.from(
 const settledResults = await Promise.allSettled(roundPromises);
 ```
 
-Scheduler 的同步 claim 保证 slot 不超限；Promise 并发允许不同 Tenant 的 Runtime 真正
+Scheduler 的同步 claim 保证 slot 不超限；Promise 并发允许不同 User 的 Runtime 真正
 并行。使用 allSettled 是为了一个 Run 失败时，其他已获 slot 的 Run 仍然完成清理。
 
 ### 11.3 为什么限制 remainingAttempts
@@ -1037,12 +1037,12 @@ ResourceSnapshot + thresholds
 | CRITICAL | 无 | QUEUE | RESOURCE_CRITICAL |
 | UNKNOWN | 无 | QUEUE | RESOURCE_UNKNOWN |
 | BUSY | 全局满 | QUEUE | GLOBAL_CONCURRENCY_LIMIT |
-| BUSY | 当前 Tenant 已有 active | QUEUE | RESOURCE_BUSY_TENANT_LIMIT |
-| BUSY | Tenant 尚无 active | START | RESOURCE_BUSY_TENANT_AVAILABLE |
+| BUSY | 当前 User 已有 active | QUEUE | RESOURCE_BUSY_USER_LIMIT |
+| BUSY | User 尚无 active | START | RESOURCE_BUSY_USER_AVAILABLE |
 | NORMAL | 全局满 | QUEUE | GLOBAL_CONCURRENCY_LIMIT |
 | NORMAL | 有 slot | START | RESOURCE_NORMAL |
 
-BUSY 时允许没有活跃 Run 的 Tenant 启动，体现最低限度公平；CRITICAL 时所有新 Run
+BUSY 时允许没有活跃 Run 的 User 启动，体现最低限度公平；CRITICAL 时所有新 Run
 都排队，安全优先。
 
 ### 13.3 为什么 UNKNOWN 要 fail closed
@@ -1142,7 +1142,7 @@ Fake Runtime 或某些 SDK 可能在 start Promise 返回前同步发出 `agent_
 ```ts
 run: {
     runId,
-    tenantId,
+    userId,
     harnessSessionId,
     workspacePath,
     templateVersionId,
@@ -1557,7 +1557,7 @@ Executor 遍历计划：
 
 ## 第 29 章：为什么 Stage 0 的 Run 不足以描述执行环境
 
-Stage 0 Run 知道 tenant、session、workspace 和任务，但不能回答：
+Stage 0 Run 知道 user、session、workspace 和任务，但不能回答：
 
 - 使用哪一版模型/工具/Skill 配置？
 - 在哪个受管执行环境运行？
@@ -1570,7 +1570,7 @@ Stage 1 增加 TemplateVersion、Instance、CapabilityProfile、Session 和 Atte
 ## 第 30 章：Template 与 TemplateVersion
 
 ```text
-HarnessTemplate = 稳定身份和 Tenant 归属
+HarnessTemplate = 稳定身份和 User 归属
 TemplateVersion = 已发布、不可变的具体执行期望
 ```
 
@@ -1626,7 +1626,7 @@ missingRequired 空、missingOptional 非空 → DEGRADED
 Instance 绑定：
 
 ```text
-Tenant
+User
 + TemplateVersion
 + CapabilityProfile
 + RuntimeKind
@@ -1653,7 +1653,7 @@ HarnessSession 是控制面关系，不等于 Pi AgentSession 内存对象：
 ```ts
 {
     id: "session-42",
-    tenantId: "tenant-a",
+    userId: "user-a",
     instanceId: "instance-a",
     runtimeSessionRef: null | "/path/to/pi/session",
 }
@@ -1687,15 +1687,15 @@ REJECTED 表示执行前控制面明确不允许；FAILED 表示准备或执行�
 
 ## 第 35 章：DefaultPiControlPlane 的兼容策略
 
-旧 API 没有 templateId/instanceId。Resolver 按 Tenant 懒创建稳定默认对象：
+旧 API 没有 templateId/instanceId。Resolver 按 User 懒创建稳定默认对象：
 
 ```text
-default-pi-template:${tenant}
-default-pi-template-version:${tenant}:1
-default-pi-instance:${tenant}
+default-pi-template:${user}
+default-pi-template-version:${user}:1
+default-pi-instance:${user}
 ```
 
-然后验证相同 sessionId 不得跨 Tenant/Instance 使用，最终返回版本和 Instance 绑定。
+然后验证相同 sessionId 不得跨 User/Instance 使用，最终返回版本和 Instance 绑定。
 
 这个类是迁移桥：它让旧 API 创建的新 Run 真实进入新模型，但不等于未来完整模板管理
 API。关键是解析发生在 Run 创建时，所以排队后发布 v2 不影响已固定的 v1。
@@ -1704,11 +1704,11 @@ API。关键是解析发生在 Run 创建时，所以排队后发布 v2 不影�
 
 ## 第 36 章：策略层与配置字段不是同一件事
 
-Template spec 说“这个模板配置了哪些工具”；Tenant policy 说“这个 Tenant 最多允许
+Template spec 说“这个模板配置了哪些工具”；User policy 说“这个 User 最多允许
 哪些工具”；Workspace policy 说“本次目录边界在哪里”。它们不能互相覆盖，只能求交：
 
 ```text
-Platform ∩ Tenant ∩ Template ∩ Workspace ∩ Run
+Platform ∩ User ∩ Template ∩ Workspace ∩ Run
 ```
 
 五层分别回答：
@@ -1716,7 +1716,7 @@ Platform ∩ Tenant ∩ Template ∩ Workspace ∩ Run
 | Layer | 控制主体 | 典型约束 |
 | --- | --- | --- |
 | PLATFORM | 平台运维者 | 全局禁用危险模型、网络、Secret |
-| TENANT | 租户管理员 | Tenant 可用 Tool/Skill/预算 |
+| USER | 用户管理员 | User 可用 Tool/Skill/预算 |
 | TEMPLATE | 已发布配置 | 本模板实际声明的 Model/Tool/Skill |
 | WORKSPACE | 任务目录 | 文件根路径 |
 | RUN | 单次调用方 | 本次进一步收紧的临时权限 |
@@ -1803,7 +1803,7 @@ Snapshot 同时保存：
 ```text
 五层原始输入 layers_json
 + 交集结果 effective_json
-+ runId / tenantId / templateVersionId
++ runId / userId / templateVersionId
 + createdAt
 ```
 
@@ -1869,7 +1869,7 @@ RunService
 ```
 
 RunService 只理解通用 AgentRuntime；ManagedRuntime 把 Template、Capability、Policy、
-Attempt 和 Sandbox 包在任意具体 Adapter 外层。PiAdapter 不需要知道 Tenant 策略来源。
+Attempt 和 Sandbox 包在任意具体 Adapter 外层。PiAdapter 不需要知道 User 策略来源。
 
 ## 第 41 章：start/resume 的兼容分流
 
@@ -1886,15 +1886,15 @@ return this.execute("START", request, invokeInner);
 按 Run 固定 ID 加载 TemplateVersion、Instance、Session 和 CapabilityProfile，然后检查：
 
 ```text
-instance.tenantId == run.tenantId
+instance.userId == run.userId
 instance.templateVersionId == run.templateVersionId
-session.tenantId == run.tenantId
+session.userId == run.userId
 session.instanceId == instance.id
 profile.id == instance.capabilityProfileId（通过查找建立）
 ```
 
-这是一道服务层 Tenant 完整性校验。数据库外键能证明 ID 存在，却不能自动证明多个表
-中的 tenantId 都相同。
+这是一道服务层 User 完整性校验。数据库外键能证明 ID 存在，却不能自动证明多个表
+中的 userId 都相同。
 
 ## 第 43 章：Snapshot 和 Attempt 的精确顺序
 
@@ -2142,7 +2142,7 @@ Harness start/resume/interrupt → Pi SDK
 Pi AgentSessionEvent → RuntimeEvent
 ```
 
-它不读取 Tenant Policy，不写 SQLite，不创建 Attempt。这样未来另一个 Adapter 可以
+它不读取 User Policy，不写 SQLite，不创建 Attempt。这样未来另一个 Adapter 可以
 复用 ManagedRuntime，而不复制控制面。
 
 ## 第 57 章：全局配置与本次编译配置
@@ -2270,7 +2270,7 @@ Stage 1–2 e2e 无需真实模型也能验证控制面路径。
 ## 第 63 章：完整领域关系
 
 ```text
-Tenant
+User
   ├── HarnessTemplate
   │     └── HarnessTemplateVersion
   │             ├── PiTemplateSpec
@@ -2313,7 +2313,7 @@ Snapshot 和 Sandbox，因为它们属于一次真实执行，不属于逻辑 Ru
 输入：
 
 ```text
-tenant-a / session-42 / /workspaces/project-a
+user-a / session-42 / /workspaces/project-a
 ```
 
 ControlPlane 首次创建：
@@ -2345,8 +2345,8 @@ RunEvent #1 RUN_CREATED
 Scheduler：
 
 ```text
-tenantOrder=[tenant-a]
-tenant-a queue=[run-100]
+userOrder=[user-a]
+user-a queue=[run-100]
 ```
 
 ## 第 65 章：资源准入
@@ -2379,7 +2379,7 @@ ManagedRuntime 加载引用并计算：
 
 ```text
 Platform  unrestricted
-Tenant    tools=[read]
+User    tools=[read]
 Template  tools=[read,write,bash], model=[local-vllm/qwen3.5-9b]
 Workspace roots=[/workspaces/project-a]
 Run       unrestricted
@@ -2469,7 +2469,7 @@ Sandbox lifecycle record
 | --- | --- | --- | --- | --- | --- |
 | 资源观测失败 | QUEUED | 无 | 无 | 无 | 未调用 |
 | CRITICAL/UNKNOWN | QUEUED | 无 | 无 | 无 | 未调用 |
-| 引用/Tenant 不一致 | INTERRUPTED | 可能无 | 无 | 无 | 未调用 |
+| 引用/User 不一致 | INTERRUPTED | 可能无 | 无 | 无 | 未调用 |
 | required capability 缺失 | INTERRUPTED | REJECTED | REJECTED | 无 | 未调用 |
 | 模型不允许 | INTERRUPTED | REJECTED | REJECTED | 无 | 未调用 |
 | Sandbox 不支持硬限制 | INTERRUPTED | FAILED | APPLIED/DEGRADED | 当前无持久 Sandbox 行 | 未调用 |
@@ -2544,7 +2544,7 @@ Fake 不等于“假装成功”。它隔离不可控外部系统，让状态机
 | `resources/vllm-resource-observer.test.ts` | 双来源降级、counter rate |
 | `resources/resource-classifier.test.ts` | 阈值边界和多原因 |
 | `resources/execution-policy.test.ts` | 压力决策表 |
-| `scheduling/tenant-run-scheduler.test.ts` | round-robin 和 slot |
+| `scheduling/user-run-scheduler.test.ts` | round-robin 和 slot |
 | `scheduling/run-queue-coordinator.test.ts` | release、single-flight、故障隔离 |
 
 ### 71.4 Stage 1–2
@@ -2791,11 +2791,11 @@ Stage 4 才会基于 Capability 和故障类型深化恢复矩阵。
 
 ### 87.1 Default Instance 的并发假设
 
-`DefaultPiControlPlane` 当前为每个 Tenant 创建一个固定 Instance，而 Instance 状态机只有
+`DefaultPiControlPlane` 当前为每个 User 创建一个固定 Instance，而 Instance 状态机只有
 单值 `READY/ACTIVE`，没有 active attempt 计数。默认配置
-`maxActiveRunsPerTenant=1` 与这个模型一致。
+`maxActiveRunsPerUser=1` 与这个模型一致。
 
-如果把单 Tenant 并发提高到 2，同一 Instance 的第二个 Run 可能尝试 `ACTIVE → ACTIVE`
+如果把单 User 并发提高到 2，同一 Instance 的第二个 Run 可能尝试 `ACTIVE → ACTIVE`
 并被状态机拒绝；即使允许该转换，第一个 Run 完成时也可能把仍承载第二个 Run 的
 Instance 提前改回 READY。因此当前真实不变量是：
 
@@ -2836,12 +2836,12 @@ API 前必须在领域入口补验证，不能只依赖 TypeScript 类型，因�
 
 ### 87.5 当前 HTTP 暴露范围
 
-`StartRunInput` 在代码层支持 `runPolicy`，但当前 `POST /runs` 只解析 Tenant、Session、
+`StartRunInput` 在代码层支持 `runPolicy`，但当前 `POST /runs` 只解析 User、Session、
 输入和 Workspace；没有 Template、Policy 或 Sandbox 管理 API。因此：
 
 - 五层 Run policy 可通过程序化调用/测试注入，尚不能由现有 HTTP 客户端提交；
 - 默认模板的 skills 是空数组，主 HTTP 路径不会加载 Skill；
-- 默认 Tenant 都使用进程配置中的同一模型，按 Tenant 选择不同模型需要正式模板 API；
+- 默认 User 都使用进程配置中的同一模型，按 User 选择不同模型需要正式模板 API；
 - PolicyRegistry 也没有 HTTP CRUD。
 
 这些不影响控制面执行机制已经接通，但影响“当前产品接口能配置到什么程度”的判断。
@@ -2852,7 +2852,7 @@ API 前必须在领域入口补验证，不能只依赖 TypeScript 类型，因�
 previous state 条件更新。Session 的调用路径会先 get 再 update，所以当前测试成立，但
 未来并发绑定或删除场景需要更强 CAS/错误检查。
 
-类似地，数据库外键证明引用存在，却不能证明所有对象 tenantId 一致；这个跨表不变量
+类似地，数据库外键证明引用存在，却不能证明所有对象 userId 一致；这个跨表不变量
 由 DefaultPiControlPlane 和 ManagedAgentRuntime 服务层验证。
 
 ### 87.7 默认对象懒创建存在跨事务窗口
@@ -3001,7 +3001,7 @@ vllm-resource-observer.ts
 resource-classifier.ts
 execution-policy.ts
 resource-admission-service.ts
-tenant-run-scheduler.ts
+user-run-scheduler.ts
 run-queue-coordinator.ts
 run-queue-pump.ts
 ```
@@ -3050,14 +3050,14 @@ runtime-capability
 
 ## 第 94 章：推演题
 
-配置：全局 slot=2，Tenant slot=1；队列 A1、A2、B1；资源 BUSY。
+配置：全局 slot=2，User slot=1；队列 A1、A2、B1；资源 BUSY。
 
 请回答：
 
 1. 第一轮最多 claim 哪两个？
 2. 为什么 A2 暂时不能 claim？
 3. Policy 为什么仍可能允许 B1？
-4. A1 完成后 tenantOrder 如何变化？
+4. A1 完成后 userOrder 如何变化？
 
 ## 第 95 章：事务题
 
@@ -3087,7 +3087,7 @@ Runtime startRequests=0
 
 ```text
 Platform tools=[read,write,bash], network=false
-Tenant   tools=[read,write], network=true
+User   tools=[read,write], network=true
 Template tools=[read,bash], network=true
 Workspace root=/repo/a
 Run      tools=null
@@ -3117,7 +3117,7 @@ bun test tests/runs/runstore.test.ts
 bun test tests/runs/run-service.test.ts
 bun test tests/tools/tool-gateway.test.ts
 bun test tests/checkpoints/recovery-service.test.ts
-bun test tests/scheduling/tenant-run-scheduler.test.ts
+bun test tests/scheduling/user-run-scheduler.test.ts
 bun test tests/scheduling/run-queue-coordinator.test.ts
 bun test tests/policies/effective-policy.test.ts
 bun test tests/integration/stage1-stage2-control-plane.e2e.test.ts
@@ -3147,7 +3147,7 @@ Day 7 demo RESULT: PASS
 | Method | Path | 作用 | 返回重点 |
 | --- | --- | --- | --- |
 | GET | `/health` | 查询 Application 是否完成启动 | ok/started |
-| GET | `/queue` | 读取 Scheduler 的只读 round-robin 视图 | position、tenantPosition、reason |
+| GET | `/queue` | 读取 Scheduler 的只读 round-robin 视图 | position、userPosition、reason |
 | GET | `/resources` | 主动执行一次资源观测 | success snapshot 或 failure |
 | POST | `/runs` | 创建并可靠入队新 Run | 202 + QUEUED Run |
 | GET | `/runs/:id` | 查询当前 Run 和资源准入决定历史 | run、decisions |
@@ -3222,7 +3222,7 @@ API 的 409 是领域冲突或未分类内部错误的统一当前映射；它�
 | `src/resources/execution-policy.ts` | 压力/并发 → START/QUEUE |
 | `src/resources/resource-admission-service.ts` | Observer/Classifier/Policy/Store 编排 |
 | `src/resources/policy-decision-store.ts` | Snapshot + Decision 原子证据 |
-| `src/scheduling/tenant-run-scheduler.ts` | Tenant FIFO、round-robin 和逻辑 slot |
+| `src/scheduling/user-run-scheduler.ts` | User FIFO、round-robin 和逻辑 slot |
 | `src/scheduling/run-queue-coordinator.ts` | claim、准入、执行、release、single-flight drain |
 | `src/scheduling/run-queue-pump.ts` | 定时和立即触发 drain，错误隔离 |
 | `src/scheduling/queued-run-recovery-service.ts` | 重启时从 SQLite 重建新任务/恢复任务队列 |
@@ -3245,7 +3245,7 @@ API 的 409 是领域冲突或未分类内部错误的统一当前映射；它�
 | 文件 | 职责 |
 | --- | --- |
 | `src/policies/effective-policy.ts` | 五层约束数据和交集算法 |
-| `src/policies/policy-registry.ts` | 当前进程内 Platform/Tenant 策略来源 |
+| `src/policies/policy-registry.ts` | 当前进程内 Platform/User 策略来源 |
 | `src/policies/effective-policy-store.ts` | Snapshot、Compilation、ToolDecision 证据 |
 | `src/policies/policy-compilation.ts` | Effective Policy → Pi RuntimeConfig |
 | `src/policies/tool-policy-guard.ts` | 副作用前 Tool/Path/Process/Network 检查 |
@@ -3315,7 +3315,7 @@ API 的 409 是领域冲突或未分类内部错误的统一当前映射；它�
 
 > 时间范围：2026-08-12 至 2026-08-19  
 > 本章补充 8.12 之后发生的关键进展：P0.5 真机验收闭合、执行质量评测闭环（A）、观测驾驶舱（B）、LLM 路由网关（C），以及完成定义 8 条全部闭合。  
-> 更详细的推进记录见 [实现日志](implementation-log/2026-08-p0-tenant-sandbox.zh-CN.md)。
+> 更详细的推进记录见 [实现日志](implementation-log/2026-08-p0-user-sandbox.zh-CN.md)。
 
 ## 第 22 章：P0.5 沙箱分级与 ECS 真机验收
 
@@ -3386,14 +3386,14 @@ P0.5 的验收结论不是"绝对安全"，而是**清楚知道每一级隔离�
 
 - 独立页面 `/observe`，和任务操作台 `/` 解耦。
 - 只读，不触发任务。
-- 多租户切换。
+- 多用户切换。
 - 数据来自 `GET /eval`。
 
 ### 25.2 可视化
 
 - 任务状态环形图（donut chart）
 - 完成度渐变条
-- 租户对比条形图
+- 用户对比条形图
 - 资源背压堆叠条
 - 任务明细表（状态徽章、Token、成本、排队耗时、危险拦截数）
 
@@ -3445,12 +3445,12 @@ Pi 直接读 `.pi/spike/models.json` 的 `baseUrl` 连到 vLLM / OpenCode。后�
 
 ## 第 27 章：完成定义全部闭合
 
-[多租户 Agent 任务服务路线图](multi-tenant-agent-task-service-roadmap.zh-CN.md) 中的完成定义 8 条已闭合：
+[多用户 Agent 任务服务路线图](multi-user-agent-task-service-roadmap.zh-CN.md) 中的完成定义 8 条已闭合：
 
 1. P0.5 Sandbox 分级方案 + 真机验收（runsc 默认，9 项攻击 PASS）。
 2. GPU 资源准入真机验证（T4 + vLLM 0.7.3，120 并发 → CRITICAL → QUEUE）。
 3. 副作用感知执行与恢复闭环（ToolEffect / Checkpoint / RecoveryDecision）。
-4. 多租户权限与隔离（Tenant → Workspace → API Key 作用域）。
+4. 多用户权限与隔离（User → Workspace → API Key 作用域）。
 5. 工具治理与可解释证据（ToolPolicyDecision / policy_decisions）。
 6. 可观测与审计（RunEvent / policy_decisions / Eval / Observe）。
 7. 课程网站与面试话术（docs/course/ + interview-prep-guide）。
@@ -3466,7 +3466,7 @@ Pi 直接读 `.pi/spike/models.json` 的 `baseUrl` 连到 vLLM / OpenCode。后�
   1. `README.md`
   2. `docs/interview-prep-guide.zh-CN.md`
   3. 本文第八部分
-  4. `docs/implementation-log/2026-08-p0-tenant-sandbox.zh-CN.md`
+  4. `docs/implementation-log/2026-08-p0-user-sandbox.zh-CN.md`
 
 ---
 

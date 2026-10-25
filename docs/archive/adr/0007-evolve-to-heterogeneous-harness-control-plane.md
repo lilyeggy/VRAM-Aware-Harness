@@ -4,11 +4,11 @@
 
 已被 ADR 0009 取代为当前实施方向；保留为秋招后的历史演进方案
 
-> 2026-08-12 更新：项目当前目标是支持团队共享本地模型的多租户 Agent 任务服务。
+> 2026-08-12 更新：项目当前目标是支持团队共享本地模型的多用户 Agent 任务服务。
 > Claude、异构 ResourcePool 和大型控制面不进入当前主线。已完成的 Template、
 > Instance、Capability、Policy 和 Sandbox 抽象保留为产品内部底座，不因路线收敛
 > 而删除。当前决策见
-> [ADR 0009](0009-build-a-multi-tenant-agent-task-service.md)。ADR 0008 是两次决策
+> [ADR 0009](0009-build-a-multi-user-agent-task-service.md)。ADR 0008 是两次决策
 > 之间的历史中间方案。
 
 ## 日期
@@ -19,12 +19,12 @@
 
 Day 1–7 已经完成单进程、SQLite 形态的可靠执行纵向切片：可替换
 `AgentRuntime`、Pi Adapter、AgentRun 状态机、追加式事件、ToolGateway、工具
-副作用、Checkpoint、安全恢复、真实资源观测、准入策略、Tenant 公平队列、slot
+副作用、Checkpoint、安全恢复、真实资源观测、准入策略、User 公平队列、slot
 生命周期、应用组装与 HTTP API。
 
 这条切片证明了 Harness 可以在 Agent Runtime 外层建立可靠执行边界，但如果后续
-只继续增加 GPU 阈值、队列规则或普通租户管理功能，项目容易分别退化成资源监控
-脚本或多租户后台。另一方面，Pi、Claude Agent SDK/Claude Code 等 Harness 在
+只继续增加 GPU 阈值、队列规则或普通用户管理功能，项目容易分别退化成资源监控
+脚本或多用户后台。另一方面，Pi、Claude Agent SDK/Claude Code 等 Harness 在
 Session、工具、权限、Sandbox、事件和恢复能力上存在真实差异，不能用一个最低
 公共接口假装它们具有完全相同的语义。
 
@@ -35,12 +35,12 @@ Session、工具、权限、Sandbox、事件和恢复能力上存在真实差异
 
 项目的规范定位调整为：
 
-> **面向异构 Agent Harness 的资源感知、可恢复执行控制面：在多租户共享环境中，
-> 以版本化模板管理 Harness 执行环境，把平台与租户策略落实到 Runtime、工具网关
+> **面向异构 Agent Harness 的资源感知、可恢复执行控制面：在多用户共享环境中，
+> 以版本化模板管理 Harness 执行环境，把平台与用户策略落实到 Runtime、工具网关
 > 和 Sandbox，并依据不同资源池控制执行，在故障后按可证明的安全边界恢复，最终
 > 形成统一但不丢失 Runtime 原始证据的审计时间线。**
 
-项目主叙事是“异构 Harness 的可靠执行与策略控制”，多租户是必须面对的运行
+项目主叙事是“异构 Harness 的可靠执行与策略控制”，多用户是必须面对的运行
 环境和隔离边界，但不是独立的 SaaS 卖点。副作用感知恢复、真实资源准入和可审计
 仍是长期核心，不因增加多 Harness 管理而降级。
 
@@ -49,7 +49,7 @@ Session、工具、权限、Sandbox、事件和恢复能力上存在真实差异
 后续统一使用以下对象层次：
 
 ```text
-Tenant
+User
   ├── HarnessTemplate
   │     ├── Runtime 类型与版本
   │     ├── Model、Tool、Skill 配置
@@ -64,13 +64,13 @@ Tenant
 
 - `HarnessTemplate` 是版本化的期望配置，不是可变配置行；已经开始的 Run 必须能
   追溯到准确模板版本。
-- `HarnessInstance` 是控制面管理的执行环境，绑定 Tenant、模板版本、Runtime、
+- `HarnessInstance` 是控制面管理的执行环境，绑定 User、模板版本、Runtime、
   Sandbox、有效策略和资源池。它可以是临时容器、子进程、远程执行环境或可复用
   warm instance，不等于永久进程，也不等于 Session。
 - `Session` 保存 Runtime 可表达的对话关系；`Run` 是一次受控制的用户任务；
   `Attempt` 是 Run 的一次实际启动或恢复执行。
-- 一个 Tenant 可以拥有多个 Template、Instance 和 Session。控制面不假定
-  “一个 Tenant 等于一个常驻 Harness 进程”。
+- 一个 User 可以拥有多个 Template、Instance 和 Session。控制面不假定
+  “一个 User 等于一个常驻 Harness 进程”。
 
 ### 2. 显式适配不同 Harness
 
@@ -104,7 +104,7 @@ Tenant
 
 当能力缺失时遵守以下规则：
 
-- 安全、权限或 Tenant 隔离无法落实：拒绝创建或执行；
+- 安全、权限或 User 隔离无法落实：拒绝创建或执行；
 - 用户请求的恢复保证无法满足：拒绝该保证，或进入明确的人工恢复状态；
 - 非关键观测能力缺失：允许显式降级，并记录审计完整度；
 - 调度优化信号缺失：使用保守的确定性策略；
@@ -118,7 +118,7 @@ Tenant
 
 ```text
 平台硬策略
-  ∩ Tenant 策略
+  ∩ User 策略
   ∩ HarnessTemplate 策略
   ∩ Workspace 策略
   ∩ Run 临时策略
@@ -158,11 +158,11 @@ VRAM 仍是重要且已实现的第一个资源事实，但不再是唯一资源
 - 本地 vLLM 的 GPU、KV、并发容量和模型服务状态；
 - 远程模型的 token、速率、并发和费用预算；
 - Sandbox 的 CPU、内存、磁盘和实例容量；
-- Tool/API 的并发、速率和租户配额。
+- Tool/API 的并发、速率和用户配额。
 
 资源策略继续满足同一条要求：资源事实必须真实改变准入、排队或执行预算；资源
 恢复后系统必须自动推进，而不是只展示监控数字。现有 ResourceObserver、Policy、
-TenantFairQueue、slot 和 drain 成为第一个 ResourcePool 实现基础。
+UserFairQueue、slot 和 drain 成为第一个 ResourcePool 实现基础。
 
 ### 8. 建立统一且可追溯的审计
 
@@ -189,7 +189,7 @@ Template 版本 → Effective Policy → Instance 生命周期 → Run 准入
 ## 与既有决策的关系
 
 - ADR 0001 仍成立：Pi 是第一个 Runtime，但不再是唯一目标 Runtime；
-- ADR 0004 仍成立：Tenant 是归属、权限、资源和审计边界；
+- ADR 0004 仍成立：User 是归属、权限、资源和审计边界；
 - ADR 0006 仍定义 Day 1–7 MVP 的完成标准；本 ADR 定义 MVP 后的长期产品方向；
 - ADR 0003、0005 中的 Agentic Scheduling 和 vLLM 深度扩展降为数据驱动的候选
   研究支线，不再主导下一阶段实施顺序。
@@ -215,4 +215,4 @@ Template 版本 → Effective Policy → Instance 生命周期 → Run 准入
 本文对应的历史产品深化方案见
 [`heterogeneous-harness-control-plane-roadmap.zh-CN.md`](../heterogeneous-harness-control-plane-roadmap.zh-CN.md)。
 当前唯一实施入口已改为
-[`multi-tenant-agent-task-service-roadmap.zh-CN.md`](../multi-tenant-agent-task-service-roadmap.zh-CN.md)。
+[`multi-user-agent-task-service-roadmap.zh-CN.md`](../multi-user-agent-task-service-roadmap.zh-CN.md)。

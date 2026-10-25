@@ -114,5 +114,5 @@ nohup bash /root/load2.sh 120 1500 > /root/load3.out 2>&1 &   # 120 并发长生
 
 ## 7. 相关文件
 - `scripts/e2e-gpu-pressure.ts`（ECS 端到端采样）
-- `scripts/tenant-budget-demo.ts` / `scripts/server-budget-control.ts`（租户预算账本）
-- `src/evidence/*`、`src/resources/{vllm-resource-observer,tenant-budget,resource-ledger,budget-aware-policy}.ts`
+- `scripts/user-budget-demo.ts` / `scripts/server-budget-control.ts`（用户预算账本）
+- `src/evidence/*`、`src/resources/{vllm-resource-observer,user-budget,resource-ledger,budget-aware-policy}.ts`

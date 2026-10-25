@@ -9,7 +9,7 @@ import type {
     RuntimeStartRequest,
 } from "../../src/runtime/agent-runtime.ts";
 import { RunScheduler } from "../../src/scheduling/run-scheduler.ts";
-import { TenantRunScheduler } from "../../src/scheduling/tenant-run-scheduler.ts";
+import { UserRunScheduler } from "../../src/scheduling/user-run-scheduler.ts";
 import { openHarnessDatabase } from "../../src/storage/database.ts";
 
 /**
@@ -59,26 +59,26 @@ test("slot 释放后立即补位，不被批内最慢的 Run 拖住", async () =
     const store = new RunStore(db);
     const runtime = new ControlledRuntime();
     const runService = new RunService(store, runtime);
-    const scheduler = new TenantRunScheduler({
+    const scheduler = new UserRunScheduler({
         maxActiveRuns: 2,
-        maxActiveRunsPerTenant: 2,
+        maxActiveRunsPerUser: 2,
     });
     const coordinator = new RunScheduler(runService, scheduler);
 
     const fast = coordinator.submit({
-        tenantId: "tenant-a",
+        userId: "user-a",
         harnessSessionId: "session-fast",
         userInput: "快任务",
         workspacePath: "/tmp/ws-fast",
     });
     const slow = coordinator.submit({
-        tenantId: "tenant-a",
+        userId: "user-a",
         harnessSessionId: "session-slow",
         userInput: "慢任务",
         workspacePath: "/tmp/ws-slow",
     });
     const waiting = coordinator.submit({
-        tenantId: "tenant-a",
+        userId: "user-a",
         harnessSessionId: "session-waiting",
         userInput: "排队任务",
         workspacePath: "/tmp/ws-waiting",

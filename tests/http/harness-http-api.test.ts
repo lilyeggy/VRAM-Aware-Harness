@@ -27,7 +27,7 @@ function createRun(
 ):AgentRun {
     return {
         id:"run-http",
-        tenantId:"tenant-http",
+        userId:"user-http",
         harnessSessionId:"session-http",
         status:"QUEUED",
         userInput:"测试 HTTP API",
@@ -77,7 +77,7 @@ function createApi(
             submittedInput = input;
             currentRun = {
                 ...currentRun,
-                tenantId:input.tenantId,
+                userId:input.userId,
                 harnessSessionId:input.harnessSessionId,
                 userInput:input.userInput,
                 workspacePath:input.workspacePath,
@@ -87,8 +87,8 @@ function createApi(
         getRun(runId) {
             return runId === currentRun.id ? currentRun : null;
         },
-        getRunsForTenant(tenantId) {
-            return tenantId === currentRun.tenantId ? [currentRun] : [];
+        getRunsForUser(userId) {
+            return userId === currentRun.userId ? [currentRun] : [];
         },
         getRunEvents(runId) {
             return runId === currentRun.id ? [event] : [];
@@ -99,7 +99,7 @@ function createApi(
             }
             return {
                 runId,
-                tenantId: currentRun.tenantId,
+                userId: currentRun.userId,
                 status: currentRun.status,
                 createdAt: currentRun.createdAt,
                 finishedAt: null,
@@ -143,13 +143,13 @@ function createApi(
         getQueue() {
             return [{
                 runId:currentRun.id,
-                tenantId:currentRun.tenantId,
+                userId:currentRun.userId,
                 reasonCode:"AWAITING_SCHEDULING",
                 enqueuedAt:timestamp,
                 position:1,
-                tenantPosition:1,
+                userPosition:1,
                 activeRunCount:0,
-                activeTenantRunCount:0,
+                activeUserRunCount:0,
                 estimatedWaitMs:null,
             }];
         },
@@ -235,7 +235,7 @@ test("最小 HTTP API 覆盖提交、查询、中断、恢复、队列、资源�
             method:"POST",
             headers:{ "content-type":"application/json" },
             body:JSON.stringify({
-                tenantId:"tenant-api",
+                userId:"user-api",
                 sessionId:"session-api",
                 userInput:"通过 HTTP 提交",
                 workspacePath:"/tmp/api-workspace",
@@ -244,14 +244,14 @@ test("最小 HTTP API 覆盖提交、查询、中断、恢复、队列、资源�
     ));
     expect(submitResponse.status).toBe(202);
     expect(getSubmittedInput()).toEqual({
-        tenantId:"tenant-api",
+        userId:"user-api",
         harnessSessionId:"session-api",
         userInput:"通过 HTTP 提交",
         workspacePath:"/tmp/api-workspace",
     });
 
     const historyResponse = await api.fetch(new Request("http://harness.local/runs"));
-    // Direct legacy API construction has no authenticated Tenant by design.
+    // Direct legacy API construction has no authenticated User by design.
     expect(await jsonBody<{ runs: AgentRun[] }>(historyResponse)).toEqual({ runs: [] });
 
     const runResponse = await api.fetch(new Request(
@@ -346,7 +346,7 @@ test("LLM 网关入口走统一身份主干：无 key 401、作用域不足 403�
         isStarted: () => true,
         submitRun: () => createRun(),
         getRun: () => null,
-        getRunsForTenant: () => [],
+        getRunsForUser: () => [],
         getRunEvents: () => [],
         getRunTrace: () => null,
         getRunOutput: () => ({ chunks: [], finalText: "" }),
@@ -375,7 +375,7 @@ test("LLM 网关入口走统一身份主干：无 key 401、作用域不足 403�
         { get: () => null },
         {
             authenticate: (_raw) => keyOk
-                ? { tenantId: "tenant-a", scopes }
+                ? { userId: "user-a", scopes }
                 : null,
             workspaceService: {} as never,
         },
@@ -454,7 +454,7 @@ test("N8：超过提交期上界的输入必须 413 且不创建 Run", async () 
             method: "POST",
             headers: { "content-type": "application/json" },
             body: JSON.stringify({
-                tenantId: "tenant-api",
+                userId: "user-api",
                 sessionId: "session-api",
                 userInput: "x".repeat(51),
                 workspacePath: "/tmp/api-workspace",
@@ -479,7 +479,7 @@ test("N8：边界内输入按 202 接受，且提交响应不回显全量输入"
             method: "POST",
             headers: { "content-type": "application/json" },
             body: JSON.stringify({
-                tenantId: "tenant-api",
+                userId: "user-api",
                 sessionId: "session-api",
                 userInput: long,
                 workspacePath: "/tmp/api-workspace",
@@ -496,8 +496,8 @@ test("N8：边界内输入按 202 接受，且提交响应不回显全量输入"
 });
 
 // ---------------------------------------------------------------------------
-// N15：策略管理面——租户资源限额 / 授权 Secret 的产品入口。
-// 修复前 PolicyRegistry.setTenantPolicy 只被测试调用，HTTP 没有任何路由，
+// N15：策略管理面——用户资源限额 / 授权 Secret 的产品入口。
+// 修复前 PolicyRegistry.setUserPolicy 只被测试调用，HTTP 没有任何路由，
 // 每次运行都落在 unrestrictedPolicy（CPU/内存无限额、无 Secret）。
 // ---------------------------------------------------------------------------
 
@@ -526,7 +526,7 @@ test("N15：POST /runs 的 runPolicy 透传到 StartRunInput（此前无产品�
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
-            tenantId: "tenant-http",
+            userId: "user-http",
             workspacePath: "/tmp/http-workspace",
             userInput: "受限运行",
             runPolicy: { allowedTools: ["read"], resourceLimits: { cpuCores: 2 } },
@@ -613,12 +613,12 @@ test("N16：非法 resolution → 400", async () => {
 test("未知异常返回 500 通用文案与 requestId，不透出内部 message（F10）", async () => {
     const application = {
         isStarted() { return true; },
-        getRunsForTenant() {
+        getRunsForUser() {
             throw new Error("SQLITE_CONSTRAINT: UNIQUE constraint failed: users.email");
         },
     } as unknown as HarnessHttpApplication;
     const api = new HarnessHttpApi(application, { get: () => null }, {
-        authenticate: () => ({ tenantId: "tenant-a", scopes: ["*"] }),
+        authenticate: () => ({ userId: "user-a", scopes: ["*"] }),
         workspaceService: {} as never,
     });
 
@@ -641,7 +641,7 @@ test("POST /runs 解析并透传 idempotencyKey", async () => {
             method: "POST",
             headers: { "content-type": "application/json" },
             body: JSON.stringify({
-                tenantId: "tenant-api",
+                userId: "user-api",
                 sessionId: "session-idem",
                 userInput: "幂等提交",
                 workspacePath: "/tmp/api-workspace",
@@ -661,7 +661,7 @@ test("POST /runs 拒绝超长 idempotencyKey", async () => {
             method: "POST",
             headers: { "content-type": "application/json" },
             body: JSON.stringify({
-                tenantId: "tenant-api",
+                userId: "user-api",
                 sessionId: "session-idem-bad",
                 userInput: "超长幂等键",
                 workspacePath: "/tmp/api-workspace",

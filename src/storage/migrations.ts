@@ -1,9 +1,12 @@
 import { readFileSync } from "node:fs";
 
+import type { Database } from "bun:sqlite";
+
 export interface SchemaMigration {
     readonly version: number;
     readonly name: string;
-    readonly up: string;
+    /** 多数迁移是一段 DDL 字符串；需要按列存在性判断的迁移写成函数。 */
+    readonly up: string | ((db: Database) => void);
 }
 
 const initialSchema = readFileSync(
@@ -58,7 +61,7 @@ ALTER TABLE run_attempts ADD COLUMN heartbeat_at TEXT;
 /**
  * v4：§9.8 v1.4 Phase 3（Durable Execution / Retry / 幂等）。
  *
- * - agent_runs.idempotency_key：提交方可选的幂等键；同一租户内唯一，
+ * - agent_runs.idempotency_key：提交方可选的幂等键；同一用户内唯一，
  *   重复提交返回既有 Run，避免弱网重试造成重复执行/重复计费。
  * - agent_runs.retry_count / retry_at：可重试失败的次数与下次重试时间；
  *   只有副作用安全的失败才会回到 QUEUED 等待重试。
@@ -68,10 +71,40 @@ ALTER TABLE agent_runs ADD COLUMN idempotency_key TEXT;
 ALTER TABLE agent_runs ADD COLUMN retry_count INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE agent_runs ADD COLUMN retry_at TEXT;
 
-CREATE UNIQUE INDEX agent_runs_tenant_idempotency_key
-    ON agent_runs(tenant_id, idempotency_key)
+CREATE UNIQUE INDEX agent_runs_user_idempotency_key
+    ON agent_runs(user_id, idempotency_key)
     WHERE idempotency_key IS NOT NULL;
 `;
+
+/**
+ * v5：把隔离域列统一改名为 user_id。
+ *
+ * 背景：隔离边界从来不是独立实体，没有组织表，旧 tenantId 恒等于 users.id。
+ * v1.7 起统一叫 user：新库由 schema.sql 直接建出 user_id，本迁移按 pragma 判断后跳过；
+ * 旧库原地改名，SQLite 的 RENAME COLUMN 会同步更新索引与触发器里的列引用。
+ */
+const USER_SCOPE_TABLES = [
+    "agent_runs",
+    "workspaces",
+    "harness_sessions",
+    "api_credentials",
+    "access_audit_events",
+    "effective_policy_snapshots",
+] as const;
+
+const LEGACY_SCOPE_COLUMN = "tenant_id";
+
+function renameScopeColumnToUserId(db: Database): void {
+    for (const table of USER_SCOPE_TABLES) {
+        const columns = db
+            .query<{ name: string }, [string]>("SELECT name FROM pragma_table_info(?)")
+            .all(table);
+        if (columns.some((column) => column.name === LEGACY_SCOPE_COLUMN)) {
+            db.exec("ALTER TABLE " + table + " RENAME COLUMN " + LEGACY_SCOPE_COLUMN + " TO user_id;");
+        }
+    }
+}
+
 
 export const migrations: readonly SchemaMigration[] = [
     {
@@ -93,5 +126,10 @@ export const migrations: readonly SchemaMigration[] = [
         version: 4,
         name: "run_idempotency_and_retry",
         up: runIdempotencyAndRetry,
+    },
+    {
+        version: 5,
+        name: "scope_column_user_id",
+        up: renameScopeColumnToUserId,
     },
 ];

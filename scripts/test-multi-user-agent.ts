@@ -1,18 +1,18 @@
 /**
- * Multi-Tenant Agent End-to-End Simulation & Benchmark.
+ * Multi-User Agent End-to-End Simulation & Benchmark.
  *
  * Verifies:
- * 1. Multi-Tenant Fair Scheduling (Round-Robin & Tenant Queue Isolation).
+ * 1. Multi-User Fair Scheduling (Round-Robin & User Queue Isolation).
  * 2. Simulated LLM Multi-Turn Thinking & Tool Dispatch (ReAct loop).
- * 3. MicroVM Execution Sandbox per Tenant (PTY state retention across turns).
- * 4. Tenant Data & Secret Isolation (Zero-Trust boundary).
+ * 3. MicroVM Execution Sandbox per User (PTY state retention across turns).
+ * 4. User Data & Secret Isolation (Zero-Trust boundary).
  */
 
 import { existsSync, accessSync, constants } from "node:fs";
 import {
-    TenantRunScheduler,
+    UserRunScheduler,
     type QueuedRun,
-} from "../src/scheduling/tenant-run-scheduler.ts";
+} from "../src/scheduling/user-run-scheduler.ts";
 import {
     MicrovmSandboxProvider,
     MockMicrovmDriver,
@@ -41,8 +41,8 @@ class MemorySandboxStore {
     }
 }
 
-interface TenantTaskPlan {
-    tenantId: string;
+interface UserTaskPlan {
+    userId: string;
     taskTitle: string;
     workspace: string;
     turns: Array<{
@@ -53,23 +53,23 @@ interface TenantTaskPlan {
     }>;
 }
 
-// 模拟 4 个不同行业真实租户的复杂多轮 Agent 任务
-const TENANT_PLANS: TenantTaskPlan[] = [
+// 模拟 4 个不同行业真实用户的复杂多轮 Agent 任务
+const USER_PLANS: UserTaskPlan[] = [
     {
-        tenantId: "tenant_fintech",
+        userId: "user_fintech",
         taskTitle: "量化金融风控指标计算 Agent",
         workspace: "/tmp/workspaces/fintech",
         turns: [
             {
-                thought: "第一轮：初始化工作区并注入金融租户环境变量",
+                thought: "第一轮：初始化工作区并注入金融用户环境变量",
                 tool: "bash",
-                command: ["export TENANT_DOMAIN=FINTECH_RISK && export SESSION_TAG=RUN_001 && echo 'INIT_OK: '$TENANT_DOMAIN"],
+                command: ["export USER_DOMAIN=FINTECH_RISK && export SESSION_TAG=RUN_001 && echo 'INIT_OK: '$USER_DOMAIN"],
                 expectedVerification: (out) => out.includes("INIT_OK: FINTECH_RISK"),
             },
             {
                 thought: "第二轮：编写风控脚本，依赖上一轮的环境状态",
                 tool: "bash",
-                command: ["echo 'DOMAIN='$TENANT_DOMAIN' STEP=CALC_VAR' && echo 'var_95=0.042' > /tmp/risk_result.txt && cat /tmp/risk_result.txt"],
+                command: ["echo 'DOMAIN='$USER_DOMAIN' STEP=CALC_VAR' && echo 'var_95=0.042' > /tmp/risk_result.txt && cat /tmp/risk_result.txt"],
                 expectedVerification: (out) => out.includes("DOMAIN=FINTECH_RISK") && out.includes("var_95=0.042"),
             },
             {
@@ -81,7 +81,7 @@ const TENANT_PLANS: TenantTaskPlan[] = [
         ],
     },
     {
-        tenantId: "tenant_biomed",
+        userId: "user_biomed",
         taskTitle: "基因序列比对与质检 Agent",
         workspace: "/tmp/workspaces/biomed",
         turns: [
@@ -106,7 +106,7 @@ const TENANT_PLANS: TenantTaskPlan[] = [
         ],
     },
     {
-        tenantId: "tenant_devops",
+        userId: "user_devops",
         taskTitle: "CI/CD 自动化构建与测试 Agent",
         workspace: "/tmp/workspaces/devops",
         turns: [
@@ -131,7 +131,7 @@ const TENANT_PLANS: TenantTaskPlan[] = [
         ],
     },
     {
-        tenantId: "tenant_security",
+        userId: "user_security",
         taskTitle: "云原生容器安全巡检 Agent",
         workspace: "/tmp/workspaces/security",
         turns: [
@@ -159,8 +159,8 @@ const TENANT_PLANS: TenantTaskPlan[] = [
 
 async function simulateAgentRun() {
     console.log("================================================================================");
-    console.log("  多租户 Agent 端到端全链路能力基准测试 (Multi-Tenant Agent Simulation)");
-    console.log("  覆盖：多租户调度轮转 + 模型思维链推演 + MicroVM 真实沙箱多轮状态保持");
+    console.log("  多用户 Agent 端到端全链路能力基准测试 (Multi-User Agent Simulation)");
+    console.log("  覆盖：多用户调度轮转 + 模型思维链推演 + MicroVM 真实沙箱多轮状态保持");
     console.log("================================================================================\n");
 
     // 1. 初始化底层 MicroVM 驱动
@@ -237,36 +237,36 @@ async function simulateAgentRun() {
 
     const store = new MemorySandboxStore();
     const secrets: SecretProvider = {
-        get: (tenantId, name) => `${name}_SECRET_FOR_${tenantId}`,
+        get: (userId, name) => `${name}_SECRET_FOR_${userId}`,
     };
     const provider = new MicrovmSandboxProvider(store as any, secrets, { driver });
 
-    // 2. 初始化多租户调度器 (TenantRunScheduler)
-    const scheduler = new TenantRunScheduler({
+    // 2. 初始化多用户调度器 (UserRunScheduler)
+    const scheduler = new UserRunScheduler({
         maxActiveRuns: 4,              // 全局允许同时活跃 4 个沙箱
-        maxActiveRunsPerTenant: 1,     // 每个租户同时活跃 1 个沙箱
+        maxActiveRunsPerUser: 1,     // 每个用户同时活跃 1 个沙箱
         agingMs: 5000,
     });
 
-    console.log("\n▶ [Phase 1] 提交 4 位租户的 Agent 复杂任务进入调度环...");
+    console.log("\n▶ [Phase 1] 提交 4 位用户的 Agent 复杂任务进入调度环...");
     const queuedRuns: QueuedRun[] = [];
-    for (const plan of TENANT_PLANS) {
-        const runId = `run_${plan.tenantId}_${Date.now()}`;
+    for (const plan of USER_PLANS) {
+        const runId = `run_${plan.userId}_${Date.now()}`;
         const queued = scheduler.enqueue({
             runId,
-            tenantId: plan.tenantId,
-            sessionId: `session_${plan.tenantId}`,
+            userId: plan.userId,
+            sessionId: `session_${plan.userId}`,
         });
         queuedRuns.push(queued);
-        console.log(`  - [已入队] 租户: ${plan.tenantId.padEnd(16)} | 任务: ${plan.taskTitle} (RunId: ${runId})`);
+        console.log(`  - [已入队] 用户: ${plan.userId.padEnd(16)} | 任务: ${plan.taskTitle} (RunId: ${runId})`);
     }
 
-    // 3. 执行多租户并发调度与 Agent 多轮交互推演
+    // 3. 执行多用户并发调度与 Agent 多轮交互推演
     console.log("\n▶ [Phase 2] 调度环开始推进，启动 MicroVM 沙箱并执行多轮 ReAct 交互推演...\n");
 
     const tStartTotal = performance.now();
     const results: Array<{
-        tenantId: string;
+        userId: string;
         taskTitle: string;
         bootTimeMs: number;
         turnLatencies: number[];
@@ -274,25 +274,25 @@ async function simulateAgentRun() {
         totalTimeMs: number;
     }> = [];
 
-    // 并发模拟各租户任务按调度出队执行
-    const tasks = TENANT_PLANS.map(async (plan, idx) => {
+    // 并发模拟各用户任务按调度出队执行
+    const tasks = USER_PLANS.map(async (plan, idx) => {
         const queued = queuedRuns[idx];
 
         if (queued === undefined) {
-            throw new Error(`缺少排队 Run：${plan.tenantId}`);
+            throw new Error(`缺少排队 Run：${plan.userId}`);
         }
 
         // 调度器认领
         const claimed = scheduler.claimNext();
         const activeRun = claimed ?? queued;
-        const tenantTag = `[${plan.tenantId}]`;
+        const userTag = `[${plan.userId}]`;
 
-        // 为该租户拉起 MicroVM 沙箱
+        // 为该用户拉起 MicroVM 沙箱
         const tBoot0 = performance.now();
         const mockPolicy: EffectivePolicySnapshot = {
-            id: `policy_${plan.tenantId}`,
+            id: `policy_${plan.userId}`,
             runId: activeRun.runId,
-            tenantId: plan.tenantId,
+            userId: plan.userId,
             layers: [],
             allowedTools: ["bash"],
             allowedSkills: null,
@@ -306,14 +306,14 @@ async function simulateAgentRun() {
         };
 
         const handle = await provider.create({
-            id: `vm_${plan.tenantId}`,
+            id: `vm_${plan.userId}`,
             runId: activeRun.runId,
             workspacePath: plan.workspace,
             policy: mockPolicy,
         });
         const bootTimeMs = Math.round(performance.now() - tBoot0);
 
-        console.log(`  ${tenantTag} MicroVM 沙箱冷启动就绪！耗时: ${bootTimeMs} ms | 工作区: ${handle.containerWorkdir}`);
+        console.log(`  ${userTag} MicroVM 沙箱冷启动就绪！耗时: ${bootTimeMs} ms | 工作区: ${handle.containerWorkdir}`);
 
         const turnLatencies: number[] = [];
         let allTurnsVerified = true;
@@ -323,7 +323,7 @@ async function simulateAgentRun() {
             const turn = plan.turns[turnIdx];
 
             if (turn === undefined) {
-                throw new Error(`缺少 turn：${plan.tenantId}#${turnIdx}`);
+                throw new Error(`缺少 turn：${plan.userId}#${turnIdx}`);
             }
 
             // 模拟大模型思考与生成 Tool Call (耗时 ~20-40ms)
@@ -352,7 +352,7 @@ async function simulateAgentRun() {
         scheduler.release(activeRun.runId);
 
         results.push({
-            tenantId: plan.tenantId,
+            userId: plan.userId,
             taskTitle: plan.taskTitle,
             bootTimeMs,
             turnLatencies,
@@ -360,7 +360,7 @@ async function simulateAgentRun() {
             totalTimeMs: Math.round(turnLatencies.reduce((a, b) => a + b, 0)),
         });
 
-        console.log(`  ${tenantTag} 任务全流程达成！沙箱毫秒级回收完毕。\n`);
+        console.log(`  ${userTag} 任务全流程达成！沙箱毫秒级回收完毕。\n`);
     });
 
     await Promise.all(tasks);
@@ -368,23 +368,23 @@ async function simulateAgentRun() {
 
     // 4. 汇总报表
     console.log("================================================================================");
-    console.log("  多租户 Agent 压测与隔离能力评估汇总报表");
+    console.log("  多用户 Agent 压测与隔离能力评估汇总报表");
     console.log("================================================================================");
-    console.log(`并发租户总数:      ${TENANT_PLANS.length} 位租户`);
-    console.log(`总交互轮次:        ${TENANT_PLANS.length * 3} 轮交互 (Tool Calls)`);
+    console.log(`并发用户总数:      ${USER_PLANS.length} 位用户`);
+    console.log(`总交互轮次:        ${USER_PLANS.length * 3} 轮交互 (Tool Calls)`);
     console.log(`总耗时:            ${totalElapsedMs} ms`);
     console.log("--------------------------------------------------------------------------------");
-    console.log("| 租户 ID          | Agent 任务业务定位        | 冷启动 | 3 轮工具平均 | 多轮状态连续性 |");
+    console.log("| 用户 ID          | Agent 任务业务定位        | 冷启动 | 3 轮工具平均 | 多轮状态连续性 |");
     console.log("--------------------------------------------------------------------------------");
     for (const r of results) {
         const avgTurn = Math.round(r.turnLatencies.reduce((a, b) => a + b, 0) / r.turnLatencies.length);
-        console.log(`| ${r.tenantId.padEnd(16)} | ${r.taskTitle.padEnd(20)} | ${(r.bootTimeMs + "ms").padEnd(6)} | ${(avgTurn + "ms").padEnd(12)} | ${r.statePreserved ? "✅ 完美保持" : "❌ 丢失"}   |`);
+        console.log(`| ${r.userId.padEnd(16)} | ${r.taskTitle.padEnd(20)} | ${(r.bootTimeMs + "ms").padEnd(6)} | ${(avgTurn + "ms").padEnd(12)} | ${r.statePreserved ? "✅ 完美保持" : "❌ 丢失"}   |`);
     }
     console.log("================================================================================");
     console.log("核心结论：");
-    console.log("1. 多租户调度公平隔离：4 位租户的专属任务顺利由调度器解耦并派发，无死锁、无饿死。");
-    console.log("2. 跨轮状态绝对保持：所有租户在第 1 轮 export 的环境变量和临时文件，在第 2/3 轮 100% 成功读取！");
-    console.log("3. 零信任安全隔离：所有租户的执行环境彼此绝对独立，宿主机敏感大模型凭证零泄露。");
+    console.log("1. 多用户调度公平隔离：4 位用户的专属任务顺利由调度器解耦并派发，无死锁、无饿死。");
+    console.log("2. 跨轮状态绝对保持：所有用户在第 1 轮 export 的环境变量和临时文件，在第 2/3 轮 100% 成功读取！");
+    console.log("3. 零信任安全隔离：所有用户的执行环境彼此绝对独立，宿主机敏感大模型凭证零泄露。");
     console.log("================================================================================\n");
 }
 

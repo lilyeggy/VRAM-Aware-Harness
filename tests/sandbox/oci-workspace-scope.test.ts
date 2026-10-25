@@ -6,7 +6,7 @@ function policy(overrides: Partial<EffectivePolicySnapshot> = {}): EffectivePoli
     return {
         ...unrestrictedPolicy,
         layers: [],
-        createdAt: new Date().toISOString(), id: "policy", runId: "run", tenantId: "tenant",
+        createdAt: new Date().toISOString(), id: "policy", runId: "run", userId: "user",
         workspaceRoots: ["/srv/workspaces"], allowNetwork: false,
         resourceLimits: { cpuCores: null, memoryMiB: null, diskMiB: null },
         ...overrides,
@@ -23,50 +23,50 @@ const baseConfig = {
 test("RUN 视野（默认）：挂载根就是本 Run 的工作区", () => {
     const compiler = new OciSandboxSpecCompiler(baseConfig);
     const compiled = compiler.compile(
-        "c", "/srv/workspaces/tenant/ws-1", policy(), [],
+        "c", "/srv/workspaces/user/ws-1", policy(), [],
     );
     expect(compiled.createArgs.join(" "))
-        .toContain("type=bind,src=/srv/workspaces/tenant/ws-1,dst=/workspace");
+        .toContain("type=bind,src=/srv/workspaces/user/ws-1,dst=/workspace");
     expect(compiled.spec.workspaceScope).toBe("RUN");
-    expect(compiled.spec.mountedRoot).toBe("/srv/workspaces/tenant/ws-1");
+    expect(compiled.spec.mountedRoot).toBe("/srv/workspaces/user/ws-1");
 });
 
-test("TENANT 视野：挂载根上提到租户根，工作区仍是 Run 自己的", () => {
+test("USER 视野：挂载根上提到用户根，工作区仍是 Run 自己的", () => {
     const compiler = new OciSandboxSpecCompiler({
-        ...baseConfig, workspaceScope: "tenant", tenantWorkspaceRoot: "/srv/workspaces",
+        ...baseConfig, workspaceScope: "user", userWorkspaceRoot: "/srv/workspaces",
     });
     const compiled = compiler.compile(
-        "c", "/srv/workspaces/tenant/ws-1", policy(), [],
+        "c", "/srv/workspaces/user/ws-1", policy(), [],
     );
-    // 挂载点只到租户根——同租户所有 Run 共用它，池因此可以跨工作区复用。
+    // 挂载点只到用户根——同用户所有 Run 共用它，池因此可以跨工作区复用。
     expect(compiled.createArgs.join(" "))
-        .toContain("type=bind,src=/srv/workspaces/tenant,dst=/workspace");
+        .toContain("type=bind,src=/srv/workspaces/user,dst=/workspace");
     expect(compiled.createArgs.join(" "))
-        .not.toContain("src=/srv/workspaces/tenant/ws-1");
-    expect(compiled.spec.workspaceScope).toBe("TENANT");
-    expect(compiled.spec.mountedRoot).toBe("/srv/workspaces/tenant");
+        .not.toContain("src=/srv/workspaces/user/ws-1");
+    expect(compiled.spec.workspaceScope).toBe("USER");
+    expect(compiled.spec.mountedRoot).toBe("/srv/workspaces/user");
     // 工作区归属仍然如实记录在 spec 里，审计链不断。
-    expect(compiled.spec.workspacePath).toBe("/srv/workspaces/tenant/ws-1");
+    expect(compiled.spec.workspacePath).toBe("/srv/workspaces/user/ws-1");
 });
 
-test("TENANT 视野的三类越界都在编译期被拒绝", () => {
-    const scoped = (workspacePath: string, tenantId = "tenant", root?: string) => {
+test("USER 视野的三类越界都在编译期被拒绝", () => {
+    const scoped = (workspacePath: string, userId = "user", root?: string) => {
         const compiler = new OciSandboxSpecCompiler({
             ...baseConfig,
-            workspaceScope: "tenant",
-            ...(root === undefined ? {} : { tenantWorkspaceRoot: root }),
+            workspaceScope: "user",
+            ...(root === undefined ? {} : { userWorkspaceRoot: root }),
         });
-        return compiler.compile("c", workspacePath, policy({ tenantId }), []);
+        return compiler.compile("c", workspacePath, policy({ userId }), []);
     };
-    // ① 未配置租户工作区根
-    expect(() => scoped("/srv/workspaces/tenant/ws-1", "tenant", undefined))
-        .toThrow("必须配置租户工作区根目录");
-    // ② 租户 ID 带路径分隔符，解析后跑到根之外
-    expect(() => scoped("/srv/workspaces/tenant/ws-1", "../evil", "/srv/workspaces"))
-        .toThrow("租户工作区根越界");
-    // ③ 工作区不属于这个租户，容器挂上去也看不见自己的工作区
-    expect(() => scoped("/srv/workspaces/other/ws-1", "tenant", "/srv/workspaces"))
-        .toThrow("不在租户挂载根内");
+    // ① 未配置用户工作区根
+    expect(() => scoped("/srv/workspaces/user/ws-1", "user", undefined))
+        .toThrow("必须配置用户工作区根目录");
+    // ② 用户 ID 带路径分隔符，解析后跑到根之外
+    expect(() => scoped("/srv/workspaces/user/ws-1", "../evil", "/srv/workspaces"))
+        .toThrow("用户工作区根越界");
+    // ③ 工作区不属于这个用户，容器挂上去也看不见自己的工作区
+    expect(() => scoped("/srv/workspaces/other/ws-1", "user", "/srv/workspaces"))
+        .toThrow("不在用户挂载根内");
 });
 
 test("池化规格剥离 CPU/内存限额，保留 pids-limit", () => {
@@ -81,10 +81,10 @@ test("池化规格剥离 CPU/内存限额，保留 pids-limit", () => {
 
 test("同一工作区、仅资源限额不同的两次编译产出同一池化规格", () => {
     const compiler = new OciSandboxSpecCompiler(baseConfig);
-    const lean = compiler.compile("c", "/srv/workspaces/tenant/ws-1", policy({
+    const lean = compiler.compile("c", "/srv/workspaces/user/ws-1", policy({
         resourceLimits: { cpuCores: 1, memoryMiB: 512, diskMiB: null },
     }), []);
-    const heavy = compiler.compile("c", "/srv/workspaces/tenant/ws-1", policy({
+    const heavy = compiler.compile("c", "/srv/workspaces/user/ws-1", policy({
         resourceLimits: { cpuCores: 4, memoryMiB: 4096, diskMiB: null },
     }), []);
     // 完整创建参数不同（正式容器必须带各自限额）

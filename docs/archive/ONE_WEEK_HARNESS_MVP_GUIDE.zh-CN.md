@@ -7,9 +7,9 @@
 >
 > **状态更新（2026-08-12）**：Day 1–7 本地工程闭环已经完成。本文冻结为 MVP
 > 的学习、设计与验收记录，不再作为后续实现入口。当前统一按照
-> [`docs/multi-tenant-agent-task-service-roadmap.zh-CN.md`](docs/multi-tenant-agent-task-service-roadmap.zh-CN.md)
+> [`docs/multi-user-agent-task-service-roadmap.zh-CN.md`](docs/multi-user-agent-task-service-roadmap.zh-CN.md)
 > 推进，产品与技术边界见
-> [`ADR 0009`](docs/adr/0009-build-a-multi-tenant-agent-task-service.md)。
+> [`ADR 0009`](docs/adr/0009-build-a-multi-user-agent-task-service.md)。
 >
 > 推理基线更新（2026-07-30）：当前使用单卡 RTX A6000 48 GB；
 > Qwen3.5-4B 用于日常开发，Qwen3.5-9B 用于主要集成验证。vLLM fork 可修改，
@@ -19,7 +19,7 @@
 ## 0. MVP 阶段的历史定位
 
 本项目构建的是面向资源受限的自托管推理环境、兼具安全恢复与资源感知准入的
-Agent Harness，不是另一套 Prompt、Memory、Agent Loop 或多租户管理后台。
+Agent Harness，不是另一套 Prompt、Memory、Agent Loop 或多用户管理后台。
 
 Day 1–7 使用的阶段定义是：
 
@@ -36,13 +36,13 @@ Pi 负责模型—工具循环、Session 历史和上下文压缩；Harness 负�
 - 共享 GPU 上的准入、并发 slot、排队、背压与资源恢复后的自动推进；
 - usage、成本、资源快照、策略理由和执行结果的审计。
 
-`tenantId` 已经从 Day 2 起进入 AgentRun，后续 Store、Service、Queue 和 Policy
-继续保留 Tenant 上下文；但它是共享资源场景下的归属与公平性约束，不是本项目
-需要扩张的产品主线。Day 6 用两个 Tenant 证明 slot 不会被单一提交方持续抢占，
-不建设认证、计费或企业租户管理能力。
+`userId` 已经从 Day 2 起进入 AgentRun，后续 Store、Service、Queue 和 Policy
+继续保留 User 上下文；但它是共享资源场景下的归属与公平性约束，不是本项目
+需要扩张的产品主线。Day 6 用两个 User 证明 slot 不会被单一提交方持续抢占，
+不建设认证、计费或企业用户管理能力。
 
 第一周只承诺逻辑隔离与公平性语义，不承诺完整认证、RBAC、网络隔离或容器级
-Workspace 安全。多租户边界的完整决策见
+Workspace 安全。多用户边界的完整决策见
 [`ADR 0004`](docs/adr/0004-multi-tenancy-as-first-class-boundary.md)。
 
 “不做 Agent 行为框架”不等于提示、上下文和长期行为可靠性已经解决，而是明确
@@ -54,11 +54,11 @@ Workspace 安全。多租户边界的完整决策见
 1. **MVP 的核心能力**：副作用感知的安全恢复、资源感知的准入/背压、可审计与可观测；这些能力在新方向中继续保留。
 2. **第一周 MVP**：单进程 + SQLite 的纵向切片，验证恢复边界、确定性准入、
    slot 生命周期、自动续跑和最小公平性。
-3. **当前正式方向**：面向团队共享本地模型的多租户 Agent 任务服务；优先补齐
-   可信身份、Tenant Workspace、真实 Sandbox、编排恢复和用户结果闭环，A6000
+3. **当前正式方向**：面向团队共享本地模型的多用户 Agent 任务服务；优先补齐
+   可信身份、User Workspace、真实 Sandbox、编排恢复和用户结果闭环，A6000
    实验与隔离攻击测试提供可信证据，异构 Runtime 与深度调度暂停。
 
-系统可以在本地只配置一个 Tenant；共享部署时保持 **tenant-aware by design**，
+系统可以在本地只配置一个 User；共享部署时保持 **user-aware by design**，
 不能让隐式“当前用户”进入领域模型、存储访问和 slot 计算。
 
 ## 1. 一周后要交付什么
@@ -90,7 +90,7 @@ RunEvent、ToolExecution 与 Checkpoint 持久化
 3. 模型调用、工具调用和状态变化都可以通过事件还原。
 4. 进程重启后，至少能从一个安全 Checkpoint 继续任务。
 5. GPU 资源压力能够令新 Run 排队，压力解除后系统无需用户操作即可继续，并留下可解释的策略记录。
-6. 两个 Tenant 共享受限 slot 时不会因全局 FIFO 或单一大户而永久饥饿。
+6. 两个 User 共享受限 slot 时不会因全局 FIFO 或单一大户而永久饥饿。
 
 如果这六点成立，我们得到的就不是聊天 API 包装器，也不是显存监控脚本，而是一个真正的 Resource-Aware Agent Harness 原型。
 
@@ -198,7 +198,7 @@ RunEvent、ToolExecution 与 Checkpoint 持久化
 
 ### 5.2 Harness 负责什么
 
-- Tenant、Session 与 AgentRun 的路由；
+- User、Session 与 AgentRun 的路由；
 - Run 生命周期与状态机；
 - 事件持久化；
 - 工具执行治理；
@@ -217,7 +217,7 @@ RunEvent、ToolExecution 与 Checkpoint 持久化
 
 在资源控制这一层，Harness 可以根据资源状态决定“是否以及何时提交模型请求”，
 但本周不接管 vLLM 内部的 token 调度和物理缓存管理。我们可以修改 vLLM fork
-来增加 Tenant/Run/Trace 归因、Metrics 或实验性 hint；这些改动不能把 Run
+来增加 User/Run/Trace 归因、Metrics 或实验性 hint；这些改动不能把 Run
 生命周期、工具副作用、权限和恢复语义下沉到推理层。
 
 ## 6. 第一版技术选择
@@ -252,7 +252,7 @@ call parser 和自动工具选择。真实模型先使用 16K `max-model-len`，
 
 ```text
 id
-tenantId
+userId
 sessionId
 status
 userInput
@@ -529,12 +529,12 @@ Day 3 只在模型调用事件缺失时对 `PiAdapter` 做小范围增量扩展�
 
 ### 编码任务
 
-1. 实现 `RuntimeEventBridge`，输入可信的 `TenantRunContext + RuntimeEvent`，输出带 Tenant 归属的可持久化事件草稿或 `null`。
+1. 实现 `RuntimeEventBridge`，输入可信的 `UserRunContext + RuntimeEvent`，输出带 User 归属的可持久化事件草稿或 `null`。
 2. 建立 `Pi AgentSessionEvent -> RuntimeEvent -> RunEvent` 的显式映射表。
 3. 将事件分成三类：RunService 已处理的生命周期事件、需要追加的业务事件、只用于流式展示的瞬时事件。
 4. Token delta 可以流式展示，但 `RuntimeEventBridge` 必须返回 `null`，不要逐 token 写数据库。
 5. 扩展模型调用开始/完成 RuntimeEvent，并记录模型、耗时、stop reason 和 usage。
-6. 为持久事件建立稳定的去重键，并用 migration v2 和唯一约束阻止重复业务事件；追加前必须校验事件所属 Run 归当前 Tenant。
+6. 为持久事件建立稳定的去重键，并用 migration v2 和唯一约束阻止重复业务事件；追加前必须校验事件所属 Run 归当前 User。
 7. 将 Bridge 接入 RunService，但不得重复写入 `RUN_STARTED`、`RUN_COMPLETED`、`RUN_FAILED` 等生命周期事件。
 
 ### 验收门槛
@@ -655,8 +655,8 @@ RunService 编排全部先用 Fake Runtime、Fake ResourceObserver 与临时 SQL
 
 Day 6 已完成，并通过 55 项调度、准入和 RunService 相关确定性测试：
 
-- `TenantRunScheduler` 实现 Tenant 内 FIFO、Tenant 间 round-robin，以及全局和
-  单 Tenant 并发限制；
+- `UserRunScheduler` 实现 User 内 FIFO、User 间 round-robin，以及全局和
+  单 User 并发限制；
 - `claimNext` 将选择 Run 与登记 slot 合并为同一个同步调度动作；
 - `RunQueueCoordinator` 接通 Admission、RunService、slot 释放、single-flight
   drain、pending drain 和单 Run 故障隔离；
@@ -665,7 +665,7 @@ Day 6 已完成，并通过 55 项调度、准入和 RunService 相关确定性�
 - `A1、A2、A3、B1` 在全局并发为 1 时的确定性顺序为
   `A1 -> B1 -> A2 -> A3`；Runtime 启动失败不会泄漏 slot，也不会阻塞后续 Run。
 
-当前 MVP 将公平性主体定义为 Tenant，而不是 Session。slot 采用保守的 Run 级
+当前 MVP 将公平性主体定义为 User，而不是 Session。slot 采用保守的 Run 级
 语义：从 Run 启动到进入终态始终占用，包括工具执行期间。若未来只计算模型执行
 阶段，则必须先增加运行阶段事件、slot 重新竞争和恢复预留机制，不能直接在工具
 调用时释放。
@@ -673,15 +673,15 @@ Day 6 已完成，并通过 55 项调度、准入和 RunService 相关确定性�
 ### 今天真正要理解的概念
 
 - slot 是准入时必须原子占用、终态时必须释放的执行资源；
-- 全局并发和单 Tenant 并发；
+- 全局并发和单 User 并发；
 - FIFO 的饥饿问题；
 - Backpressure 与资源恢复后的自动推进。
 
 ### 编码任务
 
-1. 保持所有 Run 携带 `tenantId`，但不新增租户管理功能。
-2. 实现全局并发上限和单 Tenant 并发上限。
-3. 实现简单 round-robin tenant queue。
+1. 保持所有 Run 携带 `userId`，但不新增用户管理功能。
+2. 实现全局并发上限和单 User 并发上限。
+3. 实现简单 round-robin user queue。
 4. `claimNext` 必须在选中 Run 的同时登记 slot，防止计划与占用分离后被其他 Run 抢占。
 5. Run 完成、失败或中断时幂等释放 slot，并立即尝试推进下一项。
 6. ResourceSnapshot 从 `CRITICAL/BUSY` 恢复后触发 drain，使排队 Run 无需用户再次操作即可启动。
@@ -691,8 +691,8 @@ Day 6 已完成，并通过 55 项调度、准入和 RunService 相关确定性�
 ### 验收场景
 
 ```text
-Tenant A 提交 A1、A2、A3
-Tenant B 提交 B1
+User A 提交 A1、A2、A3
+User B 提交 B1
 全局并发为 1
 ```
 
@@ -704,9 +704,9 @@ Tenant B 提交 B1
 
 ### 当天必须回答
 
-1. Tenant 是公平性主体；Session 继续作为恢复和 Runtime 关联边界。
-2. 全局 FIFO 会让单个 Tenant 的连续提交长期排在其他 Tenant 之前；Tenant
-   round-robin 在保留 Tenant 内 FIFO 的同时避免这种饥饿。
+1. User 是公平性主体；Session 继续作为恢复和 Runtime 关联边界。
+2. 全局 FIFO 会让单个 User 的连续提交长期排在其他 User 之前；User
+   round-robin 在保留 User 内 FIFO 的同时避免这种饥饿。
 3. 选中 Run 和占用 slot 必须是同一个调度动作，否则多个调度尝试可能同时看到
    空闲容量并超额启动。
 4. 当前工具长时间执行仍占用 Run 级并发 slot；模型阶段 slot 拆分留待真实测量
@@ -729,8 +729,8 @@ Tenant B 提交 B1
 
 ### 固定演示脚本
 
-1. Tenant A 提交“分析当前项目测试结构”。
-2. Tenant B 提交“总结 Harness 的架构边界”。
+1. User A 提交“分析当前项目测试结构”。
+2. User B 提交“总结 Harness 的架构边界”。
 3. Fake 或真实资源状态从 NORMAL 切换到 CRITICAL。
 4. 新 Run 进入队列，活跃 Run 继续到安全边界。
 5. 在一次已完成工具调用后重启 Harness。
@@ -751,7 +751,7 @@ Tenant B 提交 B1
 - ToolGateway 幂等性测试；
 - Checkpoint 恢复测试；
 - ExecutionPolicy 三档压力测试；
-- 多 Tenant 公平队列测试；
+- 多 User 公平队列测试；
 - slot 泄漏与重复释放测试；
 - `CRITICAL -> NORMAL` 自动推进测试；
 - 一条端到端集成测试。
@@ -783,7 +783,7 @@ GET  /health
 `POST /runs` 的最小输入：
 
 ```text
-tenantId
+userId
 sessionId（可选，新任务时创建）
 userInput
 workspacePath
@@ -833,7 +833,7 @@ workspacePath
 | Recovery | 至少一个安全边界可恢复 | 失败后重新从头运行 |
 | Resource | Snapshot 改变 START/QUEUE | 只展示显存数字 |
 | Auto progress | 资源恢复后队列自动推进 | 需要用户再次点击或重新提交 |
-| Fairness | 两个 Tenant 的确定性测试 | 全局无界并发 |
+| Fairness | 两个 User 的确定性测试 | 全局无界并发 |
 | Explainability | 决策有 reason 和输入快照 | 只有“资源不足”字符串 |
 
 ## 13. 时间不足时的砍功能顺序
@@ -847,7 +847,7 @@ workspacePath
 5. Fake ResourceObserver + Policy；
 6. 一个安全恢复点；
 7. 真实 `nvidia-smi`；
-8. 多 Tenant round-robin（不能砍掉基本 slot 队列与自动推进）；
+8. 多 User round-robin（不能砍掉基本 slot 队列与自动推进）；
 9. HTTP API。
 
 宁可最终使用 CLI，也不能为了做网页牺牲 Run、Event、Tool 和 Recovery。
@@ -882,16 +882,16 @@ Stage 1–2 已完成 Template、Instance、Capability、Attempt、Effective Pol
 最小 Sandbox 的 Pi 主路径迁移。根据 ADR 0009，后续以真实用户任务闭环为目标，
 依次推进：
 
-1. 建立 API Key/Principal 认证，所有外部访问由服务端派生 Tenant；
+1. 建立 API Key/Principal 认证，所有外部访问由服务端派生 User；
 2. 建立受管 Workspace 与 ExecutionProfile，禁止客户端传任意宿主机路径；
 3. 实现每 Attempt 的容器 Sandbox，让文件、命令、网络、Secret 和资源策略在
    真实执行点生效；
 4. 保留并强化公平队列、准入、kill/restart、Checkpoint 与危险副作用恢复；
 5. 交付任务列表/详情、实时输出、最终回答、Diff、Artifact 和人工处理入口；
-6. 用 A6000 对照、跨租户攻击测试、故障注入和固定 Benchmark 形成可复现证据。
+6. 用 A6000 对照、跨用户攻击测试、故障注入和固定 Benchmark 形成可复现证据。
 
 完整任务、退出条件和停止规则只以
-[`docs/multi-tenant-agent-task-service-roadmap.zh-CN.md`](docs/multi-tenant-agent-task-service-roadmap.zh-CN.md)
+[`docs/multi-user-agent-task-service-roadmap.zh-CN.md`](docs/multi-user-agent-task-service-roadmap.zh-CN.md)
 为准。Claude、异构 ResourcePool、多 Worker 和深度 vLLM 修改不进入当前主线；若
 实测暴露特定瓶颈，再按证据选择后续方向。
 
@@ -906,12 +906,12 @@ Deterministic Baseline
   → Guarded Agentic Control
 ```
 
-Scheduling Agent 的输入是结构化 `AdmissionContext`，至少包含 GPU 当前状态与趋势、活跃/排队 Run、预计工作量、Tenant 配额/SLO 和历史结果。它输出 `START / QUEUE / DEFER`、理由、置信度和有效期。
+Scheduling Agent 的输入是结构化 `AdmissionContext`，至少包含 GPU 当前状态与趋势、活跃/排队 Run、预计工作量、User 配额/SLO 和历史结果。它输出 `START / QUEUE / DEFER`、理由、置信度和有效期。
 
 不可由 Agent 修改的 Hard Guardrails 至少包括：
 
 - 观测过期或失败时不得假设资源充足；
-- 绝对显存安全线、并发上限和 Tenant 硬配额不可突破；
+- 绝对显存安全线、并发上限和 User 硬配额不可突破；
 - Agent 超时、不可用、低置信度或输出不合法时回退到确定性策略；
 - Scheduling Agent 与工作负载共享 GPU 时，过载状态不能依赖 Agent 完成安全决策。
 

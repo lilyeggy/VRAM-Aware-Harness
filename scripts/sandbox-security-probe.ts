@@ -13,22 +13,22 @@ import type { EffectivePolicySnapshot } from "../src/policies/effective-policy.t
  *
  * 为什么需要它：模型会出于安全考虑拒绝执行"探测凭据与出网能力"的命令
  * （真机实测：deepseek-v4.1-flash 直接拒绝并给出替代命令），所以
- * "guest 无网卡 / 看不到宿主与其他租户 / 模型 key 不进沙箱"这些平台级断言
+ * "guest 无网卡 / 看不到宿主与其他用户 / 模型 key 不进沙箱"这些平台级断言
  * 不能靠 Agent 走工具链验证，必须在平台侧（provider.execute）直接下探。
  *
  * 覆盖：guest 网络设备与出网、宿主文件系统可见性、进程身份、rootfs 可写性、
- * secret 注入的租户作用域、跨沙箱工作区隔离。
+ * secret 注入的用户作用域、跨沙箱工作区隔离。
  */
 
 const ROOT = process.env.HARNESS_PROBE_ROOT ?? "/data/harness/security-probe";
-const TENANT_A = "probe-a";
-const TENANT_B = "probe-b";
+const USER_A = "probe-a";
+const USER_B = "probe-b";
 const PLANTED_SECRET = "planted-secret-value";
 const FAKE_MODEL_KEY = "should-never-reach-guest-model-key";
 const workspaceDiskTemplatePath = process.env.FIRECRACKER_WORKSPACE_DISK_TEMPLATE_PATH;
 const vmRuntimeRoot = process.env.HARNESS_VM_RUNTIME_ROOT ?? join(ROOT, "runtime");
 
-const secretHex = Buffer.from(TENANT_A, "utf8").toString("hex").toUpperCase();
+const secretHex = Buffer.from(USER_A, "utf8").toString("hex").toUpperCase();
 const environment: Record<string, string | undefined> = { ...process.env };
 environment["HARNESS_SECRET_" + secretHex + "_PROBE_TOKEN"] = PLANTED_SECRET;
 environment.OPENCODE_API_KEY = FAKE_MODEL_KEY;
@@ -70,11 +70,11 @@ function check(name: string, ok: boolean, detail: string): void {
     console.log((ok ? "PASS " : "FAIL ") + name + " :: " + detail.slice(0, 300));
 }
 
-function policy(id: string, tenantId: string, allowedSecrets: readonly string[]): EffectivePolicySnapshot {
+function policy(id: string, userId: string, allowedSecrets: readonly string[]): EffectivePolicySnapshot {
     return {
         id,
         runId: id,
-        tenantId,
+        userId,
         layers: [],
         createdAt: new Date().toISOString(),
         sandboxProfile: "strict",
@@ -110,13 +110,13 @@ async function main(): Promise<void> {
         id: "security-probe-a",
         runId: "security-probe-a",
         workspacePath: join(ROOT, "ws-a"),
-        policy: policy("policy-probe-a", TENANT_A, ["PROBE_TOKEN"]),
+        policy: policy("policy-probe-a", USER_A, ["PROBE_TOKEN"]),
     });
     const handleB = await provider.create({
         id: "security-probe-b",
         runId: "security-probe-b",
         workspacePath: join(ROOT, "ws-b"),
-        policy: policy("policy-probe-b", TENANT_B, []),
+        policy: policy("policy-probe-b", USER_B, []),
     });
     report.acquisitionA = handleA.acquisition;
     report.acquisitionB = handleB.acquisition;
@@ -184,8 +184,8 @@ async function main(): Promise<void> {
         const cross = await run("security-probe-b", "cross-sandbox-isolation", [
             "echo '== own workspace'; ls -a /workspace",
             "echo '== peer marker'; cat /workspace/marker-a.txt 2>&1 | head -2",
-            "echo '== peer tenant secret'; echo \"PROBE_TOKEN=${PROBE_TOKEN}\"",
-            "echo '== other-tenant-workspaces'; ls /data/harness 2>&1 | head -3",
+            "echo '== peer user secret'; echo \"PROBE_TOKEN=${PROBE_TOKEN}\"",
+            "echo '== other-user-workspaces'; ls /data/harness 2>&1 | head -3",
             "echo '== running VMs visible'; ls /proc | grep -c firecracker || echo 0",
         ].join("; "));
         // 注意：探针命令/报错文本里本身会出现 marker-a.txt，不能直接全串搜索；

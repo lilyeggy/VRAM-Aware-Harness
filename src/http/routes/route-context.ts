@@ -34,7 +34,7 @@ export interface HttpRouteContext {
         resourceId: string | null,
         action: string,
         outcome: "ALLOW" | "DENY",
-        tenantId: string | null,
+        userId: string | null,
         reason: string,
     ): void;
 }

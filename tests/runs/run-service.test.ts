@@ -22,7 +22,7 @@ test("createQueuedRun 只持久化 QUEUED Run，不启动 Runtime", () => {
 
     try {
         const run = service.createQueuedRun({
-            tenantId: "tenant-1",
+            userId: "user-1",
             harnessSessionId: "session-1",
             userInput: "等待资源后执行",
             workspacePath: "/tmp/workspace",
@@ -53,7 +53,7 @@ test("executeQueuedRun 执行持久化 Run，并接续等待期间的事件序�
 
     try {
         const run = service.createQueuedRun({
-            tenantId: "tenant-queued",
+            userId: "user-queued",
             harnessSessionId: "session-queued",
             userInput: "执行已经通过调度的任务",
             workspacePath: "/tmp/queued-workspace",
@@ -79,7 +79,7 @@ test("executeQueuedRun 执行持久化 Run，并接续等待期间的事件序�
         expect(runtime.startRequests).toEqual([{
             run: {
                 runId: run.id,
-                tenantId: "tenant-queued",
+                userId: "user-queued",
                 harnessSessionId: "session-queued",
                 workspacePath: "/tmp/queued-workspace",
                 thinkingLevel: "off",
@@ -114,7 +114,7 @@ test("executeQueuedRun 拒绝重复执行非 QUEUED Run", async () => {
 
     try {
         const run = service.createQueuedRun({
-            tenantId: "tenant-1",
+            userId: "user-1",
             harnessSessionId: "session-1",
             userInput: "只允许执行一次",
             workspacePath: "/tmp/workspace",
@@ -150,7 +150,7 @@ test("Runtime 启动直接抛错时 Run 会退回 INTERRUPTED", async () => {
 
     try {
         const run = service.createQueuedRun({
-            tenantId: "tenant-1",
+            userId: "user-1",
             harnessSessionId: "session-1",
             userInput: "启动失败测试",
             workspacePath: "/tmp/workspace",
@@ -186,7 +186,7 @@ test("RunService使用 Fake Runtime 完成一次完整 Run" , async () =>{
 
     try {
         const finalRun = await service.start({
-            tenantId : "tenant-1",
+            userId : "user-1",
             harnessSessionId:"session-1",
             userInput:"完成一个测试任务",
             workspacePath:"/tmp/workspace",
@@ -204,7 +204,7 @@ test("RunService使用 Fake Runtime 完成一次完整 Run" , async () =>{
             {
                 run: {
                     runId: finalRun.id,
-                    tenantId: "tenant-1",
+                    userId: "user-1",
                     harnessSessionId: "session-1",
                     workspacePath: "/tmp/workspace",
                     thinkingLevel: "off",
@@ -238,7 +238,7 @@ test("RunService 会把 Runtime 失败持久化为 FAILED", async () => {
 
     try {
         const finalRun = await service.start({
-            tenantId: "tenant-1",
+            userId: "user-1",
             harnessSessionId: "session-1",
             userInput: "执行一个会失败的任务",
             workspacePath: "/tmp/workspace",
@@ -282,7 +282,7 @@ test("RunService 会持久化工具边界并忽略重复投递", async () => {
 
     try {
         const finalRun = await service.start({
-            tenantId: "tenant-1",
+            userId: "user-1",
             harnessSessionId: "session-1",
             userInput: "读取一个文件",
             workspacePath: "/tmp/workspace",
@@ -329,7 +329,7 @@ test("RunService 会持久化模型 usage 并忽略重复模型事件", async ()
 
     try {
         const finalRun = await service.start({
-            tenantId: "tenant-1",
+            userId: "user-1",
             harnessSessionId: "session-1",
             userInput: "执行模型调用",
             workspacePath: "/tmp/workspace",
@@ -378,7 +378,7 @@ test("RunService 会从 Checkpoint 恢复 INTERRUPTED Run", async () => {
     const createdAt = new Date().toISOString();
     const run: AgentRun = {
         id: runId,
-        tenantId: "tenant-1",
+        userId: "user-1",
         harnessSessionId: "session-1",
         status: "QUEUED",
         userInput: "恢复任务",
@@ -457,7 +457,7 @@ test("RunService 会从 Checkpoint 恢复 INTERRUPTED Run", async () => {
             {
                 run: {
                     runId,
-                    tenantId: "tenant-1",
+                    userId: "user-1",
                     harnessSessionId: "session-1",
                     workspacePath: "/tmp/workspace",
                     thinkingLevel: "off",
@@ -527,7 +527,7 @@ test("RunService 完成 Run 时保留数据库中的最新 Checkpoint", async ()
 
     try {
         const finalRun = await service.start({
-            tenantId: "tenant-1",
+            userId: "user-1",
             harnessSessionId: "session-1",
             userInput: "完成并保留恢复点",
             workspacePath: "/tmp/workspace",
@@ -550,7 +550,7 @@ test("Runtime 恢复启动失败时 Run 会退回 INTERRUPTED", async () => {
     const timestamp = new Date().toISOString();
     const interruptedRun: AgentRun = {
         id: runId,
-        tenantId: "tenant-1",
+        userId: "user-1",
         harnessSessionId: "session-1",
         status: "INTERRUPTED",
         userInput: "测试恢复启动失败",
@@ -630,7 +630,7 @@ test("interrupt 幂等中断 QUEUED Run，且不调用 Runtime", async () => {
 
     try {
         const run = service.createQueuedRun({
-            tenantId:"tenant-interrupt",
+            userId:"user-interrupt",
             harnessSessionId:"session-interrupt",
             userInput:"中断排队任务",
             workspacePath:"/tmp/workspace-interrupt",
@@ -659,7 +659,7 @@ test("终态 Run 拒绝 interrupt", async () => {
 
     try {
         const completedRun = await service.start({
-            tenantId:"tenant-completed",
+            userId:"user-completed",
             harnessSessionId:"session-completed",
             userInput:"完成后不可中断",
             workspacePath:"/tmp/workspace-completed",

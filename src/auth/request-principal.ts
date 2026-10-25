@@ -1,5 +1,5 @@
 export interface RequestPrincipal {
-    readonly tenantId: string;
+    readonly userId: string;
     readonly scopes: readonly string[];
 }
 

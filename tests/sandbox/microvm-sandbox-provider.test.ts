@@ -30,7 +30,7 @@ class MemorySandboxStore {
 }
 
 const mockSecrets: SecretProvider = {
-    get: (_tenantId, name) => (name === "TEST_SECRET" ? "secret-value-123" : null),
+    get: (_userId, name) => (name === "TEST_SECRET" ? "secret-value-123" : null),
 };
 
 function strictPolicy(overrides: Partial<EffectivePolicySnapshot> = {}): EffectivePolicySnapshot {
@@ -38,11 +38,11 @@ function strictPolicy(overrides: Partial<EffectivePolicySnapshot> = {}): Effecti
         ...unrestrictedPolicy,
         id: "policy-strict",
         runId: "run-strict-1",
-        tenantId: "tenant-a",
+        userId: "user-a",
         sandboxProfile: "strict",
         layers: [],
         createdAt: "2026-10-05T00:00:00.000Z",
-        workspaceRoots: ["/srv/workspaces/tenant-a"],
+        workspaceRoots: ["/srv/workspaces/user-a"],
         allowNetwork: false,
         allowedSecrets: ["TEST_SECRET"],
         ...overrides,
@@ -57,7 +57,7 @@ test("strict profile 成功路由至 MicrovmSandboxProvider 并产出合规硬�
     const handle = await provider.create({
         id: "sbx-strict-1",
         runId: "run-strict-1",
-        workspacePath: "/srv/workspaces/tenant-a/run-strict-1",
+        workspacePath: "/srv/workspaces/user-a/run-strict-1",
         policy: strictPolicy(),
     });
 

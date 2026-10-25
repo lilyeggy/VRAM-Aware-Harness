@@ -67,18 +67,18 @@ async function createConversationWithAutoWorkspace(
 
     let workspaceId: string;
     if (requestedWorkspaceId !== null) {
-        requireOwnedWorkspace(ctx, requestedWorkspaceId, principal.tenantId);
+        requireOwnedWorkspace(ctx, requestedWorkspaceId, principal.userId);
         workspaceId = requestedWorkspaceId;
     } else {
         // 自动建出来的工作区同样是资源创建，权限不因为"包装成建会话"而豁免。
         ctx.requirePrincipal(request, "workspaces:write");
         workspaceId = ctx.accessControl.workspaceService.create(
-            principal.tenantId,
+            principal.userId,
             autoWorkspaceName(),
         ).id;
     }
 
-    return createConversationResponse(ctx, principal.tenantId, workspaceId, title);
+    return createConversationResponse(ctx, principal.userId, workspaceId, title);
 }
 
 async function createConversation(
@@ -87,11 +87,11 @@ async function createConversation(
     ctx: HttpRouteContext,
 ): Promise<Response> {
     const principal = ctx.requirePrincipal(request, "tasks:write");
-    requireOwnedWorkspace(ctx, workspaceId, principal.tenantId);
+    requireOwnedWorkspace(ctx, workspaceId, principal.userId);
     const body = await readOptionalJsonObject(request);
     return createConversationResponse(
         ctx,
-        principal.tenantId,
+        principal.userId,
         workspaceId,
         optionalString(body, "title"),
     );
@@ -100,7 +100,7 @@ async function createConversation(
 /** 两条建会话入口（自动建工作区 / 指定工作区）共用的创建与响应。 */
 function createConversationResponse(
     ctx: HttpRouteContext,
-    tenantId: string,
+    userId: string,
     workspaceId: string,
     title: string | null,
 ): Response {
@@ -109,7 +109,7 @@ function createConversationResponse(
     }
     return jsonResponse({
         conversation: ctx.application.createConversation({
-            tenantId,
+            userId,
             workspaceId,
             ...(title == null ? {} : { title }),
         }),
@@ -122,10 +122,10 @@ function listConversations(
     ctx: HttpRouteContext,
 ): Response {
     const principal = ctx.requirePrincipal(request, "tasks:read");
-    requireOwnedWorkspace(ctx, workspaceId, principal.tenantId);
+    requireOwnedWorkspace(ctx, workspaceId, principal.userId);
     return jsonResponse({
         conversations: ctx.application.getConversationsForWorkspace?.(
-            principal.tenantId,
+            principal.userId,
             workspaceId,
         ) ?? [],
     });
@@ -139,13 +139,13 @@ function getConversation(
     const principal = ctx.requirePrincipal(request, "tasks:read");
     const conversation = ctx.application.getConversation?.(
         conversationId,
-        principal.tenantId,
+        principal.userId,
     ) ?? null;
     if (conversation === null) throw new HttpError(404, "找不到对话");
     return jsonResponse({
         conversation,
         runs: ctx.application.getRunsForConversation?.(
-            principal.tenantId,
+            principal.userId,
             conversationId,
         ) ?? [],
     });
@@ -159,13 +159,13 @@ async function sendConversationMessage(
     const principal = ctx.requirePrincipal(request, "tasks:write");
     const conversation = ctx.application.getConversation?.(
         conversationId,
-        principal.tenantId,
+        principal.userId,
     ) ?? null;
     if (conversation === null) throw new HttpError(404, "找不到对话");
     const workspace = requireOwnedWorkspace(
         ctx,
         conversation.workspaceId,
-        principal.tenantId,
+        principal.userId,
     );
     const body = await readJsonObject(request);
     const idempotencyKey = optionalString(body, "idempotencyKey");
@@ -173,13 +173,13 @@ async function sendConversationMessage(
         throw new HttpError(400, "idempotencyKey 长度不能超过 200");
     }
     const run = ctx.application.submitRun({
-        tenantId: principal.tenantId,
+        userId: principal.userId,
         harnessSessionId: conversation.id,
         userInput: requireUserInput(body, ctx.limits?.maxUserInputChars),
         thinkingLevel: parseThinkingLevel(body),
         ...(idempotencyKey === null ? {} : { idempotencyKey }),
         workspacePath: workspace.rootPath,
     });
-    ctx.application.touchConversation?.(conversation.id, principal.tenantId);
+    ctx.application.touchConversation?.(conversation.id, principal.userId);
     return jsonResponse({ run: runForResponse(run) }, 202);
 }

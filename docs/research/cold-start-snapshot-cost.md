@@ -1,7 +1,7 @@
 # Firecracker 快照创建成本 & 内存镜像恢复 近零成本调研
 
 > 范围：如何降低 **make-snapshot**（`PUT /snapshot/create`）成本，以及如何让内存镜像（`mem.snap`）恢复接近零成本。
-> 约束（我们的真实项目）：单机多租户 AI Agent 平台，每 Run 一台 microVM；Firecracker **v1.17.0**（jailer）；宿主 Ubuntu 22.04 / 内核 6.8.0；`/data` 为 **ext4（无 reflink）**；guest 内核 **4.14.174**；guest 内存 256MB；workspace 128MB；rootfs 256MB；只读共享基础文件 + 只读 rootfs + guest tmpfs；快照池 `/data/harness/snapshots-mt/<templateHash>/{vm.snap,mem.snap}`。
+> 约束（我们的真实项目）：单机多用户 AI Agent 平台，每 Run 一台 microVM；Firecracker **v1.17.0**（jailer）；宿主 Ubuntu 22.04 / 内核 6.8.0；`/data` 为 **ext4（无 reflink）**；guest 内核 **4.14.174**；guest 内存 256MB；workspace 128MB；rootfs 256MB；只读共享基础文件 + 只读 rootfs + guest tmpfs；快照池 `/data/harness/snapshots-mt/<templateHash>/{vm.snap,mem.snap}`。
 > 标注约定：**[已验证]** = 官方文档/上游源码 v1.17.0 直接读到；**[第三方]** = 厂商博客/第三方评测，未独立复现；**[推测]** = 基于上述事实的推断，需实测。
 
 ---

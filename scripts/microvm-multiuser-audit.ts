@@ -1,10 +1,10 @@
 /**
- * 真机多 VM 并发 + 跨租户对抗验收（P0）。
+ * 真机多 VM 并发 + 跨用户对抗验收（P0）。
  *
  * ## 为什么需要这个脚本
  *
  * 此前 microVM 的所有证据都来自**单 VM** 场景（23/23 审计跑的是一台）。而产品核心
- * 承诺是"多租户每人一台云电脑"——唯一没有证据的维度恰好是卖点：
+ * 承诺是"多用户每人一台云电脑"——唯一没有证据的维度恰好是卖点：
  *
  * - 全仓库没有任何测试同时跑两台以上 microVM
  * - blast-radius-isolation.e2e.test.ts 里 microVM 出现 0 次
@@ -14,15 +14,15 @@
  *
  * 1. 并发启动：N 台 VM 同时创建，全部成功（号段、内存、cgroup 不冲突）
  * 2. 真实并发：宿主确实存在 N 个 Firecracker 进程（不是串行）
- * 3. 跨租户文件隔离：A 的工作区文件在 B 的 VM 内不可见
- * 4. 跨租户写入隔离：各自 marker 互不污染
- * 5. 凭据注入：每租户独立 secret
+ * 3. 跨用户文件隔离：A 的工作区文件在 B 的 VM 内不可见
+ * 4. 跨用户写入隔离：各自 marker 互不污染
+ * 5. 凭据注入：每用户独立 secret
  * 6. 反向隔离：VM 存活期宿主看不到 VM 内产物
  * 7. 并发终止无残留：全部终止后宿主无进程/目录残留
  * 8. 启动延迟基线：P50/P95
  *
  * 用法（jailer 模式需 root）：
- *   sudo bun scripts/microvm-multitenant-audit.ts [并发数]
+ *   sudo bun scripts/microvm-multiuser-audit.ts [并发数]
  */
 
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -63,31 +63,31 @@ class MemorySandboxStore {
     listUnsettled(): SandboxRecord[] { return this.listActive(); }
 }
 
-/** 每个租户一份 secret，值可辨识（名字与 allowedSecrets 一致） */
+/** 每个用户一份 secret，值可辨识（名字与 allowedSecrets 一致） */
 function makeSecrets(): SecretProvider {
     return {
-        get: (_tenantId: string, name: string) => (
-            name === "AUDIT_SECRET" ? "s3cr3t-multitenant-value" : null
+        get: (_userId: string, name: string) => (
+            name === "AUDIT_SECRET" ? "s3cr3t-multiuser-value" : null
         ),
     };
 }
 
-function policyFor(tenantId: string, runId: string, workspaceRoot: string) {
-    // 复用平台的基线策略（与 microvm-live-audit.ts 一致），只覆盖租户相关字段。
+function policyFor(userId: string, runId: string, workspaceRoot: string) {
+    // 复用平台的基线策略（与 microvm-live-audit.ts 一致），只覆盖用户相关字段。
     // 不要手写 policy：漏掉 resourceLimits 等字段会让 provider 读到 undefined。
     return {
         ...unrestrictedPolicy,
-        id: `policy-${tenantId}`,
+        id: `policy-${userId}`,
         runId,
-        tenantId,
+        userId,
         workspaceRoots: [workspaceRoot],
         allowNetwork: false,
         allowedSecrets: ["AUDIT_SECRET"],
     };
 }
 
-interface Tenant {
-    readonly tenantId: string;
+interface User {
+    readonly userId: string;
     readonly sandboxId: string;
     readonly runId: string;
     readonly hostWorkspace: string;
@@ -96,7 +96,7 @@ interface Tenant {
 }
 
 async function main(): Promise<void> {
-    console.log("=== microVM 多租户并发 + 跨租户对抗审计 ===");
+    console.log("=== microVM 多用户并发 + 跨用户对抗审计 ===");
     console.log(`并发数: ${CONCURRENCY} | root: ${process.geteuid?.() === 0} | jailer: ${process.env.HARNESS_USE_JAILER !== "false"}`);
     console.log(`宿主内核: ${require("node:os").release()}`);
 
@@ -106,26 +106,26 @@ async function main(): Promise<void> {
 
     const fcBefore = countFirecrackerProcesses();
 
-    // 所有租户共用同一个 driver —— 这正是平台形态：一个控制面管 N 个 VM
+    // 所有用户共用同一个 driver —— 这正是平台形态：一个控制面管 N 个 VM
     const driver = new FirecrackerSandboxDriver({ vmRuntimeRoot: RUNTIME_ROOT });
 
-    const tenants: Tenant[] = [];
+    const users: User[] = [];
     const t0All = performance.now();
 
     // ---- [1] 并发启动 ----
     console.log(`\n[1] 并发启动 ${CONCURRENCY} 台真实 Firecracker VM...`);
-    const tenantIds = Array.from(
+    const userIds = Array.from(
         { length: CONCURRENCY },
-        (_, i) => `tenant-${String(i).padStart(2, "0")}`,
+        (_, i) => `user-${String(i).padStart(2, "0")}`,
     );
 
-    await Promise.all(tenantIds.map(async (tenantId) => {
-        const runId = `run-${tenantId}`;
-        const sandboxId = `mt-${tenantId}`;
-        const hostWorkspace = resolve(HOST_WS_ROOT, tenantId);
+    await Promise.all(userIds.map(async (userId) => {
+        const runId = `run-${userId}`;
+        const sandboxId = `mt-${userId}`;
+        const hostWorkspace = resolve(HOST_WS_ROOT, userId);
         mkdirSync(hostWorkspace, { recursive: true, mode: 0o700 });
-        // 每个租户预置"私有文件"，用于验证互不可见
-        writeFileSync(resolve(hostWorkspace, "private.txt"), `secret-of-${tenantId}`);
+        // 每个用户预置"私有文件"，用于验证互不可见
+        writeFileSync(resolve(hostWorkspace, "private.txt"), `secret-of-${userId}`);
 
         const provider = new MicrovmSandboxProvider(new MemorySandboxStore() as never, makeSecrets(), {
             driver,
@@ -140,19 +140,19 @@ async function main(): Promise<void> {
             id: sandboxId,
             runId,
             workspacePath: hostWorkspace,
-            policy: policyFor(tenantId, runId, hostWorkspace) as never,
+            policy: policyFor(userId, runId, hostWorkspace) as never,
         });
         const createMs = performance.now() - t0;
 
-        tenants.push({ tenantId, sandboxId, runId, hostWorkspace, provider, createMs });
-        console.log(`    ${tenantId}: 就绪 ${createMs.toFixed(0)}ms`);
+        users.push({ userId, sandboxId, runId, hostWorkspace, provider, createMs });
+        console.log(`    ${userId}: 就绪 ${createMs.toFixed(0)}ms`);
     }));
 
-    // 按 tenantId 排序保证后续断言顺序稳定
-    tenants.sort((a, b) => a.tenantId.localeCompare(b.tenantId));
+    // 按 userId 排序保证后续断言顺序稳定
+    users.sort((a, b) => a.userId.localeCompare(b.userId));
 
     const wallMs = performance.now() - t0All;
-    check(`${CONCURRENCY} 台 VM 全部并发启动成功`, tenants.length === CONCURRENCY, `墙钟 ${wallMs.toFixed(0)}ms`);
+    check(`${CONCURRENCY} 台 VM 全部并发启动成功`, users.length === CONCURRENCY, `墙钟 ${wallMs.toFixed(0)}ms`);
 
     // ---- [2] 确认真实并发（不是串行）----
     const fcDuring = countFirecrackerProcesses();
@@ -163,83 +163,83 @@ async function main(): Promise<void> {
     );
     check(
         "并发确实重叠（总墙钟显著小于单机耗时之和）",
-        wallMs < tenants.reduce((s, t) => s + t.createMs, 0) * 0.95,
-        `墙钟 ${wallMs.toFixed(0)}ms vs 串行预期 ${tenants.reduce((s, t) => s + t.createMs, 0).toFixed(0)}ms`,
+        wallMs < users.reduce((s, t) => s + t.createMs, 0) * 0.95,
+        `墙钟 ${wallMs.toFixed(0)}ms vs 串行预期 ${users.reduce((s, t) => s + t.createMs, 0).toFixed(0)}ms`,
     );
 
     // ---- [3] 启动延迟基线 ----
     console.log(`\n[2] 启动延迟基线`);
-    const times = tenants.map((t) => t.createMs).sort((a, b) => a - b);
+    const times = users.map((t) => t.createMs).sort((a, b) => a - b);
     const p50 = percentile(times, 50);
     const p95 = percentile(times, 95);
     console.log(`    min=${times[0]!.toFixed(0)}ms P50=${p50.toFixed(0)}ms P95=${p95.toFixed(0)}ms max=${times[times.length - 1]!.toFixed(0)}ms`);
     check("P95 启动延迟 < 15s（并发退化可接受上限）", p95 < 15_000, `P95=${p95.toFixed(0)}ms`);
 
-    // ---- [4] 跨租户文件隔离 ----
-    console.log(`\n[3] 跨租户文件隔离`);
+    // ---- [4] 跨用户文件隔离 ----
+    console.log(`\n[3] 跨用户文件隔离`);
     {
-        const probe = tenants[0]!;
-        // 在 A 的 VM 内查找其他租户的工作区目录
-        for (const other of tenants.slice(1, Math.min(4, tenants.length))) {
+        const probe = users[0]!;
+        // 在 A 的 VM 内查找其他用户的工作区目录
+        for (const other of users.slice(1, Math.min(4, users.length))) {
             const r = await probe.provider.execute(probe.sandboxId, [
                 "sh", "-c",
-                `test -e /workspace/${other.tenantId} && echo LEAK || echo CLEAN`,
+                `test -e /workspace/${other.userId} && echo LEAK || echo CLEAN`,
             ]);
             check(
-                `${probe.tenantId} 的 VM 看不到 ${other.tenantId} 的目录`,
+                `${probe.userId} 的 VM 看不到 ${other.userId} 的目录`,
                 r.stdout.includes("CLEAN"),
                 r.stdout.trim() || `exit=${r.exitCode}`,
             );
         }
-        // 自己workspace 不应含其他租户目录
+        // 自己workspace 不应含其他用户目录
         const listing = await probe.provider.execute(probe.sandboxId, ["ls", "/workspace"]);
-        const leaked = tenants
+        const leaked = users
             .slice(1)
-            .filter((o) => listing.stdout.includes(o.tenantId));
+            .filter((o) => listing.stdout.includes(o.userId));
         check(
-            `${probe.tenantId} 的 /workspace 列表不含其他租户目录`,
+            `${probe.userId} 的 /workspace 列表不含其他用户目录`,
             leaked.length === 0,
-            leaked.length > 0 ? `泄漏: ${leaked.map((l) => l.tenantId).join(",")}` : listing.stdout.trim().replace(/\n/g, " "),
+            leaked.length > 0 ? `泄漏: ${leaked.map((l) => l.userId).join(",")}` : listing.stdout.trim().replace(/\n/g, " "),
         );
     }
 
-    // ---- [5] 跨租户写入互不干扰 ----
-    console.log(`\n[4] 跨租户写入互不干扰`);
+    // ---- [5] 跨用户写入互不干扰 ----
+    console.log(`\n[4] 跨用户写入互不干扰`);
     {
-        await Promise.all(tenants.map((t) =>
+        await Promise.all(users.map((t) =>
             t.provider.execute(t.sandboxId, [
-                "sh", "-c", `echo marker-of-${t.tenantId} > /workspace/marker.txt`,
+                "sh", "-c", `echo marker-of-${t.userId} > /workspace/marker.txt`,
             ])));
-        for (const t of tenants) {
+        for (const t of users) {
             const r = await t.provider.execute(t.sandboxId, ["cat", "/workspace/marker.txt"]);
-            const pollutedBy = tenants
-                .filter((o) => o.tenantId !== t.tenantId)
-                .filter((o) => r.stdout.includes(`marker-of-${o.tenantId}`))
-                .map((o) => o.tenantId);
+            const pollutedBy = users
+                .filter((o) => o.userId !== t.userId)
+                .filter((o) => r.stdout.includes(`marker-of-${o.userId}`))
+                .map((o) => o.userId);
             check(
-                `${t.tenantId} 的 marker 只含自己的内容`,
-                r.stdout.includes(`marker-of-${t.tenantId}`) && pollutedBy.length === 0,
+                `${t.userId} 的 marker 只含自己的内容`,
+                r.stdout.includes(`marker-of-${t.userId}`) && pollutedBy.length === 0,
                 pollutedBy.length > 0 ? `被污染: ${pollutedBy.join(",")}` : r.stdout.trim(),
             );
         }
     }
 
-    // ---- [6] 凭据注入与跨租户不串 ----
-    console.log(`\n[5] 凭据注入与跨租户不串`);
+    // ---- [6] 凭据注入与跨用户不串 ----
+    console.log(`\n[5] 凭据注入与跨用户不串`);
     {
-        // 每租户应拿到自己的 secret 值
-        for (const t of tenants.slice(0, 3)) {
+        // 每用户应拿到自己的 secret 值
+        for (const t of users.slice(0, 3)) {
             const r = await t.provider.execute(t.sandboxId, ["sh", "-c", "echo [$AUDIT_SECRET]"]);
             check(
-                `${t.tenantId} 拿到自己的 secret`,
-                r.stdout.includes("s3cr3t-multitenant-value"),
+                `${t.userId} 拿到自己的 secret`,
+                r.stdout.includes("s3cr3t-multiuser-value"),
                 r.stdout.trim(),
             );
         }
-        // env 中不得出现其他租户的 secret 名（本例所有租户同名，故验证数量为 1，
+        // env 中不得出现其他用户的 secret 名（本例所有用户同名，故验证数量为 1，
         // 即"只注入允许的那个"，没有把宿主/其他来源的凭据带进来）
-        const leak = await tenants[0]!.provider.execute(
-            tenants[0]!.sandboxId,
+        const leak = await users[0]!.provider.execute(
+            users[0]!.sandboxId,
             ["sh", "-c", "env | grep -c AUDIT_SECRET"],
         );
         check(
@@ -252,8 +252,8 @@ async function main(): Promise<void> {
     // ---- [6.5] 网络隔离：guest 内无网卡 ----
     console.log("\n[6.5] 网络隔离：guest 内只有 loopback");
     {
-        const net = await tenants[0]!.provider.execute(
-            tenants[0]!.sandboxId,
+        const net = await users[0]!.provider.execute(
+            users[0]!.sandboxId,
             ["sh", "-c", "grep -c ':' /proc/net/dev"],
         );
         const count = net.stdout.trim();
@@ -262,18 +262,18 @@ async function main(): Promise<void> {
 
     // ---- [7] 反向隔离：VM 内存产物宿主不可见 ----
     console.log(`\n[6] VM 存活期宿主看不到 VM 内产物`);
-    for (const t of tenants.slice(0, 3)) {
+    for (const t of users.slice(0, 3)) {
         check(
-            `${t.tenantId} 的 marker 未落到宿主工作区`,
+            `${t.userId} 的 marker 未落到宿主工作区`,
             !existsSync(resolve(t.hostWorkspace, "marker.txt")),
         );
     }
 
     // ---- [8] 并发终止 + 残留 ----
     console.log(`\n[7] 并发终止全部 VM 并检查残留`);
-    await Promise.all(tenants.map((t) =>
+    await Promise.all(users.map((t) =>
         t.provider.terminate(t.sandboxId).catch((e: unknown) => {
-            console.error(`    ${t.tenantId} 终止失败:`, e instanceof Error ? e.message : e);
+            console.error(`    ${t.userId} 终止失败:`, e instanceof Error ? e.message : e);
         })));
     await new Promise((r) => setTimeout(r, 2000));
 
@@ -289,11 +289,11 @@ async function main(): Promise<void> {
     check("终止后运行根目录无残留", dirs.length === 0, dirs.join(",") || "(空)");
 
     // 工作区产物应已导出回宿主（终止流程正确）
-    const exported = tenants.filter((t) => existsSync(resolve(t.hostWorkspace, "marker.txt")));
+    const exported = users.filter((t) => existsSync(resolve(t.hostWorkspace, "marker.txt")));
     check(
-        "终止后各租户产物已导出到各自宿主工作区",
-        exported.length === tenants.length,
-        `${exported.length}/${tenants.length}`,
+        "终止后各用户产物已导出到各自宿主工作区",
+        exported.length === users.length,
+        `${exported.length}/${users.length}`,
     );
 
     console.log(`\n=== 审计完成：${passed} 项通过，${failed} 项失败 ===`);
@@ -333,6 +333,6 @@ function percentile(sorted: number[], p: number): number {
 }
 
 main().catch((err) => {
-    console.error("多租户并发审计异常终止：", err);
+    console.error("多用户并发审计异常终止：", err);
     process.exit(1);
 });

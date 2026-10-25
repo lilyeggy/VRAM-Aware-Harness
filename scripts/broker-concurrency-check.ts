@@ -53,8 +53,8 @@ const base = resolve("data/live-full-flow/broker-conc");
 rmSync(base, { recursive: true, force: true });
 mkdirSync(base, { recursive: true, mode: 0o700 });
 
-type Tenant = {
-    tenantId: string;
+type User = {
+    userId: string;
     sandboxId: string;
     runId: string;
     workspacePath: string;
@@ -62,73 +62,73 @@ type Tenant = {
     policy: Record<string, unknown>;
 };
 
-const tenants: Tenant[] = Array.from({ length: concurrency }, (_value, index) => {
+const users: User[] = Array.from({ length: concurrency }, (_value, index) => {
     const suffix = String(index).padStart(2, "0");
-    const tenantId = "tenant-" + suffix;
+    const userId = "user-" + suffix;
     const sandboxId = "conc-sb-" + suffix;
     const runId = "conc-run-" + suffix;
-    const workspacePath = resolve(base, tenantId);
+    const workspacePath = resolve(base, userId);
     mkdirSync(workspacePath, { recursive: true, mode: 0o700 });
     const policy = {
         ...unrestrictedPolicy,
-        id: "policy-" + tenantId,
+        id: "policy-" + userId,
         runId,
-        tenantId,
+        userId,
         workspaceRoots: [workspacePath],
         allowNetwork: false,
         allowedSecrets: [],
     };
-    return { tenantId, sandboxId, runId, workspacePath, token: crypto.randomUUID(), policy };
+    return { userId, sandboxId, runId, workspacePath, token: crypto.randomUUID(), policy };
 });
 
-const created = await Promise.all(tenants.map((tenant) => request({
-    id: "create-" + tenant.tenantId,
+const created = await Promise.all(users.map((user) => request({
+    id: "create-" + user.userId,
     op: "create",
     input: {
-        id: tenant.sandboxId,
-        runId: tenant.runId,
-        workspacePath: tenant.workspacePath,
-        policy: tenant.policy,
+        id: user.sandboxId,
+        runId: user.runId,
+        workspacePath: user.workspacePath,
+        policy: user.policy,
         controlToken: CONTROL_TOKEN,
-        token: tenant.token,
+        token: user.token,
     },
 })));
-created.forEach((response, index) => expectOk("create " + (tenants[index] as Tenant).tenantId, response));
+created.forEach((response, index) => expectOk("create " + (users[index] as User).userId, response));
 
-const own = await Promise.all(tenants.map((tenant) => request({
-    id: "exec-" + tenant.tenantId,
+const own = await Promise.all(users.map((user) => request({
+    id: "exec-" + user.userId,
     op: "execute",
-    sandboxId: tenant.sandboxId,
-    tenantId: tenant.tenantId,
-    token: tenant.token,
-    command: ["sh", "-c", "echo HELLO-" + tenant.tenantId],
+    sandboxId: user.sandboxId,
+    userId: user.userId,
+    token: user.token,
+    command: ["sh", "-c", "echo HELLO-" + user.userId],
 })));
-own.forEach((response, index) => expectOk("execute " + (tenants[index] as Tenant).tenantId, response));
+own.forEach((response, index) => expectOk("execute " + (users[index] as User).userId, response));
 
-const cross = await Promise.all(tenants.map((tenant, index) => {
-    const other = tenants[(index + 1) % tenants.length] as Tenant;
+const cross = await Promise.all(users.map((user, index) => {
+    const other = users[(index + 1) % users.length] as User;
     return request({
-        id: "cross-" + tenant.tenantId,
+        id: "cross-" + user.userId,
         op: "execute",
         sandboxId: other.sandboxId,
-        tenantId: tenant.tenantId,
+        userId: user.userId,
         token: other.token,
-        command: ["sh", "-c", "echo CROSS-TENANT"],
+        command: ["sh", "-c", "echo CROSS-USER"],
     });
 }));
-cross.forEach((response, index) => expectFail("cross " + (tenants[index] as Tenant).tenantId, response, "拒绝跨租户操作"));
+cross.forEach((response, index) => expectFail("cross " + (users[index] as User).userId, response, "拒绝跨用户操作"));
 
-const forged = await Promise.all(tenants.map((tenant) => request({
-    id: "forged-" + tenant.tenantId,
+const forged = await Promise.all(users.map((user) => request({
+    id: "forged-" + user.userId,
     op: "execute",
-    sandboxId: tenant.sandboxId,
-    tenantId: tenant.tenantId,
+    sandboxId: user.sandboxId,
+    userId: user.userId,
     token: "forged-token",
     command: ["sh", "-c", "echo FORGED"],
 })));
-forged.forEach((response, index) => expectFail("forged " + (tenants[index] as Tenant).tenantId, response, "capability token 不匹配"));
+forged.forEach((response, index) => expectFail("forged " + (users[index] as User).userId, response, "capability token 不匹配"));
 
-const badWorkspace = resolve(base, "tenant-bad");
+const badWorkspace = resolve(base, "user-bad");
 mkdirSync(badWorkspace, { recursive: true, mode: 0o700 });
 const badCreate = await request({
     id: "bad-create",
@@ -139,9 +139,9 @@ const badCreate = await request({
         workspacePath: badWorkspace,
         policy: {
             ...unrestrictedPolicy,
-            id: "policy-tenant-bad",
+            id: "policy-user-bad",
             runId: "bad-run",
-            tenantId: "tenant-bad",
+            userId: "user-bad",
             workspaceRoots: [badWorkspace],
             allowNetwork: false,
             allowedSecrets: [],
@@ -152,27 +152,27 @@ const badCreate = await request({
 });
 expectFail("bad control create", badCreate, "control token 不匹配");
 
-const terminated = await Promise.all(tenants.map((tenant) => request({
-    id: "term-" + tenant.tenantId,
+const terminated = await Promise.all(users.map((user) => request({
+    id: "term-" + user.userId,
     op: "terminate",
-    sandboxId: tenant.sandboxId,
-    tenantId: tenant.tenantId,
-    token: tenant.token,
+    sandboxId: user.sandboxId,
+    userId: user.userId,
+    token: user.token,
 })));
-terminated.forEach((response, index) => expectOk("terminate " + (tenants[index] as Tenant).tenantId, response));
+terminated.forEach((response, index) => expectOk("terminate " + (users[index] as User).userId, response));
 
 const afterTerminate = await request({
     id: "after-terminate",
     op: "execute",
-    sandboxId: (tenants[0] as Tenant).sandboxId,
-    tenantId: (tenants[0] as Tenant).tenantId,
-    token: (tenants[0] as Tenant).token,
+    sandboxId: (users[0] as User).sandboxId,
+    userId: (users[0] as User).userId,
+    token: (users[0] as User).token,
     command: ["sh", "-c", "echo AFTER"],
 });
 expectFail("after terminate", afterTerminate, "不认识 sandbox");
 
 console.log("BROKER_CONCURRENCY_CHECK_OK", JSON.stringify({
     concurrency,
-    tenants: tenants.map((tenant) => tenant.tenantId),
+    users: users.map((user) => user.userId),
 }));
 console.log("BROKER_CONCURRENCY_CHECK_DONE");

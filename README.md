@@ -1,8 +1,8 @@
 # VRAM-Aware Harness
 
-> **单机多租户 Agent 宿主层：准入 / 调度 / 隔离 / 溯源**
+> **单机多用户 Agent 宿主层：准入 / 调度 / 隔离 / 溯源**
 >
-> 命名保留历史原因：M4 起平台不再观测 VRAM/GPU（模型服务在平台外），当前形态是「外部模型 + 单机多租户宿主层」。定位与边界见 `docs/platform-boundary.md` §9.1 / §9.10（v1.6）。
+> 命名保留历史原因：M4 起平台不再观测 VRAM/GPU（模型服务在平台外），当前形态是「外部模型 + 单机多用户宿主层」。定位与边界见 `docs/platform-boundary.md` §9.1 / §9.10（v1.6）/ §9.11（v1.7，隔离域统一为 user）。
 
 宿主层只做四件事，其余都不属于它：
 
@@ -17,9 +17,9 @@
 
 核心目标只有三件事：
 
-1. **任务生命周期与调度**：多租户提交任务，按租户轮转、全局/单租户并发上限、会话串行与 Queue TTL 公平调度。
+1. **任务生命周期与调度**：多用户提交任务，按用户轮转、全局/单用户并发上限、会话串行与 Queue TTL 公平调度。
 2. **副作用与恢复**：工具调用先记账后执行，崩溃/中断后只自动重放安全操作。
-3. **隔离与身份边界**：API Key 派生 Tenant，工具与文件操作限制在 jailer + Firecracker microVM（生产）或 runsc Sandbox（开发）内。
+3. **隔离与身份边界**：API Key 派生 User，工具与文件操作限制在 jailer + Firecracker microVM（生产）或 runsc Sandbox（开发）内。
 
 
 
@@ -31,17 +31,17 @@
 
 ## 核心能力
 
-### 多租户任务
-- API Key → Principal → Tenant
+### 多用户任务
+- API Key → Principal → User
 - Workspace / Session / Run / Attempt 生命周期
 - Run 状态机 + 追加式 RunEvent 时间线
 - 最终回答、Workspace Diff、Artifact 交付
 
 ### 调度与并发准入
-- Tenant 内 FIFO、Tenant 间轮转
-- 全局 / 单租户并发上限
+- User 内 FIFO、User 间轮转
+- 全局 / 单用户并发上限
 - 会话串行与 Queue TTL
-- 平台不观测推理侧 GPU/KV cache；准入由全局/租户并发、会话串行与 Queue TTL 决定
+- 平台不观测推理侧 GPU/KV cache；准入由全局/用户并发、会话串行与 Queue TTL 决定
 - 资源恢复后自动推进队列
 
 ### 工具治理与恢复
@@ -54,7 +54,7 @@
 - Worker 子进程运行时
 - runsc 容器：只读根、无网络、能力丢弃、CPU/内存/PID 限制
 - ToolGateway 策略白名单与工作区路径围栏
-- 审计事件按租户可查
+- 审计事件按用户可查
 
 ### 外部模型调用
 - 外部 OpenAI 兼容服务（opencode-go / 自建 vLLM 等）经 Pi runtime 调用
@@ -101,7 +101,7 @@ src/
 ├── http/        HTTP API、用户工作台、请求工具
 ├── auth/        API Key / 用户账号
 ├── runs/        Run、Attempt、RunStore、RunService
-├── scheduling/  RunScheduler 与租户公平队列
+├── scheduling/  RunScheduler 与用户公平队列
 ├── resources/   资源快照与准入决策（外部模型服务固定 NORMAL）
 ├── runtime/     PiAdapter、Worker 执行器、运行事件
 ├── worker/      Worker 进程与 IPC
@@ -133,7 +133,7 @@ bun test ./tests
 VM 创建分阶段耗时埋点：设 `HARNESS_VM_PHASE_TRACE=1` 后每台 VM 会向 stderr 打 `[vm-phase] <sandboxId> <阶段> <ms>`（默认关闭零开销）；`HARNESS_VM_BOOT_VERBOSE=1` 可打开内核启动日志并把 `serial-first-line` 纳入排障。
 首次冷启动（池空后的第一次 create，≈2.2s）已拆解为 guest 用户态就绪 ~1.28s + 写内存镜像 ~0.9s，**靠调参消不掉**；对用户可见的解法是服务启动预热：`scripts/vm-snapshot-prewarm.ts` + `deploy/harness-vm-prewarm.{service,timer}.example`，生产实测预热后首个 Run `warmHit:true` / 166ms。
 主流 Agent Sandbox 技术方案调研（E2B / Daytona / Modal / CubeSandbox / CodeSandbox / Firecracker 官方快照与 UFFD 等）见 `docs/agent-sandbox-landscape.zh-CN.md`。
-深度 backpressure / RunAttempt 租约心跳（Phase 2，§9.8 v1.4）见 `.env.example` 的 `HARNESS_MAX_QUEUED_RUNS*` 与 `HARNESS_RUN_LEASE_*`；**v1.6 已删除队列优先级**（所有租户等权，见 `docs/platform-boundary.md` §9.10）。
+深度 backpressure / RunAttempt 租约心跳（Phase 2，§9.8 v1.4）见 `.env.example` 的 `HARNESS_MAX_QUEUED_RUNS*` 与 `HARNESS_RUN_LEASE_*`；**v1.6 已删除队列优先级**（所有用户等权，见 `docs/platform-boundary.md` §9.10）。
 Durable Execution / 重试 / Run 幂等键（Phase 3，§9.8 v1.4）见 `.env.example` 的 `HARNESS_RUN_MAX_ATTEMPTS`、`HARNESS_RUN_RETRY_*`；提交 `POST /runs` 或会话消息时可带 `idempotencyKey`，终态后以 `RUN_ARTIFACTS_READY` 事件标记 artifacts 可读。
 MCP 工具接入（Phase 4，§9.8 v1.4）见 `.env.example` 的 `HARNESS_MCP_SERVERS`：stdio MCP server 的工具以 `mcp__<server>__<tool>` 暴露，调用仍经过 ToolGateway 的策略守卫、PREPARED 记账与审计；烟测脚本 `scripts/mcp-smoke.ts`。
 
@@ -153,7 +153,7 @@ HARNESS_REGISTRATION_MODE=invite
 HARNESS_REGISTRATION_INVITE_CODE=change-me
 
 # HTTP 入口限流（默认开启；可按实验室人数调整）
-HARNESS_RATE_LIMIT_MAX_PER_TENANT=600
+HARNESS_RATE_LIMIT_MAX_PER_USER=600
 HARNESS_RATE_LIMIT_MAX_PER_IP=1200
 
 # 磁盘水位、SQLite 备份/恢复、VM 与快照清理

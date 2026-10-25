@@ -2,8 +2,8 @@
 
 > **定位说明（2026-08-12）**：本文保留为外部系统源码分析。涉及异构 Runtime、
 > 分布式 Substrate 和长期控制面的建议不代表当前实施优先级；只采用其中能直接
-> 加强多租户 Sandbox、任务编排、恢复契约、故障注入和审计证据的部分。当前路线见
-> [多租户 Agent 任务服务路线图](multi-tenant-agent-task-service-roadmap.zh-CN.md)。
+> 加强多用户 Sandbox、任务编排、恢复契约、故障注入和审计证据的部分。当前路线见
+> [多用户 Agent 任务服务路线图](multi-user-agent-task-service-roadmap.zh-CN.md)。
 
 > 分析基线：`google/ax` commit `f327e23b5b842e9b700675ded9a6cdb79c505856`（2026-07-28）  
 > 本地源码：`/Users/mac/Desktop/agent_harness/google-ax`  
@@ -23,7 +23,7 @@ AX 最值得我们参考的，并不是“Google 用 Go 写了一个分布式 Ag
 这个分层与我们的方向高度相似，但两者的核心重心并不相同：
 
 - AX 当前更像一个“**可挂起、可恢复的 Agent 执行器**”。
-- 我们当前要做的是“**面向团队共享本地模型的多租户 Agent 任务服务**”；AX 中
+- 我们当前要做的是“**面向团队共享本地模型的多用户 Agent 任务服务**”；AX 中
   与第③ Sandbox、第④任务编排、恢复和审计有关的机制可作为内部实现参考，异构
   Runtime 与分布式控制面只保留为远期材料。
 
@@ -31,7 +31,7 @@ AX 最值得我们参考的，并不是“Google 用 Go 写了一个分布式 Ag
 
 - Tool Gateway 与工具副作用账本；
 - `PREPARED / SUCCEEDED / FAILED` 工具执行状态；
-- Resource Admission 与租户公平调度；
+- Resource Admission 与用户公平调度；
 - Effective Policy 与 Capability Profile 的设计方向；
 - `Session / Run / Attempt` 的显式分层；
 - 对“恢复模型状态”和“恢复外部世界副作用”的严格区分。
@@ -118,7 +118,7 @@ flowchart LR
 | Controller | 执行顺序、Harness 选择、事件写入时机 | Harness 的私有模型状态 |
 | Event Log | 可回放的逻辑事件序列 | 工作进程内存、文件系统完整快照 |
 | Harness Registry | Harness ID 到实现的映射 | 每个 conversation 的业务状态 |
-| Harness | 模型循环、私有 cursor、工具实现 | 全局租户调度与资源公平性 |
+| Harness | 模型循环、私有 cursor、工具实现 | 全局用户调度与资源公平性 |
 | Agent Substrate | Actor 生命周期、环境恢复、快照 | Agent 的业务语义和工具幂等语义 |
 
 这个状态所有权划分是 AX 最强的部分之一。很多 Agent 系统的问题不是“缺少 checkpoint”，而是所有状态都堆在一个 session JSON 中，最终没人知道：
@@ -535,7 +535,7 @@ WHERE attempt_id = :id
 
 对我们而言，这不需要现在就实现，但模型必须预留：
 
-- 当前 [TenantRunScheduler](../src/scheduling/tenant-run-scheduler.ts) 是内存调度器；
+- 当前 [UserRunScheduler](../src/scheduling/user-run-scheduler.ts) 是内存调度器；
 - 当前 [PiAdapter](../src/runtime/pi-adapter.ts) 的活动 session 也在进程内 Map；
 - SQLite 足够支撑单节点 Stage 0/1；
 - 当进入多副本时，应增加 LeaseStore、Attempt owner 和 fencing token，而不是把内存 Map 换成 Redis 就宣布“分布式完成”。
@@ -583,7 +583,7 @@ type EventLog interface {
 这对早期实现足够，但长期会遇到：
 
 - Conversation 很长时全量扫描成本上升；
-- JSON payload 不利于按 tenant、attempt、tool、状态查询；
+- JSON payload 不利于按 user、attempt、tool、状态查询；
 - 没有 snapshot/compaction 边界；
 - schema migration 与历史重放需要额外纪律；
 - 事件类型与聚合状态混在一个 message 中；
@@ -710,7 +710,7 @@ interface CapabilityReporter {
 interface PolicyCompiler<TemplateConfig, RuntimeConfig> {
   compile(input: {
     template: TemplateConfig;
-    tenantPolicy: TenantPolicy;
+    userPolicy: UserPolicy;
     platformPolicy: PlatformPolicy;
     capabilities: CapabilityProfile;
   }): Promise<EffectivePolicy<RuntimeConfig>>;
@@ -723,7 +723,7 @@ interface PolicyCompiler<TemplateConfig, RuntimeConfig> {
 - `CapabilityReporter`：能做什么；
 - `PolicyCompiler`：本次允许做什么，以及怎样转换成 runtime 参数。
 
-这比直接复制 AX 的 opaque `harness_config []byte` 更适合多租户异构控制面。
+这比直接复制 AX 的 opaque `harness_config []byte` 更适合多用户异构控制面。
 
 ### 7.4 Harness 配置必须版本化、可验证、可审计
 
@@ -733,7 +733,7 @@ Opaque config 对通用 runtime 很方便，但不应原样穿过控制面。建
 用户配置
   -> Template schema validation
   -> Capability compatibility check
-  -> Tenant policy intersection
+  -> User policy intersection
   -> Platform hard limits
   -> EffectivePolicySnapshot
   -> Adapter-specific runtime config
@@ -1018,7 +1018,7 @@ Antigravity 把内部状态放到类似 `~/.ax/...` 的位置，而不是 Agent 
 风险：
 
 - 中央控制面看不到完整的 tool intent；
-- 审批、租户策略和审计可能被绕开；
+- 审批、用户策略和审计可能被绕开；
 - 恢复时无法统一判断副作用；
 - 不同 Harness 的安全语义会漂移；
 - 工具执行资源难以统一计量。
@@ -1083,14 +1083,14 @@ TypeScript 对我们同样合理，因为我们的核心复杂度是：
 - 策略组合；
 - Tool Gateway 与 connector；
 - API/UI 快速演进；
-- 多租户领域模型；
+- 多用户领域模型；
 - 资源和恢复决策编排。
 
 未来如果 worker 侧需要极低开销守护进程、容器 runtime 深度集成或高并发流代理，可以使用 Go/Rust node agent，而控制面继续用 TypeScript。语言边界可以与 plane 边界一致：
 
 ```text
 TypeScript Control Plane
-  - template / policy / tenant / scheduling / audit
+  - template / policy / user / scheduling / audit
 
 Go or Rust Execution Agent（可选）
   - sandbox lifecycle / process supervision / stream proxy / metrics
@@ -1115,9 +1115,9 @@ Python / TS / Go Harness
 - skills；
 - telemetry。
 
-配置版本为 v1alpha，并验证 default Harness 等关系。这适合系统装配，但不等于多租户 policy resolution。
+配置版本为 v1alpha，并验证 default Harness 等关系。这适合系统装配，但不等于多用户 policy resolution。
 
-我们的 Template、Tenant Policy、Platform Policy 不应直接合并进一个 YAML 后传给 Runtime；必须保留来源、优先级与拒绝原因。
+我们的 Template、User Policy、Platform Policy 不应直接合并进一个 YAML 后传给 Runtime；必须保留来源、优先级与拒绝原因。
 
 ### 12.2 Registry 需要从“实现映射”升级为“可调度目录”
 
@@ -1144,7 +1144,7 @@ AX 的 skills 层把 local 或 remote source 归一化成 `Available / Group / S
 
 - source revision pinning；
 - digest/signature；
-- tenant allowlist；
+- user allowlist；
 - 恶意 instruction 扫描；
 - 可见性与授权；
 - 下载缓存和供应链审计；
@@ -1157,7 +1157,7 @@ AX 使用 OpenTelemetry 是正确的基础设施选择，但 trace/span 不能�
 我们应关联以下 ID：
 
 ```text
-tenantId -> sessionId -> runId -> attemptId
+userId -> sessionId -> runId -> attemptId
          -> harnessInstanceId -> workerId
          -> modelRequestId -> toolExecutionId
          -> traceId
@@ -1298,7 +1298,7 @@ Substrate 测试覆盖：
 
 - 不要为了“看起来分布式”现在就引入 Kubernetes CRD、gVisor 和快照集群。
 - 不要复制 coarse 的 `PENDING / FAILED / COMPLETED / CANCELED` 作为全部领域状态。
-- 不要把所有 Harness 参数作为 opaque bytes 直接穿透租户边界。
+- 不要把所有 Harness 参数作为 opaque bytes 直接穿透用户边界。
 - 不要把进程内 Map 当成多副本并发保证。
 - 不要允许 Adapter 绕过 Tool Gateway 执行高风险外部副作用。
 - 不要假设恢复了容器/VM，就恢复了工具执行正确性。
@@ -1317,7 +1317,7 @@ Substrate 测试覆盖：
 - ToolGateway；
 - PiAdapter；
 - ResourceObserver / ResourceAdmission；
-- TenantRunScheduler / QueuePump；
+- UserRunScheduler / QueuePump；
 - RecoveryService。
 
 这意味着我们不是从 AX 的起点开始。更准确的映射如下：
@@ -1333,7 +1333,7 @@ Substrate 测试覆盖：
 | Actor | 尚无统一 Instance | HarnessInstance + SandboxProvider |
 | Substrate snapshot | Checkpoint | 区分 logical checkpoint 与 instance snapshot |
 | internal tool execution | [ToolGateway](../src/tools/tool-gateway.ts) | 保持中央治理优势 |
-| process in-flight map | [TenantRunScheduler](../src/scheduling/tenant-run-scheduler.ts) 内存状态 | owner lease 演进点 |
+| process in-flight map | [UserRunScheduler](../src/scheduling/user-run-scheduler.ts) 内存状态 | owner lease 演进点 |
 | Harness config | [HarnessTemplate](../src/templates/harness-template.ts) 初始骨架 | version + schema + effective snapshot |
 
 ### 16.1 我们现有设计比 AX 更强的地方
@@ -1346,9 +1346,9 @@ Substrate 测试覆盖：
 
 [resource-admission-service.ts](../src/resources/resource-admission-service.ts) 和资源分类/策略让实际资源事实影响 admit 或 queue。AX 的 Controller 当前不负责 GPU/VRAM admission，主要把计算环境交给 Substrate。
 
-#### 租户公平
+#### 用户公平
 
-[tenant-run-scheduler.ts](../src/scheduling/tenant-run-scheduler.ts) 已经做租户轮转与并发槽限制。虽仍是单进程，但领域语义已经存在。
+[user-run-scheduler.ts](../src/scheduling/user-run-scheduler.ts) 已经做用户轮转与并发槽限制。虽仍是单进程，但领域语义已经存在。
 
 #### 恢复证据
 
@@ -1381,7 +1381,7 @@ flowchart TB
     API["API / Client Stream"] --> CP["TypeScript Control Plane"]
     CP --> Template["Template + Version Registry"]
     CP --> Policy["Effective Policy Compiler"]
-    CP --> Scheduler["Tenant + Resource Scheduler"]
+    CP --> Scheduler["User + Resource Scheduler"]
     CP --> Attempts[("Run / Attempt / Event Store")]
     CP --> Lease["Session/Attempt Lease"]
 
@@ -1409,7 +1409,7 @@ flowchart TB
 - Instance 不等于 Session；
 - Attempt 有独立 owner 和恢复证据；
 - 工具副作用与 runtime checkpoint 分开记录；
-- 资源调度、租户公平是控制面的一级职责。
+- 资源调度、用户公平是控制面的一级职责。
 
 ---
 
@@ -1472,7 +1472,7 @@ interface AttemptRecord {
 
 ```text
 effective = platform hard limits
-          ∩ tenant policy
+          ∩ user policy
           ∩ template request
           ∩ adapter capabilities
           ∩ instance capabilities
@@ -1608,14 +1608,14 @@ effectivePolicySnapshotId
 | interactions tools | [tool-gateway.ts](../src/tools/tool-gateway.ts) |
 | Substrate Harness | 未来 SandboxProvider |
 | Registry/config | [harness-template.ts](../src/templates/harness-template.ts) |
-| inFlight gate | [tenant-run-scheduler.ts](../src/scheduling/tenant-run-scheduler.ts) |
+| inFlight gate | [user-run-scheduler.ts](../src/scheduling/user-run-scheduler.ts) |
 
 每读完一组，不要问“代码像不像”，而要问：
 
 1. 两边的不变量是否相同？
 2. 状态 owner 是否相同？
 3. 崩溃边界是否相同？
-4. 租户与安全边界是否相同？
+4. 用户与安全边界是否相同？
 5. 这个抽象是否能容纳第二种 Harness？
 
 ---
@@ -1665,12 +1665,12 @@ effectivePolicySnapshotId
 - 工具结果、checkpoint 和执行账本之间有明确提交顺序。
 - Approval 是 durable control state，不是普通聊天文本。
 
-### 策略与多租户不变量
+### 策略与多用户不变量
 
-- Effective Policy 不得超过 platform、tenant、template、capability 的交集。
+- Effective Policy 不得超过 platform、user、template、capability 的交集。
 - 所有执行都能追溯 policy/template/capability 版本。
-- 租户公平与资源准入在启动实例前生效。
-- secret 不进入可被租户恢复或导出的 snapshot。
+- 用户公平与资源准入在启动实例前生效。
+- secret 不进入可被用户恢复或导出的 snapshot。
 - 审计事件不依赖采样 telemetry。
 
 ---
@@ -1684,7 +1684,7 @@ AX 证明了我们的方向不是“为了抽象而抽象”：当 Agent 需要�
 1. **执行顺序可信**：single-writer、事件序列、终态唯一；
 2. **运行状态可恢复**：模型 cursor、runtime state、workspace/snapshot 分层；
 3. **外部副作用可证明**：工具账本、幂等证据、人工复核；
-4. **异构执行可治理**：Capability、Effective Policy、ResourcePool、Tenant fairness。
+4. **异构执行可治理**：Capability、Effective Policy、ResourcePool、User fairness。
 
 AX 当前最成熟的是前两项的架构骨架；我们的项目应在借走这副骨架的同时，把后三项，尤其是工具副作用、资源与策略治理，做成自己的核心竞争力。
 

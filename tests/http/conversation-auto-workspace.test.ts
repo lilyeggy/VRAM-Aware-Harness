@@ -14,25 +14,25 @@ const timestamp = "2026-09-15T12:00:00.000Z";
  */
 function memoryWorkspaceService() {
     const created: {
-        id: string; tenantId: string; name: string; rootPath: string; createdAt: string;
+        id: string; userId: string; name: string; rootPath: string; createdAt: string;
     }[] = [];
     return {
         created,
-        create(tenantId: string, name: string) {
+        create(userId: string, name: string) {
             const id = `ws-${created.length + 1}`;
             const workspace = {
-                id, tenantId, name,
-                rootPath: `/srv/workspaces/${tenantId}/${id}`,
+                id, userId, name,
+                rootPath: `/srv/workspaces/${userId}/${id}`,
                 createdAt: timestamp,
             };
             created.push(workspace);
             return workspace;
         },
-        getForTenant(id: string, tenantId: string) {
-            return created.find((item) => item.id === id && item.tenantId === tenantId) ?? null;
+        getForUser(id: string, userId: string) {
+            return created.find((item) => item.id === id && item.userId === userId) ?? null;
         },
-        listForTenant(tenantId: string) {
-            return created.filter((item) => item.tenantId === tenantId);
+        listForUser(userId: string) {
+            return created.filter((item) => item.userId === userId);
         },
     };
 }
@@ -40,16 +40,16 @@ function memoryWorkspaceService() {
 function buildApi() {
     const workspaces = memoryWorkspaceService();
     const conversations = new Map<string, {
-        id: string; tenantId: string; workspaceId: string; createdAt: string; updatedAt: string;
+        id: string; userId: string; workspaceId: string; createdAt: string; updatedAt: string;
     }>();
     const runs: { id: string; workspacePath: string; harnessSessionId: string }[] = [];
 
     const application = {
         isStarted: () => true,
-        submitRun(input: { tenantId: string; harnessSessionId: string; userInput: string; workspacePath: string }) {
+        submitRun(input: { userId: string; harnessSessionId: string; userInput: string; workspacePath: string }) {
             const run = {
                 id: `run-${runs.length + 1}`,
-                tenantId: input.tenantId,
+                userId: input.userId,
                 harnessSessionId: input.harnessSessionId,
                 status: "QUEUED",
                 userInput: input.userInput,
@@ -62,7 +62,7 @@ function buildApi() {
             return run;
         },
         getRun: () => null,
-        getRunsForTenant: () => [],
+        getRunsForUser: () => [],
         getRunEvents: () => [],
         getRunOutput: () => ({ chunks: [], finalText: "" }),
         getRunWorkspaceDiff: () => null,
@@ -71,28 +71,28 @@ function buildApi() {
         getQueue: () => [],
         interruptRun: async () => { throw new Error("本测试不使用 interruptRun"); },
         resumeRun: () => { throw new Error("本测试不使用 resumeRun"); },
-        createConversation(input: { tenantId: string; workspaceId: string; title?: string }) {
+        createConversation(input: { userId: string; workspaceId: string; title?: string }) {
             const id = `conv-${conversations.size + 1}`;
             const conversation = {
-                id, tenantId: input.tenantId, workspaceId: input.workspaceId,
+                id, userId: input.userId, workspaceId: input.workspaceId,
                 createdAt: timestamp, updatedAt: timestamp,
             };
             conversations.set(id, conversation);
             return conversation;
         },
-        getConversation(id: string, tenantId: string) {
+        getConversation(id: string, userId: string) {
             const conversation = conversations.get(id) ?? null;
-            return conversation !== null && conversation.tenantId === tenantId
+            return conversation !== null && conversation.userId === userId
                 ? conversation
                 : null;
         },
-        getRunsForConversation: (_tenantId: string, conversationId: string) =>
+        getRunsForConversation: (_userId: string, conversationId: string) =>
             runs.filter((run) => run.harnessSessionId === conversationId),
     } as unknown as HarnessHttpApplication;
 
     const accessControl = {
         authenticate: (rawKey: string) =>
-            rawKey === "good-key" ? { tenantId: "tenant-a", scopes: ["*"] } : null,
+            rawKey === "good-key" ? { userId: "user-a", scopes: ["*"] } : null,
         workspaceService: workspaces,
     } as unknown as HttpAccessControl;
 
@@ -156,7 +156,7 @@ test("不同会话各自拿到一个工作区，路径互不相同", async () =>
 
 test("显式指定工作区仍走归属校验，拿不到别人的工作区", async () => {
     const { call, workspaces } = buildApi();
-    const mine = workspaces.create("tenant-a", "explicit-ws");
+    const mine = workspaces.create("user-a", "explicit-ws");
 
     const ok = await call("/conversations", { workspaceId: mine.id });
     expect(ok.status).toBe(201);
@@ -175,11 +175,11 @@ test("建会话路由必须保留 application 的 this 绑定（N26 回归）", 
     class ThisBoundApplication {
         readonly store = new Map<string, unknown>();
         isStarted() { return true; }
-        createConversation(input: { tenantId: string; workspaceId: string; title?: string }) {
+        createConversation(input: { userId: string; workspaceId: string; title?: string }) {
             const id = `conv-this-${this.store.size + 1}`;
             const conversation = {
                 id,
-                tenantId: input.tenantId,
+                userId: input.userId,
                 workspaceId: input.workspaceId,
                 createdAt: timestamp,
                 updatedAt: timestamp,
@@ -192,7 +192,7 @@ test("建会话路由必须保留 application 的 this 绑定（N26 回归）", 
 
     const application = new ThisBoundApplication() as unknown as HarnessHttpApplication;
     const accessControl = {
-        authenticate: () => ({ tenantId: "tenant-a", scopes: ["*"] }),
+        authenticate: () => ({ userId: "user-a", scopes: ["*"] }),
         workspaceService: memoryWorkspaceService(),
     } as unknown as HttpAccessControl;
     const api = new HarnessHttpApi(application, { get: () => null }, accessControl);

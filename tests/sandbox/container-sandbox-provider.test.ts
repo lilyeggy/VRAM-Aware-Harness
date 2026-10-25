@@ -38,8 +38,8 @@ function policy(overrides: Partial<EffectivePolicySnapshot> = {}): EffectivePoli
     return {
         ...unrestrictedPolicy,
         layers: [],
-        createdAt: new Date().toISOString(), id: "policy", runId: "run", tenantId: "tenant",
-        workspaceRoots: ["/srv/workspaces/tenant"], allowNetwork: false,
+        createdAt: new Date().toISOString(), id: "policy", runId: "run", userId: "user",
+        workspaceRoots: ["/srv/workspaces/user"], allowNetwork: false,
         resourceLimits: { cpuCores: 1.5, memoryMiB: 512, diskMiB: null },
         ...overrides,
     };
@@ -50,12 +50,12 @@ test("容器 Sandbox 将隔离策略编译为可审计 Docker 参数，并仅持
     const store = new MemorySandboxStore();
     const provider = new ContainerSandboxProvider(
         store as unknown as SandboxStore,
-        { get: (tenantId, name) => tenantId === "tenant" && name === "TOKEN" ? "secret-value" : null },
+        { get: (userId, name) => userId === "user" && name === "TOKEN" ? "secret-value" : null },
         { image: "agent-sandbox:test" }, docker,
     );
     const handle = await provider.create({
         id: "sandbox-1", runId: "run",
-        workspacePath: "/srv/workspaces/tenant/workspace", policy: policy({ allowedSecrets: ["TOKEN"] }),
+        workspacePath: "/srv/workspaces/user/workspace", policy: policy({ allowedSecrets: ["TOKEN"] }),
     });
     const create = docker.calls[0]!;
     expect(create).toContain("--runtime");
@@ -76,7 +76,7 @@ test("容器 Sandbox 将隔离策略编译为可审计 Docker 参数，并仅持
     // （实测不传时 900/900 个子进程均可创建成功）。
     expect(create).toContain("--pids-limit");
     expect(create).toContain("128");
-    expect(create).toContain("type=bind,src=/srv/workspaces/tenant/workspace,dst=/workspace");
+    expect(create).toContain("type=bind,src=/srv/workspaces/user/workspace,dst=/workspace");
     expect(create.some((argument) => argument.includes(",rw"))).toBe(false);
     // N13 回归：Secret 明文不得出现在任何创建参数里（历史实现会在这里放明文，
     // 结果 docker inspect 可读出、argv 也可见）。
@@ -128,7 +128,7 @@ test("docker exec 发现容器消失时发出 LOST，而不是把它当成普通
     provider.subscribe((event) => events.push(event));
     const handle = await provider.create({
         id: "sandbox-lost", runId: "run",
-        workspacePath: "/srv/workspaces/tenant/workspace", policy: policy(),
+        workspacePath: "/srv/workspaces/user/workspace", policy: policy(),
     });
     docker.nextExecResult = { exitCode: 1, stdout: "", stderr: "Error response from daemon: No such container: agent-harness-sandbox-lost" };
     await provider.execute(handle.id, ["sh", "-lc", "pwd"]);
@@ -148,7 +148,7 @@ test("gVisor 沙箱被资源上限终结的报错同样判为失联，不必等�
     provider.subscribe((event) => events.push(event));
     const handle = await provider.create({
         id: "sandbox-oom", runId: "run",
-        workspacePath: "/srv/workspaces/tenant/workspace", policy: policy(),
+        workspacePath: "/srv/workspaces/user/workspace", policy: policy(),
     });
     // 真机原文：A6000 上 32MiB 限额容器分配 ~200MB 时，触发那一次 exec 的 stderr
     // 与退出码（exit=128，容器随后被 --rm 回收）。
@@ -172,7 +172,7 @@ test("启动对账可按持久化 Sandbox ID 回收旧进程未登记的容器",
     );
     const handle = await provider.create({
         id: "sandbox-stale", runId: "run",
-        workspacePath: "/srv/workspaces/tenant/workspace", policy: policy(),
+        workspacePath: "/srv/workspaces/user/workspace", policy: policy(),
     });
     await provider.cleanupStale(store.get(handle.id)!);
     expect(docker.calls.at(-1)).toEqual([
@@ -188,7 +188,7 @@ test("无法强制 bind mount 磁盘配额或越出 Workspace 根时拒绝执行
     );
     await expect(provider.create({
         id: "sandbox-disk", runId: "run",
-        workspacePath: "/srv/workspaces/tenant/workspace",
+        workspacePath: "/srv/workspaces/user/workspace",
         policy: policy({ resourceLimits: { cpuCores: null, memoryMiB: null, diskMiB: 10 } }),
     })).rejects.toThrow("磁盘配额");
     await expect(provider.create({
@@ -197,7 +197,7 @@ test("无法强制 bind mount 磁盘配额或越出 Workspace 根时拒绝执行
     })).rejects.toThrow("超出策略范围");
 });
 
-test("TENANT 视野：容器挂租户根，工具工作目录落到本 Run 的工作区子目录", async () => {
+test("USER 视野：容器挂用户根，工具工作目录落到本 Run 的工作区子目录", async () => {
     const docker = new FakeDocker();
     const store = new MemorySandboxStore();
     const provider = new ContainerSandboxProvider(
@@ -205,29 +205,29 @@ test("TENANT 视野：容器挂租户根，工具工作目录落到本 Run 的�
         { get: () => null },
         {
             image: "agent-sandbox:test",
-            workspaceScope: "tenant",
-            tenantWorkspaceRoot: "/srv/workspaces",
+            workspaceScope: "user",
+            userWorkspaceRoot: "/srv/workspaces",
         },
         docker,
     );
     const handle = await provider.create({
-        id: "sandbox-tenant", runId: "run",
-        workspacePath: "/srv/workspaces/tenant/ws-1",
-        policy: policy({ workspaceRoots: ["/srv/workspaces/tenant"] }),
+        id: "sandbox-user", runId: "run",
+        workspacePath: "/srv/workspaces/user/ws-1",
+        policy: policy({ workspaceRoots: ["/srv/workspaces/user"] }),
     });
     const create = docker.calls[0]!;
-    expect(create.join(" ")).toContain("type=bind,src=/srv/workspaces/tenant,dst=/workspace");
-    expect(create.join(" ")).not.toContain("src=/srv/workspaces/tenant/ws-1");
-    expect(handle.mountRoot).toBe("/srv/workspaces/tenant");
-    expect(handle.enforcement.workspaceScope).toBe("TENANT");
-    // 视野放宽到租户根，但 bash 的 cwd 必须落回本 Run 自己的工作区。
+    expect(create.join(" ")).toContain("type=bind,src=/srv/workspaces/user,dst=/workspace");
+    expect(create.join(" ")).not.toContain("src=/srv/workspaces/user/ws-1");
+    expect(handle.mountRoot).toBe("/srv/workspaces/user");
+    expect(handle.enforcement.workspaceScope).toBe("USER");
+    // 视野放宽到用户根，但 bash 的 cwd 必须落回本 Run 自己的工作区。
     expect(handle.containerWorkdir).toBe("/workspace/ws-1");
 
     await provider.execute(handle.id, ["sh", "-lc", "pwd"], { workdir: handle.containerWorkdir });
     const exec = docker.calls.filter((call) => call[1] === "exec").at(-1);
     expect(exec).toEqual([
         "docker", "exec", "--workdir", "/workspace/ws-1",
-        "agent-harness-sandbox-tenant", "sh", "-lc", "pwd",
+        "agent-harness-sandbox-user", "sh", "-lc", "pwd",
     ]);
     await provider.terminate(handle.id);
 });

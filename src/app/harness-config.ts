@@ -39,12 +39,12 @@ export interface HarnessConfig {
     registrationMode:"open" | "invite" | "closed";
     /** registrationMode=invite 时必需；服务端用 timing-safe 比较。 */
     registrationInviteCode?:string;
-    /** HTTP 入口限流开关（默认开启，防止单租户/单 IP 刷爆）。 */
+    /** HTTP 入口限流开关（默认开启，防止单用户/单 IP 刷爆）。 */
     rateLimitEnabled:boolean;
     /** 限流固定窗口大小（ms，默认 60000）。 */
     rateLimitWindowMs:number;
-    /** 每租户每窗口请求上限（默认 600）。 */
-    rateLimitMaxPerTenant:number;
+    /** 每用户每窗口请求上限（默认 600）。 */
+    rateLimitMaxPerUser:number;
     /** 每 IP 每窗口请求上限（默认 120）。 */
     rateLimitMaxPerIp:number;
     /**
@@ -89,11 +89,11 @@ export interface HarnessConfig {
     containerPidsLimit?:number;
     /**
      * 容器工作区视野粒度。
-     * `run`（默认）：容器只挂本 Run 的工作区，同租户跨 Run 物理不可见。
-     * `tenant`：容器挂租户工作区根，同租户所有 Run 共用挂载点；
-     * 代价是同租户跨 Run 的文件隔离由物理视野降为策略约束。
+     * `run`（默认）：容器只挂本 Run 的工作区，同用户跨 Run 物理不可见。
+     * `user`：容器挂用户工作区根，同用户所有 Run 共用挂载点；
+     * 代价是同用户跨 Run 的文件隔离由物理视野降为策略约束。
      */
-    sandboxWorkspaceScope?: "run" | "tenant";
+    sandboxWorkspaceScope?: "run" | "user";
 
     piProvider:string;
     piModelId:string;
@@ -103,11 +103,11 @@ export interface HarnessConfig {
 
 
     maxActiveRuns:number;
-    maxActiveRunsPerTenant:number;
+    maxActiveRunsPerUser:number;
     /** §9.8 v1.4 Phase 2：全局排队深度上限，0 = 不启用 backpressure。 */
     maxQueuedRuns:number;
-    /** §9.8 v1.4 Phase 2：单租户排队深度上限，0 = 不启用 backpressure。 */
-    maxQueuedRunsPerTenant:number;
+    /** §9.8 v1.4 Phase 2：单用户排队深度上限，0 = 不启用 backpressure。 */
+    maxQueuedRunsPerUser:number;
     /** §9.8 v1.4 Phase 2：RunAttempt 租约 TTL（ms）。 */
     runLeaseTtlMs:number;
     /** §9.8 v1.4 Phase 2：RunAttempt 心跳间隔（ms），必须小于 TTL。 */
@@ -141,7 +141,7 @@ export interface HarnessConfig {
     queueTtlMs:number;
     /**
      * N10：调度老化阈值（ms）。队首 Run 等待超过该时长即可插队优先调度，
-     * 给被洪泛租户挡在后面的正常租户一个确定的等待上界；0 = 关闭老化。
+     * 给被洪泛用户挡在后面的正常用户一个确定的等待上界；0 = 关闭老化。
      * 未配置时不启用（保持纯轮转），生产由 harness-config 默认注入。
      */
     schedulerAgingMs?:number;
@@ -228,15 +228,15 @@ export function loadHarnessConfig(
         nonNegativeInteger(environment, name, fallback);
     // 支柱 2：工具执行与模型等待期间 GPU 不应空转——默认并发上限放开到
     // 20~30 档位，工具与文件 I/O 在沙箱内并发执行，不独占 GPU 槽位。
-    // 每租户并发仍然可配（HARNESS_MAX_ACTIVE_RUNS_PER_TENANT）。
+    // 每用户并发仍然可配（HARNESS_MAX_ACTIVE_RUNS_PER_USER）。
     // 默认 6：与外部模型服务的安全并发对齐（见 docs/research/model-capacity.zh-CN.md）。
     const maxActiveRuns = posInt("HARNESS_MAX_ACTIVE_RUNS", 6);
-    // 0 = 自动公平份额（全局并发 / 有需求租户数）；显式正数作为硬上限。
-    const maxActiveRunsPerTenant = nonNeg("HARNESS_MAX_ACTIVE_RUNS_PER_TENANT", 0);
+    // 0 = 自动公平份额（全局并发 / 有需求用户数）；显式正数作为硬上限。
+    const maxActiveRunsPerUser = nonNeg("HARNESS_MAX_ACTIVE_RUNS_PER_USER", 0);
     // §9.8 v1.4 Phase 2：默认 0 = 不限制，显式配置后 submit 在队列深度超限时
     // 返回 429（QueueBackpressureError）。
     const maxQueuedRuns = nonNeg("HARNESS_MAX_QUEUED_RUNS", 0);
-    const maxQueuedRunsPerTenant = nonNeg("HARNESS_MAX_QUEUED_RUNS_PER_TENANT", 0);
+    const maxQueuedRunsPerUser = nonNeg("HARNESS_MAX_QUEUED_RUNS_PER_USER", 0);
     const runLeaseTtlMs = posInt("HARNESS_RUN_LEASE_TTL_MS", 60_000);
     const runLeaseHeartbeatMs = posInt("HARNESS_RUN_LEASE_HEARTBEAT_MS", 10_000);
     if (runLeaseHeartbeatMs >= runLeaseTtlMs) {
@@ -264,16 +264,16 @@ export function loadHarnessConfig(
 
     const rateLimitEnabled = boolValue(environment, "HARNESS_RATE_LIMIT_ENABLED", true);
     const rateLimitWindowMs = positiveInteger(environment, "HARNESS_RATE_LIMIT_WINDOW_MS", 60_000);
-    const rateLimitMaxPerTenant = positiveInteger(environment, "HARNESS_RATE_LIMIT_MAX_PER_TENANT", 600);
+    const rateLimitMaxPerUser = positiveInteger(environment, "HARNESS_RATE_LIMIT_MAX_PER_USER", 600);
     // 默认放宽 per-IP 桶：实验室内十几个人通常共用一个 NAT 出口 IP（同一个 IP 会
-    // 承载所有人的 UI 轮询 + 提交），120/min 会在正常使用下直接 429。per-tenant 桶
-    // （默认 600/min）才是真正的租户配额；per-IP 桶只用于挡住未认证洪水与注册爆破。
+    // 承载所有人的 UI 轮询 + 提交），120/min 会在正常使用下直接 429。per-user 桶
+    // （默认 600/min）才是真正的用户配额；per-IP 桶只用于挡住未认证洪水与注册爆破。
     const rateLimitMaxPerIp = positiveInteger(environment, "HARNESS_RATE_LIMIT_MAX_PER_IP", 1200);
     const trustProxy = boolValue(environment, "HARNESS_TRUST_PROXY", false);
 
-    if (maxActiveRunsPerTenant > 0 && maxActiveRunsPerTenant > maxActiveRuns) {
+    if (maxActiveRunsPerUser > 0 && maxActiveRunsPerUser > maxActiveRuns) {
         throw new Error(
-            "HARNESS_MAX_ACTIVE_RUNS_PER_TENANT 不能大于 HARNESS_MAX_ACTIVE_RUNS",
+            "HARNESS_MAX_ACTIVE_RUNS_PER_USER 不能大于 HARNESS_MAX_ACTIVE_RUNS",
         );
     }
     const sandboxProvider = environment.HARNESS_SANDBOX_PROVIDER === "microvm"
@@ -341,9 +341,9 @@ export function loadHarnessConfig(
     assertWorkspaceRootMatchesDatabaseLifetime(databasePath, workspaceRoot);
 
     return {
-        // 只有显式声明 tenant 才放宽视野；默认（含拼错的值）保持 Run 级隔离。
-        ...(environment.HARNESS_SANDBOX_WORKSPACE_SCOPE === "tenant"
-            ? { sandboxWorkspaceScope: "tenant" as const }
+        // 只有显式声明 user 才放宽视野；默认（含拼错的值）保持 Run 级隔离。
+        ...(environment.HARNESS_SANDBOX_WORKSPACE_SCOPE === "user"
+            ? { sandboxWorkspaceScope: "user" as const }
             : {}),
         databasePath,
         httpHost:environment.HARNESS_HOST ?? "127.0.0.1",
@@ -434,9 +434,9 @@ export function loadHarnessConfig(
         piCompactionKeepRecentTokens:posInt("PI_COMPACTION_KEEP_RECENT_TOKENS", 8_192),
 
         maxActiveRuns,
-        maxActiveRunsPerTenant,
+        maxActiveRunsPerUser,
         maxQueuedRuns,
-        maxQueuedRunsPerTenant,
+        maxQueuedRunsPerUser,
         runLeaseTtlMs,
         runLeaseHeartbeatMs,
         instanceId,
@@ -450,7 +450,7 @@ export function loadHarnessConfig(
         artifactMaxBytesPerRun,
         rateLimitEnabled,
         rateLimitWindowMs,
-        rateLimitMaxPerTenant,
+        rateLimitMaxPerUser,
         rateLimitMaxPerIp,
         trustProxy,
         // 2s 兜底轮询：提交走 kick()、完成走 slot 释放补位，稳态下不依赖轮询。

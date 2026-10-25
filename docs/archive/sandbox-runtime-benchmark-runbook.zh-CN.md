@@ -6,7 +6,7 @@
 
 当前代码可以直接测：
 
-- `runc`：仅作为 development benchmark baseline，不是多租户 default；
+- `runc`：仅作为 development benchmark baseline，不是多用户 default；
 - `runsc`：P0.5 default candidate，必须通过 `docker inspect` 取得实际 runtime evidence。
 
 Kata/Firecracker 不在本项目内自研 VMM。它们接入后应实现同一 `SandboxProvider` 合同，再加入本实验矩阵；在 Provider 尚未接入前，不得填写虚构结果。
@@ -64,7 +64,7 @@ HARNESS_BENCHMARK_RUNTIMES=runc bun run benchmark:sandbox
 建议至少分别执行：
 
 1. 空闲主机冷启动；
-2. 两 Tenant 交错创建 Sandbox；
+2. 两 User 交错创建 Sandbox；
 3. CPU/内存/PID 压力下的启动和清理；
 4. Sandbox kill 后的 LOST 收敛；
 5. Agent 代表性命令集：Git、Node/Python 测试、文件扫描和编译。
@@ -77,13 +77,13 @@ HARNESS_BENCHMARK_RUNTIMES=runc bun run benchmark:sandbox
 bun run smoke:container:attacks
 ```
 
-该攻击 smoke 覆盖跨 Tenant Workspace/Secret、宿主路径、路径穿越、默认网络、PID/tmpfs 资源和 Sandbox kill → LOST。它也必须在真实 Linux Docker + runsc 环境执行。
+该攻击 smoke 覆盖跨 User Workspace/Secret、宿主路径、路径穿越、默认网络、PID/tmpfs 资源和 Sandbox kill → LOST。它也必须在真实 Linux Docker + runsc 环境执行。
 
 ## 结果判定建议
 
 不要用单一“最快”指标选 default。建议按下面顺序决策：
 
-1. **硬门槛**：实际 runtime、Tenant 文件/Secret、宿主路径、网络和资源攻击必须通过；
+1. **硬门槛**：实际 runtime、User 文件/Secret、宿主路径、网络和资源攻击必须通过；
 2. **兼容性**：代表性 Agent 命令集不能出现未解释的 syscall/工具失败；
 3. **生命周期**：创建、LOST、terminate、重启恢复不泄漏 Sandbox/slot；
 4. **性能**：比较 P50/P95 冷启动、命令和 I/O；

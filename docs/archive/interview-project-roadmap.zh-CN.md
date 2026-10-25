@@ -1,34 +1,34 @@
-# 多租户 VRAM-Aware Agent Harness：秋招面试项目路线图
+# 多用户 VRAM-Aware Agent Harness：秋招面试项目路线图
 
 > **历史路线，不是当前产品入口。** 本文由 ADR 0009 取代。它保留了真实实验和
 > 可复现交付要求，但把面试目的误当成产品定位，并把真实 Sandbox 延后。当前路线见
-> [多租户 Agent 任务服务路线图](multi-tenant-agent-task-service-roadmap.zh-CN.md)。
+> [多用户 Agent 任务服务路线图](multi-user-agent-task-service-roadmap.zh-CN.md)。
 
 > 决策日期：2026-08-12  
-> 上位决策：[ADR 0008](adr/0008-focus-on-single-node-multi-tenant-interview-project.md)  
+> 上位决策：[ADR 0008](adr/0008-focus-on-single-node-multi-user-interview-project.md)  
 > 文档性质：历史面试交付路线
 
 ## 1. 项目目标
 
 秋招前交付一个可以在五分钟内演示、在三十分钟技术追问中讲深的系统项目：
 
-> **面向单机共享 GPU 环境的多租户、资源感知、可恢复 Agent Harness。**
+> **面向单机共享 GPU 环境的多用户、资源感知、可恢复 Agent Harness。**
 
 当前部署组合固定为 Pi + 自托管 vLLM + 单机 NVIDIA GPU。项目不重新实现 Agent
-Loop，也不建设通用多 Runtime 平台；它解决多个 Tenant 共享有限推理资源时的任务
+Loop，也不建设通用多 Runtime 平台；它解决多个 User 共享有限推理资源时的任务
 公平性、资源背压、工具副作用、崩溃恢复和执行审计。
 
 ## 2. 面试主叙事
 
 项目必须围绕四个相互连接的系统问题展开：
 
-1. **多租户公平调度**：Tenant 内 FIFO、Tenant 间 round-robin，全局与单 Tenant
+1. **多用户公平调度**：User 内 FIFO、User 间 round-robin，全局与单 User
    并发上限共同防止资源垄断和永久饥饿；
 2. **资源感知准入与背压**：vLLM Metrics、GPU 状态和 slot 真正改变
    `START / QUEUE`，资源恢复后自动推进；
 3. **副作用感知的安全恢复**：工具意图先持久化，根据只读、幂等写和未知副作用
    判断复用、重放或人工处理，不能把 Agent 失败简单等价为重试；
-4. **策略与审计**：Tenant 有效策略进入 Pi、ToolGateway 和 Sandbox，资源快照、
+4. **策略与审计**：User 有效策略进入 Pi、ToolGateway 和 Sandbox，资源快照、
    决策、Attempt、工具和恢复事实形成可查询时间线。
 
 资源过滤只是其中一个环节，不能单独作为项目亮点。
@@ -37,11 +37,11 @@ Loop，也不建设通用多 Runtime 平台；它解决多个 Tenant 共享有�
 
 | 范围 | 决策 | 原因 |
 | --- | --- | --- |
-| Tenant 归属、公平队列、并发限制 | 核心保留 | 让共享 GPU 的资源竞争问题成立 |
+| User 归属、公平队列、并发限制 | 核心保留 | 让共享 GPU 的资源竞争问题成立 |
 | Run/Attempt、事件、事务 | 核心保留 | 支撑生命周期、一致性与审计 |
 | ToolGateway、Checkpoint、Recovery | 核心保留 | Agent Infra 最有辨识度的可靠性问题 |
 | GPU/vLLM Observer、Admission、slot | 核心保留 | 形成真实资源反馈闭环 |
-| Effective Policy、Template | 保留 | 证明 Tenant 差异进入执行路径 |
+| Effective Policy、Template | 保留 | 证明 User 差异进入执行路径 |
 | Instance、Capability、Sandbox | 最小保留 | 作为部署能力、执行环境和安全边界，不继续平台化 |
 | Claude Adapter、第二 Runtime | 暂停 | 不能优先补足当前证据缺口 |
 | 异构 ResourcePool | 暂停 | 当前只对单机 GPU/vLLM 作真实承诺 |
@@ -53,7 +53,7 @@ Loop，也不建设通用多 Runtime 平台；它解决多个 Tenant 共享有�
 最终演示必须覆盖同一条真实应用链：
 
 ```text
-Tenant A 提交 A1、A2；Tenant B 提交 B1
+User A 提交 A1、A2；User B 提交 B1
   → GPU/vLLM 处于 CRITICAL，三个 Run 持久化排队
   → 资源恢复为 NORMAL
   → 受限并发下按 A1 → B1 → A2 公平推进
@@ -67,7 +67,7 @@ Tenant A 提交 A1、A2；Tenant B 提交 B1
 
 演示通过不仅要求任务最终完成，还必须证明：
 
-- Tenant B 没有被 Tenant A 的连续任务永久压后；
+- User B 没有被 User A 的连续任务永久压后；
 - `CRITICAL` 时没有绕过准入启动 Runtime；
 - 重启后 slot、队列和 Run 状态没有泄漏；
 - 已提交工具副作用没有重复执行；
@@ -103,7 +103,7 @@ Runtime 作为当前承诺。
 退出条件：仓库中存在原始结果、运行配置、汇总表和诚实结论；没有数据时不声明
 Harness 提升性能或 GPU 利用率。
 
-### P0：多租户故障演示
+### P0：多用户故障演示
 
 在现有 Day 7 Fake 闭环基础上补齐代表性演示，优先使用真实 Pi；无法稳定自动注入的
 外部故障可以保留确定性 Fake 对照，但必须区分真实证据与模拟证据。
@@ -128,7 +128,7 @@ Harness 提升性能或 GPU 利用率。
 - trajectory 长度和 token usage；
 - 自动恢复、人工处理和失败的数量；
 - 重复副作用次数；
-- Tenant 启动顺序和最大等待时间。
+- User 启动顺序和最大等待时间。
 
 这不是论文 Benchmark，不追求大规模或统计显著性；目的是让简历中的数字可复查。
 
@@ -157,7 +157,7 @@ Harness 提升性能或 GPU 利用率。
 
 项目在秋招前完成，必须同时满足：
 
-1. 一个命令可以运行确定性测试和多租户恢复演示；
+1. 一个命令可以运行确定性测试和多用户恢复演示；
 2. A6000 上有真实 Pi/vLLM 数据，而不是只有 Fake Runtime；
 3. Demo 同时证明公平调度、资源背压和副作用安全恢复；
 4. README 明确区分当前保证、逻辑隔离和生产化非目标；

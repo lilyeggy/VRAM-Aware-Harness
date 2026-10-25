@@ -38,7 +38,7 @@ function loginRequest(email:string):Request {
 test("单 IP 超过窗口上限返回 429 + Retry-After", async () => {
     const composition = await createComposition({
         HARNESS_RATE_LIMIT_MAX_PER_IP:"2",
-        HARNESS_RATE_LIMIT_MAX_PER_TENANT:"100",
+        HARNESS_RATE_LIMIT_MAX_PER_USER:"100",
     });
     try {
         expect((await composition.httpApi.fetch(registerRequest("ip-1@example.com"))).status).toBe(201);
@@ -54,14 +54,14 @@ test("单 IP 超过窗口上限返回 429 + Retry-After", async () => {
     }
 });
 
-test("同一租户超过窗口上限返回 429，另一个租户不受影响", async () => {
+test("同一用户超过窗口上限返回 429，另一个用户不受影响", async () => {
     const composition = await createComposition({
         HARNESS_RATE_LIMIT_MAX_PER_IP:"100",
-        HARNESS_RATE_LIMIT_MAX_PER_TENANT:"2",
+        HARNESS_RATE_LIMIT_MAX_PER_USER:"2",
     });
     try {
-        await composition.httpApi.fetch(registerRequest("tenant-a@example.com"));
-        const login = await composition.httpApi.fetch(loginRequest("tenant-a@example.com"));
+        await composition.httpApi.fetch(registerRequest("user-a@example.com"));
+        const login = await composition.httpApi.fetch(loginRequest("user-a@example.com"));
         const { token } = (await login.json()) as { token:string };
 
         const workspaceRequest = () => new Request("http://harness.local/workspaces", {
@@ -75,11 +75,11 @@ test("同一租户超过窗口上限返回 429，另一个租户不受影响", a
         expect(third.status).toBe(429);
         expect(third.headers.get("retry-after")).toBeTruthy();
         const body = (await third.json()) as { error?:string };
-        expect(body.error).toContain("租户请求过于频繁");
+        expect(body.error).toContain("用户请求过于频繁");
 
-        // 新租户自己的桶是空的，不应被 tenant-a 的限流波及。
-        await composition.httpApi.fetch(registerRequest("tenant-b@example.com"));
-        const loginB = await composition.httpApi.fetch(loginRequest("tenant-b@example.com"));
+        // 新用户自己的桶是空的，不应被 user-a 的限流波及。
+        await composition.httpApi.fetch(registerRequest("user-b@example.com"));
+        const loginB = await composition.httpApi.fetch(loginRequest("user-b@example.com"));
         const { token: tokenB } = (await loginB.json()) as { token:string };
         const responseB = await composition.httpApi.fetch(new Request("http://harness.local/workspaces", {
             headers:{ authorization:`Bearer ${tokenB}` },
@@ -93,7 +93,7 @@ test("同一租户超过窗口上限返回 429，另一个租户不受影响", a
 test("健康检查不参与限流", async () => {
     const composition = await createComposition({
         HARNESS_RATE_LIMIT_MAX_PER_IP:"1",
-        HARNESS_RATE_LIMIT_MAX_PER_TENANT:"100",
+        HARNESS_RATE_LIMIT_MAX_PER_USER:"100",
     });
     try {
         for (let i = 0; i < 5; i += 1) {
@@ -110,7 +110,7 @@ test("健康检查不参与限流", async () => {
 test("trustProxy=true 时按 X-Forwarded-For 首跳限流", async () => {
     const composition = await createComposition({
         HARNESS_RATE_LIMIT_MAX_PER_IP:"1",
-        HARNESS_RATE_LIMIT_MAX_PER_TENANT:"100",
+        HARNESS_RATE_LIMIT_MAX_PER_USER:"100",
         HARNESS_TRUST_PROXY:"true",
     });
     try {

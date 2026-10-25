@@ -27,7 +27,7 @@ export async function handleRunsRoute(
             return jsonResponse({
                 runs: ctx.accessControl === undefined
                     ? []
-                    : ctx.application.getRunsForTenant(principal.tenantId),
+                    : ctx.application.getRunsForUser(principal.userId),
             });
         }
         return null;
@@ -108,9 +108,9 @@ async function submitRun(request: Request, ctx: HttpRouteContext): Promise<Respo
     const principal = ctx.requirePrincipal(request, "tasks:write");
     const workspace = ctx.accessControl === undefined
         ? null
-        : ctx.accessControl.workspaceService.getForTenant(
+        : ctx.accessControl.workspaceService.getForUser(
             requiredString(body, "workspaceId"),
-            principal.tenantId,
+            principal.userId,
         );
     if (ctx.accessControl !== undefined && workspace === null) {
         // Deliberately indistinguishable from an absent resource (anti-enumeration).
@@ -120,16 +120,16 @@ async function submitRun(request: Request, ctx: HttpRouteContext): Promise<Respo
         optionalString(body, "sessionId")
         ?? optionalString(body, "harnessSessionId");
 
-    // B6：会话归属校验——sessionId 首次使用即认领给提交租户；已被
-    // 其他租户使用过则拒绝。防止客户端自选 sessionId 抢注/污染他人会话。
+    // B6：会话归属校验——sessionId 首次使用即认领给提交用户；已被
+    // 其他用户使用过则拒绝。防止客户端自选 sessionId 抢注/污染他人会话。
     if (requestedSessionId !== null) {
         const sessionOwner = ctx.application.resolveSessionOwner?.(requestedSessionId);
         if (sessionOwner !== null && sessionOwner !== undefined) {
-            const submitterTenantId = ctx.accessControl === undefined
-                ? requiredString(body, "tenantId")
-                : principal.tenantId;
-            if (sessionOwner !== submitterTenantId) {
-                throw new HttpError(409, "harnessSessionId 已被其他租户占用");
+            const submitterUserId = ctx.accessControl === undefined
+                ? requiredString(body, "userId")
+                : principal.userId;
+            if (sessionOwner !== submitterUserId) {
+                throw new HttpError(409, "harnessSessionId 已被其他用户占用");
             }
         }
     }
@@ -137,7 +137,7 @@ async function submitRun(request: Request, ctx: HttpRouteContext): Promise<Respo
     // N15：请求级策略层（RUN 层）。此前 StartRunInput.runPolicy
     // 没有任何产品调用方，受限运行只能靠测试直接调 Runtime。
     const runPolicy = parseRunPolicy(body);
-    // §9.8 v1.4 Phase 3：可选幂等键；同租户重复提交返回既有 Run。
+    // §9.8 v1.4 Phase 3：可选幂等键；同用户重复提交返回既有 Run。
     const idempotencyKey = optionalString(body, "idempotencyKey");
     if (idempotencyKey !== null && idempotencyKey.length > 200) {
         throw new HttpError(400, "idempotencyKey 长度不能超过 200");
@@ -145,9 +145,9 @@ async function submitRun(request: Request, ctx: HttpRouteContext): Promise<Respo
     let run;
     try {
         run = ctx.application.submitRun({
-            tenantId: ctx.accessControl === undefined
-                ? requiredString(body, "tenantId")
-                : principal.tenantId,
+            userId: ctx.accessControl === undefined
+                ? requiredString(body, "userId")
+                : principal.userId,
             harnessSessionId: requestedSessionId ?? crypto.randomUUID(),
             userInput: requireUserInput(body, ctx.limits?.maxUserInputChars),
             thinkingLevel: parseThinkingLevel(body),
@@ -167,7 +167,7 @@ async function submitRun(request: Request, ctx: HttpRouteContext): Promise<Respo
         }
         throw error;
     }
-    ctx.auditResource("RUN", run.id, "RUN_SUBMIT", "ALLOW", principal.tenantId, "run_submitted");
+    ctx.auditResource("RUN", run.id, "RUN_SUBMIT", "ALLOW", principal.userId, "run_submitted");
     return jsonResponse({ run: runForResponse(run) }, 202);
 }
 
@@ -203,11 +203,11 @@ async function interruptRun(
     // 终态 Run 的中断是客户端可预期的冲突，不是服务端错误：显式 409，
     // 否则会穿透到 HTTP 兜底变成 500「内部错误」（真机全流程实测）。
     if (run.status === "COMPLETED" || run.status === "FAILED") {
-        ctx.auditResource("RUN", runId, "RUN_INTERRUPT", "DENY", principal.tenantId, "terminal_run");
+        ctx.auditResource("RUN", runId, "RUN_INTERRUPT", "DENY", principal.userId, "terminal_run");
         throw new HttpError(409, `终态 Run 不能中断：${runId}`);
     }
 
-    ctx.auditResource("RUN", runId, "RUN_INTERRUPT", "ALLOW", principal.tenantId, "interrupt_requested");
+    ctx.auditResource("RUN", runId, "RUN_INTERRUPT", "ALLOW", principal.userId, "interrupt_requested");
     return jsonResponse({ run: await ctx.application.interruptRun(runId) });
 }
 
@@ -221,18 +221,18 @@ async function resumeRun(
     // 只有 INTERRUPTED 的 Run 可以恢复；其它状态（尤其终态）显式 409，
     // 避免状态机异常穿透成 500「内部错误」（真机全流程实测）。
     if (run.status !== "INTERRUPTED") {
-        ctx.auditResource("RUN", runId, "RUN_RESUME", "DENY", principal.tenantId, `not_interrupted:${run.status}`);
+        ctx.auditResource("RUN", runId, "RUN_RESUME", "DENY", principal.userId, `not_interrupted:${run.status}`);
         throw new HttpError(409, `只有 INTERRUPTED 的 Run 可以恢复，当前状态：${run.status}`);
     }
 
     if (run.checkpointId === null) {
-        ctx.auditResource("RUN", runId, "RUN_RESUME", "DENY", principal.tenantId, "no_checkpoint");
+        ctx.auditResource("RUN", runId, "RUN_RESUME", "DENY", principal.userId, "no_checkpoint");
         throw new HttpError(409, `Run 没有可用 Checkpoint：${runId}`);
     }
 
     const checkpoint = ctx.checkpointLookup.get(run.checkpointId);
     if (checkpoint === null || checkpoint.runId !== runId) {
-        ctx.auditResource("RUN", runId, "RUN_RESUME", "DENY", principal.tenantId, "checkpoint_mismatch");
+        ctx.auditResource("RUN", runId, "RUN_RESUME", "DENY", principal.userId, "checkpoint_mismatch");
         throw new HttpError(409, `Run 的 Checkpoint 不存在或不匹配：${runId}`);
     }
 
@@ -244,7 +244,7 @@ async function resumeRun(
         continuationInput: optionalString(body, "continuationInput")
             ?? buildRecoveryContinuationInput(run.userInput, checkpoint.id),
     });
-    ctx.auditResource("RUN", runId, "RUN_RESUME", "ALLOW", principal.tenantId, "run_resumed");
+    ctx.auditResource("RUN", runId, "RUN_RESUME", "ALLOW", principal.userId, "run_resumed");
     return jsonResponse({ run: queuedRun }, 202);
 }
 
@@ -279,17 +279,17 @@ async function resolveUnknownEffect(
         const result = ctx.application.resolveUnknownEffect(runId, {
             resolution,
             note: optionalString(body, "note") ?? undefined,
-            actor: principal.tenantId,
+            actor: principal.userId,
         });
         ctx.auditResource(
             "RUN", runId, "RUN_RESOLVE_UNKNOWN_EFFECT", "ALLOW",
-            principal.tenantId, `resolution=${resolution}`,
+            principal.userId, `resolution=${resolution}`,
         );
         return jsonResponse(result);
     } catch (error) {
         ctx.auditResource(
             "RUN", runId, "RUN_RESOLVE_UNKNOWN_EFFECT", "DENY",
-            principal.tenantId, "resolution_rejected",
+            principal.userId, "resolution_rejected",
         );
         throw new HttpError(
             409,

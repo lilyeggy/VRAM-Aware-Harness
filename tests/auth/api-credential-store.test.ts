@@ -9,11 +9,11 @@ test("registerUser + loginUser 全流程：正确密码返回 token，错误密�
     try {
         const store = new ApiCredentialStore(db);
 
-        const { userId, tenantId } = await store.registerUser(
+        const { userId } = await store.registerUser(
             "Operator@Example.COM ",
             "super-secret-password",
         );
-        expect(userId).toBe(tenantId);
+        expect(userId.length).toBeGreaterThan(0);
 
         const result = await store.loginUser("operator@example.com", "super-secret-password");
         expect(result).not.toBeNull();
@@ -23,7 +23,7 @@ test("registerUser + loginUser 全流程：正确密码返回 token，错误密�
 
         // 已注册会话可用作请求主体。
         const principal = store.authenticate(result!.token);
-        expect(principal?.tenantId).toBe(userId);
+        expect(principal?.userId).toBe(userId);
 
         expect(
             await store.loginUser("operator@example.com", "wrong-password"),

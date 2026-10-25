@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="color-scheme" content="dark" />
-  <meta name="description" content="VRAM-Aware 多租户 Agent 任务服务的现有执行内核、产品边界、Sandbox、编排恢复与技术审视。" />
+  <meta name="description" content="VRAM-Aware 多用户 Agent 任务服务的现有执行内核、产品边界、Sandbox、编排恢复与技术审视。" />
   <title>VRAM-Aware Agent 任务服务｜系统剖面与产品深化</title>
   <style>
     :root {
@@ -1039,14 +1039,14 @@
       margin-top: 20px;
     }
 
-    .tenant-lane {
+    .user-lane {
       display: grid;
       grid-template-columns: 76px 1fr;
       gap: 9px;
       align-items: center;
     }
 
-    .tenant-lane > span {
+    .user-lane > span {
       color: var(--faint);
       font-family: var(--mono);
       font-size: 10px;
@@ -1713,17 +1713,17 @@
   <main id="main">
     <div id="top" class="shell hero">
       <div>
-        <div class="eyebrow">Agent task service / tenant isolation / shared GPU / 2026-08-12</div>
+        <div class="eyebrow">Agent task service / user isolation / shared GPU / 2026-08-12</div>
         <h1>让团队安全地把项目<br /><span>交给 Agent 执行</span></h1>
         <p class="hero-lead">
-          这是一个支持团队共享本地模型的多租户 Agent 任务服务。用户在独立
+          这是一个支持团队共享本地模型的多用户 Agent 任务服务。用户在独立
           Workspace 中提交任务、查看过程并取得回答、文件 Diff 和 Artifact；现有
           可靠执行内核负责 Run、副作用、资源准入与恢复，下一步重点补齐可信身份、
           真实 Sandbox 和用户端到端任务体验。
         </p>
         <div class="hero-claim">
           <strong>系统承诺：</strong>
-          Tenant 之间不能互读代码与 Secret；资源不足时不盲目启动；进程失败后
+          User 之间不能互读代码与 Secret；资源不足时不盲目启动；进程失败后
           不盲目重做；用户最终获得可使用的修改结果，而不只是内部终态。
         </div>
         <div class="hero-actions">
@@ -1866,7 +1866,7 @@
             <div class="layer-label"><strong>控制层</strong><span>SCHEDULING</span></div>
             <div class="layer-nodes" style="--cols: 4">
               <div class="layer-node"><code>RunQueueCoordinator</code><p>连接队列、Admission 与 RunService。</p></div>
-              <div class="layer-node"><code>TenantRunScheduler</code><p>round-robin、公平选择与原子占 slot。</p></div>
+              <div class="layer-node"><code>UserRunScheduler</code><p>round-robin、公平选择与原子占 slot。</p></div>
               <div class="layer-node"><code>ResourceAdmission</code><p>观测、分类、决策与证据落库。</p></div>
               <div class="layer-node"><code>RunQueuePump</code><p>周期推进与 single-flight drain。</p></div>
             </div>
@@ -2047,8 +2047,8 @@
                 <input id="active-global" type="range" min="0" max="2" value="0" />
               </div>
               <div class="sim-control">
-                <label for="active-tenant">当前 Tenant 活跃 Run <output id="active-tenant-value">0</output></label>
-                <input id="active-tenant" type="range" min="0" max="1" value="0" />
+                <label for="active-user">当前 User 活跃 Run <output id="active-user-value">0</output></label>
+                <input id="active-user" type="range" min="0" max="1" value="0" />
               </div>
               <div id="decision-box" class="decision-box">
                 <span id="decision-action" class="decision-action">START</span>
@@ -2060,11 +2060,11 @@
           <article class="mechanic reveal">
             <div class="section-index">fair queue + logical slots</div>
             <h3>claimNext 同时完成选择与占位</h3>
-            <p>Tenant 内 FIFO、Tenant 间轮转。返回 Run 时，它已经离开等待队列并占有一个 Run 级逻辑 slot。</p>
+            <p>User 内 FIFO、User 间轮转。返回 Run 时，它已经离开等待队列并占有一个 Run 级逻辑 slot。</p>
             <div class="scheduler-visual">
-              <div class="tenant-lane"><span>TENANT A</span><div class="run-queue"><span class="run-block claimed">A1</span><span class="run-block">A2</span><span class="run-block">A3</span></div></div>
-              <div class="tenant-lane"><span>TENANT B</span><div class="run-queue"><span class="run-block claimed">B1</span><span class="run-block">B2</span></div></div>
-              <div class="tenant-lane"><span>SLOTS 2</span><div class="run-queue"><span class="run-block claimed">A1</span><span class="run-block claimed">B1</span></div></div>
+              <div class="user-lane"><span>USER A</span><div class="run-queue"><span class="run-block claimed">A1</span><span class="run-block">A2</span><span class="run-block">A3</span></div></div>
+              <div class="user-lane"><span>USER B</span><div class="run-queue"><span class="run-block claimed">B1</span><span class="run-block">B2</span></div></div>
+              <div class="user-lane"><span>SLOTS 2</span><div class="run-queue"><span class="run-block claimed">A1</span><span class="run-block claimed">B1</span></div></div>
             </div>
             <p class="scheduler-rule"><strong>不变量：</strong>任何 Run 只有获得 slot 后才进入 Admission；失败、完成或 Runtime 抛错都必须在 finally 中释放。</p>
           </article>
@@ -2090,7 +2090,7 @@
             <div class="section-index">durable schema</div>
             <h3>六类事实</h3>
             <div class="schema-grid">
-              <div class="table-card"><code>agent_runs</code><p>任务当前快照、Tenant、Session、状态与 Checkpoint 引用。</p></div>
+              <div class="table-card"><code>agent_runs</code><p>任务当前快照、User、Session、状态与 Checkpoint 引用。</p></div>
               <div class="table-card"><code>run_events</code><p>按 sequence 排列的生命周期、模型和工具事件。</p></div>
               <div class="table-card"><code>tool_executions</code><p>PREPARED/SUCCEEDED/FAILED、副作用类型、参数与结果。</p></div>
               <div class="table-card"><code>checkpoints</code><p>Runtime Session 引用与最后安全事件位置。</p></div>
@@ -2179,7 +2179,7 @@
             </button>
             <div class="review-body">
               <div class="review-cell"><span>风险</span><p>客户端超时重试可能创建两个 Run；Runtime 恢复后若 toolCallId 变化，历史成功结果无法自动命中。</p></div>
-              <div class="review-cell"><span>深挖</span><p>增加 tenant-scoped idempotency key、RunAttempt 和业务幂等键；明确每类工具的 dedupe contract。</p></div>
+              <div class="review-cell"><span>深挖</span><p>增加 user-scoped idempotency key、RunAttempt 和业务幂等键；明确每类工具的 dedupe contract。</p></div>
               <div class="review-cell"><span>证明</span><p>网络响应丢失、相同提交重复十次、恢复后 toolCallId 改变、外部 API 超时但实际成功。</p></div>
             </div>
           </article>
@@ -2191,9 +2191,9 @@
               <span class="review-plus">+</span>
             </button>
             <div class="review-body">
-              <div class="review-cell"><span>风险</span><p>云端部署后，逻辑 Tenant 字段不能阻止路径越界、进程逃逸或访问其他租户文件。</p></div>
-              <div class="review-cell"><span>深挖</span><p>Workspace sandbox、路径根校验、Tenant Capability Policy、Tool/Skill allowlist、密钥作用域和网络 egress policy。</p></div>
-              <div class="review-cell"><span>证明</span><p>符号链接穿越、绝对路径、bash fork bomb、跨 Tenant 文件读取和未经授权工具调用测试。</p></div>
+              <div class="review-cell"><span>风险</span><p>云端部署后，逻辑 User 字段不能阻止路径越界、进程逃逸或访问其他用户文件。</p></div>
+              <div class="review-cell"><span>深挖</span><p>Workspace sandbox、路径根校验、User Capability Policy、Tool/Skill allowlist、密钥作用域和网络 egress policy。</p></div>
+              <div class="review-cell"><span>证明</span><p>符号链接穿越、绝对路径、bash fork bomb、跨 User 文件读取和未经授权工具调用测试。</p></div>
             </div>
           </article>
 
@@ -2239,13 +2239,13 @@
           <article class="review-item">
             <button class="review-trigger" type="button" aria-expanded="false">
               <span class="review-priority p2">P2</span>
-              <span class="review-title"><strong>公平性只有 round-robin，还没有成本与 SLO 语义</strong><span>能防 Tenant 饥饿，但长短任务和优先级尚未建模</span></span>
+              <span class="review-title"><strong>公平性只有 round-robin，还没有成本与 SLO 语义</strong><span>能防 User 饥饿，但长短任务和优先级尚未建模</span></span>
               <span class="review-plus">+</span>
             </button>
             <div class="review-body">
               <div class="review-cell"><span>风险</span><p>一个超长 Run 与一个短交互 Run 消耗同一个 slot；VIP、deadline、token plan 都无法表达。</p></div>
               <div class="review-cell"><span>深挖</span><p>Weighted DRR、cost estimate、deadline/SLO class、最大输出 token budget 与 aging。</p></div>
-              <div class="review-cell"><span>证明</span><p>长短任务混合、Tenant 权重、尾延迟、有效吞吐与估算误差校准。</p></div>
+              <div class="review-cell"><span>证明</span><p>长短任务混合、User 权重、尾延迟、有效吞吐与估算误差校准。</p></div>
             </div>
           </article>
 
@@ -2274,7 +2274,7 @@
           </div>
           <p>
             后续主线由 ADR 0009 固定：不再扩张异构 Runtime 和大型控制面，围绕
-            用户任务闭环建设可信身份、Tenant Workspace、真实 Sandbox、编排恢复
+            用户任务闭环建设可信身份、User Workspace、真实 Sandbox、编排恢复
             和结果交付。第③④层是内部技术重点，不是产品名称。
           </p>
         </div>
@@ -2285,14 +2285,14 @@
             <span class="phase">Existing / reliable core</span>
             <h3>保留现有执行内核</h3>
             <p>冻结 Run/Attempt、副作用、Checkpoint、资源准入、公平队列和 Pi 主路径。</p>
-            <ul><li>State machine</li><li>Side-effect recovery</li><li>GPU admission</li><li>Tenant fairness</li></ul>
+            <ul><li>State machine</li><li>Side-effect recovery</li><li>GPU admission</li><li>User fairness</li></ul>
           </article>
           <article class="roadmap-card">
             <span class="roadmap-dot"></span>
             <span class="phase">P0 / trusted boundary</span>
             <h3>身份、Workspace 与策略</h3>
-            <p>从认证 Principal 派生 Tenant，并把项目目录和环境配置变成受管对象。</p>
-            <ul><li>API key</li><li>Tenant-scoped API</li><li>Workspace root</li><li>ExecutionProfile</li></ul>
+            <p>从认证 Principal 派生 User，并把项目目录和环境配置变成受管对象。</p>
+            <ul><li>API key</li><li>User-scoped API</li><li>Workspace root</li><li>ExecutionProfile</li></ul>
           </article>
           <article class="roadmap-card">
             <span class="roadmap-dot"></span>
@@ -2313,7 +2313,7 @@
         <div class="north-star reveal">
           <span>North-star evidence</span>
           <p>
-            Tenant A 与 B 在同一台机器上创建同名 Workspace 并提交任务：身份、文件、
+            User A 与 B 在同一台机器上创建同名 Workspace 并提交任务：身份、文件、
             进程、Secret 和结果互不可见；GPU 压力触发公平排队；Sandbox 被 kill 后
             slot 与状态安全收敛，恢复不重复危险副作用；用户最终获得可审查的 Diff。
           </p>
@@ -2341,7 +2341,7 @@
               <li>CRITICAL → NORMAL 自动推进</li>
               <li>安全 Checkpoint 重启恢复</li>
               <li>未知副作用阻止自动重放</li>
-              <li>Tenant 公平、slot 不泄漏与 HTTP 纵向切片</li>
+              <li>User 公平、slot 不泄漏与 HTTP 纵向切片</li>
             </ul>
           </article>
 
@@ -2349,12 +2349,12 @@
             <div class="section-index">not yet proven</div>
             <h3>还不能对外宣称</h3>
             <ul>
-              <li>生产级多租户安全与物理隔离</li>
+              <li>生产级多用户安全与物理隔离</li>
               <li>多节点高可用或 exactly-once 执行</li>
               <li>比 direct Pi 延迟更低或吞吐更高</li>
               <li>token 级 GPU/KV Cache 调度能力</li>
               <li>真实 A6000 压力下的稳定性收益</li>
-              <li>Tenant 级 Tool/Skill 权限治理已经完成</li>
+              <li>User 级 Tool/Skill 权限治理已经完成</li>
             </ul>
           </article>
         </div>
@@ -2398,10 +2398,10 @@
       {
         id: "scheduler",
         layer: "Scheduling",
-        name: "TenantRunScheduler",
-        file: "src/scheduling/tenant-run-scheduler.ts",
-        summary: "维护 Tenant 内 FIFO、Tenant 间 round-robin 和 Run 级逻辑并发 slot。",
-        input: "QueuedRun、全局并发和单 Tenant 并发配置。",
+        name: "UserRunScheduler",
+        file: "src/scheduling/user-run-scheduler.ts",
+        summary: "维护 User 内 FIFO、User 间 round-robin 和 Run 级逻辑并发 slot。",
+        input: "QueuedRun、全局并发和单 User 并发配置。",
         output: "已经占有 slot 的 QueuedRun，或当前不可调度的 null。",
         proof: "本身是内存结构；队列由持久 Run 状态在重启时重建。",
         invariant: "一个 runId 不能同时排队和活跃；claimNext 的返回与占位原子发生。",
@@ -2413,7 +2413,7 @@
         name: "ResourceAdmissionService",
         file: "src/resources/resource-admission-service.ts",
         summary: "一次准入完成 observe → classify → decide → persist，观测失败时 fail-closed。",
-        input: "runId、tenantId、当前全局和 Tenant 活跃数量。",
+        input: "runId、userId、当前全局和 User 活跃数量。",
         output: "PolicyDecision 与对应 ResourceSnapshot/Observation Failure。",
         proof: "resource_snapshots + policy_decisions 原子保存。",
         invariant: "决策必须能关联其资源事实；观测失败不能伪造 Snapshot。",
@@ -2465,7 +2465,7 @@
         output: "复用历史结果，或执行后保存 SUCCEEDED/FAILED。",
         proof: "tool_executions + checkpoints + agent_runs.checkpoint_id。",
         invariant: "先保存意图再产生副作用；成功结果、Checkpoint 和 Run 引用同事务提交。",
-        boundary: "当前只做保守分类，还没有 Tenant 级 Tool/Skill 授权与 sandbox。"
+        boundary: "当前只做保守分类，还没有 User 级 Tool/Skill 授权与 sandbox。"
       },
       {
         id: "recovery",
@@ -2489,7 +2489,7 @@
         output: "RuntimeEvent 流、Pi Session 引用与 Agent 执行终态。",
         proof: "自身不持久化；所有可审计事实由外层 Bridge、RunService 和 Gateway 保存。",
         invariant: "不同 runId 的事件不能串线；unsubscribe 后不再投递。",
-        boundary: "它不拥有 Tenant 公平性、恢复业务语义和资源准入。"
+        boundary: "它不拥有 User 公平性、恢复业务语义和资源准入。"
       },
       {
         id: "stores",
@@ -2509,7 +2509,7 @@
         name: "HarnessHttpApi",
         file: "src/http/harness-http-api.ts",
         summary: "把 HTTP 请求翻译为应用命令，并返回稳定 JSON 和错误状态。",
-        input: "8 条路由、tenantId、sessionId、userInput、workspacePath。",
+        input: "8 条路由、userId、sessionId、userInput、workspacePath。",
         output: "Run、events、decisions、queue、resources 与 health JSON。",
         proof: "不持久化协议状态；所有结果来自 HarnessApplication。",
         invariant: "无效输入 400、不存在 404、领域冲突 409。",
@@ -2523,11 +2523,11 @@
         label: "正常执行",
         title: "NORMAL：一个新任务完成完整 Run",
         steps: [
-          ["HTTP API", "接收提交请求", "校验 tenantId、userInput 与 workspacePath，把协议对象转为 StartRunInput。", "无", "HarnessApplication.submitRun"],
+          ["HTTP API", "接收提交请求", "校验 userId、userInput 与 workspacePath，把协议对象转为 StartRunInput。", "无", "HarnessApplication.submitRun"],
           ["RunService", "创建持久 Run", "先创建 QUEUED AgentRun，并同时追加 RUN_CREATED。", "agent_runs + RUN_CREATED", "run.status = QUEUED"],
-          ["Scheduler", "进入 Tenant 队列", "Run 进入 Tenant 内 FIFO，默认 reason 为 AWAITING_SCHEDULING。", "内存 QueueEntry", "等待 tick/drain"],
+          ["Scheduler", "进入 User 队列", "Run 进入 User 内 FIFO，默认 reason 为 AWAITING_SCHEDULING。", "内存 QueueEntry", "等待 tick/drain"],
           ["QueuePump", "立即请求推进", "提交不等待任务完成，但会立刻 tick，不必等待下一个轮询周期。", "无", "RunQueueCoordinator.drain"],
-          ["TenantRunScheduler", "选择并占用 slot", "claimNext 在 Tenant 间轮转；返回 Run 时 slot 已属于它。", "activeTenantByRunId", "claimed + slot held"],
+          ["UserRunScheduler", "选择并占用 slot", "claimNext 在 User 间轮转；返回 Run 时 slot 已属于它。", "activeUserByRunId", "claimed + slot held"],
           ["ResourceAdmission", "资源准入", "观测 vLLM/GPU，分类为 NORMAL，检查全局并发后作出 START。", "ResourceSnapshot + PolicyDecision", "START / RESOURCE_NORMAL"],
           ["RunService", "启动 Runtime", "Run 转 RUNNING，订阅 RuntimeEvent，并调用 PiAdapter.start。", "RUN_STARTED", "Runtime active"],
           ["RuntimeEventBridge", "记录模型与工具边界", "模型 usage、工具开始和完成被映射为稳定、可去重 RunEvent。", "MODEL_* + TOOL_*", "auditable timeline"],
@@ -2542,7 +2542,7 @@
         steps: [
           ["Scheduler", "Run 已在等待队列", "claimNext 暂时取出候选并占用逻辑 slot，以避免并发选择超卖。", "QueueEntry", "candidate claimed"],
           ["ResourceObserver", "采集真实资源", "vLLM Metrics 与 nvidia-smi 表明压力达到 CRITICAL。", "ResourceObservation", "pressure = CRITICAL"],
-          ["ExecutionPolicy", "拒绝本次启动", "CRITICAL 对任何新执行都返回 QUEUE，不允许用 Tenant 空闲绕过。", "PolicyDecision", "QUEUE / RESOURCE_CRITICAL"],
+          ["ExecutionPolicy", "拒绝本次启动", "CRITICAL 对任何新执行都返回 QUEUE，不允许用 User 空闲绕过。", "PolicyDecision", "QUEUE / RESOURCE_CRITICAL"],
           ["Coordinator", "释放并重新入队", "先 release slot，再用原 enqueuedAt 和 RESOURCE_CRITICAL reason 入队。", "QueueEntry reason", "DEFERRED"],
           ["QueuePump", "周期继续检查", "single-flight drain 防止多个 tick 形成互相重叠的推进循环。", "无", "wait for state change"],
           ["ResourceObserver", "资源恢复 NORMAL", "后续 tick 得到新的 Snapshot，历史 CRITICAL 决策不会被改写。", "new ResourceSnapshot", "pressure = NORMAL"],
@@ -2561,7 +2561,7 @@
           ["ToolExecutionStore", "检查崩溃窗口", "读取所有 PREPARED 工具，确认没有无法自动重放的 UNKNOWN_EFFECT。", "tool_executions", "all replay-safe"],
           ["RecoveryDecision", "生成 AUTO_RESUME", "有有效 Checkpoint 且未决工具均可重放，恢复计划标记 SAFE_CHECKPOINT。", "RecoveryPlan", "AUTO_RESUME"],
           ["RecoveryExecutor", "重新提交恢复任务", "恢复参数进入 pendingResumeByRunId，并把 INTERRUPTED Run 转回 QUEUED。", "RUN_QUEUED", "resume intent retained"],
-          ["Scheduler", "重新参与公平竞争", "它和新任务一样等待 Tenant round-robin 与逻辑 slot。", "QueueEntry", "no recovery bypass"],
+          ["Scheduler", "重新参与公平竞争", "它和新任务一样等待 User round-robin 与逻辑 slot。", "QueueEntry", "no recovery bypass"],
           ["Admission", "重新检查当前资源", "旧进程的资源事实不能直接复用；恢复时产生新的 Snapshot 与 Decision。", "Snapshot + Decision", "START or QUEUE"],
           ["RunService", "调用 executeQueuedResume", "获得 START 后使用 Checkpoint 和 Runtime Session 引用调用 PiAdapter.resume。", "RUN_RESUMED", "runtime resumed"],
           ["ToolGateway", "复用已成功结果", "若 Runtime 再次请求同一 toolCallId，Gateway 返回历史 SUCCEEDED 结果。", "ToolExecution lookup", "no duplicate success effect"]
@@ -2683,11 +2683,11 @@
 
     let selectedPressure = "NORMAL";
     const activeGlobal = document.getElementById("active-global");
-    const activeTenant = document.getElementById("active-tenant");
+    const activeUser = document.getElementById("active-user");
 
     function renderDecision() {
       const globalCount = Number(activeGlobal.value);
-      const tenantCount = Number(activeTenant.value);
+      const userCount = Number(activeUser.value);
       let action = "START";
       let reason = "RESOURCE_NORMAL";
 
@@ -2701,12 +2701,12 @@
         if (globalCount >= 2) {
           action = "QUEUE";
           reason = "GLOBAL_CONCURRENCY_LIMIT";
-        } else if (tenantCount > 0) {
+        } else if (userCount > 0) {
           action = "QUEUE";
-          reason = "RESOURCE_BUSY_TENANT_LIMIT";
+          reason = "RESOURCE_BUSY_USER_LIMIT";
         } else {
           action = "START";
-          reason = "RESOURCE_BUSY_TENANT_AVAILABLE";
+          reason = "RESOURCE_BUSY_USER_AVAILABLE";
         }
       } else if (globalCount >= 2) {
         action = "QUEUE";
@@ -2714,7 +2714,7 @@
       }
 
       document.getElementById("active-global-value").textContent = globalCount;
-      document.getElementById("active-tenant-value").textContent = tenantCount;
+      document.getElementById("active-user-value").textContent = userCount;
       document.getElementById("decision-action").textContent = action;
       document.getElementById("decision-reason").textContent = reason;
       document.getElementById("decision-box").classList.toggle("queue", action === "QUEUE");
@@ -2731,7 +2731,7 @@
     });
 
     activeGlobal.addEventListener("input", renderDecision);
-    activeTenant.addEventListener("input", renderDecision);
+    activeUser.addEventListener("input", renderDecision);
 
     document.getElementById("review-list").addEventListener("click", function (event) {
       const trigger = event.target.closest(".review-trigger");

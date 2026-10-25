@@ -1,5 +1,5 @@
 /**
- * P0 端到端 smoke：串行、并发、跨租户拒绝。
+ * P0 端到端 smoke：串行、并发、跨用户拒绝。
  *
  * 需要已启动 Harness server（建议 systemd + microVM + broker + 外部模型）。
  * 环境变量：
@@ -22,7 +22,7 @@ const userInput = process.env.HARNESS_SMOKE_USER_INPUT
     ?? "请使用 bash 工具执行 echo SMOKE-OK，并只回答 SMOKE-OK。";
 const inviteCode = process.env.HARNESS_SMOKE_INVITE_CODE;
 
-type Principal = { tenantId: string; token: string; email: string };
+type Principal = { userId: string; token: string; email: string };
 type RunView = { id: string; status: string };
 
 const TERMINAL_STATUSES = new Set<string>(["COMPLETED", "FAILED", "INTERRUPTED"]);
@@ -57,7 +57,7 @@ function positiveInt(rawValue: string | undefined, fallback: number): number {
     return value;
 }
 
-async function registerSmokeTenant(prefix: string): Promise<Principal> {
+async function registerSmokeUser(prefix: string): Promise<Principal> {
     const email = prefix + "-" + label + "-" + Date.now() + "@smoke.local";
     const password = "smoke-password-1234";
     const registration = await requestJson("/auth/register", {
@@ -80,8 +80,8 @@ async function registerSmokeTenant(prefix: string): Promise<Principal> {
     if (login.response.status !== 200) {
         throw new Error("登录失败 HTTP " + login.response.status + ": " + JSON.stringify(login.payload));
     }
-    const payload = login.payload as { token: string; tenantId: string };
-    return { tenantId: payload.tenantId, token: payload.token, email };
+    const payload = login.payload as { token: string; userId: string };
+    return { userId: payload.userId, token: payload.token, email };
 }
 
 async function createWorkspace(principal: Principal, name: string): Promise<string> {
@@ -192,7 +192,7 @@ function intervalsOverlap(intervals: Array<{ id: string; start: number; end: num
 }
 
 async function scenarioSerial(): Promise<{ principal: Principal; workspaceId: string; runId: string }> {
-    const principal = await registerSmokeTenant("serial");
+    const principal = await registerSmokeUser("serial");
     const workspaceId = await createWorkspace(principal, "smoke-serial-" + label);
     const sessionId = "smoke-serial-session-" + label;
     const firstRunId = await submitRun(principal, workspaceId, sessionId);
@@ -215,7 +215,7 @@ async function scenarioSerial(): Promise<{ principal: Principal; workspaceId: st
 }
 
 async function scenarioConcurrent(): Promise<void> {
-    const principal = await registerSmokeTenant("concurrent");
+    const principal = await registerSmokeUser("concurrent");
     const workspaceId = await createWorkspace(principal, "smoke-concurrent-" + label);
     const runIds = await Promise.all(
         Array.from({ length: concurrency }, () => submitRun(principal, workspaceId)),
@@ -234,14 +234,14 @@ async function scenarioConcurrent(): Promise<void> {
     console.log("[p0-smoke] concurrent ok: runs=" + runIds.join(",") + " maxActive=" + maxActive + " overlap=" + overlap);
 }
 
-async function scenarioCrossTenant(ownerRunId: string, ownerWorkspaceId: string): Promise<void> {
-    const intruder = await registerSmokeTenant("intruder");
+async function scenarioCrossUser(ownerRunId: string, ownerWorkspaceId: string): Promise<void> {
+    const intruder = await registerSmokeUser("intruder");
     const attempts: Array<{ label: string; method: string; path: string; body?: unknown }> = [
         { label: "GET run", method: "GET", path: "/runs/" + encodeURIComponent(ownerRunId) },
         { label: "GET events", method: "GET", path: "/runs/" + encodeURIComponent(ownerRunId) + "/events" },
         { label: "GET output", method: "GET", path: "/runs/" + encodeURIComponent(ownerRunId) + "/output" },
         { label: "POST interrupt", method: "POST", path: "/runs/" + encodeURIComponent(ownerRunId) + "/interrupt", body: {} },
-        { label: "POST run in owner workspace", method: "POST", path: "/runs", body: { workspaceId: ownerWorkspaceId, userInput: "cross-tenant probe" } },
+        { label: "POST run in owner workspace", method: "POST", path: "/runs", body: { workspaceId: ownerWorkspaceId, userInput: "cross-user probe" } },
     ];
     const observed: string[] = [];
     for (const attempt of attempts) {
@@ -251,19 +251,19 @@ async function scenarioCrossTenant(ownerRunId: string, ownerWorkspaceId: string)
             ...(attempt.body === undefined ? {} : { body: JSON.stringify(attempt.body) }),
         });
         if (result.response.status < 400) {
-            throw new Error("跨租户访问未被拒绝: " + attempt.label + " HTTP " + result.response.status + " " + JSON.stringify(result.payload));
+            throw new Error("跨用户访问未被拒绝: " + attempt.label + " HTTP " + result.response.status + " " + JSON.stringify(result.payload));
         }
         observed.push(attempt.label + "=" + result.response.status);
     }
     const list = await requestJson("/runs", { headers: authHeaders(intruder.token) });
     if (list.response.ok === false) {
-        throw new Error("查询租户 Run 列表失败 HTTP " + list.response.status);
+        throw new Error("查询用户 Run 列表失败 HTTP " + list.response.status);
     }
     const payload = list.payload as { runs: Array<{ id: string }> };
     if (payload.runs.some((run) => run.id === ownerRunId)) {
-        throw new Error("跨租户 Run 出现在列表中: " + ownerRunId);
+        throw new Error("跨用户 Run 出现在列表中: " + ownerRunId);
     }
-    console.log("[p0-smoke] cross-tenant ok: " + observed.join(", "));
+    console.log("[p0-smoke] cross-user ok: " + observed.join(", "));
 }
 
 async function assertHealth(): Promise<void> {
@@ -281,7 +281,7 @@ await assertHealth();
 console.log("[p0-smoke] baseUrl=" + baseUrl + " label=" + label + " concurrency=" + concurrency);
 const serial = await scenarioSerial();
 await scenarioConcurrent();
-await scenarioCrossTenant(serial.runId, serial.workspaceId);
+await scenarioCrossUser(serial.runId, serial.workspaceId);
 console.log("P0_E2E_SMOKE_OK label=" + label);
 
 export {};

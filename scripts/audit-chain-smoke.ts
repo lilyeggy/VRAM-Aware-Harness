@@ -15,7 +15,7 @@ function runSelfTest(): void {
             store.record({
                 action: `smoke-${i}`,
                 outcome: i === 1 ? "DENY" : "ALLOW",
-                tenantId: "smoke-tenant",
+                userId: "smoke-user",
                 resourceType: "HTTP_REQUEST",
                 resourceId: null,
                 reason: `reason-${i}`,

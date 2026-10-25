@@ -1,19 +1,19 @@
 import { expect, test } from "bun:test";
 
-import { TenantRunScheduler } from "../../src/scheduling/tenant-run-scheduler.ts";
+import { UserRunScheduler } from "../../src/scheduling/user-run-scheduler.ts";
 
 function enqueue(
-    scheduler: TenantRunScheduler,
-    tenantId: string,
+    scheduler: UserRunScheduler,
+    userId: string,
     count: number,
     prefix: string,
 ): void {
     for (let index = 0; index < count; index += 1) {
-        scheduler.enqueue({ runId: `${prefix}${index}`, tenantId });
+        scheduler.enqueue({ runId: `${prefix}${index}`, userId });
     }
 }
 
-function claimAll(scheduler: TenantRunScheduler): Record<string, number> {
+function claimAll(scheduler: UserRunScheduler): Record<string, number> {
     const claimed: Record<string, number> = {};
 
     while (true) {
@@ -23,52 +23,52 @@ function claimAll(scheduler: TenantRunScheduler): Record<string, number> {
             break;
         }
 
-        claimed[run.tenantId] = (claimed[run.tenantId] ?? 0) + 1;
+        claimed[run.userId] = (claimed[run.userId] ?? 0) + 1;
     }
 
     return claimed;
 }
 
-test("等权公平份额：单租户可以用满全局 30 个槽位", () => {
-    const scheduler = new TenantRunScheduler({
+test("等权公平份额：单用户可以用满全局 30 个槽位", () => {
+    const scheduler = new UserRunScheduler({
         maxActiveRuns: 30,
-        maxActiveRunsPerTenant: 0,
+        maxActiveRunsPerUser: 0,
     });
-    enqueue(scheduler, "tenant-a", 40, "a");
+    enqueue(scheduler, "user-a", 40, "a");
 
-    expect(claimAll(scheduler)).toEqual({ "tenant-a": 30 });
+    expect(claimAll(scheduler)).toEqual({ "user-a": 30 });
     expect(scheduler.listQueue()).toHaveLength(10);
 });
 
-test("等权公平份额：两个租户各 15，不再被静态上限卡在 20", () => {
-    const scheduler = new TenantRunScheduler({
+test("等权公平份额：两个用户各 15，不再被静态上限卡在 20", () => {
+    const scheduler = new UserRunScheduler({
         maxActiveRuns: 30,
-        maxActiveRunsPerTenant: 0,
+        maxActiveRunsPerUser: 0,
     });
-    enqueue(scheduler, "tenant-a", 20, "a");
-    enqueue(scheduler, "tenant-b", 20, "b");
+    enqueue(scheduler, "user-a", 20, "a");
+    enqueue(scheduler, "user-b", 20, "b");
 
-    expect(claimAll(scheduler)).toEqual({ "tenant-a": 15, "tenant-b": 15 });
+    expect(claimAll(scheduler)).toEqual({ "user-a": 15, "user-b": 15 });
 });
 
 test("work-conserving 借用：一方没活时另一方可以占满全局", () => {
-    const scheduler = new TenantRunScheduler({
+    const scheduler = new UserRunScheduler({
         maxActiveRuns: 30,
-        maxActiveRunsPerTenant: 0,
+        maxActiveRunsPerUser: 0,
     });
-    enqueue(scheduler, "tenant-a", 3, "a");
-    enqueue(scheduler, "tenant-b", 40, "b");
+    enqueue(scheduler, "user-a", 3, "a");
+    enqueue(scheduler, "user-b", 40, "b");
 
-    expect(claimAll(scheduler)).toEqual({ "tenant-a": 3, "tenant-b": 27 });
+    expect(claimAll(scheduler)).toEqual({ "user-a": 3, "user-b": 27 });
 });
 
 test("显式上限仍然生效：配置为正数时作为硬上限", () => {
-    const scheduler = new TenantRunScheduler({
+    const scheduler = new UserRunScheduler({
         maxActiveRuns: 30,
-        maxActiveRunsPerTenant: 5,
+        maxActiveRunsPerUser: 5,
     });
-    enqueue(scheduler, "tenant-a", 20, "a");
-    enqueue(scheduler, "tenant-b", 20, "b");
+    enqueue(scheduler, "user-a", 20, "a");
+    enqueue(scheduler, "user-b", 20, "b");
 
-    expect(claimAll(scheduler)).toEqual({ "tenant-a": 5, "tenant-b": 5 });
+    expect(claimAll(scheduler)).toEqual({ "user-a": 5, "user-b": 5 });
 });

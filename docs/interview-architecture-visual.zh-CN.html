@@ -180,7 +180,7 @@ table.glo td.k{color:#cfe0ff;font-family:ui-monospace,Menlo,monospace;white-spac
 </head>
 <body>
 <header class="top">
-  <h1>Harness 架构动态图<span>多租户 Agent 平台 · 面试版</span></h1>
+  <h1>Harness 架构动态图<span>多用户 Agent 平台 · 面试版</span></h1>
   <div class="tabs">
     <button data-view="v1" class="on">① 全系统数据流</button>
     <button data-view="v2">② 模块内部流转</button>
@@ -431,7 +431,7 @@ var FLOW = {
     {id:'client', icon:'💬', x:50,  y:36,  w:250, h:52, zone:'ctl', label:'浏览器 /app', sub:'web/app.js · harness-user-console.ts'},
     {id:'http', icon:'🚪',   x:50,  y:126, w:250, h:58, zone:'ctl', label:'HTTP 接入层', sub:'限流 → 鉴权 → 路由 → 审计'},
     {id:'app', icon:'🎛️',    x:50,  y:228, w:250, h:52, zone:'ctl', label:'应用门面 HarnessApplication', sub:'submitRun · queuePump · interrupt'},
-    {id:'sched', icon:'🧭',  x:50,  y:318, w:250, h:56, zone:'ctl', label:'调度器 RunScheduler', sub:'TenantRunScheduler · 资源准入'},
+    {id:'sched', icon:'🧭',  x:50,  y:318, w:250, h:56, zone:'ctl', label:'调度器 RunScheduler', sub:'UserRunScheduler · 资源准入'},
     {id:'exec', icon:'⚙️',   x:50,  y:418, w:250, h:58, zone:'ctl', label:'RunExecutor', sub:'策略快照 · Attempt · 租约'},
     {id:'router', icon:'🚦', x:50,  y:528, w:250, h:52, zone:'ctl', label:'SandboxProviderRouter', sub:'microvm / container / managed-local'},
     {id:'broker', icon:'🛡️', x:430, y:528, w:250, h:52, zone:'brk', label:'Sandbox Broker（root）', sub:'Unix socket · capability token'},
@@ -461,18 +461,18 @@ var FLOW = {
   ],
   steps: [
     {n:['client','http'], e:['e1'], cap:'① 用户在 /app 提交任务：POST /runs { workspaceId, userInput, idempotencyKey, priority }', tag:'POST /runs', st:'QUEUED'},
-    {n:['http'], e:['e2','e15'], cap:'② 入口治理：IP 限流 → Bearer 鉴权（principal.tenantId）→ 租户限流 → 审计（只追加 + hash 链）', tag:'Bearer + 审计', st:'QUEUED'},
+    {n:['http'], e:['e2','e15'], cap:'② 入口治理：IP 限流 → Bearer 鉴权（principal.userId）→ 用户限流 → 审计（只追加 + hash 链）', tag:'Bearer + 审计', st:'QUEUED'},
     {n:['app'], e:['e2'], cap:'③ 应用门面：幂等键查重（命中直接返回既有 Run）→ 事务写 agent_runs + RUN_CREATED 事件', tag:'Run(QUEUED)', st:'QUEUED'},
-    {n:['sched'], e:['e3'], cap:'④ 入队 + kick：租户队列按 priority desc / enqueuedAt asc / aging 插队；kick 独立抢 slot，不等 drain 批次', tag:'kick + 队列', st:'QUEUED'},
+    {n:['sched'], e:['e3'], cap:'④ 入队 + kick：用户队列按 priority desc / enqueuedAt asc / aging 插队；kick 独立抢 slot，不等 drain 批次', tag:'kick + 队列', st:'QUEUED'},
     {n:['sched'], e:['e4'], cap:'⑤ 资源准入：ResourceObserver → 分类 NORMAL/BUSY/CRITICAL → PolicyDecision START / QUEUE / DENY', tag:'ResourceObserver', st:'QUEUED'},
     {n:['exec'], e:['e4'], cap:'⑥ Attempt + 租约：createRunAttempt → acquire（lease_owner / lease_expires_at）→ 心跳续租', tag:'attempt + lease', st:'RUNNING'},
-    {n:['exec'], e:['e5'], cap:'⑦ 五层策略交集（platform / tenant / template / workspace / run，deny wins）+ 联网请求 fail-closed', tag:'policy snapshot', st:'RUNNING'},
-    {n:['router','broker'], e:['e5','e6'], cap:'⑧ sandbox.create → Broker.create：capability token 绑定 sandboxId + tenantId', tag:'create + token', st:'RUNNING'},
+    {n:['exec'], e:['e5'], cap:'⑦ 五层策略交集（platform / user / template / workspace / run，deny wins）+ 联网请求 fail-closed', tag:'policy snapshot', st:'RUNNING'},
+    {n:['router','broker'], e:['e5','e6'], cap:'⑧ sandbox.create → Broker.create：capability token 绑定 sandboxId + userId', tag:'create + token', st:'RUNNING'},
     {n:['broker','microvm'], e:['e7'], cap:'⑨ jailer 建 chroot / cgroup / mount namespace → Firecracker 冷启动或快照恢复 → vsock 就绪', tag:'jailer + FC boot', st:'RUNNING'},
     {n:['microvm','exec'], e:['e12'], cap:'⑩ SANDBOX_ACQUIRED 事件（durationMs + warmHit）→ SandboxRecord 落库', tag:'SANDBOX_ACQUIRED', st:'RUNNING'},
     {n:['exec','worker'], e:['e8'], cap:'⑪ runtime.start → worker-protocol v2 → systemd 瞬时 Worker（专用 UID、seccomp、Landlock、只读 rootfs）', tag:'START_RUN v2', st:'RUNNING'},
     {n:['worker','model'], e:['e9'], cap:'⑫ 模型推理：Pi ModelRuntime → 外部模型服务；Worker 唯一出站，egress ACL 只放行模型 CIDR', tag:'LLM 请求', st:'RUNNING'},
-    {n:['worker','tools','broker','microvm'], e:['e10','e11','e7'], cap:'⑬ 工具调用：PREPARED 记账 → Broker.execute（tenantId + token 校验）→ guest 执行 → SUCCEEDED → checkpoint', tag:'PREPARED → execute', st:'WAITING_TOOL'},
+    {n:['worker','tools','broker','microvm'], e:['e10','e11','e7'], cap:'⑬ 工具调用：PREPARED 记账 → Broker.execute（userId + token 校验）→ guest 执行 → SUCCEEDED → checkpoint', tag:'PREPARED → execute', st:'WAITING_TOOL'},
     {n:['store','client'], e:['e14','e16'], cap:'⑭ 事件流：run_events / run_output_chunks → 前端轮询 /runs/:id/events 增量渲染', tag:'run_events', st:'RUNNING'},
     {n:['exec','store'], e:['e14'], cap:'⑮ 终态：workspace 快照 + diff + artifacts → RUN_ARTIFACTS_READY → RUN_COMPLETED；finally 释放租约 → sandbox.terminate', tag:'artifacts + 终态', st:'COMPLETED'},
     {n:['broker','microvm','store'], e:['e7','e14'], cap:'⑯ 回收：VM 销毁 + workspace 导出；孤儿 reaper 清理 vm-runtime；租约过期 → AUTO_RESUME / MANUAL_REVIEW', tag:'terminate + 回收', st:'COMPLETED'}
@@ -481,12 +481,12 @@ var FLOW = {
 
 var NODE_INFO = {
   client:   {t:'浏览器 /app', p:'web/app.js · web/app.css · src/http/harness-user-console.ts', rows:[['职责','同源静态控制台：登录/注册、会话、composer、事件轮询'],['输入','用户输入 + 思考深度'],['输出','POST /conversations/:id/messages 或 POST /runs'],['读','GET /runs/:id/events、/output、/workspace-diff、/artifacts']], b:['无框架、无构建步骤，单文件 HTML + 原生 JS','Markdown 渲染自带（含表格/代码块），暗色主题','轮询而非 SSE：Run 事件增量拉取，断线可续']},
-  http:     {t:'HTTP 接入层', p:'src/http/harness-http-api.ts:245 · rate-limiter.ts:88 · routes/*.ts:856', rows:[['职责','限流 → 鉴权 → 路由分发 → 审计 → 调应用门面'],['输入','Bun.serve Request + clientIp'],['输出','JSON 响应 / 202 Run / 429 + Retry-After'],['写表','access_audit_events（每次鉴权与工具尝试）']], b:['两级固定窗口限流：IP 桶 120/min、租户桶 600/min（可配）','未捕获异常统一 500 + requestId，不泄漏内部错误信息','注册支持 open / invite / closed 三态，邀请码 SHA-256 + timingSafeEqual 比较']},
-  app:      {t:'应用门面 HarnessApplication', p:'src/app/harness-application.ts:394', rows:[['职责','对外唯一门面：submitRun / resume / interrupt / 队列泵'],['输入','已鉴权的 tenantId + 请求体'],['输出','Run 记录 / 队列决策 / 中断结果'],['写表','agent_runs（经 RunStore）、run_events']], b:['幂等键命中直接返回既有 Run（并发重放只创建 1 个）','submit 后 kick 独立抢 slot：避免 drain 批次把后提交的 Run 串行化','queuePump 抽象：tick 兜底重试，kick 立即推进']},
-  sched:    {t:'调度器 RunScheduler + TenantRunScheduler', p:'src/scheduling/run-scheduler.ts:822 · tenant-run-scheduler.ts:610', rows:[['职责','选谁跑（公平/优先级）+ 谁去跑（资源准入）'],['输入','QueuedRun（runId/tenantId/priority/enqueuedAt）'],['输出','START / QUEUE(reasonCode) / DENY 决策'],['写表','policy_decisions、resource_snapshots']], b:['租户队列内 priority desc → enqueuedAt asc；agingMs 让等太久的租户插队','会话串行化：同一 harness_session 同时只跑一个 Run','backpressure：HARNESS_MAX_QUEUED_RUNS / _PER_TENANT 超限抛 429','retryAt 未到点的 QUEUED Run 会被 reconcile 跳过']},
-  exec:     {t:'RunExecutor', p:'src/runtime/run-executor.ts:340', rows:[['职责','把 Attempt / 策略 / 沙箱 / Runtime 串成一次执行'],['输入','Run + 租户 + workspace 路径'],['输出','事件流 + 终态 + 产物'],['写表','run_attempts、effective_policy_snapshots、sandboxes、run_workspace_*']], b:['执行前写策略快照，事后可审计「当时按什么策略跑的」','sandbox 创建后立刻上报 SANDBOX_ACQUIRED（含 warmHit）','finally：释放租约 → 终止沙箱 → 不留孤儿']},
+  http:     {t:'HTTP 接入层', p:'src/http/harness-http-api.ts:245 · rate-limiter.ts:88 · routes/*.ts:856', rows:[['职责','限流 → 鉴权 → 路由分发 → 审计 → 调应用门面'],['输入','Bun.serve Request + clientIp'],['输出','JSON 响应 / 202 Run / 429 + Retry-After'],['写表','access_audit_events（每次鉴权与工具尝试）']], b:['两级固定窗口限流：IP 桶 120/min、用户桶 600/min（可配）','未捕获异常统一 500 + requestId，不泄漏内部错误信息','注册支持 open / invite / closed 三态，邀请码 SHA-256 + timingSafeEqual 比较']},
+  app:      {t:'应用门面 HarnessApplication', p:'src/app/harness-application.ts:394', rows:[['职责','对外唯一门面：submitRun / resume / interrupt / 队列泵'],['输入','已鉴权的 userId + 请求体'],['输出','Run 记录 / 队列决策 / 中断结果'],['写表','agent_runs（经 RunStore）、run_events']], b:['幂等键命中直接返回既有 Run（并发重放只创建 1 个）','submit 后 kick 独立抢 slot：避免 drain 批次把后提交的 Run 串行化','queuePump 抽象：tick 兜底重试，kick 立即推进']},
+  sched:    {t:'调度器 RunScheduler + UserRunScheduler', p:'src/scheduling/run-scheduler.ts:822 · user-run-scheduler.ts:610', rows:[['职责','选谁跑（公平/优先级）+ 谁去跑（资源准入）'],['输入','QueuedRun（runId/userId/priority/enqueuedAt）'],['输出','START / QUEUE(reasonCode) / DENY 决策'],['写表','policy_decisions、resource_snapshots']], b:['用户队列内 priority desc → enqueuedAt asc；agingMs 让等太久的用户插队','会话串行化：同一 harness_session 同时只跑一个 Run','backpressure：HARNESS_MAX_QUEUED_RUNS / _PER_USER 超限抛 429','retryAt 未到点的 QUEUED Run 会被 reconcile 跳过']},
+  exec:     {t:'RunExecutor', p:'src/runtime/run-executor.ts:340', rows:[['职责','把 Attempt / 策略 / 沙箱 / Runtime 串成一次执行'],['输入','Run + 用户 + workspace 路径'],['输出','事件流 + 终态 + 产物'],['写表','run_attempts、effective_policy_snapshots、sandboxes、run_workspace_*']], b:['执行前写策略快照，事后可审计「当时按什么策略跑的」','sandbox 创建后立刻上报 SANDBOX_ACQUIRED（含 warmHit）','finally：释放租约 → 终止沙箱 → 不留孤儿']},
   router:   {t:'SandboxProviderRouter', p:'src/sandbox/sandbox-provider-router.ts:106', rows:[['职责','按 profile 选后端，并声明能力边界'],['输入','SandboxCreateInput（policy + workspace + 资源限额）'],['输出','SandboxHandle + enforcement 能力声明'],['读','HARNESS_SANDBOX_PROVIDER / PROFILE / RUNTIME']], b:['microvm=strict、container=runsc、managed-local=开发降级','provider 必须如实声明 filesystemIsolation / networkIsolation 等能力','策略守卫读这份声明：声明不具备隔离能力时直接拒绝工具执行（fail-closed）']},
-  broker:   {t:'Sandbox Broker（root）', p:'src/sandbox/broker/*.ts:1075', rows:[['职责','唯一的特权沙箱管理面：create / execute / terminate'],['输入','Unix socket 上的 BrokerRequest（含 tenantId + token）'],['输出','SandboxHandle / 执行结果'],['写表','sandboxes（Master 侧 SandboxStore）']], b:['窄接口：只暴露三个操作，不暴露任意 shell','三重校验：controlToken（Master）+ capabilityToken（绑定 sandbox）+ tenantId 归属','SO_PEERCRED 校验对端 UID：create/terminate 只收 Master UID，execute 只收 Worker UID','非 jailer + 快照组合在构造期直接抛错（快照会固化宿主绝对路径 → 跨租户串盘）']},
+  broker:   {t:'Sandbox Broker（root）', p:'src/sandbox/broker/*.ts:1075', rows:[['职责','唯一的特权沙箱管理面：create / execute / terminate'],['输入','Unix socket 上的 BrokerRequest（含 userId + token）'],['输出','SandboxHandle / 执行结果'],['写表','sandboxes（Master 侧 SandboxStore）']], b:['窄接口：只暴露三个操作，不暴露任意 shell','三重校验：controlToken（Master）+ capabilityToken（绑定 sandbox）+ userId 归属','SO_PEERCRED 校验对端 UID：create/terminate 只收 Master UID，execute 只收 Worker UID','非 jailer + 快照组合在构造期直接抛错（快照会固化宿主绝对路径 → 跨用户串盘）']},
   microvm:  {t:'jailer + Firecracker microVM', p:'src/sandbox/microvm/*.ts:3136', rows:[['职责','不可信执行面：跑 shell / 代码 / 文件操作'],['输入','rootfs 模板 + workspace 磁盘模板 + 资源限额'],['输出','guest agent 执行结果（vsock）'],['读','快照池 vm.snap / mem.snap']], b:['jailer：专用 UID/GID、chroot、独立 mount namespace、cgroup v2 cpu.max / memory.max','无网卡：网络隔离由「不给设备」实现，而不是靠防火墙规则','快照恢复 median 513ms，冷启动 median 1477ms（真机 jailer）','终止后 vm-runtime 目录清空，孤儿 reaper 兜底']},
   worker:   {t:'Worker 进程（每 Run 一个）', p:'src/worker/*.ts:1538 · scripts/harness-worker-run.sh', rows:[['职责','跑 Pi Agent Loop：模型推理 + 工具编排'],['输入','worker-protocol v2 的 START / RESUME 消息'],['输出','模型/工具事件 + 最终回答'],['隔离','systemd 瞬时单元 + 专用 UID + seccomp + Landlock']], b:['只读 rootfs：可写路径仅 /var/lib/harness-worker（Landlock 白名单）','egress ACL：IPAddressDeny=any + 只放行模型服务 CIDR','不继承宿主全量 env：只传白名单变量','崩溃即单元退出，Master 侧由租约/监督两条路径收尾']},
   tools:    {t:'工具网关 ToolGateway', p:'src/tools/tool-gateway.ts:180 · src/runtime/pi-tool-gateway.ts:367', rows:[['职责','所有工具副作用先记账后执行'],['输入','Pi 工具调用（name + args）'],['输出','执行结果 / 拒绝原因'],['写表','tool_executions、tool_policy_decisions、checkpoints']], b:['effect 分类：READ_ONLY / IDEMPOTENT_WRITE / UNKNOWN_EFFECT','执行前写 PREPARED 行：崩溃后能知道「可能已产生副作用」','只有 PREPARED + READ_ONLY 才允许自动重放；UNKNOWN_EFFECT 一律人工复核','MCP 工具按 readOnlyHint 映射到同一套 effect 模型']},
@@ -607,15 +607,15 @@ function mod(id, title, sub, items, steps, kv, bullets, impl){
 var MODULES = [
   mod('http', 'HTTP 接入层', '限流 → 鉴权 → 路由 → 审计（每个请求都走这条链）',
     [{label:'HTTP 请求', sub:'Bun.serve + requestIP', zone:'ctl'}, {label:'IP 限流桶', sub:'120/min 固定窗口', zone:'ctl'},
-     {label:'Bearer 鉴权', sub:'principal.tenantId + scopes', zone:'ctl'}, {label:'租户限流桶', sub:'600/min 固定窗口', zone:'ctl'},
+     {label:'Bearer 鉴权', sub:'principal.userId + scopes', zone:'ctl'}, {label:'用户限流桶', sub:'600/min 固定窗口', zone:'ctl'},
      {label:'审计写入', sub:'access_audit_events + hash 链', zone:'sto'}, {label:'路由 → 应用门面', sub:'runs / conversations / system', zone:'ctl'}],
     [{n:[0,1], e:['e0'], cap:'每个请求先过 IP 桶：超限直接 429 + Retry-After'},
-     {n:[1,2], e:['e1'], cap:'鉴权：Bearer → ApiCredentialStore → principal（tenantId + scopes）'},
-     {n:[2,3], e:['e2'], cap:'鉴权成功后再过租户桶，避免单租户打爆全站'},
+     {n:[1,2], e:['e1'], cap:'鉴权：Bearer → ApiCredentialStore → principal（userId + scopes）'},
+     {n:[2,3], e:['e2'], cap:'鉴权成功后再过用户桶，避免单用户打爆全站'},
      {n:[3,4,5], e:['e3','e4'], cap:'审计落库后交给应用门面；未知异常统一 500 + requestId'}],
-    [['关键文件','harness-http-api.ts:245 · rate-limiter.ts:88 · routes/runs.ts:276'],['写表','access_audit_events'],['测试','rate-limiter / rate-limit.e2e / tenant-boundary / registration-mode']],
-    ['两级限流桶：IP 与租户独立计数，任一超限即 429 并回 Retry-After','/health 与 /ready 不参与限流（探活不能被限流影响）','HARNESS_TRUST_PROXY=true 时按 X-Forwarded-For 首跳限流','审计先于业务：鉴权结果（ALLOW/DENY）都留痕'],
-    {files:[['src/http/harness-http-api.ts:245','fetch → 限流 → requirePrincipal → 路由'],['src/http/rate-limiter.ts:88','RateLimiter：consumeTenant / consumeIp / prune'],['src/http/routes/runs.ts:276','POST /runs：priority + idempotencyKey 解析，backpressure → 429']], types:['HttpError(status, message, headers?)','RateLimitDecision{allowed,limit,remaining,retryAfterSeconds}','optionalNonNegativeInteger(body, field)'], tests:['tests/http/rate-limiter.test.ts','tests/http/rate-limit.e2e.test.ts','tests/http/run-backpressure.e2e.test.ts']}),
+    [['关键文件','harness-http-api.ts:245 · rate-limiter.ts:88 · routes/runs.ts:276'],['写表','access_audit_events'],['测试','rate-limiter / rate-limit.e2e / user-boundary / registration-mode']],
+    ['两级限流桶：IP 与用户独立计数，任一超限即 429 并回 Retry-After','/health 与 /ready 不参与限流（探活不能被限流影响）','HARNESS_TRUST_PROXY=true 时按 X-Forwarded-For 首跳限流','审计先于业务：鉴权结果（ALLOW/DENY）都留痕'],
+    {files:[['src/http/harness-http-api.ts:245','fetch → 限流 → requirePrincipal → 路由'],['src/http/rate-limiter.ts:88','RateLimiter：consumeUser / consumeIp / prune'],['src/http/routes/runs.ts:276','POST /runs：priority + idempotencyKey 解析，backpressure → 429']], types:['HttpError(status, message, headers?)','RateLimitDecision{allowed,limit,remaining,retryAfterSeconds}','optionalNonNegativeInteger(body, field)'], tests:['tests/http/rate-limiter.test.ts','tests/http/rate-limit.e2e.test.ts','tests/http/run-backpressure.e2e.test.ts']}),
 
   mod('app', '应用门面 + 队列泵', '对外唯一入口，内部把「落库 / 入队 / 推进」拆开',
     [{label:'submitRun', sub:'幂等键查重', zone:'ctl'}, {label:'RunStore.create', sub:'事务：Run + RUN_CREATED', zone:'sto'},
@@ -626,20 +626,20 @@ var MODULES = [
      {n:[2,3], e:['e2','e3'], cap:'kick：新提交的 Run 独立抢 slot，不被 drain 批次串行化'},
      {n:[4], e:[], cap:'tick：定期兜底，处理 DEFERRED / 恢复 / 租约回收'}],
     [['关键文件','harness-application.ts:394 · create-harness-application.ts:872'],['写表','agent_runs · run_events'],['测试','create-harness-application.test.ts · run-scheduler.test.ts']],
-    ['幂等键唯一索引在 (tenant_id, idempotency_key)：并发重放只落一个 Run','kick 与 tick 分工：kick 抢实时性，tick 保最终一致','中断/恢复都经门面，保证状态机与事件一致'],
+    ['幂等键唯一索引在 (user_id, idempotency_key)：并发重放只落一个 Run','kick 与 tick 分工：kick 抢实时性，tick 保最终一致','中断/恢复都经门面，保证状态机与事件一致'],
     {files:[['src/app/harness-application.ts:394','submitRun / resumeRun / interrupt / requestPump'],['src/app/create-harness-application.ts:872','组合根：装配所有 store / provider / runtime'],['src/app/harness-config.ts:768','loadHarnessConfig：全部 env 的唯一入口']], types:['QueuePump{kick?(), tick()}','HarnessConfig（含 60+ 配置项）'], tests:['tests/app/create-harness-application.test.ts','tests/integration/blast-radius-isolation.e2e.test.ts']}),
 
-  mod('sched', '调度器：选谁跑 + 谁去跑', '租户公平、优先级、会话串行、资源准入、backpressure',
-    [{label:'enqueue', sub:'租户队列 + reasonCode', zone:'ctl'}, {label:'claimNext', sub:'aging 插队 / priority', zone:'ctl'},
-     {label:'canClaim', sub:'全局 / 租户 / 会话串行', zone:'ctl'}, {label:'资源准入', sub:'ResourceObserver → 决策', zone:'ctl'},
+  mod('sched', '调度器：选谁跑 + 谁去跑', '用户公平、优先级、会话串行、资源准入、backpressure',
+    [{label:'enqueue', sub:'用户队列 + reasonCode', zone:'ctl'}, {label:'claimNext', sub:'aging 插队 / priority', zone:'ctl'},
+     {label:'canClaim', sub:'全局 / 用户 / 会话串行', zone:'ctl'}, {label:'资源准入', sub:'ResourceObserver → 决策', zone:'ctl'},
      {label:'executeQueuedRun', sub:'成功后 release', zone:'ctl'}, {label:'reaper', sub:'租约过期回收', zone:'ctl'}],
-    [{n:[0], e:['e0'], cap:'入队：QueuedRun{runId,tenantId,priority,enqueuedAt,sessionId}'},
-     {n:[1,2], e:['e1'], cap:'选择顺序：aging 超时租户插队 → priority desc → 轮转 → 会话串行检查'},
+    [{n:[0], e:['e0'], cap:'入队：QueuedRun{runId,userId,priority,enqueuedAt,sessionId}'},
+     {n:[1,2], e:['e1'], cap:'选择顺序：aging 超时用户插队 → priority desc → 轮转 → 会话串行检查'},
      {n:[3], e:['e2'], cap:'资源准入：START / QUEUE(reasonCode) / DENY，决策落库可审计'},
      {n:[4,5], e:['e3','e4'], cap:'执行完 release；租约过期由 reaper 回收并触发恢复'}],
-    [['关键文件','run-scheduler.ts:822 · tenant-run-scheduler.ts:610'],['写表','policy_decisions · resource_snapshots'],['测试','run-scheduler / tenant-run-scheduler-priority / backpressure / retry-at']],
-    ['QueueReasonCode 有 10 种：全局/租户并发、会话串行、资源忙、预算超限等','backpressure：队列深度超限直接 429，被拒请求不落库','retryAt 未到点不重新入队，退避重试不会空转'],
-    {files:[['src/scheduling/run-scheduler.ts:822','drain / kick / reconcileQueuedRuns / reapExpired'],['src/scheduling/tenant-run-scheduler.ts:610','queuesByTenant / claimAged / canClaim / isActive / isQueued']], types:['SchedulerDrainResult = EMPTY | DEFERRED | EXECUTED','QueueBackpressureError','RunLeaseManager(attempts, {owner, leaseTtlMs, heartbeatIntervalMs})'], tests:['tests/scheduling/run-scheduler.test.ts','tests/scheduling/tenant-run-scheduler-priority.test.ts','tests/scheduling/run-scheduler-backpressure.test.ts']}),
+    [['关键文件','run-scheduler.ts:822 · user-run-scheduler.ts:610'],['写表','policy_decisions · resource_snapshots'],['测试','run-scheduler / user-run-scheduler-priority / backpressure / retry-at']],
+    ['QueueReasonCode 有 10 种：全局/用户并发、会话串行、资源忙、预算超限等','backpressure：队列深度超限直接 429，被拒请求不落库','retryAt 未到点不重新入队，退避重试不会空转'],
+    {files:[['src/scheduling/run-scheduler.ts:822','drain / kick / reconcileQueuedRuns / reapExpired'],['src/scheduling/user-run-scheduler.ts:610','queuesByUser / claimAged / canClaim / isActive / isQueued']], types:['SchedulerDrainResult = EMPTY | DEFERRED | EXECUTED','QueueBackpressureError','RunLeaseManager(attempts, {owner, leaseTtlMs, heartbeatIntervalMs})'], tests:['tests/scheduling/run-scheduler.test.ts','tests/scheduling/user-run-scheduler-priority.test.ts','tests/scheduling/run-scheduler-backpressure.test.ts']}),
 
   mod('runs', 'Run 生命周期与状态机', '六态 + 租约 + 幂等键 + 退避重试',
     [{label:'QUEUED', sub:'入队等待', zone:'ctl'}, {label:'RUNNING', sub:'租约持有中', zone:'ctl'},
@@ -651,7 +651,7 @@ var MODULES = [
      {n:[1,4,0], e:['e3','e4'], cap:'失败且无副作用：INTERRUPTED → QUEUED（退避重试）；有副作用 → 人工复核'}],
     [['关键文件','run-service.ts:877 · runstore.ts:655 · run-state-machine.ts:54'],['写表','agent_runs · run_attempts'],['测试','run-service-retry / runstore / lease-expiry-recovery']],
     ['状态机白名单：非法迁移直接抛错（含断言测试）','retry_at 记录下次可重试时间；重试次数上限 HARNESS_RUN_MAX_ATTEMPTS=3','租约过期 → INTERRUPTED（LEASE_EXPIRED），由恢复服务决定后续'],
-    {files:[['src/runs/run-service.ts:877','createQueuedRun / executeRunLifecycle / tryScheduleRetry / markLeaseExpired'],['src/runs/runstore.ts:655','findByTenantIdempotencyKey / listQueuedRuns(priority) / countByStatus'],['src/runs/run-lease-manager.ts:165','acquire / startHeartbeat / release / reapExpired']], types:['StartRunInput{tenantId,harnessSessionId,userInput,workspacePath,runPolicy?,priority?,idempotencyKey?}','RunRetryOptions{maxAttempts,baseDelayMs,maxDelayMs}','RunAttempt{...leaseOwner,leaseExpiresAt,heartbeatAt}'], tests:['tests/runs/run-service-retry.test.ts','tests/recovery/lease-expiry-recovery.test.ts','tests/runs/run-lease-manager.test.ts']}),
+    {files:[['src/runs/run-service.ts:877','createQueuedRun / executeRunLifecycle / tryScheduleRetry / markLeaseExpired'],['src/runs/runstore.ts:655','findByUserIdempotencyKey / listQueuedRuns(priority) / countByStatus'],['src/runs/run-lease-manager.ts:165','acquire / startHeartbeat / release / reapExpired']], types:['StartRunInput{userId,harnessSessionId,userInput,workspacePath,runPolicy?,priority?,idempotencyKey?}','RunRetryOptions{maxAttempts,baseDelayMs,maxDelayMs}','RunAttempt{...leaseOwner,leaseExpiresAt,heartbeatAt}'], tests:['tests/runs/run-service-retry.test.ts','tests/recovery/lease-expiry-recovery.test.ts','tests/runs/run-lease-manager.test.ts']}),
 
   mod('executor', 'RunExecutor', '一次执行的编排者：策略 → Attempt → 沙箱 → Runtime → 终态',
     [{label:'策略快照', sub:'五层交集 + fail-closed', zone:'ctl'}, {label:'Attempt + 租约', sub:'run_attempts', zone:'sto'},
@@ -680,14 +680,14 @@ var MODULES = [
   mod('broker', 'Broker 协议与安全', '特权面只开三个操作，三重校验',
     [{label:'BrokerSandboxProvider', sub:'Master/Worker 侧客户端', zone:'ctl'}, {label:'Unix socket', sub:'/run/harness/sandbox-broker.sock', zone:'brk'},
      {label:'controlToken', sub:'Master 专用', zone:'brk'}, {label:'capabilityToken', sub:'绑定 sandboxId', zone:'brk'},
-     {label:'tenantId 归属校验', sub:'assertTenant', zone:'brk'}, {label:'SO_PEERCRED', sub:'对端 UID 白名单', zone:'brk'}],
+     {label:'userId 归属校验', sub:'assertUser', zone:'brk'}, {label:'SO_PEERCRED', sub:'对端 UID 白名单', zone:'brk'}],
     [{n:[0,1], e:['e0'], cap:'Master 与 Worker 都通过同一个 Unix socket 访问 Broker'},
      {n:[1,2,3], e:['e1','e2'], cap:'create/terminate 需 controlToken；execute 需 capabilityToken'},
-     {n:[4], e:['e3'], cap:'任何 execute/terminate 都校验 sandbox 归属租户，跨租户直接拒绝'},
+     {n:[4], e:['e3'], cap:'任何 execute/terminate 都校验 sandbox 归属用户，跨用户直接拒绝'},
      {n:[5], e:['e4'], cap:'getsockopt(SO_PEERCRED) 取对端 pid/uid/gid：create 只收 Master UID，execute 只收 Worker UID'}],
-    [['关键文件','sandbox-broker-server.ts:356 · broker-sandbox-provider.ts:274 · peer-credentials.ts:96'],['协议','create / execute / terminate（含 tenantId 必填）'],['测试','sandbox-broker.test.ts（含跨租户拒绝、孤儿回收）']],
-    ['Broker 是唯一 root 组件，接口窄到只有三个操作','能力令牌与租户校验双保险：拿到 token 也不能跨租户','readRecord 失败时立即 terminate，避免不可寻址的孤儿 VM','非 jailer + 快照组合在构造期抛错（快照固化宿主绝对路径 → 跨租户串盘）'],
-    {files:[['src/sandbox/broker/sandbox-broker-server.ts:356','op 分发 + assertCapability + assertTenant + 孤儿回收'],['src/sandbox/broker/broker-protocol.ts:122','BrokerRequest 判别联合 + isBrokerRequest 校验'],['src/sandbox/broker/peer-credentials.ts:96','SO_PEERCRED 读取与 UID 白名单']], types:['BrokerRequest = create | execute | terminate','BrokerSandboxHandlePayload{id,workspacePath,enforcement,...}','allowedPeerUids / masterPeerUid / workerPeerUid'], tests:['tests/sandbox/sandbox-broker.test.ts','tests/deploy/control-plane-egress.test.ts']}),
+    [['关键文件','sandbox-broker-server.ts:356 · broker-sandbox-provider.ts:274 · peer-credentials.ts:96'],['协议','create / execute / terminate（含 userId 必填）'],['测试','sandbox-broker.test.ts（含跨用户拒绝、孤儿回收）']],
+    ['Broker 是唯一 root 组件，接口窄到只有三个操作','能力令牌与用户校验双保险：拿到 token 也不能跨用户','readRecord 失败时立即 terminate，避免不可寻址的孤儿 VM','非 jailer + 快照组合在构造期抛错（快照固化宿主绝对路径 → 跨用户串盘）'],
+    {files:[['src/sandbox/broker/sandbox-broker-server.ts:356','op 分发 + assertCapability + assertUser + 孤儿回收'],['src/sandbox/broker/broker-protocol.ts:122','BrokerRequest 判别联合 + isBrokerRequest 校验'],['src/sandbox/broker/peer-credentials.ts:96','SO_PEERCRED 读取与 UID 白名单']], types:['BrokerRequest = create | execute | terminate','BrokerSandboxHandlePayload{id,workspacePath,enforcement,...}','allowedPeerUids / masterPeerUid / workerPeerUid'], tests:['tests/sandbox/sandbox-broker.test.ts','tests/deploy/control-plane-egress.test.ts']}),
 
   mod('microvm', 'microVM 驱动与快照', '冷启动 1477ms / 快照恢复 513ms，无网卡',
     [{label:'运行目录', sub:'vm-runtime/<sandboxId>', zone:'vm'}, {label:'磁盘准备', sub:'rootfs + workspace 复制', zone:'vm'},
@@ -715,7 +715,7 @@ var MODULES = [
 
   mod('tools', '工具网关与 MCP', '副作用先记账后执行，UNKNOWN_EFFECT 绝不自动重放',
     [{label:'Pi 工具调用', sub:'name + args + toolCallId', zone:'wrk'}, {label:'effect 分类', sub:'READ_ONLY / IDEMPOTENT_WRITE / UNKNOWN_EFFECT', zone:'wrk'},
-     {label:'PREPARED 落库', sub:'tool_executions', zone:'sto'}, {label:'Broker.execute', sub:'token + tenantId', zone:'brk'},
+     {label:'PREPARED 落库', sub:'tool_executions', zone:'sto'}, {label:'Broker.execute', sub:'token + userId', zone:'brk'},
      {label:'SUCCEEDED / FAILED', sub:'结果 + 完成时间', zone:'sto'}, {label:'checkpoint', sub:'安全恢复点', zone:'sto'}],
     [{n:[0,1], e:['e0'], cap:'工具调用先分类 effect：决定崩溃后能否自动重放'},
      {n:[1,2], e:['e1'], cap:'执行前写 PREPARED 行：崩溃后能知道「可能已产生副作用」'},
@@ -740,12 +740,12 @@ var MODULES = [
   mod('ops', '审计 / 指标 / 账单 / 运维', '可审计、可观测、可维护',
     [{label:'run_events', sub:'每次状态变化', zone:'sto'}, {label:'access_audit_events', sub:'鉴权与工具尝试', zone:'sto'},
      {label:'hash 链 + 触发器', sub:'只追加，禁止 UPDATE/DELETE', zone:'sto'}, {label:'/metrics', sub:'Run/队列/沙箱采集', zone:'ctl'},
-     {label:'/billing', sub:'按租户聚合用量', zone:'ctl'}, {label:'harness-ops', sub:'backup / cleanup / disk-check', zone:'sto'}],
+     {label:'/billing', sub:'按用户聚合用量', zone:'ctl'}, {label:'harness-ops', sub:'backup / cleanup / disk-check', zone:'sto'}],
     [{n:[0,1], e:['e0'], cap:'Run 事件与访问审计分开存：一个面向过程，一个面向安全'},
      {n:[2], e:['e1'], cap:'审计表加 BEFORE UPDATE/DELETE 触发器 + prev_hash/hash 链，篡改可检出'},
-     {n:[3,4], e:['e2','e3'], cap:'指标与账单都按租户聚合，供运营与对账使用'},
+     {n:[3,4], e:['e2','e3'], cap:'指标与账单都按用户聚合，供运营与对账使用'},
      {n:[5], e:['e4'], cap:'运维脚本：VACUUM INTO 备份（Run 执行中也一致）、磁盘水位、产物/快照清理'}],
-    [['关键文件','access-audit-store.ts:208 · metrics.ts:81 · tenant-billing.ts:233 · harness-maintenance.ts:290'],['脚本','audit-chain-smoke / tenant-billing-smoke / harness-ops'],['测试','access-audit-store / metrics / backup-consistency / harness-maintenance']],
+    [['关键文件','access-audit-store.ts:208 · metrics.ts:81 · user-billing.ts:233 · harness-maintenance.ts:290'],['脚本','audit-chain-smoke / user-billing-smoke / harness-ops'],['测试','access-audit-store / metrics / backup-consistency / harness-maintenance']],
     ['审计链校验：跳过链首 legacy 行，链开始后任何 NULL 或不匹配都判失败','备份用 VACUUM INTO + WAL，实测 Run 执行中备份不报 SQLITE_BUSY','指标端点走 metrics:read scope，与业务鉴权同一套'],
     {files:[['src/audit/access-audit-store.ts:208','record（计算 hash 链）/ verifyChain() / lastHash()'],['src/ops/harness-maintenance.ts:290','backupSqliteDatabase / restoreSqliteDatabase / prune*'],['src/observability/metrics.ts:81','Run 状态分布 + 沙箱获取耗时统计']], types:['AuditChainVerification{ok,checked,legacy,brokenAt?,reason?}','backupSqliteDatabase({databasePath,backupDir,keep?})'], tests:['tests/audit/access-audit-store.test.ts','tests/ops/backup-consistency.test.ts','tests/observability/metrics.test.ts']})
 ];
@@ -754,10 +754,10 @@ var MODULES = [
 var MOD_EXTRA = {
   http: {icon:'🚪', sample:'POST /runs\nAuthorization: Bearer <apiKey>\n{"workspaceId":"ws_1","userInput":"读 README 第一行","idempotencyKey":"k-9f2","priority":0}\n→ 202 {"run":{"id":"8f3c…","status":"QUEUED"}}'},
   app: {icon:'🎛️', sample:'submitRun → RunStore.create(run, RUN_CREATED)\n同 idempotencyKey 重放 → 直接返回既有 Run（不重复入队）'},
-  sched: {icon:'🧭', sample:'QueueEntry{runId, tenantId, priority, enqueuedAt}\n→ claimNext → START / QUEUE(RESOURCE_BUSY) / DENY'},
-  exec: {icon:'⚙️', sample:'effective_policy_snapshots.layers_json = [platform, tenant, template, workspace, run]\neffective.allowNetwork = false（deny wins）→ 创建 VM 前 fail-closed'},
+  sched: {icon:'🧭', sample:'QueueEntry{runId, userId, priority, enqueuedAt}\n→ claimNext → START / QUEUE(RESOURCE_BUSY) / DENY'},
+  exec: {icon:'⚙️', sample:'effective_policy_snapshots.layers_json = [platform, user, template, workspace, run]\neffective.allowNetwork = false（deny wins）→ 创建 VM 前 fail-closed'},
   router: {icon:'🚦', sample:'SandboxHandle{ id, workspacePath,\n  enforcement:{ toolExecutionBoundary:"SANDBOX", filesystemIsolation:true, networkPolicyEnforced:true, … } }'},
-  broker: {icon:'🛡️', sample:'{"op":"execute","sandboxId":"3f9a…","tenantId":"t_7","token":"cap_…","command":"uname -r"}\n→ {"ok":true,"stdout":"4.14.174"}'},
+  broker: {icon:'🛡️', sample:'{"op":"execute","sandboxId":"3f9a…","userId":"t_7","token":"cap_…","command":"uname -r"}\n→ {"ok":true,"stdout":"4.14.174"}'},
   microvm: {icon:'📦', sample:'SANDBOX_ACQUIRED {"sandboxId":"3f9a…","attemptId":"…","durationMs":2475,"warmHit":false,"runtime":"firecracker"}'},
   worker: {icon:'🤖', sample:'START_RUN {"runId":"8f3c…","request":{ … ,"runtimeConfig":{"provider":"opencode-go","modelId":"deepseek-v4.1-flash","tools":[…]}}}'},
   tools: {icon:'🧰', sample:'tool_executions: PREPARED → SUCCEEDED\n{"toolName":"bash","effect":"UNKNOWN_EFFECT","status":"PREPARED"}  ← 崩溃后据此判定能否自动重放'},
@@ -876,7 +876,7 @@ var EXTRA_CARDS = [
   ]},
   {t:'关键配置（env）', s:'全部经 loadHarnessConfig 单一入口', b:['生产模式强制：HARNESS_ENV=production 要求 jailer + microvm + broker socket'], rows:[
     ['沙箱', 'HARNESS_SANDBOX_PROVIDER / _PROFILE / _RUNTIME / HARNESS_MICROVM_DRIVER / HARNESS_USE_JAILER / HARNESS_VM_SNAPSHOTS_ENABLED'],
-    ['资源与准入', 'HARNESS_MAX_ACTIVE_RUNS / _PER_TENANT / HARNESS_MAX_QUEUED_RUNS / _PER_TENANT / HARNESS_SCHEDULER_AGING_MS'],
+    ['资源与准入', 'HARNESS_MAX_ACTIVE_RUNS / _PER_USER / HARNESS_MAX_QUEUED_RUNS / _PER_USER / HARNESS_SCHEDULER_AGING_MS'],
     ['可靠性', 'HARNESS_RUN_LEASE_TTL_MS / _HEARTBEAT_MS / HARNESS_RUN_MAX_ATTEMPTS / _RETRY_BASE_MS / _RETRY_MAX_MS'],
     ['限额', 'HARNESS_MAX_USER_INPUT_CHARS / HARNESS_WORKSPACE_SNAPSHOT_MAX_FILES / _MAX_DEPTH / HARNESS_ARTIFACT_MAX_*'],
     ['入口', 'HARNESS_RATE_LIMIT_* / HARNESS_TRUST_PROXY / HARNESS_REGISTRATION_MODE / _INVITE_CODE'],
@@ -897,7 +897,7 @@ var EXTRA_CARDS = [
   {t:'实测性能（真机 jailer）', s:'Firecracker v1.17.0 · 192 vCPU / 251GB · n=5~20', b:[
     '并发热恢复墙钟：N=1 595ms → N=10 766ms（近似线性，无雪崩）',
     '并发冷启动约 2.9s 且 warmHit=0：未复用「首个完成的快照」，是已知优化点',
-    '多租户审计：非 jailer 10 并发 28/28 · 1593ms；jailer + 快照恢复 24/24 · P95 437ms'
+    '多用户审计：非 jailer 10 并发 28/28 · 1593ms；jailer + 快照恢复 24/24 · P95 437ms'
   ], rows:[
     ['冷启动 create', 'min 1476 / median 1477 / p95 1485 ms'],
     ['首次（冷启动 + 制作快照）', '2866 ms'],
@@ -908,24 +908,24 @@ var EXTRA_CARDS = [
   {t:'测试与质量基线', s:'126 文件 · 592 通过 · 0 失败', b:[
     'typecheck 仅剩 9 条历史基线错误（脚本与 serial-bridge），主源码零错误',
     '故障注入 F1–F7 有独立测试 + 真机编排脚本',
-    '真机复验：p0 e2e smoke（串行/并发/跨租户 404）+ 审计链 + 账单 + 备份一致性'
+    '真机复验：p0 e2e smoke（串行/并发/跨用户 404）+ 审计链 + 账单 + 备份一致性'
   ], rows:[
     ['tests/sandbox（21）', '驱动 / 快照 / 超时 / 能力声明 / 孤儿回收'],
     ['tests/runs + scheduling（23）', '状态机 / 幂等 / 租约 / 优先级 / backpressure / retryAt'],
-    ['tests/http（12）', '限流 / 租户边界 / 注册模式 / 幂等并发 / 故障隔离'],
+    ['tests/http（12）', '限流 / 用户边界 / 注册模式 / 幂等并发 / 故障隔离'],
     ['tests/recovery + checkpoints（6+）', '租约过期两条路径 / 决策表'],
     ['tests/mcp（4）', '协议 / stdio 客户端 / 注册表 / Pi 工具适配'],
-    ['scripts/*-smoke.ts', 'p0-e2e / audit-chain / tenant-billing / mcp / phase5 故障注入']
+    ['scripts/*-smoke.ts', 'p0-e2e / audit-chain / user-billing / mcp / phase5 故障注入']
   ]},
   {t:'面试追问：我踩过的坑', s:'真实问题与设计取舍（每条都有真机证据）', b:[
     '为什么 Broker 要 root 而 Master 不要：特权面越小越好，Broker 只开三个操作',
-    '非 jailer + 快照为什么必须 fail-closed：快照固化宿主绝对路径 → 多台恢复 VM 共用工作区磁盘 → 跨租户串写',
+    '非 jailer + 快照为什么必须 fail-closed：快照固化宿主绝对路径 → 多台恢复 VM 共用工作区磁盘 → 跨用户串写',
     '为什么 UNKNOWN_EFFECT 不自动重放：重放可能重复扣款/重复发消息，宁可人工复核',
     '为什么 kick 而不只 tick：drain 批次屏障会把后提交的 Run 串行化',
     '最难的真实 bug：Worker egress 被钉死 IPv4，模型服务 IPv4 段不可达 → 整片 Run 挂起（已恢复双栈 + 按 CIDR 放行）',
     '模型服务黑洞时没有快速失败：只能等执行超时（建议 30min → 5min + 健康探测）'
   ], rows:[
-    ['隔离怎么证明', '跨租户 GET/中断/提交全部 404 + 终止后 0 进程 0 目录 + 产物导出校验'],
+    ['隔离怎么证明', '跨用户 GET/中断/提交全部 404 + 终止后 0 进程 0 目录 + 产物导出校验'],
     ['为什么单机 SQLite', '个人/实验室规模够用；WAL + busy_timeout 已解决并发与备份冲突'],
     ['要分布式先改什么', 'RunAttempt 租约与心跳已经是分布式原语：换成 DB 锁 + 多 Master 即可起步'],
     ['上下文压缩', 'Pi SDK 自带（compaction 子系统），平台只负责下发参数与观测']
@@ -1009,7 +1009,7 @@ function renderDomains(){
         '<div class="dom d3"><b>不可信执行面 microVM（jailer + Firecracker）</b><em>无网卡 · 仅 vsock · chroot / mount namespace / cpu.max / memory.max · shell / 代码 / 文件 / MCP 工具都落在这层</em>' +
         '</div></div></div>' +
     '<div class="dom"><b>外部模型服务 opencode-go</b><em>不属于平台内部：Worker 唯一出站目标；平台只做准入与审计，不内置模型路由</em></div>' +
-    '<div class="dom"><b>宿主内核 / SQLite 单机持久化</b><em>不在任何租户沙箱内；审计表只追加 + hash 链，备份用 VACUUM INTO（Run 执行中也一致）</em></div>';
+    '<div class="dom"><b>宿主内核 / SQLite 单机持久化</b><em>不在任何用户沙箱内；审计表只追加 + hash 链，备份用 VACUUM INTO（Run 执行中也一致）</em></div>';
 }
 var TL_ROWS = [
   ['冷启动 median（n=5）', 1477, 'linear-gradient(90deg,#ef4444,#ff9f43)', '1477 ms'],
@@ -1079,13 +1079,13 @@ var VM_TOPICS = [
  cap:'非 jailer 时，Firecracker 就是个普通宿主进程，出问题直接落在宿主上；jailer 把它<b>关进自己的 chroot + 命名空间 + 降权 UID + cgroup</b>，于是有两层防护：jailer 管住 VMM，KVM 管住 guest。',
  analog:'jailer ≈ Docker 的 namespace + cgroup + userns-remap + 只读挂载，但作用对象是 VMM 进程',
  rows:[['非 jailer','Firecracker 以当前用户跑；无 chroot / 无 mount namespace / 无降权 / 无 cgroup；部署门槛低（在 kvm 组即可）'],['jailer','专用 UID/GID、chroot、独立 mount namespace、cgroup v2（cpu.max / memory.max）；快照路径安全'],['代价','整个 Harness 需要 root（API socket 在 jail 的命名空间里）'],['我们线上怎么跑','Broker 以 root 常驻（systemd），Master 以 cxr、Worker 以 harness-worker(998) 非特权']],
- bullets:['安全上的意义：Firecracker 自身只有约 5 万行 Rust、设备面极小，但它仍是宿主进程；jailer 是它的第二道笼子','jailer 不是功能前提（非 jailer 也能跑 VM），但生产 / 多租户 / 快照场景必须开','开发也可以在 Linux+KVM 上用 jailer；只有 macOS 无 KVM 时才退回 Mock 或 managed-local']},
+ bullets:['安全上的意义：Firecracker 自身只有约 5 万行 Rust、设备面极小，但它仍是宿主进程；jailer 是它的第二道笼子','jailer 不是功能前提（非 jailer 也能跑 VM），但生产 / 多用户 / 快照场景必须开','开发也可以在 Linux+KVM 上用 jailer；只有 macOS 无 KVM 时才退回 Mock 或 managed-local']},
 
 {id:'snaptrap', icon:'🕳️', title:'快照陷阱：为什么"快照必须配 jailer"', sub:'一次真机事故：非 jailer + 快照导致多台恢复 VM 共用同一块工作区磁盘',
  vb:'0 0 940 470', chip:'快照路径固化',
  spec:{bands:[vmB(20,20,440,300,'vm','❌','非 jailer + 快照（危险组合）'), vmB(480,20,440,300,'wrk','✅','jailer + 快照（生产唯一安全组合）'), vmB(20,340,900,120,'plain','🛡️','构造期就拦下，不允许"先跑起来再说"')],
-  nodes:[vmN('l1',45,60,390,48,'vm','黄金 VM 制作 vm.snap','快照里固化的是宿主绝对路径'), vmN('l2',45,135,390,48,'vm','tenant-01 恢复 VM'), vmN('l3',45,200,390,48,'vm','tenant-02 恢复 VM'), vmN('l4',45,262,390,48,'vm','两块 VM 指向同一个 workspace.ext4','跨租户串写 · 产物导出为空'),
-   vmN('r1',505,60,390,48,'wrk','黄金 VM 制作 vm.snap','chroot 内路径恒为 /workspace.ext4'), vmN('r2',505,135,390,48,'wrk','tenant-01 恢复 VM'), vmN('r3',505,200,390,48,'wrk','tenant-02 恢复 VM'), vmN('r4',505,262,390,48,'wrk','各自 jail 内各挂自己的盘','隔离成立 · 产物可正常导出'),
+  nodes:[vmN('l1',45,60,390,48,'vm','黄金 VM 制作 vm.snap','快照里固化的是宿主绝对路径'), vmN('l2',45,135,390,48,'vm','user-01 恢复 VM'), vmN('l3',45,200,390,48,'vm','user-02 恢复 VM'), vmN('l4',45,262,390,48,'vm','两块 VM 指向同一个 workspace.ext4','跨用户串写 · 产物导出为空'),
+   vmN('r1',505,60,390,48,'wrk','黄金 VM 制作 vm.snap','chroot 内路径恒为 /workspace.ext4'), vmN('r2',505,135,390,48,'wrk','user-01 恢复 VM'), vmN('r3',505,200,390,48,'wrk','user-02 恢复 VM'), vmN('r4',505,262,390,48,'wrk','各自 jail 内各挂自己的盘','隔离成立 · 产物可正常导出'),
    vmN('b1',50,365,840,66,'plain','驱动构造期门禁：snapshotsEnabled 且 useJailer=false → 直接抛错','原因：Firecracker /snapshot/load 只支持 snapshot_path / mem_file_path / enable_diff_snapshots / resume_vm / vsock_override，无法覆盖块设备路径')],
   edges:[vmE('l1l2','l1','b','l2','t'), vmE('l1l3','l1','b','l3','t',null,true), vmE('l2l4','l2','b','l4','t'), vmE('l3l4','l3','b','l4','t'),
    vmE('r1r2','r1','b','r2','t'), vmE('r1r3','r1','b','r3','t',null,true), vmE('r2r4','r2','b','r4','t'), vmE('r3r4','r3','b','r4','t')]},
@@ -1093,7 +1093,7 @@ var VM_TOPICS = [
  analog:'像把 docker run -v /abs/path 的绝对路径写进了镜像',
  warn:'真机现象：第二轮快照恢复 10 并发时，启动很快（P95 313 ms），但「产物导出到各自宿主工作区」0/10 通过 —— 因为产物都写进了黄金 VM 的那块盘。',
  rows:[['修复方式','构造函数里加门禁（fail-closed）：非 jailer + snapshots=true 直接抛错，提示改用 HARNESS_USE_JAILER=true 或关闭快照'],['回归测试','microvm-snapshot-mode-guard.test.ts：非 jailer+快照必抛错、非 jailer 关快照可构造、jailer+快照可构造'],['文档','docs/microvm-live-validation.md §3.1.1 与 .env.example 都写明「快照加速必须搭配 jailer」'],['真机复验','非 jailer 开快照：启动即报错（fail-closed）；jailer+快照两轮 24/24 通过，恢复 P95 437 ms']],
- bullets:['教训：快照不是"更快的冷启动"，它是"把设备路径也一起冻住"的机制，必须让路径在恢复后仍然唯一','这类问题的可怕之处在于：VM 能起来、命令能跑、只有隔离和产物是错的 —— 所以要用跨租户检查项去抓']},
+ bullets:['教训：快照不是"更快的冷启动"，它是"把设备路径也一起冻住"的机制，必须让路径在恢复后仍然唯一','这类问题的可怕之处在于：VM 能起来、命令能跑、只有隔离和产物是错的 —— 所以要用跨用户检查项去抓']},
 
 {id:'disks', icon:'💽', title:'磁盘与快照池：VM 的文件都从哪来', sub:'rootfs.ext4 / workspace.ext4 / run 目录 / 快照池，一张图看清',
  vb:'0 0 940 470', chip:'磁盘布局',
@@ -1112,7 +1112,7 @@ var VM_TOPICS = [
 {id:'vsock', icon:'🔌', title:'通信：没有网卡，VM 怎么和宿主说话', sub:'只有 virtio-vsock：一条 host↔guest 的点对点通道，没有 IP 栈',
  vb:'0 0 940 430', chip:'vsock 通道',
  spec:{bands:[vmB(20,20,380,250,'ctl','🖥️','宿主：Broker + vsock bridge'), vmB(540,20,380,250,'vm','📦','guest microVM（没有网卡）'), vmB(20,300,900,110,'plain','🚫','为什么 Agent 拿不到网络')],
-  nodes:[vmN('h1',45,70,330,52,'ctl','Broker.execute 收到命令','capability token + tenantId 校验'), vmN('h2',45,140,330,52,'ctl','firecracker-vsock-bridge','宿主侧唯一的通道'), vmN('h3',45,210,330,48,'ctl','帧协议（JSON + base64 分块）','exec / exec_output / exec_result'),
+  nodes:[vmN('h1',45,70,330,52,'ctl','Broker.execute 收到命令','capability token + userId 校验'), vmN('h2',45,140,330,52,'ctl','firecracker-vsock-bridge','宿主侧唯一的通道'), vmN('h3',45,210,330,48,'ctl','帧协议（JSON + base64 分块）','exec / exec_output / exec_result'),
    vmN('g1',565,70,330,52,'vm','guest agent','VM 内唯一的常驻服务'), vmN('g2',565,140,330,52,'vm','fork / exec 子进程','就是 bash / python / 你的代码'), vmN('g3',565,210,330,48,'vm','stdout / stderr 分块回传','base64 编码，逐块送'),
    vmN('x1',50,330,400,64,'plain','guest 里没有 IP 栈','virtio-vsock 是点对点通道，不经过网络协议栈'), vmN('x2',500,330,400,64,'plain','没有 NIC = 没有 egress','即使命令里 curl 公网也没有网络设备可用')],
   edges:[vmE('h1h2','h1','b','h2','t'), vmE('h2h3','h2','b','h3','t'), vmE('h2g1','h2','r','g1','l','exec 帧（vsock 端口）'), vmE('g1g2','g1','b','g2','t'), vmE('g2g3','g2','b','g3','t'), vmE('g3h3','g3','l','h3','r','exec_output / exec_result')]},
@@ -1124,7 +1124,7 @@ var VM_TOPICS = [
 {id:'toolrun', icon:'🧰', title:'一次工具执行在 VM 里到底发生了什么', sub:'从工具网关到 guest 子进程，再回到记账与审计',
  vb:'0 0 940 470', chip:'工具执行时序',
  spec:{bands:[vmB(20,20,900,150,'ctl','🛡️','宿主侧（可信控制面 + Broker）'), vmB(20,190,900,150,'vm','📦','guest 侧（不可信执行面）'), vmB(20,360,900,90,'sto','🗄️','记账 / 审计 / 产物')],
-  nodes:[vmN('s1',45,60,200,60,'ctl','ToolGateway.prepare','副作用先记账（PREPARED）'), vmN('s2',270,60,200,60,'ctl','策略判定（工具效果）','READ_ONLY / UNKNOWN_EFFECT'), vmN('s3',495,60,200,60,'ctl','Broker.execute','capability token + tenantId'), vmN('s4',720,60,200,60,'ctl','vsock 发帧','exec + maxOutputBytes'),
+  nodes:[vmN('s1',45,60,200,60,'ctl','ToolGateway.prepare','副作用先记账（PREPARED）'), vmN('s2',270,60,200,60,'ctl','策略判定（工具效果）','READ_ONLY / UNKNOWN_EFFECT'), vmN('s3',495,60,200,60,'ctl','Broker.execute','capability token + userId'), vmN('s4',720,60,200,60,'ctl','vsock 发帧','exec + maxOutputBytes'),
    vmN('g1',45,230,200,60,'vm','guest agent','VM 内是 root'), vmN('g2',270,230,200,60,'vm','fork / exec uname -r','实测 median 11.6 ms'), vmN('g3',495,230,200,60,'vm','stdout 分块 base64'), vmN('g4',720,230,200,60,'vm','宿主聚合 + 硬截断','超限置 truncated: true'),
    vmN('b1',45,390,280,48,'sto','tool_executions SUCCEEDED','记账闭合，可审计'), vmN('b2',330,390,280,48,'sto','run_events + checkpoint','可恢复 / 可重放判定'), vmN('b3',615,390,280,48,'sto','artifact 导出 + RUN_ARTIFACTS_READY')],
   edges:[vmE('s1s2','s1','r','s2','l'), vmE('s2s3','s2','r','s3','l'), vmE('s3s4','s3','r','s4','l'), vmE('s4g1','s4','b','g1','t','exec 帧'), vmE('g1g2','g1','r','g2','l'), vmE('g2g3','g2','r','g3','l'), vmE('g3g4','g3','r','g4','l'), vmE('g4b1','g4','b','b1','t','exec_result'), vmE('b1b2','b1','r','b2','l'), vmE('b2b3','b2','r','b3','l')]},
@@ -1160,7 +1160,7 @@ var VM_TOPICS = [
   ['guest agent','VM 内的常驻服务：收命令、fork/exec、回传输出','容器里的 exec 服务'],
   ['快照（vm.snap / mem.snap）','整机状态：内存镜像 + 设备状态，恢复即续跑','docker checkpoint / CRIO，但快照整台 VM'],
   ['templateHash','内核 + rootfs 大小/mtime + agent 版本的 sha256，快照池的目录名','镜像 digest'],
-  ['capability token','Broker 发给某次执行的短期令牌，绑定 sandbox + tenant','类似短期 scoped token，替代"谁能连 docker.sock"'],
+  ['capability token','Broker 发给某次执行的短期令牌，绑定 sandbox + user','类似短期 scoped token，替代"谁能连 docker.sock"'],
   ['SO_PEERCRED','Unix socket 对端凭据（pid/uid/gid），Broker 用它做连接级白名单','类似 Docker socket 的组权限，但更细']],
  bullets:['容器共享内核 → 逃逸面是宿主内核；microVM 有独立内核 → 逃逸面是那台 VM','容器没有"启动时间"概念（进程即起）；microVM 要开机（冷 1477 ms / 快照 513 ms）','容器磁盘是目录挂载；microVM 磁盘是块设备，必须靠导出通道与宿主交换文件']}
 ];

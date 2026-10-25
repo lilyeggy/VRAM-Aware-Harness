@@ -31,7 +31,7 @@ export class ManagedLocalSandboxProvider implements SandboxProvider {
     ) {
         this.profile = config.profile ?? "development";
         if (this.profile !== "development") {
-            throw new Error("ManagedLocal 只能使用 development profile，不能承载多租户执行");
+            throw new Error("ManagedLocal 只能使用 development profile，不能承载多用户执行");
         }
     }
 
@@ -57,7 +57,7 @@ export class ManagedLocalSandboxProvider implements SandboxProvider {
         const secretNames = input.policy.allowedSecrets ?? [];
         const environment: Record<string, string> = {};
         for (const name of secretNames) {
-            const value = this.secrets.get(input.policy.tenantId, name);
+            const value = this.secrets.get(input.policy.userId, name);
             if (value === null) throw new Error(`授权 Secret 不存在：${name}`);
             environment[name] = value;
         }
@@ -178,12 +178,12 @@ export class ManagedLocalSandboxProvider implements SandboxProvider {
 
 export class EnvironmentSecretProvider implements SecretProvider {
     constructor(private readonly environment: Record<string, string | undefined>) {}
-    get(tenantId: string, name: string): string | null {
+    get(userId: string, name: string): string | null {
         if (!isEnvironmentSegment(name)) {
             throw new Error("Secret 名称只能包含大写字母、数字和下划线");
         }
-        const tenantNamespace = Buffer.from(tenantId, "utf8").toString("hex").toUpperCase();
-        return this.environment[`HARNESS_SECRET_${tenantNamespace}_${name}`] ?? null;
+        const userNamespace = Buffer.from(userId, "utf8").toString("hex").toUpperCase();
+        return this.environment[`HARNESS_SECRET_${userNamespace}_${name}`] ?? null;
     }
 }
 

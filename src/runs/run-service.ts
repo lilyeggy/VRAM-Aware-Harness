@@ -22,14 +22,14 @@ import type { ToolExecutionStore } from "../tools/tool-execution-store.ts";
 
 
 export interface StartRunInput {
-    tenantId : string;
+    userId : string;
     harnessSessionId : string;
     userInput : string;
     workspacePath : string;
     runPolicy?: PolicyConstraints;
     thinkingLevel?: ThinkingLevel;
     /** §9.8 v1.4 Phase 2：调度优先级（越大越先调度），缺省 0。 */
-    /** §9.8 v1.4 Phase 3：提交方幂等键；同租户内唯一，重复提交返回既有 Run。 */
+    /** §9.8 v1.4 Phase 3：提交方幂等键；同用户内唯一，重复提交返回既有 Run。 */
     idempotencyKey?: string;
 }
 
@@ -109,15 +109,15 @@ export class RunService{
     }
 
     // 创建并持久化Queued Run
-    findByTenantIdempotencyKey(tenantId: string, idempotencyKey: string): AgentRun | null {
-        return this.store.findByTenantIdempotencyKey(tenantId, idempotencyKey);
+    findByUserIdempotencyKey(userId: string, idempotencyKey: string): AgentRun | null {
+        return this.store.findByUserIdempotencyKey(userId, idempotencyKey);
     }
 
     createQueuedRun(input : StartRunInput) : AgentRun {
         // §9.8 v1.4 Phase 3：幂等键命中时直接返回既有 Run，不再创建新 Run。
         if (input.idempotencyKey !== undefined && input.idempotencyKey.length > 0) {
-            const existing = this.store.findByTenantIdempotencyKey(
-                input.tenantId,
+            const existing = this.store.findByUserIdempotencyKey(
+                input.userId,
                 input.idempotencyKey,
             );
             if (existing !== null) {
@@ -130,7 +130,7 @@ export class RunService{
         // 创建真实的 AgentRun
         const run : AgentRun = {
             id:runId,
-            tenantId:input.tenantId,
+            userId:input.userId,
             harnessSessionId:input.harnessSessionId,
             status : "QUEUED",
             userInput:input.userInput,
@@ -169,8 +169,8 @@ export class RunService{
             this.store.create(run,createdEvent);
         } catch (error) {
             if (input.idempotencyKey !== undefined && input.idempotencyKey.length > 0) {
-                const existing = this.store.findByTenantIdempotencyKey(
-                    input.tenantId,
+                const existing = this.store.findByUserIdempotencyKey(
+                    input.userId,
                     input.idempotencyKey,
                 );
                 if (existing !== null) {
@@ -266,7 +266,7 @@ export class RunService{
             invoke: () => this.runtime.start({
                 run: {
                     runId:run.id,
-                    tenantId: run.tenantId,
+                    userId: run.userId,
                     harnessSessionId: run.harnessSessionId,
                     workspacePath: run.workspacePath,
                     ...(run.thinkingLevel === undefined ? {} : { thinkingLevel: run.thinkingLevel }),
@@ -351,7 +351,7 @@ export class RunService{
             invoke: () => this.runtime.resume({
                 run: {
                     runId: queuedRun.id,
-                    tenantId: queuedRun.tenantId,
+                    userId: queuedRun.userId,
                     harnessSessionId: queuedRun.harnessSessionId,
                     workspacePath: queuedRun.workspacePath,
                     ...(queuedRun.thinkingLevel === undefined ? {} : { thinkingLevel: queuedRun.thinkingLevel }),

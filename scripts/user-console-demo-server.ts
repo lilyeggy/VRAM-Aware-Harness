@@ -28,7 +28,7 @@ const composition = await createHarnessApplication(config, {
 await composition.application.start();
 startHarnessHttpServer(composition.httpApi, { port: 3977 });
 
-// 预置演示账号（邮箱即租户身份，注册后登录可用）。
+// 预置演示账号（邮箱即用户身份，注册后登录可用）。
 composition.credentialStore.registerUser("demo@team.local", "demo-password-123");
 
 console.log("");

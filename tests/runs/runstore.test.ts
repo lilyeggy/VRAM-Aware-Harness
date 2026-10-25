@@ -13,7 +13,7 @@ const createdAt = "2026-07-25T10:00:00.000Z";
 function createQueuedRun(runId = "run-1"): AgentRun {
     return {
         id: runId,
-        tenantId: "tenant-1",
+        userId: "user-1",
         harnessSessionId: "session-1",
         status: "QUEUED",
         userInput: "完成测试任务",
@@ -229,7 +229,7 @@ test("appendEventIfNew 只忽略相同 dedupe key 的重复事实", () => {
 });
 
 
-test("listForTenant/listForSession 返回无 runPolicy 的 Run，不抛 JSON.parse(undefined)（N27 回归）", () => {
+test("listForUser/listForSession 返回无 runPolicy 的 Run，不抛 JSON.parse(undefined)（N27 回归）", () => {
     const db = openHarnessDatabase(":memory:");
     const store = new RunStore(db);
 
@@ -237,12 +237,12 @@ test("listForTenant/listForSession 返回无 runPolicy 的 Run，不抛 JSON.par
         const run = createQueuedRun("run-list-1");
         store.create(run, createEvent(run.id, 1, "RUN_CREATED"));
 
-        const listed = store.listForTenant("tenant-1");
+        const listed = store.listForUser("user-1");
         expect(listed).toHaveLength(1);
         expect(listed[0]?.id).toBe("run-list-1");
         expect(listed[0]?.runPolicy).toBeUndefined();
 
-        const session = store.listForSession("tenant-1", "session-1");
+        const session = store.listForSession("user-1", "session-1");
         expect(session).toHaveLength(1);
         expect(session[0]?.id).toBe("run-list-1");
     } finally {
@@ -250,7 +250,7 @@ test("listForTenant/listForSession 返回无 runPolicy 的 Run，不抛 JSON.par
     }
 });
 
-test("listForTenant 保留 runPolicy（N27 回归）", () => {
+test("listForUser 保留 runPolicy（N27 回归）", () => {
     const db = openHarnessDatabase(":memory:");
     const store = new RunStore(db);
 
@@ -261,7 +261,7 @@ test("listForTenant 保留 runPolicy（N27 回归）", () => {
         };
         store.create(run, createEvent(run.id, 1, "RUN_CREATED"));
 
-        const listed = store.listForTenant("tenant-1");
+        const listed = store.listForUser("user-1");
         expect(listed).toHaveLength(1);
         expect(listed[0]?.runPolicy).toMatchObject({ allowNetwork: false });
     } finally {

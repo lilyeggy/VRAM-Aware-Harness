@@ -14,7 +14,7 @@
 
 - 当前 GPU 状态及其时间趋势；
 - 活跃 Run、排队时长和预计工作量；
-- Tenant 配额、优先级与 SLO；
+- User 配额、优先级与 SLO；
 - 历史 OOM、延迟和吞吐结果；
 - 可选模型、上下文长度和工具阶段。
 
@@ -35,7 +35,7 @@ Scheduling Agent 可以综合这些信息提出更有上下文的决策。不过
 观测层只提供事实，不做判断：
 
 ```text
-ResourceObserver + RunStore + Queue + Tenant/SLO
+ResourceObserver + RunStore + Queue + User/SLO
                          ↓
                   AdmissionContext
 ```
@@ -53,7 +53,7 @@ evidenceRefs
 最终决定必须经过不可由 Agent 修改的硬约束：
 
 - 观测数据过期或采集失败时不得假设资源充足；
-- 绝对显存安全线、全局并发上限和 Tenant 硬配额不可突破；
+- 绝对显存安全线、全局并发上限和 User 硬配额不可突破；
 - 不因资源压力粗暴终止正在执行的工具；
 - Agent 超时、不可用、低置信度或输出不合法时回退到确定性策略；
 - 若 Scheduling Agent 与工作负载共享同一 GPU，过载时不得依赖它完成安全决策。
@@ -99,6 +99,6 @@ evidenceRefs
 - OOM 与资源安全线违规率；
 - Run 吞吐量和 GPU 利用率；
 - 平均、P95 排队时间与端到端延迟；
-- Tenant 公平性与 SLO 违规率；
+- User 公平性与 SLO 违规率；
 - Agent 建议被 Guardrail 否决或回退的比例；
 - 决策延迟、模型成本和可用性。

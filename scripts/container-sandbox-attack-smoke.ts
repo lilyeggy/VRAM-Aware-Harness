@@ -19,8 +19,8 @@ class MemorySandboxStore {
 }
 
 const root = mkdtempSync(join(tmpdir(), "harness-sandbox-attacks-"));
-const workspaceA = join(root, "tenant-a");
-const workspaceB = join(root, "tenant-b");
+const workspaceA = join(root, "user-a");
+const workspaceB = join(root, "user-b");
 const hostSentinel = join(root, "host-secret");
 mkdirSync(workspaceA, { recursive: true, mode: 0o700 });
 mkdirSync(workspaceB, { recursive: true, mode: 0o700 });
@@ -30,14 +30,14 @@ writeFileSync(join(workspaceA, "marker"), "A");
 writeFileSync(join(workspaceB, "marker"), "B");
 writeFileSync(hostSentinel, "host-only");
 
-const tenantA = "tenant-a";
-const tenantB = "tenant-b";
+const userA = "user-a";
+const userB = "user-b";
 const store = new MemorySandboxStore();
 const provider = new ContainerSandboxProvider(
     store as unknown as SandboxStore,
     new EnvironmentSecretProvider({
-        [secretKey(tenantA, "TOKEN")]: "tenant-a-secret",
-        [secretKey(tenantB, "TOKEN")]: "tenant-b-secret",
+        [secretKey(userA, "TOKEN")]: "user-a-secret",
+        [secretKey(userB, "TOKEN")]: "user-b-secret",
     }),
     {
         image: process.env.HARNESS_CONTAINER_IMAGE ?? "alpine:3.20",
@@ -55,23 +55,23 @@ try {
     const handleA = await provider.create({
         id: sandboxA, runId: "run-a",
         workspacePath: workspaceA,
-        policy: policy("run-a", tenantA, workspaceA),
+        policy: policy("run-a", userA, workspaceA),
     });
     await provider.create({
         id: sandboxB, runId: "run-b",
         workspacePath: workspaceB,
-        policy: policy("run-b", tenantB, workspaceB),
+        policy: policy("run-b", userB, workspaceB),
     });
 
     assert(store.get(sandboxA)?.runtimeEvidence.verified === true, "A 未取得 runsc 证据");
     assert(store.get(sandboxB)?.runtimeEvidence.verified === true, "B 未取得 runsc 证据");
     assert(await stdout(provider, sandboxA, ["sh", "-lc", "cat /workspace/marker"]) === "A", "A Workspace 不可读");
     assert(await stdout(provider, sandboxB, ["sh", "-lc", "cat /workspace/marker"]) === "B", "B Workspace 不可读");
-    assert((await provider.execute(handleA.id, ["sh", "-lc", "test ! -e /workspace-b/marker"])).exitCode === 0, "跨 Tenant Workspace 可见");
+    assert((await provider.execute(handleA.id, ["sh", "-lc", "test ! -e /workspace-b/marker"])).exitCode === 0, "跨 User Workspace 可见");
     assert((await provider.execute(handleA.id, ["sh", "-lc", "test ! -e /host-secret"])).exitCode === 0, "宿主路径可见");
     assert((await provider.execute(handleA.id, ["sh", "-lc", "test ! -e /workspace/../workspace-b/marker"])).exitCode === 0, "Workspace 路径穿越成功");
-    assert(await stdout(provider, sandboxA, ["sh", "-lc", "printf %s \"$TOKEN\""]) === "tenant-a-secret", "A Secret 不匹配");
-    assert(await stdout(provider, sandboxB, ["sh", "-lc", "printf %s \"$TOKEN\""]) === "tenant-b-secret", "B Secret 不匹配");
+    assert(await stdout(provider, sandboxA, ["sh", "-lc", "printf %s \"$TOKEN\""]) === "user-a-secret", "A Secret 不匹配");
+    assert(await stdout(provider, sandboxB, ["sh", "-lc", "printf %s \"$TOKEN\""]) === "user-b-secret", "B Secret 不匹配");
     assert((await provider.execute(handleA.id, ["sh", "-lc", "test -z \"$OTHER_TOKEN\""])).exitCode === 0, "未授权 Secret 可见");
     assert((await provider.execute(handleA.id, ["sh", "-lc", "wget -T 2 -qO- http://1.1.1.1"])).exitCode !== 0, "默认网络可外连");
 
@@ -98,8 +98,8 @@ try {
         result: "PASS",
         runtime: store.get(sandboxA)?.runtime,
         checks: [
-            "runsc_runtime_evidence", "cross_tenant_workspace", "host_path",
-            "path_traversal", "tenant_secret", "network_none", "pid_limit",
+            "runsc_runtime_evidence", "cross_user_workspace", "host_path",
+            "path_traversal", "user_secret", "network_none", "pid_limit",
             "tmpfs_limit", "sandbox_lost",
         ],
     }, null, 2));
@@ -109,11 +109,11 @@ try {
     rmSync(root, { recursive: true, force: true });
 }
 
-function policy(runId: string, tenantId: string, workspacePath: string): EffectivePolicySnapshot {
+function policy(runId: string, userId: string, workspacePath: string): EffectivePolicySnapshot {
     return {
         ...unrestrictedPolicy,
         layers: [],
-        id: crypto.randomUUID(), runId, tenantId,
+        id: crypto.randomUUID(), runId, userId,
         createdAt: new Date().toISOString(),
         workspaceRoots: [workspacePath], allowNetwork: false,
         allowedSecrets: ["TOKEN"],
@@ -136,8 +136,8 @@ async function runDocker(args: readonly string[]): Promise<void> {
     await process.exited;
 }
 
-function secretKey(tenantId: string, name: string): string {
-    return `HARNESS_SECRET_${Buffer.from(tenantId, "utf8").toString("hex").toUpperCase()}_${name}`;
+function secretKey(userId: string, name: string): string {
+    return `HARNESS_SECRET_${Buffer.from(userId, "utf8").toString("hex").toUpperCase()}_${name}`;
 }
 
 function configuredUid(): number {

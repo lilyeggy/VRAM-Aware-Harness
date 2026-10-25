@@ -24,12 +24,12 @@ async function createTestComposition(): Promise<HarnessComposition> {
     });
 }
 
-function registerTenant(
+function registerUser(
     composition: HarnessComposition,
     email: string,
     sessionTag: string,
 ): Promise<{ token: string; workspaceId: string }> {
-    const registerTenantInner = async (): Promise<{ token: string; workspaceId: string }> => {
+    const registerUserInner = async (): Promise<{ token: string; workspaceId: string }> => {
         const registerResponse = await composition.httpApi.fetch(
             new Request("http://harness.local/auth/register", {
                 method:"POST",
@@ -65,22 +65,22 @@ function registerTenant(
         };
         return { token, workspaceId: workspace.id };
     };
-    return registerTenantInner();
+    return registerUserInner();
 }
 
 /**
  * B6：harnessSessionId 不能被客户端任意抢注。
- * 会话归属以服务端最早一条 Run 的租户为准：首次使用即认领，
- * 其他租户再提交同一 sessionId 一律 409。
+ * 会话归属以服务端最早一条 Run 的用户为准：首次使用即认领，
+ * 其他用户再提交同一 sessionId 一律 409。
  */
-test("POST /runs 拒绝其他租户占用已被认领的 harnessSessionId", async () => {
+test("POST /runs 拒绝其他用户占用已被认领的 harnessSessionId", async () => {
     const composition = await createTestComposition();
 
     try {
         await composition.application.start();
 
-        const tenantA = await registerTenant(composition, "owner-a@example.com", "a");
-        const tenantB = await registerTenant(composition, "other-b@example.com", "b");
+        const userA = await registerUser(composition, "owner-a@example.com", "a");
+        const userB = await registerUser(composition, "other-b@example.com", "b");
 
         const submitRun = async (
             token: string,
@@ -95,28 +95,28 @@ test("POST /runs 拒绝其他租户占用已被认领的 harnessSessionId", asyn
                 },
                 body: JSON.stringify({
                     sessionId,
-                    userInput:"多租户会话归属验证",
+                    userInput:"多用户会话归属验证",
                     workspaceId,
                 }),
             }),
         );
 
-        // tenant-a 首次使用 session-shared → 认领成功。
-        const first = await submitRun(tenantA.token, tenantA.workspaceId, "session-shared");
+        // user-a 首次使用 session-shared → 认领成功。
+        const first = await submitRun(userA.token, userA.workspaceId, "session-shared");
         expect(first.status).toBe(202);
 
-        // tenant-b 抢注同一会话 → 409。
-        const squatter = await submitRun(tenantB.token, tenantB.workspaceId, "session-shared");
+        // user-b 抢注同一会话 → 409。
+        const squatter = await submitRun(userB.token, userB.workspaceId, "session-shared");
         expect(squatter.status).toBe(409);
         expect(((await squatter.json()) as { error:string }).error)
-            .toContain("已被其他租户占用");
+            .toContain("已被其他用户占用");
 
-        // 归属租户复用自己的会话 → 仍然放行。
-        const ownerAgain = await submitRun(tenantA.token, tenantA.workspaceId, "session-shared");
+        // 归属用户复用自己的会话 → 仍然放行。
+        const ownerAgain = await submitRun(userA.token, userA.workspaceId, "session-shared");
         expect(ownerAgain.status).toBe(202);
 
-        // 全新 sessionId 任意租户都可首次认领。
-        const fresh = await submitRun(tenantB.token, tenantB.workspaceId, "session-fresh-b");
+        // 全新 sessionId 任意用户都可首次认领。
+        const fresh = await submitRun(userB.token, userB.workspaceId, "session-fresh-b");
         expect(fresh.status).toBe(202);
     } finally {
         await composition.close();
@@ -131,18 +131,18 @@ test("资源可见性显式化 + 资源级审计 + 登出语义", async () => {
 
     try {
         await composition.application.start();
-        const tenant = await registerTenant(composition, "audit-user@example.com", "d");
+        const user = await registerUser(composition, "audit-user@example.com", "d");
 
         const submitResponse = await composition.httpApi.fetch(
             new Request("http://harness.local/runs", {
                 method:"POST",
                 headers:{
                     "content-type": "application/json",
-                    authorization:`Bearer ${tenant.token}`,
+                    authorization:`Bearer ${user.token}`,
                 },
                 body: JSON.stringify({
                     userInput:"审计验证任务",
-                    workspaceId: tenant.workspaceId,
+                    workspaceId: user.workspaceId,
                 }),
             }),
         );
@@ -152,23 +152,23 @@ test("资源可见性显式化 + 资源级审计 + 登出语义", async () => {
         // D4：提交动作落在具体资源上（resourceType=RUN，resourceId=run id）。
         const auditResponse = await composition.httpApi.fetch(
             new Request("http://harness.local/audit", {
-                headers:{ authorization:`Bearer ${tenant.token}` },
+                headers:{ authorization:`Bearer ${user.token}` },
             }),
         );
         expect(auditResponse.status).toBe(200);
         const auditBody = (await auditResponse.json()) as {
-            events: Array<{ action:string; resourceType:string|null; resourceId:string|null; tenantId:string|null }>;
+            events: Array<{ action:string; resourceType:string|null; resourceId:string|null; userId:string|null }>;
         };
         const submitAudit = auditBody.events.find((event) => event.action === "RUN_SUBMIT");
         expect(submitAudit).toBeDefined();
         expect(submitAudit!.resourceType).toBe("RUN");
         expect(submitAudit!.resourceId).toBe(run.id);
-        expect(submitAudit!.tenantId).not.toBeNull();
+        expect(submitAudit!.userId).not.toBeNull();
 
         // D4：审计查询支持 limit 分页参数。
         const pagedResponse = await composition.httpApi.fetch(
             new Request("http://harness.local/audit?limit=1", {
-                headers:{ authorization:`Bearer ${tenant.token}` },
+                headers:{ authorization:`Bearer ${user.token}` },
             }),
         );
         expect(((await pagedResponse.json()) as { events:unknown[] }).events)
@@ -186,7 +186,7 @@ test("资源可见性显式化 + 资源级审计 + 登出语义", async () => {
         const goodLogout = await composition.httpApi.fetch(
             new Request("http://harness.local/auth/logout", {
                 method:"POST",
-                headers:{ authorization:`Bearer ${tenant.token}` },
+                headers:{ authorization:`Bearer ${user.token}` },
             }),
         );
         expect(goodLogout.status).toBe(200);
@@ -194,7 +194,7 @@ test("资源可见性显式化 + 资源级审计 + 登出语义", async () => {
         const repeatLogout = await composition.httpApi.fetch(
             new Request("http://harness.local/auth/logout", {
                 method:"POST",
-                headers:{ authorization:`Bearer ${tenant.token}` },
+                headers:{ authorization:`Bearer ${user.token}` },
             }),
         );
         expect(repeatLogout.status).toBe(401);

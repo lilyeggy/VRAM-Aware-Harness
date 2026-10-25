@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="color-scheme" content="dark" />
-  <title>多租户 Agent 任务服务技术架构图谱</title>
+  <title>多用户 Agent 任务服务技术架构图谱</title>
   <style>
     :root {
       --bg: #07100f;
@@ -1600,7 +1600,7 @@
     <div class="shell topbar-inner">
       <a class="brand" href="#top" aria-label="回到页面顶部">
         <span class="brand-mark">MT</span>
-        <span>Multi-tenant Agent Task Service Atlas</span>
+        <span>Multi-user Agent Task Service Atlas</span>
       </a>
       <nav class="nav" aria-label="页面导航">
         <a href="#meaning">概念边界</a>
@@ -1630,14 +1630,14 @@
         </div>
       </div>
 
-      <div class="platform-map" aria-label="多租户 Agent 平台结构图">
+      <div class="platform-map" aria-label="多用户 Agent 平台结构图">
         <div class="map-head">
           <span>one platform · many isolated runs</span>
           <span>logical architecture</span>
         </div>
         <div class="control-plane">
           <div class="plane-title">
-            <span>Tenant Control Plane</span>
+            <span>User Control Plane</span>
             <span>shared governance</span>
           </div>
           <div class="control-items">
@@ -1650,17 +1650,17 @@
         </div>
         <div class="worker-grid">
           <article class="worker">
-            <div class="worker-user"><span>tenant-a</span><span>run-101</span></div>
+            <div class="worker-user"><span>user-a</span><span>run-101</span></div>
             <div class="worker-run">AgentRun A</div>
             <div class="worker-box">Pi Session<br />Workspace / Tools</div>
           </article>
           <article class="worker">
-            <div class="worker-user"><span>tenant-b</span><span>run-202</span></div>
+            <div class="worker-user"><span>user-b</span><span>run-202</span></div>
             <div class="worker-run">AgentRun B</div>
             <div class="worker-box">Pi Session<br />Workspace / Tools</div>
           </article>
           <article class="worker">
-            <div class="worker-user"><span>tenant-a</span><span>run-103</span></div>
+            <div class="worker-user"><span>user-a</span><span>run-103</span></div>
             <div class="worker-run">AgentRun C</div>
             <div class="worker-box">Pi Session<br />Workspace / Tools</div>
           </article>
@@ -1681,7 +1681,7 @@
             <h2>“很多用户”不是一个技术结论</h2>
           </div>
           <p class="section-lead">
-            多用户、多租户、多任务和多 Agent 是四个正交维度。面试中先拆开它们，后续架构讨论才不会混乱。
+            多用户、多用户、多任务和多 Agent 是四个正交维度。面试中先拆开它们，后续架构讨论才不会混乱。
           </p>
         </div>
 
@@ -1694,9 +1694,9 @@
           </article>
           <article class="orthogonal-card">
             <span class="card-code">Isolation dimension</span>
-            <h3>多租户</h3>
+            <h3>多用户</h3>
             <p>用户或组织拥有独立的数据、权限、配额、Secret、策略与审计边界。</p>
-            <span class="example">tenantId → policy / quota / data</span>
+            <span class="example">userId → policy / quota / data</span>
           </article>
           <article class="orthogonal-card">
             <span class="card-code">Concurrency dimension</span>
@@ -1707,7 +1707,7 @@
           <article class="orthogonal-card">
             <span class="card-code">Orchestration dimension</span>
             <h3>多 Agent</h3>
-            <p>单个任务内部存在 Lead、Subagent 或专家团队；它解决分工，不等于多租户。</p>
+            <p>单个任务内部存在 Lead、Subagent 或专家团队；它解决分工，不等于多用户。</p>
             <span class="example">one run → N agent workers</span>
           </article>
         </div>
@@ -1726,7 +1726,7 @@
           </p>
         </div>
 
-        <div id="system-tabs" class="system-tabs reveal" role="tablist" aria-label="选择多租户 Agent 系统"></div>
+        <div id="system-tabs" class="system-tabs reveal" role="tablist" aria-label="选择多用户 Agent 系统"></div>
 
         <div class="system-stage reveal">
           <article class="swimlane-board" aria-live="polite">
@@ -1745,8 +1745,8 @@
             <h3 id="profile-title" class="profile-title"></h3>
             <p id="profile-summary" class="profile-summary"></p>
             <div class="profile-fact">
-              <h4>租户边界</h4>
-              <p id="profile-tenant"></p>
+              <h4>用户边界</h4>
+              <p id="profile-user"></p>
             </div>
             <div class="profile-fact">
               <h4>执行隔离</h4>
@@ -1788,7 +1788,7 @@
               <thead>
                 <tr>
                   <th>系统</th>
-                  <th>Tenant / Identity</th>
+                  <th>User / Identity</th>
                   <th>Run / Session</th>
                   <th>执行隔离</th>
                   <th>持久状态</th>
@@ -1817,7 +1817,7 @@
             <h2>一次请求，不是直接调用 session.prompt()</h2>
           </div>
           <p class="section-lead">
-            点击步骤，看一个 Tenant 的任务怎样从入口穿过控制面，最终进入 Pi 和 vLLM。每一步都对应一个可测试的工程承诺。
+            点击步骤，看一个 User 的任务怎样从入口穿过控制面，最终进入 Pi 和 vLLM。每一步都对应一个可测试的工程承诺。
           </p>
         </div>
 
@@ -1829,9 +1829,9 @@
           </aside>
           <div id="journey-canvas" class="journey-canvas" aria-live="polite">
             <div class="journey-node"><b>API / Task</b><span>认证用户并接收 workspaceId、任务和幂等键</span></div>
-            <div class="journey-node"><b>Tenant Context</b><span>从 Principal 派生 Tenant、scope、策略和配额</span></div>
+            <div class="journey-node"><b>User Context</b><span>从 Principal 派生 User、scope、策略和配额</span></div>
             <div class="journey-node"><b>Admission</b><span>结合队列、GPU 与硬约束决定 START / QUEUE</span></div>
-            <div class="journey-node"><b>Fair Queue</b><span>按 Tenant 公平性和优先级选择下一个 Run</span></div>
+            <div class="journey-node"><b>Fair Queue</b><span>按 User 公平性和优先级选择下一个 Run</span></div>
             <div class="journey-node"><b>Sandbox</b><span>按 ExecutionProfile 创建 Attempt 隔离环境</span></div>
             <div class="journey-node"><b>Pi + Tools</b><span>在 Sandbox 内读写 Workspace、执行命令并转译事件</span></div>
             <div class="journey-node"><b>vLLM / GPU</b><span>模型请求进入 batching、KV cache 和物理显存调度</span></div>
@@ -1861,9 +1861,9 @@
           <article class="scheduler-box">
             <p class="eyebrow">Scheduler A · our ownership</p>
             <h3>Agent Run Scheduler</h3>
-            <p>决定哪一个 Tenant 的哪一个 Run，现在是否可以向 Runtime 提交新的工作。</p>
+            <p>决定哪一个 User 的哪一个 Run，现在是否可以向 Runtime 提交新的工作。</p>
             <div class="scheduler-list">
-              <div class="scheduler-item"><b>INPUT</b><span>Tenant、优先级、队列等待、GPU 趋势、任务估计</span></div>
+              <div class="scheduler-item"><b>INPUT</b><span>User、优先级、队列等待、GPU 趋势、任务估计</span></div>
               <div class="scheduler-item"><b>DECISION</b><span>START / QUEUE / DEFER / REJECT</span></div>
               <div class="scheduler-item"><b>GUARANTEE</b><span>并发上限、公平性、SLO、取消、可解释原因</span></div>
               <div class="scheduler-item"><b>UNIT</b><span>AgentRun / model execution admission</span></div>
@@ -1929,13 +1929,13 @@
           </article>
           <article class="blueprint-item">
             <span class="blueprint-status">later slice</span>
-            <h3>Tenant Context</h3>
-            <p>Tenant → User → Run → RuntimeSession 显式映射；策略、Secret、配额和数据查询全部带 tenantId。</p>
+            <h3>User Context</h3>
+            <p>User → User → Run → RuntimeSession 显式映射；策略、Secret、配额和数据查询全部带 userId。</p>
           </article>
           <article class="blueprint-item">
             <span class="blueprint-status">later slice</span>
             <h3>Fair Queue + Lease</h3>
-            <p>借鉴托管平台的并发边界：per-tenant 限额、全局并发、租约和幂等消费必须分开建模。</p>
+            <p>借鉴托管平台的并发边界：per-user 限额、全局并发、租约和幂等消费必须分开建模。</p>
           </article>
           <article class="blueprint-item">
             <span class="blueprint-status">later slice</span>
@@ -1972,7 +1972,7 @@
               <span>Parallel SOLO tasks</span>
               <span>Editor · browser · terminal · docs</span>
             </div>
-            <div class="hybrid-note">可学习：多任务监督 UI。未知：服务端公平队列、租户数据模型、资源调度。</div>
+            <div class="hybrid-note">可学习：多任务监督 UI。未知：服务端公平队列、用户数据模型、资源调度。</div>
             <a href="https://www.trae.ai/blog/product_solo_1112" target="_blank" rel="noreferrer">官方 SOLO 介绍 ↗</a>
           </article>
           <article class="hybrid-card">
@@ -1983,7 +1983,7 @@
               <span>Lead + independent teammates</span>
               <span>Shared task list + messaging</span>
             </div>
-            <div class="hybrid-note">可学习：多 Agent 协作协议。注意：官方 CLI 文档显示 Team 数据可本地存储，不等于云端多租户实现。</div>
+            <div class="hybrid-note">可学习：多 Agent 协作协议。注意：官方 CLI 文档显示 Team 数据可本地存储，不等于云端多用户实现。</div>
             <a href="https://www.codebuddy.ai/docs/cli/agent-teams" target="_blank" rel="noreferrer">官方 Agent Teams ↗</a>
           </article>
           <article class="hybrid-card">
@@ -1994,7 +1994,7 @@
               <span>Quest task board</span>
               <span>Agent or Experts + review</span>
             </div>
-            <div class="hybrid-note">可学习：任务状态、Artifact review 与 Worktree。未知：平台后端 Tenant 和容量管理实现。</div>
+            <div class="hybrid-note">可学习：任务状态、Artifact review 与 Worktree。未知：平台后端 User 和容量管理实现。</div>
             <a href="https://docs.qoder.com/user-guide/quest/overview" target="_blank" rel="noreferrer">官方 Quest 架构 ↗</a>
           </article>
         </div>
@@ -2006,20 +2006,20 @@
         <div class="section-head reveal">
           <div>
             <span class="section-index">08 · interview checklist</span>
-            <h2>设计多租户 Harness 时，必须回答的八个问题</h2>
+            <h2>设计多用户 Harness 时，必须回答的八个问题</h2>
           </div>
           <p class="section-lead">
-            如果这些问题答不清楚，系统往往只是“能跑多个 Agent”，还不能称为可靠的多租户执行平台。
+            如果这些问题答不清楚，系统往往只是“能跑多个 Agent”，还不能称为可靠的多用户执行平台。
           </p>
         </div>
 
         <div class="questions reveal">
-          <div class="question"><b>身份怎样传递？</b><span>tenantId、userId、runId、runtimeSessionId 谁生成、谁校验，能否跨租户伪造？</span></div>
+          <div class="question"><b>身份怎样传递？</b><span>userId、userId、runId、runtimeSessionId 谁生成、谁校验，能否跨用户伪造？</span></div>
           <div class="question"><b>配额在哪一层执行？</b><span>并发 Run、排队数、Token、GPU 时间、工具调用分别由谁限流？</span></div>
           <div class="question"><b>隔离边界是什么？</b><span>只做数据库逻辑隔离，还是进程、容器、microVM、网络和 Secret 也隔离？</span></div>
           <div class="question"><b>Worker 消失后还剩什么？</b><span>哪些状态在内存，哪些事件已落盘，恢复会不会重复执行有副作用的工具？</span></div>
           <div class="question"><b>如何防止重复执行？</b><span>Task 幂等键、Run lease、工具幂等键和事件唯一约束是否分别存在？</span></div>
-          <div class="question"><b>公平性怎样证明？</b><span>大 Tenant 是否会饿死小 Tenant？优先级是否能绕过全局硬约束？</span></div>
+          <div class="question"><b>公平性怎样证明？</b><span>大 User 是否会饿死小 User？优先级是否能绕过全局硬约束？</span></div>
           <div class="question"><b>审计记录到什么粒度？</b><span>命令、模型请求、工具参数、审批人、策略版本和资源快照能否串成时间线？</span></div>
           <div class="question"><b>Agent 和模型资源谁负责？</b><span>Harness 决定何时提交；推理服务决定 token、batch、KV 和 GPU 物理分配。</span></div>
         </div>
@@ -2053,7 +2053,7 @@
 
   <footer>
     <div class="shell footer-inner">
-      <span>Multi-tenant Agent Task Service Architecture Atlas</span>
+      <span>Multi-user Agent Task Service Architecture Atlas</span>
       <span>用户获得任务结果；内部 Sandbox 与编排让多个 Run 安全、公平、可恢复地共存。</span>
     </div>
   </footer>
@@ -2068,25 +2068,25 @@
         type: "user-facing product · target architecture",
         evidence: "项目设计 · 目标架构",
         summary: "用户在受管 Workspace 中提交任务并获得 Diff/Artifact；内部用 Pi 承担 Agent loop，以 Sandbox 和编排建立安全执行边界。",
-        tenant: "认证 Principal → Tenant → Workspace → Task/Run；身份、数据、策略、资源和结果按 Tenant 收口。",
+        user: "认证 Principal → User → Workspace → Task/Run；身份、数据、策略、资源和结果按 User 收口。",
         isolation: "目标是每 Attempt 独立容器；文件、进程、网络、Secret 和计算资源攻击测试必须通过。当前 ManagedLocal 仅用于开发。",
         state: "RunEvent 作为事实；Checkpoint 标记安全恢复边界；Pi Session 提供 Runtime 上下文。",
         resource: "ResourceObserver 读取 GPU / vLLM 信号；ExecutionPolicy 决定 Run 启动或排队。",
         borrow: "把 AgentCore 的 Session 映射、OpenHands 的远程执行边界、Codex 的审计证据和云平台的双层配额组合起来。",
-        source: "multi-tenant-agent-task-service-roadmap.zh-CN.md",
+        source: "multi-user-agent-task-service-roadmap.zh-CN.md",
         lanes: [
-          ["tenant", "Product / Tenant", [["Authenticated API", "principal + workspaceId"], ["Tenant Context", "scope + quota + policy"], ["Task Result", "answer + diff + artifact"]]],
-          ["control", "Control Plane", [["Admission", "GPU + queue + guardrails"], ["Fair Queue", "per-tenant scheduling"], ["Run Lease", "single active consumer"]]],
+          ["user", "Product / User", [["Authenticated API", "principal + workspaceId"], ["User Context", "scope + quota + policy"], ["Task Result", "answer + diff + artifact"]]],
+          ["control", "Control Plane", [["Admission", "GPU + queue + guardrails"], ["Fair Queue", "per-user scheduling"], ["Run Lease", "single active consumer"]]],
           ["execution", "Sandbox / Runtime", [["SandboxInstance", "per-attempt isolation"], ["PiAdapter", "runtime translation"], ["Tools", "execute inside sandbox"]]],
-          ["state", "State Plane", [["RunEvent", "append-only facts"], ["Checkpoint", "safe recovery boundary"], ["Audit View", "tenant timeline"]]],
+          ["state", "State Plane", [["RunEvent", "append-only facts"], ["Checkpoint", "safe recovery boundary"], ["Audit View", "user timeline"]]],
           ["model", "Inference Plane", [["vLLM API", "model request"], ["Scheduler", "batch + KV"], ["GPU", "physical VRAM"]]]
         ],
         matrix: {
-          tenant: "可信 Principal；Tenant-scoped Workspace、任务、策略与结果",
+          user: "可信 Principal；User-scoped Workspace、任务、策略与结果",
           run: "AgentRun ≠ Pi Session；start / resume / interrupt",
           isolation: "当前仅最小逻辑边界；产品目标为每 Attempt 容器和真实攻击测试",
           state: "SQLite RunEvent + Checkpoint 目标",
-          quota: "全局并发 + per-tenant 公平队列 + GPU admission",
+          quota: "全局并发 + per-user 公平队列 + GPU admission",
           audit: "统一 Run 时间线目标",
           model: "自托管 vLLM；可观测 GPU，但不接管 KV",
           openness: "本项目完全可见"
@@ -2100,21 +2100,21 @@
         type: "managed coding agent product",
         evidence: "官方行为公开 · 后端部分封闭",
         summary: "面向个人与企业 Workspace 的云端编码 Agent；每个任务在独立云环境运行，可并行执行并产出可审查证据。",
-        tenant: "ChatGPT 用户 / Workspace / Tenant；GitHub 仓库授权、环境可见性与企业管理员配置形成访问边界。",
+        user: "ChatGPT 用户 / Workspace / User；GitHub 仓库授权、环境可见性与企业管理员配置形成访问边界。",
         isolation: "每个任务进入独立、预加载仓库的云端 sandbox；网络默认受限，任务相互独立。",
         state: "任务进度、终端日志、测试证据、Diff 和后续修订保留在云端任务上下文中。",
         resource: "用户看到计划额度、credits 和并行任务；内部队列与 GPU placement 未公开。",
         borrow: "把“执行证据”做成一等产物：事件、日志、测试结果和 Diff 必须可由用户验证。",
         source: "https://openai.com/index/introducing-codex/",
         lanes: [
-          ["tenant", "Tenant / Access", [["ChatGPT Identity", "user + workspace"], ["GitHub Auth", "repo allowlist"], ["Environment", "shared or private config"]]],
+          ["user", "User / Access", [["ChatGPT Identity", "user + workspace"], ["GitHub Auth", "repo allowlist"], ["Environment", "shared or private config"]]],
           ["control", "Cloud Control", [["Task Create", "Ask / Code"], ["Parallel Tasks", "independent runs"], ["Admin Controls", "environment + analytics"]]],
           ["execution", "Task Sandbox", [["Repo Checkout", "preloaded codebase"], ["Codex Agent", "edit + commands"], ["Verification", "tests + linters"]]],
           ["state", "Evidence", [["Progress", "live task status"], ["Logs / Citations", "verifiable actions"], ["Diff / PR", "review + integrate"]]],
           ["model", "Model Service", [["Model Routing", "managed"], ["Capacity", "credits / limits"], ["Inference", "implementation hidden"]]]
         ],
         matrix: {
-          tenant: "ChatGPT Tenant / Workspace / user / repo authorization",
+          user: "ChatGPT User / Workspace / user / repo authorization",
           run: "云端 task；可并行、迭代和继续",
           isolation: "每任务独立 cloud sandbox",
           state: "任务进度、日志、测试、Diff、环境配置",
@@ -2132,21 +2132,21 @@
         type: "repository-native cloud agent",
         evidence: "官方执行环境与治理公开",
         summary: "把 Issue、PR、自动化触发器转成云端编码 Session，在 GitHub Actions 驱动的临时开发环境中工作。",
-        tenant: "GitHub Enterprise / Organization / Repository 权限天然成为租户与资源边界；策略可跨 GitHub、IDE 和 CLI surface。",
+        user: "GitHub Enterprise / Organization / Repository 权限天然成为用户与资源边界；策略可跨 GitHub、IDE 和 CLI surface。",
         isolation: "每个 coding session 使用自己的 ephemeral development environment，由 GitHub Actions 提供。",
         state: "任务与 PR/Issue 生命周期绑定；代码变更、检查和审计事件留在 GitHub 对象模型中。",
         resource: "消费 Actions minutes 和 AI credits；组织策略控制可用性，底层 capacity scheduling 不公开。",
         borrow: "不要另造所有业务对象：Task 可以与现有 Issue / PR / workflow 身份和权限模型对齐。",
         source: "https://docs.github.com/en/copilot/concepts/agents/cloud-agent/about-cloud-agent",
         lanes: [
-          ["tenant", "GitHub Scope", [["Enterprise", "AI controls"], ["Organization", "policy + seats"], ["Repository", "code permissions"]]],
+          ["user", "GitHub Scope", [["Enterprise", "AI controls"], ["Organization", "policy + seats"], ["Repository", "code permissions"]]],
           ["control", "Task Control", [["Issue / Prompt", "task source"], ["Session", "cloud agent run"], ["Automation", "schedule / event trigger"]]],
           ["execution", "Actions Env", [["Ephemeral Env", "isolated workspace"], ["Copilot Agent", "explore + edit"], ["Checks", "tests + linters"]]],
           ["state", "GitHub Objects", [["Progress", "session status"], ["Branch / PR", "review boundary"], ["Audit Log", "actor:Copilot"]]],
           ["model", "Managed Capacity", [["AI Credits", "usage unit"], ["Actions Minutes", "compute unit"], ["Model Plane", "implementation hidden"]]]
         ],
         matrix: {
-          tenant: "Enterprise → Organization → Repository RBAC",
+          user: "Enterprise → Organization → Repository RBAC",
           run: "Cloud agent session；Issue / PR / automation 触发",
           isolation: "GitHub Actions ephemeral development environment",
           state: "Issue、branch、PR、checks、session status",
@@ -2164,21 +2164,21 @@
         type: "open multi-user architecture",
         evidence: "组件架构公开 · 最适合读源码",
         summary: "以 HTTP / WebSocket Agent Server、Conversation Handler 和 Workspace Manager 组织多用户远程 Agent 执行。",
-        tenant: "API 层负责认证授权；Workspace Manager 为每个用户分配隔离 workspace。开源本地 GUI 本身不适合共享多租户。",
+        user: "API 层负责认证授权；Workspace Manager 为每个用户分配隔离 workspace。开源本地 GUI 本身不适合共享多用户。",
         isolation: "生产模式可为用户创建 Docker / remote sandbox；Docker Manager 负责创建、限制和销毁容器。",
         state: "Conversation Handler 管会话状态和并发；WebSocket 流式返回事件；workspace 负责执行侧文件状态。",
         resource: "公开设计包含容器生命周期与 resource limits；模型 quota / GPU 取决于外接 LLM 和部署者。",
         borrow: "把 Conversation Handler 和 Workspace Manager 分离：前者管状态，后者管执行环境生命周期。",
         source: "https://docs.openhands.dev/sdk/arch/agent-server",
         lanes: [
-          ["tenant", "API Boundary", [["FastAPI", "HTTP ingress"], ["AuthN / AuthZ", "user boundary"], ["Validation", "request contract"]]],
+          ["user", "API Boundary", [["FastAPI", "HTTP ingress"], ["AuthN / AuthZ", "user boundary"], ["Validation", "request contract"]]],
           ["control", "Conversation", [["Handler", "route + state"], ["Concurrency", "request coordination"], ["WebSocket", "stream events"]]],
           ["execution", "Workspace", [["Workspace Manager", "provider selection"], ["Docker Manager", "container lifecycle"], ["Agent Server", "agent + tools"]]],
           ["state", "Action Loop", [["Action", "tool intent"], ["Executor", "sandbox operation"], ["Observation", "result to agent"]]],
           ["model", "LLM Provider", [["Model Config", "BYO provider"], ["Rate Limits", "external"], ["GPU", "deployment-specific"]]]
         ],
         matrix: {
-          tenant: "Agent Server auth + per-user workspace；Enterprise RBAC",
+          user: "Agent Server auth + per-user workspace；Enterprise RBAC",
           run: "Conversation Handler 管 conversation 和并发",
           isolation: "Docker / remote sandbox；每用户 workspace",
           state: "Conversation state + workspace files + event stream",
@@ -2196,21 +2196,21 @@
         type: "managed agent runtime substrate",
         evidence: "基础设施语义公开",
         summary: "框架无关的 Agent 托管底座：Runtime 管伸缩、Session、microVM 隔离和可观测性，Agent loop 仍由应用提供。",
-        tenant: "IAM / JWT 负责入口身份；关键点是 AgentCore 不替应用强制 sessionId → userId 映射，客户端后端必须维护。",
+        user: "IAM / JWT 负责入口身份；关键点是 AgentCore 不替应用强制 sessionId → userId 映射，客户端后端必须维护。",
         isolation: "每个 runtimeSessionId 获得专用 microVM，CPU、内存和文件系统隔离；Session 结束后 VM 销毁并清理内存。",
         state: "microVM 内状态是临时的；持久文件用 session storage，结构化长期信息用 AgentCore Memory。",
         resource: "Runtime 自动伸缩并按 Session 计费；单次生命周期最长可达 8 小时。每用户 Session 上限仍由应用控制。",
-        borrow: "最值得抄的是责任声明：基础设施隔离 Session，但 Tenant 映射和每用户并发必须由我们的控制面完成。",
+        borrow: "最值得抄的是责任声明：基础设施隔离 Session，但 User 映射和每用户并发必须由我们的控制面完成。",
         source: "https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-sessions.html",
         lanes: [
-          ["tenant", "Application Edge", [["Client Backend", "user mapping"], ["IAM / JWT", "authenticate"], ["Session ID", "app-provided identity"]]],
+          ["user", "Application Edge", [["Client Backend", "user mapping"], ["IAM / JWT", "authenticate"], ["Session ID", "app-provided identity"]]],
           ["control", "AgentCore Runtime", [["Endpoint", "versioned runtime"], ["Session Router", "microVM stickiness"], ["Lifecycle", "active / idle / stopped"]]],
           ["execution", "Dedicated microVM", [["Agent Code", "any framework"], ["Command API", "deterministic shell"], ["Tools", "gateway / browser / code"]]],
           ["state", "Persistence", [["Ephemeral RAM", "compute lifetime"], ["Session Storage", "filesystem resume"], ["Memory", "long-term structured state"]]],
           ["model", "Model Access", [["Bedrock / Other", "model call"], ["CloudWatch", "metrics + traces"], ["Capacity", "managed separately"]]]
         ],
         matrix: {
-          tenant: "IAM/JWT；user ↔ session 映射由应用维护",
+          user: "IAM/JWT；user ↔ session 映射由应用维护",
           run: "runtimeSessionId；Active / Idle / Stopped；最长 8h 生命周期",
           isolation: "每 Session 专用 microVM",
           state: "临时上下文 + session storage + AgentCore Memory",
@@ -2228,21 +2228,21 @@
         type: "managed enterprise agent platform",
         evidence: "托管合同与网络架构公开",
         summary: "将自定义 Agent 容器部署到托管基础设施；平台负责 Session 沙箱、状态恢复、Agent 身份、伸缩和可观测性。",
-        tenant: "Foundry Resource → Project → Agent；Azure RBAC 控制创建、调用和管理，每个 Agent 有独立 Entra identity。",
+        user: "Foundry Resource → Project → Agent；Azure RBAC 控制创建、调用和管理，每个 Agent 有独立 Entra identity。",
         isolation: "每个 Session 运行在 VM-isolated sandbox，拥有持久 $HOME / files；Session 空闲后可 scale-to-zero 并恢复。",
         state: "平台保存 Session；Basic 使用逻辑隔离托管存储，Standard 可把文件、Search 和 Cosmos DB 放进客户资源。",
         resource: "每 Session 配置 CPU / memory；模型调用额度在 model deployment 层另行执行，Agent 与模型是两套 limit。",
         borrow: "显式分离 Agent Service quota 和 Model quota；这正对应我们的 Run 并发与 vLLM / GPU 容量。",
         source: "https://learn.microsoft.com/en-us/azure/foundry/agents/concepts/hosted-agents",
         lanes: [
-          ["tenant", "Azure Scope", [["Foundry Resource", "governance"], ["Project", "team isolation"], ["Agent Identity", "dedicated Entra ID"]]],
+          ["user", "Azure Scope", [["Foundry Resource", "governance"], ["Project", "team isolation"], ["Agent Identity", "dedicated Entra ID"]]],
           ["control", "Agent Service", [["Endpoint", "Responses / Invoke"], ["Session", "platform lifecycle"], ["Autoscale", "scale to zero"]]],
           ["execution", "VM Sandbox", [["Agent Container", "custom framework"], ["Toolbox MCP", "managed tools"], ["Data Proxy", "customer resources"]]],
           ["state", "State Services", [["Persistent HOME", "resume files"], ["Cosmos DB", "threads / messages"], ["Storage / Search", "files + retrieval"]]],
           ["model", "Model Deployment", [["Model Catalog", "reasoning"], ["Model Quota", "TPM / RPM"], ["Agent Quota", "separate limits"]]]
         ],
         matrix: {
-          tenant: "Resource → Project → Agent；Azure RBAC + Agent identity",
+          user: "Resource → Project → Agent；Azure RBAC + Agent identity",
           run: "Per-session sandbox；Responses / Invocations / WebSocket",
           isolation: "每 Session VM-isolated sandbox + VNet options",
           state: "持久 HOME / files；托管或 BYO Storage / Cosmos / Search",
@@ -2255,10 +2255,10 @@
     ];
 
     const journeySteps = [
-      ["01 / ingress", "入口验证 API Key，从 RequestPrincipal 派生 Tenant，再以 workspaceId 创建幂等 Task；不接受客户端自报身份和任意宿主机路径。"],
-      ["02 / identity", "所有 Workspace、Run、事件和操作都使用 Tenant-scoped 查询；跨租户对象对外不可见。"],
-      ["03 / admission", "确定性 Hard Guardrails 先判断全局并发、Tenant 配额和 GPU 安全线，再决定启动或排队。"],
-      ["04 / queue", "Fair Queue 决定谁先运行。优先级属于 Tenant 策略，但不能绕过显存和全局并发硬约束。"],
+      ["01 / ingress", "入口验证 API Key，从 RequestPrincipal 派生 User，再以 workspaceId 创建幂等 Task；不接受客户端自报身份和任意宿主机路径。"],
+      ["02 / identity", "所有 Workspace、Run、事件和操作都使用 User-scoped 查询；跨用户对象对外不可见。"],
+      ["03 / admission", "确定性 Hard Guardrails 先判断全局并发、User 配额和 GPU 安全线，再决定启动或排队。"],
+      ["04 / queue", "Fair Queue 决定谁先运行。优先级属于 User 策略，但不能绕过显存和全局并发硬约束。"],
       ["05 / sandbox", "编排层为 Attempt 创建受 ExecutionProfile 约束的 Sandbox，ready 后才进入 RUNNING；退出或丢失必须释放 slot。"],
       ["06 / runtime", "PiAdapter 驱动 AgentSession，文件和 Shell 工具通过 Sandbox Executor 操作被授权 Workspace。"],
       ["07 / inference", "Harness 只提交模型请求；vLLM 自己决定 batching、token 调度、KV block 和物理显存分配。"],
@@ -2336,7 +2336,7 @@
       document.getElementById("profile-mark").textContent = system.short;
       document.getElementById("profile-title").textContent = system.name;
       document.getElementById("profile-summary").textContent = system.summary;
-      document.getElementById("profile-tenant").textContent = system.tenant;
+      document.getElementById("profile-user").textContent = system.user;
       document.getElementById("profile-isolation").textContent = system.isolation;
       document.getElementById("profile-state").textContent = system.state;
       document.getElementById("profile-resource").textContent = system.resource;
@@ -2348,7 +2348,7 @@
       matrixBody.innerHTML = systems.map((system) => `
         <tr>
           <td>${system.name}</td>
-          <td>${system.matrix.tenant}</td>
+          <td>${system.matrix.user}</td>
           <td>${system.matrix.run}</td>
           <td>${system.matrix.isolation}</td>
           <td>${system.matrix.state}</td>

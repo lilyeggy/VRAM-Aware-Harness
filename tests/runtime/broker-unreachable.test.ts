@@ -36,11 +36,11 @@ test("Broker 不可达时 Run fail-closed 为 INTERRUPTED，且不留下孤儿 s
     try {
         await composition.application.start();
         const workspace = composition.workspaceService.create(
-            "tenant-broker-down",
+            "user-broker-down",
             "fault",
         );
         const run = composition.application.submitRun({
-            tenantId: "tenant-broker-down",
+            userId: "user-broker-down",
             harnessSessionId: "session-broker-down",
             userInput: "验证 Broker 不可达",
             workspacePath: workspace.rootPath,

@@ -30,9 +30,9 @@ function event(
     };
 }
 
-const run: Pick<AgentRun, "id" | "tenantId" | "status" | "createdAt" | "finishedAt"> = {
+const run: Pick<AgentRun, "id" | "userId" | "status" | "createdAt" | "finishedAt"> = {
     id: "run-trace-1",
-    tenantId: "tenant-a",
+    userId: "user-a",
     status: "COMPLETED",
     createdAt: at(0),
     finishedAt: at(2700),
@@ -175,7 +175,7 @@ test("真实 Run 走完后，trace 能给出模型/工具调用数与成本归�
     const runtime = new FakeAgentRuntime("completed", 1, 1);
     const service = new RunService(store, runtime);
     const run = service.createQueuedRun({
-        tenantId: "tenant-a",
+        userId: "user-a",
         harnessSessionId: "session-trace",
         userInput: "跑一次带工具和模型事件的 Run",
         workspacePath: "/tmp/ws-trace",

@@ -82,7 +82,7 @@ export interface Day7DemoRunReport {
 export interface Day7FakeDemoReport {
     queueAtConcurrencyLimit:Array<{
         runId:string;
-        tenantId:string;
+        userId:string;
         reasonCode:string;
         position:number;
     }>;
@@ -109,7 +109,7 @@ export async function runDay7FakeDemo():Promise<Day7FakeDemoReport> {
             HARNESS_PUMP_INTERVAL_MS:"60000",
             // 用真实并发上限制造排队，替代已删除的资源压力观测。
             HARNESS_MAX_ACTIVE_RUNS:"1",
-            HARNESS_MAX_ACTIVE_RUNS_PER_TENANT:"1",
+            HARNESS_MAX_ACTIVE_RUNS_PER_USER:"1",
         });
         const composition = await createHarnessApplication(config, {
             runtime,
@@ -122,7 +122,7 @@ export async function runDay7FakeDemo():Promise<Day7FakeDemoReport> {
             const queueAtConcurrencyLimit = composition.application.getQueue().map(
                 (entry) => ({
                     runId:entry.runId,
-                    tenantId:entry.tenantId,
+                    userId:entry.userId,
                     reasonCode:entry.reasonCode,
                     position:entry.position,
                 }),
@@ -152,12 +152,12 @@ export async function runDay7FakeDemo():Promise<Day7FakeDemoReport> {
                 ),
                 runs:[
                     createRunReport(
-                        "Tenant A / Checkpoint Recovery",
+                        "User A / Checkpoint Recovery",
                         recoveryRun,
                         composition,
                     ),
                     createRunReport(
-                        "Tenant B / Restored Queue",
+                        "User B / Restored Queue",
                         freshRun,
                         composition,
                     ),
@@ -180,7 +180,7 @@ export function formatDay7FakeDemoReport(
         "",
         "[CONCURRENCY LIMIT] queue snapshot",
         ...report.queueAtConcurrencyLimit.map((entry) =>
-            `${entry.position}. ${entry.tenantId} ${entry.runId} reason=${entry.reasonCode}`,
+            `${entry.position}. ${entry.userId} ${entry.runId} reason=${entry.reasonCode}`,
         ),
         "",
         `[EXECUTED] runtime.start  -> ${report.startRunIds.join(", ")}`,
@@ -216,7 +216,7 @@ function seedFirstProcess(databasePath:string):{
             new DemoAgentRuntime(),
         );
         const recoveryRun = runService.createQueuedRun({
-            tenantId:"tenant-a",
+            userId:"user-a",
             harnessSessionId:"session-a",
             userInput:"分析当前项目测试结构",
             workspacePath:"/tmp/day7-workspace-a",
@@ -269,7 +269,7 @@ function seedFirstProcess(databasePath:string):{
         }, checkpoint);
 
         const freshRun = runService.createQueuedRun({
-            tenantId:"tenant-b",
+            userId:"user-b",
             harnessSessionId:"session-b",
             userInput:"总结 Harness 的架构边界",
             workspacePath:"/tmp/day7-workspace-b",

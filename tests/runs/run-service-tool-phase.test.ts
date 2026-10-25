@@ -14,7 +14,7 @@ test("markToolPhase STARTED/ENDED 在 RUNNING 与 WAITING_TOOL 间往返并记�
 
     try {
         const run = service.createQueuedRun({
-            tenantId: "tenant-1",
+            userId: "user-1",
             harnessSessionId: "session-1",
             userInput: "读取文件",
             workspacePath: "/tmp/workspace",
@@ -72,7 +72,7 @@ test("markToolPhase 在非预期状态下静默忽略迟到的阶段回执", () 
 
     try {
         const run = service.createQueuedRun({
-            tenantId: "tenant-1",
+            userId: "user-1",
             harnessSessionId: "session-1",
             userInput: "读取文件",
             workspacePath: "/tmp/workspace",

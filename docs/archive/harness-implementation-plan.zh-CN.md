@@ -4,14 +4,14 @@
 >
 > 文档性质：架构背景、Idea 可行性分析与条件式 Agent–Inference 研究材料
 >
-> 当前核心定位：支持团队共享本地模型的多租户 Agent 任务服务
+> 当前核心定位：支持团队共享本地模型的多用户 Agent 任务服务
 >
 > 研究方向：Agent–Inference Co-scheduling 保留为实测触发的候选支线，不是当前实施主线
 
 > **当前实施入口（2026-08-12）**：Day 1–7、Stage 1–2 本地语义已经完成。项目
-> 通过 [`ADR 0009`](adr/0009-build-a-multi-tenant-agent-task-service.md)
-> 定位为面向真实用户的多租户 Agent 任务服务；当前唯一实施顺序见
-> [`multi-tenant-agent-task-service-roadmap.zh-CN.md`](multi-tenant-agent-task-service-roadmap.zh-CN.md)。
+> 通过 [`ADR 0009`](adr/0009-build-a-multi-user-agent-task-service.md)
+> 定位为面向真实用户的多用户 Agent 任务服务；当前唯一实施顺序见
+> [`multi-user-agent-task-service-roadmap.zh-CN.md`](multi-user-agent-task-service-roadmap.zh-CN.md)。
 > 本文第 2 节起的大量 vLLM、Prefix/KV 和 Co-scheduling 内容继续作为历史分析和
 > 条件式研究材料；Claude、异构 ResourcePool 和大型控制面内容也只保留为秋招后
 > 参考，不能覆盖新路线图的优先级。
@@ -20,14 +20,14 @@
 >
 > **源码状态（2026-07-22）**：自研 Agent Loop、内存 ContextManager、直接 vLLM Client 与 `src/kv/*` 实验已经移除，避免与 Pi 主路径形成双重实现。新源码从 `runtime/` 的稳定接口和 `spikes/` 的 Pi 验证开始，随后进入 `runs/`、`events/`、`tools/`、`checkpoints/`、`policy/`、`resources/` 与 `storage/`。删除决策见 [`ADR 0002`](adr/0002-remove-legacy-agent-prototype.md)。
 >
-> **策略方向（2026-07-23）**：固定阈值只作为第一阶段的安全基线和故障回退。后续使用 Scheduling Agent 综合资源趋势、任务、队列、Tenant/SLO 和历史结果，先运行 Shadow Mode，再在 Hard Guardrails 内参与真实调度。见 [`ADR 0003`](adr/0003-guarded-agentic-resource-scheduling.md)。
+> **策略方向（2026-07-23）**：固定阈值只作为第一阶段的安全基线和故障回退。后续使用 Scheduling Agent 综合资源趋势、任务、队列、User/SLO 和历史结果，先运行 Shadow Mode，再在 Hard Guardrails 内参与真实调度。见 [`ADR 0003`](adr/0003-guarded-agentic-resource-scheduling.md)。
 >
-> **多租户定位（2026-07-26）**：Tenant 不是后加的数据库字段，而是身份、权限、Workspace、Secret、配额、公平性、成本和审计的共同主体。第一阶段先证明逻辑隔离和确定性公平，后续再增加生产级认证与运行环境隔离。见 [`ADR 0004`](adr/0004-multi-tenancy-as-first-class-boundary.md)。
+> **多用户定位（2026-07-26）**：User 不是后加的数据库字段，而是身份、权限、Workspace、Secret、配额、公平性、成本和审计的共同主体。第一阶段先证明逻辑隔离和确定性公平，后续再增加生产级认证与运行环境隔离。见 [`ADR 0004`](adr/0004-multi-tenancy-as-first-class-boundary.md)。
 >
 > **模型与推理基线（2026-07-30）**：Harness 不绑定特定模型。当前以单卡 RTX A6000 48 GB 为硬件基线，Qwen3.5-4B 用于高频开发，Qwen3.5-9B 用于主要集成验证；vLLM fork 可以增加观测、请求归因和后续调度扩展，但模型配置不能进入 Harness 业务逻辑。见 [`ADR 0005`](adr/0005-use-replaceable-models-and-extensible-vllm.md)。
 >
 > **范围收紧（2026-08-03）**：MVP 的双核心固定为“副作用感知的安全恢复”和
-> “基于真实资源事实的准入/背压”。多租户只保留为归属、公平性和非饥饿的验证
+> “基于真实资源事实的准入/背压”。多用户只保留为归属、公平性和非饥饿的验证
 > 场景；Scheduling Agent 与深度 vLLM 调度均为数据驱动的候选研究方向，不是
 > 当前交付承诺。见 [`ADR 0006`](adr/0006-narrow-mvp-to-recovery-and-resource-admission.md)。
 
@@ -35,7 +35,7 @@
 
 本项目当前的规范定义是：
 
-> **支持团队共享本地模型的多租户 Agent 任务服务：用户在独立 Workspace 中提交
+> **支持团队共享本地模型的多用户 Agent 任务服务：用户在独立 Workspace 中提交
 > 任务、观察执行并取得回答、Diff 和 Artifact；系统使用 Pi 驱动自托管 vLLM，
 > 为每个 Attempt 分配受策略约束的 Sandbox，公平调度共享 GPU，并通过副作用记录、
 > Checkpoint 和审计时间线保证故障后的安全恢复。**
@@ -43,7 +43,7 @@
 项目已经基于 Pi Coding Agent 完成可靠执行纵向切片，并让 HarnessTemplate、
 HarnessInstance、RuntimeCapabilityProfile、EffectivePolicySnapshot 与最小
 Sandbox 进入真实 Pi 路径。这些实现继续保留，但秋招前不再接入 Claude 或扩张
-异构 ResourcePool。Tenant 是用户、Workspace、策略、Secret、资源、结果和审计的
+异构 ResourcePool。User 是用户、Workspace、策略、Secret、资源、结果和审计的
 共同边界，不是普通 CRUD 字段。产品只实现支撑任务闭环所需的身份与管理能力，
 不扩张为通用企业 SaaS 平台。
 
@@ -55,14 +55,14 @@ Sandbox 进入真实 Pi 路径。这些实现继续保留，但秋招前不再�
 
 这条问题已经形成可靠的本地语义基线。后续主线不是立即进入 Agent–Inference
 Co-scheduling 或双 Runtime，而是补齐可信身份、受管 Workspace、真实容器 Sandbox、
-用户结果与操作界面，并以 A6000、多租户攻击测试、资源竞争、kill/restart 和副作用
+用户结果与操作界面，并以 A6000、多用户攻击测试、资源竞争、kill/restart 和副作用
 恢复实验提供证据。完成产品闭环后，才根据目标岗位和实测结果决定是否研究优先级、
 Prefill/Decode 成本、缓存复用或第二 Runtime。
 
 项目不应被狭义定义为“Turn 级 KV 驱逐器”。KV Cache 是未来可能观测和优化的
 重要资源，但不是预先假定的唯一瓶颈，也不一定是第一阶段最值得优化的资源。
 
-多租户既是用户产品的使用边界，也是共享单机 GPU 的资源竞争场景：Tenant 必须
+多用户既是用户产品的使用边界，也是共享单机 GPU 的资源竞争场景：User 必须
 贯穿身份、Workspace、策略、Sandbox、Secret、资源、结果和审计。第一版需要可信
 认证和最小任务 UI，但不优先做计费、复杂组织管理或通用低代码后台；隔离能否落实、
 故障能否安全恢复、资源能否真实影响执行，仍然决定项目的工程深度。
@@ -102,7 +102,7 @@ DeepSeek-V4 的 CSA/HCA 已经同时在注意力计算和 KV 长度维度上做�
 - CUDA Graph、MoE workspace、通信和临时 buffer；
 - 大请求阻塞短交互请求造成的尾延迟；
 - 重复 Prefill 和较低的 Prefix Cache 命中；
-- 多租户之间缺少公平调度；
+- 多用户之间缺少公平调度；
 - 最后才可能是 KV 容量本身。
 
 所以第一原则是：
@@ -160,19 +160,19 @@ flowchart LR
 并用确定性策略决定新 Run 的启动或排队。更细的推理动作必须由后续测量证明其
 必要性，不能从研究设想反推当前接口。
 
-### 3.5 为什么多租户是核心变量
+### 3.5 为什么多用户是核心变量
 
-单租户 Agent 可以把当前用户、当前 Workspace、当前 Session 和当前资源预算
-都藏在进程全局状态中；多租户 Harness 不允许这些隐式假设存在。
+单用户 Agent 可以把当前用户、当前 Workspace、当前 Session 和当前资源预算
+都藏在进程全局状态中；多用户 Harness 不允许这些隐式假设存在。
 
-Tenant 必须贯穿：
+User 必须贯穿：
 
 - Session、Run、Event、ToolExecution 和 Checkpoint 的所有权；
 - Workspace、Secret、工具策略和外部数据访问；
 - 并发、Token、费用、显存预算、队列权重和 SLO；
 - 日志、指标、恢复操作和策略决策的审计归属。
 
-因此，多租户带来的价值不只是“支持更多用户”，而是迫使系统形成清晰、可测试、
+因此，多用户带来的价值不只是“支持更多用户”，而是迫使系统形成清晰、可测试、
 可扩展的控制面边界。具体约束见 [`ADR 0004`](adr/0004-multi-tenancy-as-first-class-boundary.md)。
 
 ## 4. 为什么选择 Pi，而不是继续当前自研 Agent Loop
@@ -198,17 +198,17 @@ Tenant 必须贯穿：
 第一阶段使用 Pi SDK 嵌入，而不是直接 fork Pi：
 
 - 每个活跃服务会话对应一个 Pi AgentSession；
-- 服务层维护 Tenant → Session 的路由与生命周期；
+- 服务层维护 User → Session 的路由与生命周期；
 - 订阅 Pi 的 turn、tool、compaction 和 agent 事件；
 - 使用自定义 Provider 或兼容 Provider 连接 Model Gateway；
-- 在请求 hook 中注入 tenant、session、epoch、latency class 等元数据；
+- 在请求 hook 中注入 user、session、epoch、latency class 等元数据；
 - Harness 自己实现多 Session 调度与资源策略。
 
 只有当 SDK/Extension 无法提供必要 hook 时，才对 Pi 做小范围 fork。这样可以避免长期背负 Agent Runtime 的维护成本。
 
 ### 4.3 Pi 不替我们解决的部分
 
-- 20 人多租户配额；
+- 20 人多用户配额；
 - 跨 Session Admission Control；
 - GPU 资源公平调度；
 - vLLM KV 与请求事件归因；
@@ -226,7 +226,7 @@ Tenant 必须贯穿：
 ```mermaid
 flowchart TB
     U["20+ 实验室用户"] --> API["Session API / UI"]
-    API --> SM["Multi-tenant Session Orchestrator"]
+    API --> SM["Multi-user Session Orchestrator"]
 
     subgraph PI["Pi Coding Agent Runtime"]
         AS["AgentSession"]
@@ -276,13 +276,13 @@ flowchart TB
 
 ### 6.1 对象链
 
-> Tenant → Workspace → Agent Session → User Task/Turn → Agent Step → Model Request → Context Epoch → Prefix Block / KV Cache Group
+> User → Workspace → Agent Session → User Task/Turn → Agent Step → Model Request → Context Epoch → Prefix Block / KV Cache Group
 
 这些对象不能混为一谈。
 
 | 对象 | 含义 | 主要职责 |
 | --- | --- | --- |
-| Tenant | 资源和权限主体 | 配额、公平性、审计 |
+| User | 资源和权限主体 | 配额、公平性、审计 |
 | Workspace | Coding Agent 操作环境 | 文件与进程隔离、项目上下文 |
 | Agent Session | 可恢复的长期任务会话 | 历史、分支、compaction、恢复 |
 | User Task/Turn | 一次用户目标到最终回应 | 语义价值、任务状态 |
@@ -415,16 +415,16 @@ Compaction 一定会改变某个位置之后的 token，因此会产生新的 Pr
 - 接受新 Epoch 的一次重建成本；
 - 用实测判断旧 Epoch 是否值得主动释放。
 
-### 7.4 多租户安全
+### 7.4 多用户安全
 
 vLLM 支持通过 cache salt 隔离 Prefix Cache，但 salt 会进入首个 Block 的 Hash 链。
 
 需要在两者之间做明确选择：
 
 - 实验室内部互信：允许共享公共 System/Tool Prefix，获得更高命中；
-- 不同安全域：使用 tenant salt，牺牲跨租户共享以避免缓存侧信道。
+- 不同安全域：使用 user salt，牺牲跨用户共享以避免缓存侧信道。
 
-不能一边要求全局共享 Prefix，一边假设天然具备租户隔离。
+不能一边要求全局共享 Prefix，一边假设天然具备用户隔离。
 
 ## 8. KV Cache：保留什么、修正什么
 
@@ -523,7 +523,7 @@ flowchart LR
 
 可解释的初始策略可以使用：
 
-> 保留价值 = 恢复概率 × 重建成本 + 共享收益 + 交互优先级 − 显存机会成本 − 租户超额惩罚
+> 保留价值 = 恢复概率 × 重建成本 + 共享收益 + 交互优先级 − 显存机会成本 − 用户超额惩罚
 
 其中：
 
@@ -539,7 +539,7 @@ flowchart LR
 
 建议使用分层公平策略：
 
-1. 每个 Tenant 限制同时运行的 Agent 请求；
+1. 每个 User 限制同时运行的 Agent 请求；
 2. 交互请求优先于后台 compaction；
 3. 在同一优先级内使用等待时间防止饥饿；
 4. 大 Prefill 使用独立并发槽；
@@ -567,7 +567,7 @@ flowchart LR
 
 薄改造或 Gateway 注入：
 
-- tenant id；
+- user id；
 - session id；
 - context epoch id；
 - request class；
@@ -608,7 +608,7 @@ Harness 在这一层建立 Session/Epoch 与 KV 的可信归因。
 | 早期 Idea | 判定 | 调整后的定位 |
 | --- | --- | --- |
 | 基于 Pi Coding Agent | 保留并加强 | 使用 Pi SDK，停止重复实现 Agent Loop |
-| 多 Session 管理 | 核心保留 | Tenant/Workspace/Session 服务层 |
+| 多 Session 管理 | 核心保留 | User/Workspace/Session 服务层 |
 | new/active/stale | 保留但扩展 | 事件驱动状态机，阈值随压力动态调整 |
 | 六层消息结构 | 保留思想，放弃固定形态 | 复用 Pi Context/Compaction，以 Epoch 描述版本 |
 | Prefix 字节级稳定 | 保留 | 同时固定 Chat Template、Tools 和序列化 |
@@ -649,7 +649,7 @@ Harness 在这一层建立 Session/Epoch 与 KV 的可信归因。
 - `package.json` 没有 Pi 依赖；
 - Harness 没有实例化或调用 KV Lifecycle Manager；
 - vLLM KV Client 只有接口和测试 Mock，没有真实实现；
-- 多 Tenant、Session Router、Admission Queue 和 Monitor 尚不存在；
+- 多 User、Session Router、Admission Queue 和 Monitor 尚不存在；
 - Session 仅保存在进程内存；
 - 工具过程中的中间消息没有完整持久化到 Session；
 - Prefix 守卫在主流程中校验了用户消息，而不是 System Prompt；
@@ -676,10 +676,10 @@ Harness 在这一层建立 Session/Epoch 与 KV 的可信归因。
 
 > **状态说明（2026-08-12）**：下列 Phase 0–5 是 ADR 0007 之前形成的
 > Agent–Inference 深化方案，保留用于解释 A6000、Prefix/KV 与 vLLM 研究脉络，
-> 不再是当前产品实施顺序。其中 Pi Runtime、基础资源准入和最小多租户编排已经
+> 不再是当前产品实施顺序。其中 Pi Runtime、基础资源准入和最小多用户编排已经
 > 在 Day 1–7 以较小范围完成；未完成部分只有在产品任务闭环完成且真实数据证明必要时
 > 才重新进入。当前主线只以
-> [`multi-tenant-agent-task-service-roadmap.zh-CN.md`](multi-tenant-agent-task-service-roadmap.zh-CN.md)
+> [`multi-user-agent-task-service-roadmap.zh-CN.md`](multi-user-agent-task-service-roadmap.zh-CN.md)
 > 为准。
 
 ### Phase 0：建立事实基线
@@ -726,13 +726,13 @@ Harness 在这一层建立 Session/Epoch 与 KV 的可信归因。
 
 退出条件：不使用当前自制 Agent Loop，也能完成真实多轮 Coding Agent 工具任务。
 
-### Phase 2：多租户 Session Orchestrator
+### Phase 2：多用户 Session Orchestrator
 
 目标：让 20 人能够被安全、公平地服务。
 
 产出：
 
-- Tenant、Workspace、Session 数据模型；
+- User、Workspace、Session 数据模型；
 - 每用户并发限制；
 - 交互/后台请求分类；
 - Weighted Fair Queue；
@@ -832,7 +832,7 @@ Harness 在这一层建立 Session/Epoch 与 KV 的可信归因。
 
 公平性：
 
-- 各 Tenant 等待时间分布；
+- 各 User 等待时间分布；
 - 最大连续占用；
 - 饥饿次数；
 - 交互请求被后台任务阻塞的比例。
@@ -901,7 +901,7 @@ Harness 在这一层建立 Session/Epoch 与 KV 的可信归因。
 
 - Agent Runtime 价值；
 - Inference Infra 深度；
-- 多租户系统设计；
+- 多用户系统设计；
 - 可量化实验；
 - 可扩展到其他自托管模型的通用性。
 
@@ -934,11 +934,11 @@ Harness 在这一层建立 Session/Epoch 与 KV 的可信归因。
 在 Pi + 本地 vLLM 场景中，三者的候选研究边界是：
 
 - Pi：Session、工具、Turn、compaction 和 Agent 体验；
-- Harness：Tenant、Template/Instance、跨 Session 调度、成本模型、资源策略和评估；
+- Harness：User、Template/Instance、跨 Session 调度、成本模型、资源策略和评估；
 - vLLM：Scheduler、Prefill/Decode、Prefix Cache、KV Block、Offload 和物理正确性。
 
 研究假设仍然有价值：Agent 语义状态可能成为自托管推理调度器可以利用的资源
-信号。但它必须作为候选深度优化接受对照实验，不能重新覆盖多租户公平、策略落实、
+信号。但它必须作为候选深度优化接受对照实验，不能重新覆盖多用户公平、策略落实、
 安全恢复和审计这条当前主线。
 
 ## 19. 参考资料

@@ -27,7 +27,7 @@ export type AgentRunStatus =
 
 export interface AgentRun{
     id :string;
-    tenantId : string;
+    userId : string;
     harnessSessionId : string;
     status : AgentRunStatus;
     userInput : string;
@@ -47,7 +47,7 @@ export interface AgentRun{
     /** Stage 1 正式控制面入口为新 Run 固定的不可变执行证据。 */
     runPolicy?:PolicyConstraints;
 
-    /** §9.8 v1.4 Phase 3：提交方幂等键；同租户内唯一。 */
+    /** §9.8 v1.4 Phase 3：提交方幂等键；同用户内唯一。 */
     idempotencyKey?: string;
 
     /** §9.8 v1.4 Phase 3：已消耗的可重试失败次数，缺省 0。 */

@@ -18,8 +18,8 @@ import {
     RunScheduler,
 } from "../../src/scheduling/run-scheduler.ts";
 import {
-    TenantRunScheduler,
-} from "../../src/scheduling/tenant-run-scheduler.ts";
+    UserRunScheduler,
+} from "../../src/scheduling/user-run-scheduler.ts";
 import {
     openHarnessDatabase,
 } from "../../src/storage/database.ts";
@@ -181,11 +181,11 @@ class FailFirstExecuteRunService extends RunService {
 
 function createScheduler(options: {
     maxActiveRuns?: number;
-    maxActiveRunsPerTenant?: number;
-} = {}): TenantRunScheduler {
-    return new TenantRunScheduler({
+    maxActiveRunsPerUser?: number;
+} = {}): UserRunScheduler {
+    return new UserRunScheduler({
         maxActiveRuns: options.maxActiveRuns ?? 1,
-        maxActiveRunsPerTenant: options.maxActiveRunsPerTenant ?? 1,
+        maxActiveRunsPerUser: options.maxActiveRunsPerUser ?? 1,
     });
 }
 
@@ -199,7 +199,7 @@ test("submit 持久化 QUEUED Run 并入队，但不启动 Runtime", () => {
 
     try {
         const run = coordinator.submit({
-            tenantId: "tenant-a",
+            userId: "user-a",
             harnessSessionId: "session-a",
             userInput: "等待调度后执行",
             workspacePath: "/tmp/workspace-a",
@@ -208,17 +208,17 @@ test("submit 持久化 QUEUED Run 并入队，但不启动 Runtime", () => {
         expect(run.status).toBe("QUEUED");
         expect(store.get(run.id)).toEqual(run);
         expect(runtime.startRequests).toEqual([]);
-        expect(scheduler.getCapacity("tenant-a")).toEqual({
+        expect(scheduler.getCapacity("user-a")).toEqual({
             activeRunCount: 0,
-            activeTenantRunCount: 0,
+            activeUserRunCount: 0,
         });
         expect(scheduler.listQueue()).toEqual([{
             runId: run.id,
-            tenantId: "tenant-a",
+            userId: "user-a",
             reasonCode: "AWAITING_SCHEDULING",
             enqueuedAt: expect.any(String),
             position: 1,
-            tenantPosition: 1,
+            userPosition: 1,
         }]);
         expect(store.listEvents(run.id).map((event) => event.type))
             .toEqual(["RUN_CREATED"]);
@@ -255,7 +255,7 @@ test("attemptNext claim 成功后直接执行 Run 并释放 slot", async () => {
 
     try {
         const submittedRun = coordinator.submit({
-            tenantId: "tenant-a",
+            userId: "user-a",
             harnessSessionId: "session-a",
             userInput: "立即执行",
             workspacePath: "/tmp/workspace-a",
@@ -270,9 +270,9 @@ test("attemptNext claim 成功后直接执行 Run 并释放 slot", async () => {
         }
         expect(runtime.startRequests).toHaveLength(1);
         expect(scheduler.listQueue()).toEqual([]);
-        expect(scheduler.getCapacity("tenant-a")).toEqual({
+        expect(scheduler.getCapacity("user-a")).toEqual({
             activeRunCount: 0,
-            activeTenantRunCount: 0,
+            activeUserRunCount: 0,
         });
     } finally {
         db.close();
@@ -289,7 +289,7 @@ test("执行异常且 Run 仍为 QUEUED 时重新入队 AWAITING_SCHEDULING", as
 
     try {
         const run = coordinator.submit({
-            tenantId: "tenant-a",
+            userId: "user-a",
             harnessSessionId: "session-a",
             userInput: "等待重试",
             workspacePath: "/tmp/workspace-a",
@@ -301,9 +301,9 @@ test("执行异常且 Run 仍为 QUEUED 时重新入队 AWAITING_SCHEDULING", as
 
         expect(store.get(run.id)?.status).toBe("QUEUED");
         expect(runtime.startRequests).toEqual([]);
-        expect(scheduler.getCapacity("tenant-a")).toEqual({
+        expect(scheduler.getCapacity("user-a")).toEqual({
             activeRunCount: 0,
-            activeTenantRunCount: 0,
+            activeUserRunCount: 0,
         });
         expect(scheduler.listQueue().map((entry) => ({
             runId: entry.runId,
@@ -324,19 +324,19 @@ test("drain 执行当前队列中的所有 Run", async () => {
     const runService = new RunService(store, runtime);
     const scheduler = createScheduler({
         maxActiveRuns: 2,
-        maxActiveRunsPerTenant: 1,
+        maxActiveRunsPerUser: 1,
     });
     const coordinator = new RunScheduler(runService, scheduler);
 
     try {
         const runA = coordinator.submit({
-            tenantId: "tenant-a",
+            userId: "user-a",
             harnessSessionId: "session-a",
             userInput: "执行 A",
             workspacePath: "/tmp/workspace-a",
         });
         const runB = coordinator.submit({
-            tenantId: "tenant-b",
+            userId: "user-b",
             harnessSessionId: "session-b",
             userInput: "执行 B",
             workspacePath: "/tmp/workspace-b",
@@ -366,14 +366,14 @@ test("drain 的真实并发不会超过 Scheduler 全局 slot", async () => {
     const runService = new RunService(store, runtime);
     const scheduler = createScheduler({
         maxActiveRuns: 2,
-        maxActiveRunsPerTenant: 1,
+        maxActiveRunsPerUser: 1,
     });
     const coordinator = new RunScheduler(runService, scheduler);
 
     try {
         const runs = ["a", "b", "c"].map((suffix) =>
             coordinator.submit({
-                tenantId: `tenant-${suffix}`,
+                userId: `user-${suffix}`,
                 harnessSessionId: `session-${suffix}`,
                 userInput: `执行 ${suffix}`,
                 workspacePath: `/tmp/workspace-${suffix}`,
@@ -427,7 +427,7 @@ test("并发 drain 调用复用同一个推进循环", async () => {
 
     try {
         coordinator.submit({
-            tenantId: "tenant-a",
+            userId: "user-a",
             harnessSessionId: "session-a",
             userInput: "只执行一次",
             workspacePath: "/tmp/workspace-a",
@@ -466,7 +466,7 @@ test("drain 执行期间的新推进请求会在下一轮处理新 Run", async (
 
     try {
         const firstRun = coordinator.submit({
-            tenantId: "tenant-a",
+            userId: "user-a",
             harnessSessionId: "session-a",
             userInput: "先执行",
             workspacePath: "/tmp/workspace-a",
@@ -476,7 +476,7 @@ test("drain 执行期间的新推进请求会在下一轮处理新 Run", async (
         await runtime.waitForStartCount(1);
 
         const secondRun = coordinator.submit({
-            tenantId: "tenant-b",
+            userId: "user-b",
             harnessSessionId: "session-b",
             userInput: "执行期间提交",
             workspacePath: "/tmp/workspace-b",
@@ -520,7 +520,7 @@ test("drain 完成后可以启动新的独立推进循环", async () => {
 
     try {
         const firstRun = coordinator.submit({
-            tenantId: "tenant-a",
+            userId: "user-a",
             harnessSessionId: "session-a",
             userInput: "第一次 drain",
             workspacePath: "/tmp/workspace-a",
@@ -530,7 +530,7 @@ test("drain 完成后可以启动新的独立推进循环", async () => {
         await firstDrain;
 
         const secondRun = coordinator.submit({
-            tenantId: "tenant-b",
+            userId: "user-b",
             harnessSessionId: "session-b",
             userInput: "第二次 drain",
             workspacePath: "/tmp/workspace-b",
@@ -561,7 +561,7 @@ test("drain 异常结束后会清理 single-flight 状态并保留待执行 Run"
 
     try {
         const run = coordinator.submit({
-            tenantId: "tenant-a",
+            userId: "user-a",
             harnessSessionId: "session-a",
             userInput: "执行异常后继续",
             workspacePath: "/tmp/workspace-a",
@@ -592,13 +592,13 @@ test("Runtime 启动失败不会泄漏 slot，且 drain 继续推进后续 Run",
 
     try {
         const failedRun = coordinator.submit({
-            tenantId: "tenant-a",
+            userId: "user-a",
             harnessSessionId: "session-a",
             userInput: "启动时失败",
             workspacePath: "/tmp/workspace-a",
         });
         const followingRun = coordinator.submit({
-            tenantId: "tenant-b",
+            userId: "user-b",
             harnessSessionId: "session-b",
             userInput: "仍然应当执行",
             workspacePath: "/tmp/workspace-b",
@@ -611,9 +611,9 @@ test("Runtime 启动失败不会泄漏 slot，且 drain 继续推进后续 Run",
         expect(runtime.startRequests.map(
             (request) => request.run.runId,
         )).toEqual([failedRun.id, followingRun.id]);
-        expect(scheduler.getCapacity("tenant-a")).toEqual({
+        expect(scheduler.getCapacity("user-a")).toEqual({
             activeRunCount: 0,
-            activeTenantRunCount: 0,
+            activeUserRunCount: 0,
         });
         expect(scheduler.listQueue()).toEqual([]);
     } finally {
@@ -621,7 +621,7 @@ test("Runtime 启动失败不会泄漏 slot，且 drain 继续推进后续 Run",
     }
 });
 
-test("全局并发为 1 时 Tenant B 不会排在 Tenant A 的全部 Run 之后", async () => {
+test("全局并发为 1 时 User B 不会排在 User A 的全部 Run 之后", async () => {
     const db = openHarnessDatabase(":memory:");
     const store = new RunStore(db);
     const runtime = new FakeAgentRuntime();
@@ -631,25 +631,25 @@ test("全局并发为 1 时 Tenant B 不会排在 Tenant A 的全部 Run 之后"
 
     try {
         const runA1 = coordinator.submit({
-            tenantId: "tenant-a",
+            userId: "user-a",
             harnessSessionId: "session-a1",
             userInput: "执行 A1",
             workspacePath: "/tmp/workspace-a",
         });
         const runA2 = coordinator.submit({
-            tenantId: "tenant-a",
+            userId: "user-a",
             harnessSessionId: "session-a2",
             userInput: "执行 A2",
             workspacePath: "/tmp/workspace-a",
         });
         const runA3 = coordinator.submit({
-            tenantId: "tenant-a",
+            userId: "user-a",
             harnessSessionId: "session-a3",
             userInput: "执行 A3",
             workspacePath: "/tmp/workspace-a",
         });
         const runB1 = coordinator.submit({
-            tenantId: "tenant-b",
+            userId: "user-b",
             harnessSessionId: "session-b1",
             userInput: "执行 B1",
             workspacePath: "/tmp/workspace-b",
@@ -689,7 +689,7 @@ test("恢复 Run 直接占用 slot 执行并保留恢复参数", async () => {
     };
     const interruptedRun: AgentRun = {
         id: checkpoint.runId,
-        tenantId: "tenant-recovery",
+        userId: "user-recovery",
         harnessSessionId: "session-recovery",
         status: "INTERRUPTED",
         userInput: "从安全边界恢复",
@@ -730,7 +730,7 @@ test("恢复 Run 直接占用 slot 执行并保留恢复参数", async () => {
         expect(runtime.resumeRequests).toEqual([{
             run: {
                 runId: interruptedRun.id,
-                tenantId: interruptedRun.tenantId,
+                userId: interruptedRun.userId,
                 harnessSessionId: interruptedRun.harnessSessionId,
                 workspacePath: interruptedRun.workspacePath,
                 thinkingLevel: "off",
@@ -750,9 +750,9 @@ test("恢复 Run 直接占用 slot 执行并保留恢复参数", async () => {
             "RUN_RESUMED",
             "RUN_COMPLETED",
         ]);
-        expect(scheduler.getCapacity(interruptedRun.tenantId)).toEqual({
+        expect(scheduler.getCapacity(interruptedRun.userId)).toEqual({
             activeRunCount: 0,
-            activeTenantRunCount: 0,
+            activeUserRunCount: 0,
         });
         expect(scheduler.listQueue()).toEqual([]);
     } finally {
@@ -772,7 +772,7 @@ test("interrupt 移除排队 Run，使后续 drain 不会启动它", async () =>
 
     try {
         const run = coordinator.submit({
-            tenantId:"tenant-interrupt",
+            userId:"user-interrupt",
             harnessSessionId:"session-interrupt",
             userInput:"取消这个排队任务",
             workspacePath:"/tmp/workspace-interrupt",
@@ -802,13 +802,13 @@ test("运行中 interrupt 不提前释放 slot，Runtime 退出后才允许后�
 
     try {
         const firstRun = coordinator.submit({
-            tenantId:"tenant-a",
+            userId:"user-a",
             harnessSessionId:"session-a",
             userInput:"运行后中断",
             workspacePath:"/tmp/workspace-a",
         });
         const secondRun = coordinator.submit({
-            tenantId:"tenant-b",
+            userId:"user-b",
             harnessSessionId:"session-b",
             userInput:"等待前一个 Runtime 退出",
             workspacePath:"/tmp/workspace-b",
@@ -819,7 +819,7 @@ test("运行中 interrupt 不提前释放 slot，Runtime 退出后才允许后�
         await coordinator.interrupt(firstRun.id);
 
         expect(store.get(firstRun.id)?.status).toBe("INTERRUPTED");
-        expect(scheduler.getCapacity(firstRun.tenantId).activeRunCount)
+        expect(scheduler.getCapacity(firstRun.userId).activeRunCount)
             .toBe(1);
         expect(await coordinator.attemptNext()).toEqual({ kind:"EMPTY" });
 
@@ -832,7 +832,7 @@ test("运行中 interrupt 不提前释放 slot，Runtime 退出后才允许后�
         runtime.releaseAllStarted();
         await secondAttempt;
 
-        expect(scheduler.getCapacity(firstRun.tenantId).activeRunCount)
+        expect(scheduler.getCapacity(firstRun.userId).activeRunCount)
             .toBe(0);
     } finally {
         db.close();
@@ -842,30 +842,30 @@ test("运行中 interrupt 不提前释放 slot，Runtime 退出后才允许后�
 test("scheduler-only queue blockers are persisted once per reason transition", async () => {
     const cases: Array<{
         name: string;
-        config: { maxActiveRuns: number; maxActiveRunsPerTenant: number };
-        active: { tenantId: string; sessionId: string };
-        waiting: { tenantId: string; sessionId: string };
-        expected: "GLOBAL_CONCURRENCY_LIMIT" | "TENANT_CONCURRENCY_LIMIT" | "SESSION_SERIALIZATION";
+        config: { maxActiveRuns: number; maxActiveRunsPerUser: number };
+        active: { userId: string; sessionId: string };
+        waiting: { userId: string; sessionId: string };
+        expected: "GLOBAL_CONCURRENCY_LIMIT" | "USER_CONCURRENCY_LIMIT" | "SESSION_SERIALIZATION";
     }> = [
         {
             name: "global",
-            config: { maxActiveRuns: 1, maxActiveRunsPerTenant: 1 },
-            active: { tenantId: "tenant-a", sessionId: "session-a" },
-            waiting: { tenantId: "tenant-b", sessionId: "session-b" },
+            config: { maxActiveRuns: 1, maxActiveRunsPerUser: 1 },
+            active: { userId: "user-a", sessionId: "session-a" },
+            waiting: { userId: "user-b", sessionId: "session-b" },
             expected: "GLOBAL_CONCURRENCY_LIMIT",
         },
         {
-            name: "tenant",
-            config: { maxActiveRuns: 2, maxActiveRunsPerTenant: 1 },
-            active: { tenantId: "tenant-a", sessionId: "session-a" },
-            waiting: { tenantId: "tenant-a", sessionId: "session-b" },
-            expected: "TENANT_CONCURRENCY_LIMIT",
+            name: "user",
+            config: { maxActiveRuns: 2, maxActiveRunsPerUser: 1 },
+            active: { userId: "user-a", sessionId: "session-a" },
+            waiting: { userId: "user-a", sessionId: "session-b" },
+            expected: "USER_CONCURRENCY_LIMIT",
         },
         {
             name: "session",
-            config: { maxActiveRuns: 2, maxActiveRunsPerTenant: 2 },
-            active: { tenantId: "tenant-a", sessionId: "session-a" },
-            waiting: { tenantId: "tenant-a", sessionId: "session-a" },
+            config: { maxActiveRuns: 2, maxActiveRunsPerUser: 2 },
+            active: { userId: "user-a", sessionId: "session-a" },
+            waiting: { userId: "user-a", sessionId: "session-a" },
             expected: "SESSION_SERIALIZATION",
         },
     ];
@@ -875,12 +875,12 @@ test("scheduler-only queue blockers are persisted once per reason transition", a
         const store = new RunStore(db);
         const runtime = new BlockingAgentRuntime();
         const runService = new RunService(store, runtime);
-        const scheduler = new TenantRunScheduler(scenario.config);
+        const scheduler = new UserRunScheduler(scenario.config);
         const coordinator = new RunScheduler(runService, scheduler);
 
         try {
             const active = coordinator.submit({
-                tenantId: scenario.active.tenantId,
+                userId: scenario.active.userId,
                 harnessSessionId: scenario.active.sessionId,
                 userInput: `${scenario.name} active`,
                 workspacePath: "/tmp/workspace-active",
@@ -888,7 +888,7 @@ test("scheduler-only queue blockers are persisted once per reason transition", a
             const activeAttempt = coordinator.attemptNext();
             await runtime.waitForStartCount(1);
             const waiting = coordinator.submit({
-                tenantId: scenario.waiting.tenantId,
+                userId: scenario.waiting.userId,
                 harnessSessionId: scenario.waiting.sessionId,
                 userInput: `${scenario.name} waiting`,
                 workspacePath: "/tmp/workspace-waiting",
@@ -929,14 +929,14 @@ test("提交到已满 scheduler 时立即记录阻塞原因，不等待下一次
 
     try {
         coordinator.submit({
-            tenantId: "tenant-a", harnessSessionId: "session-a",
+            userId: "user-a", harnessSessionId: "session-a",
             userInput: "active", workspacePath: "/tmp/active",
         });
         const activeAttempt = coordinator.attemptNext();
         await runtime.waitForStartCount(1);
 
         const waiting = coordinator.submit({
-            tenantId: "tenant-b", harnessSessionId: "session-b",
+            userId: "user-b", harnessSessionId: "session-b",
             userInput: "waiting", workspacePath: "/tmp/waiting",
         });
         expect(store.listEvents(waiting.id).filter(
@@ -962,13 +962,13 @@ test("kick 可并发启动 drain 批次之外的新 Run", async () => {
     const runService = new RunService(store, runtime);
     const scheduler = createScheduler({
         maxActiveRuns: 2,
-        maxActiveRunsPerTenant: 1,
+        maxActiveRunsPerUser: 1,
     });
     const coordinator = new RunScheduler(runService, scheduler);
 
     try {
         const firstRun = coordinator.submit({
-            tenantId: "tenant-a",
+            userId: "user-a",
             harnessSessionId: "session-a",
             userInput: "先执行",
             workspacePath: "/tmp/workspace-a",
@@ -977,7 +977,7 @@ test("kick 可并发启动 drain 批次之外的新 Run", async () => {
         await runtime.waitForStartCount(1);
 
         const secondRun = coordinator.submit({
-            tenantId: "tenant-b",
+            userId: "user-b",
             harnessSessionId: "session-b",
             userInput: "批次外并发",
             workspacePath: "/tmp/workspace-b",

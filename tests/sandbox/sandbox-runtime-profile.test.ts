@@ -29,10 +29,10 @@ function policy(overrides: Partial<EffectivePolicySnapshot> = {}): EffectivePoli
         ...unrestrictedPolicy,
         id: "policy",
         runId: "run",
-        tenantId: "tenant",
+        userId: "user",
         layers: [],
         createdAt: "2026-08-17T00:00:00.000Z",
-        workspaceRoots: ["/srv/workspaces/tenant"],
+        workspaceRoots: ["/srv/workspaces/user"],
         allowNetwork: false,
         ...overrides,
     };
@@ -49,7 +49,7 @@ test("default profile 必须取得 runsc 的实际 inspect 证据", async () => 
     );
     await provider.create({
         id: "sandbox-profile", runId: "run",
-        workspacePath: "/srv/workspaces/tenant/workspace", policy: policy(),
+        workspacePath: "/srv/workspaces/user/workspace", policy: policy(),
     });
     expect(runtime.calls[0]).toContain("runsc");
     expect(runtime.calls.some((call) => call[1] === "inspect")).toBe(true);
@@ -74,7 +74,7 @@ test("default profile 使用 runc 或 inspect 非 runsc 时 fail closed", async 
     );
     await expect(provider.create({
         id: "sandbox-mismatch", runId: "run",
-        workspacePath: "/srv/workspaces/tenant/workspace", policy: policy(),
+        workspacePath: "/srv/workspaces/user/workspace", policy: policy(),
     })).rejects.toThrow("runtime 证据校验失败");
     expect(store.records.get("sandbox-mismatch")?.status).toBe("FAILED");
     expect(store.records.get("sandbox-mismatch")?.runtimeEvidence.observedRuntime).toBe("runc");
@@ -88,7 +88,7 @@ test("strict profile 没有 microVM Provider 时不静默回退", async () => {
     const router = new SandboxProviderRouter({ strict }, "strict");
     await expect(router.create({
         id: "strict-sandbox", runId: "run",
-        workspacePath: "/srv/workspaces/tenant/workspace",
+        workspacePath: "/srv/workspaces/user/workspace",
         policy: policy({ sandboxProfile: "strict" }),
     })).rejects.toThrow("尚未接入");
 });

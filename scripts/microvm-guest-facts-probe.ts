@@ -67,7 +67,7 @@ async function main(): Promise<void> {
             layers: [],
             id: "policy-probe",
             runId: "run-probe",
-            tenantId: "probe-tenant",
+            userId: "probe-user",
             createdAt: new Date().toISOString(),
             workspaceRoots: [root],
             allowNetwork: false,

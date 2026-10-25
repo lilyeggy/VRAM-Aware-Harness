@@ -1288,13 +1288,13 @@
           </article>
           <article class="scene-layer control" data-scene-layer="control" tabindex="0">
             <span class="layer-no">02 / PRODUCT + EXECUTION</span>
-            <h3>Multi-tenant Agent Task Service</h3>
-            <p>向用户交付 Workspace 与任务结果，内部重点管理 Sandbox、生命周期、恢复、多租户与资源准入。</p>
+            <h3>Multi-user Agent Task Service</h3>
+            <p>向用户交付 Workspace 与任务结果，内部重点管理 Sandbox、生命周期、恢复、多用户与资源准入。</p>
             <div class="mini-stack">
               <span>Identity / Workspace / Result</span>
               <span>Sandbox / ToolGateway</span>
               <span>Run / Queue / Recovery</span>
-              <span>Tenant / GPU-aware Admission</span>
+              <span>User / GPU-aware Admission</span>
             </div>
           </article>
           <article class="scene-layer learning" data-scene-layer="learning" tabindex="0">
@@ -1333,7 +1333,7 @@
           <article class="flow-band">
             <h3>在线执行链 <span>request path</span></h3>
             <div class="flow-track">
-              <div class="flow-step"><b>用户任务</b><span>目标、Tenant、Workspace、约束</span></div>
+              <div class="flow-step"><b>用户任务</b><span>目标、User、Workspace、约束</span></div>
               <div class="flow-step"><b>Agent Task Service</b><span>身份、Workspace、Sandbox、准入、排队与恢复</span></div>
               <div class="flow-step"><b>DeepResearch</b><span>规划、调用工具、组织证据</span></div>
               <div class="flow-step"><b>vLLM</b><span>Prefill、Decode、Batching、KV</span></div>
@@ -1504,7 +1504,7 @@
             <p>回答“用户能否安全获得结果，多个任务是否被可靠、公平地运行”。</p>
             <ul>
               <li>Run 成功率、恢复率和事件完整性</li>
-              <li>队列等待、Tenant 公平性与饥饿</li>
+              <li>队列等待、User 公平性与饥饿</li>
               <li>工具幂等、未知副作用和 Checkpoint</li>
               <li>吞吐、TTFT、P95 延迟和资源利用率</li>
               <li>故障注入与资源过载回退</li>
@@ -1615,7 +1615,7 @@
         </div>
         <div class="closing-stack">
           <div><b>行为层</b><span>理解模型怎样通过规划、上下文与工具形成可用 Agent。</span></div>
-          <div><b>控制层</b><span>理解多个 Agent 怎样在真实资源、故障和多租户环境中可靠运行。</span></div>
+          <div><b>控制层</b><span>理解多个 Agent 怎样在真实资源、故障和多用户环境中可靠运行。</span></div>
           <div><b>学习层</b><span>理解 trajectory、reward 和 rollout 怎样转化为模型策略更新。</span></div>
           <div><b>推理底座</b><span>理解 vLLM 对延迟、吞吐、缓存和并发的影响，但不把 Kernel 作为主线。</span></div>
           <div><b>共同语言</b><span>用版本、事件、轨迹、评测与模型制品连接三个独立项目。</span></div>
@@ -1666,16 +1666,16 @@
           ["Robustness", "工具失败后仍能修正"],
           ["Cost", "Token、调用次数与时延"]
         ],
-        boundary: "不负责多个 Tenant 的资源公平、生产级 Run 恢复、全局 GPU 准入，也不负责通过 RL 更新模型权重。它只优化一个任务内部的智能行为。"
+        boundary: "不负责多个 User 的资源公平、生产级 Run 恢复、全局 GPU 准入，也不负责通过 RL 更新模型权重。它只优化一个任务内部的智能行为。"
       },
       control: {
         color: "var(--control)",
         kicker: "02 / Agent Task Product + Execution",
-        title: "VRAM-Aware：多租户 Agent 任务服务",
+        title: "VRAM-Aware：多用户 Agent 任务服务",
         badge: "DELIVER ISOLATED TASKS",
-        summary: "这是一个向团队交付 Workspace、任务过程和结果的用户产品；内部围绕 Pi 管理 Sandbox、Run、副作用、Checkpoint、Tenant、公平队列与共享推理资源。",
+        summary: "这是一个向团队交付 Workspace、任务过程和结果的用户产品；内部围绕 Pi 管理 Sandbox、Run、副作用、Checkpoint、User、公平队列与共享推理资源。",
         objects: [
-          "Principal / Tenant / Workspace：可信身份、所有权与项目空间",
+          "Principal / User / Workspace：可信身份、所有权与项目空间",
           "Task / Session / AgentRun：用户目标、连续交互与一次执行",
           "SandboxInstance / ExecutionProfile：每次执行的隔离环境与策略",
           "RunEvent：状态变化、模型调用、工具边界的追加事实",
@@ -1684,8 +1684,8 @@
           "ResourceSnapshot / PolicyDecision：资源事实与准入理由"
         ],
         flow: [
-          "认证用户，在 Tenant Workspace 中创建任务与 AgentRun",
-          "读取队列、Tenant 配额和 GPU Snapshot 作准入决定",
+          "认证用户，在 User Workspace 中创建任务与 AgentRun",
+          "读取队列、User 配额和 GPU Snapshot 作准入决定",
           "创建 Sandbox，并通过 AgentRuntime 启动或恢复 Pi Session",
           "将工具调用送入 Sandbox 内执行，原子保存结果和 Checkpoint",
           "持久化 RuntimeEvent，并向用户交付回答、Diff 与 Artifact"
@@ -1696,13 +1696,13 @@
           ["可靠执行", "状态机、SQLite transaction、append-only events、idempotency、checkpoint"],
           ["工具治理", "ToolGateway、permission、timeout、side-effect class、replay decision"],
           ["资源策略", "vLLM Metrics、nvidia-smi fallback、NORMAL/BUSY/CRITICAL、admission queue"],
-          ["产品边界", "API Key、Tenant-scoped Store、Workspace、任务结果与最小 UI"],
+          ["产品边界", "API Key、User-scoped Store、Workspace、任务结果与最小 UI"],
           ["执行隔离", "每 Attempt Sandbox、文件/进程/网络/Secret/资源限制与攻击测试"],
-          ["多租户编排", "公平队列、并发上限、资源准入、恢复、审计与成本归因"]
+          ["多用户编排", "公平队列、并发上限、资源准入、恢复、审计与成本归因"]
         ],
         metrics: [
           ["Reliability", "Run 成功率与恢复率"],
-          ["Fairness", "Tenant 等待与非饥饿"],
+          ["Fairness", "User 等待与非饥饿"],
           ["Latency", "排队、TTFT、P95 E2E"],
           ["Utilization", "GPU 吞吐与空闲率"],
           ["Safety", "副作用与越权事件"],
@@ -1746,7 +1746,7 @@
           ["Stability", "Reward、KL、Loss 曲线"],
           ["Generalization", "跨环境一致趋势"]
         ],
-        boundary: "不依赖生产 RunService、ToolGateway 或 PiAdapter，不负责线上多租户调度，也不重写分布式训练框架。它消费版本化 trajectory，产出版本化 model artifact。"
+        boundary: "不依赖生产 RunService、ToolGateway 或 PiAdapter，不负责线上多用户调度，也不重写分布式训练框架。它消费版本化 trajectory，产出版本化 model artifact。"
       }
     };
 
@@ -1757,7 +1757,7 @@
         summary: "Control Plane 只发送标准命令并接收标准事件。Pi、DeepResearch 或未来 Runtime 的内部循环由 Adapter 隔离。",
         route: ["RunService", "AgentRuntime", "DeepResearch Adapter", "Inner Agent Harness"],
         schema: `type RuntimeCommand = {
-  tenantId: string;
+  userId: string;
   runId: string;
   sessionId: string;
   task: string;
@@ -1775,10 +1775,10 @@ interface AgentRuntime {
       inference: {
         kicker: "C2 / INFERENCE EXECUTION",
         title: "Inference Contract：标准调用面加请求归因",
-        summary: "Agent Runtime 使用 OpenAI-compatible API 调用 vLLM；Control Plane 通过 request metadata 和 Metrics 关联 Tenant、Run、模型版本与资源成本。",
+        summary: "Agent Runtime 使用 OpenAI-compatible API 调用 vLLM；Control Plane 通过 request metadata 和 Metrics 关联 User、Run、模型版本与资源成本。",
         route: ["Agent Runtime", "Model Request", "vLLM Scheduler", "Model / GPU"],
         schema: `type InferenceRequestMeta = {
-  tenantId: string;
+  userId: string;
   runId: string;
   modelCallId: string;
   traceId: string;
@@ -1862,7 +1862,7 @@ type InferenceObservation = {
         kicker: "L3 / CONTROLLED EXTENSION",
         title: "会在 vLLM fork 中增加受控扩展点",
         summary: "源码可修改的价值在于补齐请求身份和资源事实，而不是立即重写整个 Scheduler。",
-        know: ["请求生命周期与 Scheduler 主要代码路径", "tenantId / runId / traceId 传播", "Prometheus Metrics 与事件扩展", "priority、request class 与 scheduling hint", "fork commit、patch 与上游兼容管理"],
+        know: ["请求生命周期与 Scheduler 主要代码路径", "userId / runId / traceId 传播", "Prometheus Metrics 与事件扩展", "priority、request class 与 scheduling hint", "fork commit、patch 与上游兼容管理"],
         output: ["按 Run 归因延迟、Token 和缓存行为", "提供稳定 Metrics/Event contract", "最小 patch、可测试、可回滚", "为跨层调度研究建立数据基础"]
       },
       {

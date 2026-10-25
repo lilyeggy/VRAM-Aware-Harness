@@ -4,14 +4,14 @@ import { RunService } from "../../src/runs/run-service.ts";
 import { RunStore } from "../../src/runs/runstore.ts";
 import type { RuntimeStartRequest } from "../../src/runtime/agent-runtime.ts";
 import { RunScheduler } from "../../src/scheduling/run-scheduler.ts";
-import { TenantRunScheduler } from "../../src/scheduling/tenant-run-scheduler.ts";
+import { UserRunScheduler } from "../../src/scheduling/user-run-scheduler.ts";
 import { openHarnessDatabase } from "../../src/storage/database.ts";
 import { FakeAgentRuntime } from "../fakes/fake-agent-runtime.ts";
 
 /**
  * 支柱 3 一级防线：排队 TTL。
  *
- * 第二道资源门禁删除后，排队只可能由宿主层硬约束产生：全局/租户并发上限、
+ * 第二道资源门禁删除后，排队只可能由宿主层硬约束产生：全局/用户并发上限、
  * 会话锁。这里用「占满唯一 slot 的阻塞 Run」制造真实排队。
  */
 class GatedRuntime extends FakeAgentRuntime {
@@ -50,16 +50,16 @@ test("排队超过 TTL 的 Run 被熔断为 FAILED(QUEUE_TIMEOUT) 并释放队�
     const store = new RunStore(db);
     const runtime = new GatedRuntime();
     const runService = new RunService(store, runtime);
-    const scheduler = new TenantRunScheduler({
+    const scheduler = new UserRunScheduler({
         maxActiveRuns: 1,
-        maxActiveRunsPerTenant: 1,
+        maxActiveRunsPerUser: 1,
     });
     const coordinator = new RunScheduler(runService, scheduler, {
         queueTtlMs: 20,
     });
 
     const blocker = coordinator.submit({
-        tenantId: "tenant-block",
+        userId: "user-block",
         harnessSessionId: "session-block",
         userInput: "占住唯一 slot",
         workspacePath: "/tmp/ws-block",
@@ -68,7 +68,7 @@ test("排队超过 TTL 的 Run 被熔断为 FAILED(QUEUE_TIMEOUT) 并释放队�
     await waitForRunning(store, blocker.id);
 
     const run = coordinator.submit({
-        tenantId: "tenant-a",
+        userId: "user-a",
         harnessSessionId: "session-a",
         userInput: "长时间等待的任务",
         workspacePath: "/tmp/ws-a",
@@ -100,8 +100,8 @@ test("排队超过 TTL 的 Run 被熔断为 FAILED(QUEUE_TIMEOUT) 并释放队�
     expect(payload.waitedMs).toBeGreaterThan(20);
 
     expect(scheduler.listQueue()).toHaveLength(0);
-    // tenant-a 自己的活跃计数必须归零（全局 1 个 slot 仍被 blocker 占着）。
-    expect(scheduler.getCapacity("tenant-a").activeTenantRunCount).toBe(0);
+    // user-a 自己的活跃计数必须归零（全局 1 个 slot 仍被 blocker 占着）。
+    expect(scheduler.getCapacity("user-a").activeUserRunCount).toBe(0);
 
     runtime.releaseAll();
     await blockerAttempt;
@@ -113,16 +113,16 @@ test("未超 TTL 的排队 Run 不受影响", async () => {
     const store = new RunStore(db);
     const runtime = new GatedRuntime();
     const runService = new RunService(store, runtime);
-    const scheduler = new TenantRunScheduler({
+    const scheduler = new UserRunScheduler({
         maxActiveRuns: 1,
-        maxActiveRunsPerTenant: 1,
+        maxActiveRunsPerUser: 1,
     });
     const coordinator = new RunScheduler(runService, scheduler, {
         queueTtlMs: 60_000,
     });
 
     const blocker = coordinator.submit({
-        tenantId: "tenant-block",
+        userId: "user-block",
         harnessSessionId: "session-block",
         userInput: "占住唯一 slot",
         workspacePath: "/tmp/ws-block",
@@ -131,7 +131,7 @@ test("未超 TTL 的排队 Run 不受影响", async () => {
     await waitForRunning(store, blocker.id);
 
     const queued = coordinator.submit({
-        tenantId: "tenant-b",
+        userId: "user-b",
         harnessSessionId: "session-b",
         userInput: "还在 TTL 内的任务",
         workspacePath: "/tmp/ws-b",
@@ -155,16 +155,16 @@ test("会话锁等待不计入 Queue TTL", async () => {
     const store = new RunStore(db);
     const runtime = new GatedRuntime();
     const runService = new RunService(store, runtime);
-    const scheduler = new TenantRunScheduler({
+    const scheduler = new UserRunScheduler({
         maxActiveRuns: 4,
-        maxActiveRunsPerTenant: 4,
+        maxActiveRunsPerUser: 4,
     });
     const coordinator = new RunScheduler(runService, scheduler, {
         queueTtlMs: 20,
     });
 
     const first = coordinator.submit({
-        tenantId: "tenant-a",
+        userId: "user-a",
         harnessSessionId: "session-shared",
         userInput: "会话里的第一条",
         workspacePath: "/tmp/ws-a",
@@ -173,7 +173,7 @@ test("会话锁等待不计入 Queue TTL", async () => {
     await waitForRunning(store, first.id);
 
     const followUp = coordinator.submit({
-        tenantId: "tenant-a",
+        userId: "user-a",
         harnessSessionId: "session-shared",
         userInput: "同一会话的追问",
         workspacePath: "/tmp/ws-a",
@@ -198,7 +198,7 @@ test("RunService.failQueuedRun 只熔断 QUEUED Run，终态幂等返回 null", 
     const runService = new RunService(store, new FakeAgentRuntime());
 
     const run = runService.createQueuedRun({
-        tenantId: "tenant-c",
+        userId: "user-c",
         harnessSessionId: "session-c",
         userInput: "直接熔断",
         workspacePath: "/tmp/ws-c",

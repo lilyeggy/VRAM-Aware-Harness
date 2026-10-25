@@ -135,8 +135,8 @@ ul.tight{margin:6px 0; padding-left:20px} ul.tight li{margin:3px 0; color:#cfd9f
 <header class="hero">
   <div class="wrap">
     <h1><span>VRAM-Aware Harness</span> · 架构与数据流</h1>
-    <p>面向实验室多人共享的单机多租户 Agent 平台：用户交任务，Agent 推理、调工具、执行代码与文件操作；
-      不可信执行全部落在 per-Run 的 Firecracker microVM 里，租户之间强隔离、可审计、可配额、可计费。</p>
+    <p>面向实验室多人共享的单机多用户 Agent 平台：用户交任务，Agent 推理、调工具、执行代码与文件操作；
+      不可信执行全部落在 per-Run 的 Firecracker microVM 里，用户之间强隔离、可审计、可配额、可计费。</p>
     <div class="meta">
       <span class="pill"><b>23,682</b> 行 TypeScript / <b>123</b> 个源文件</span>
       <span class="pill"><b>20</b> 张 SQLite 表 / migration <b>v1-v4</b></span>
@@ -184,7 +184,7 @@ ul.tight{margin:6px 0; padding-left:20px} ul.tight li{margin:3px 0; color:#cfd9f
         <div class="cols">
           <div class="node blue"><div class="t">HTTP 接入层</div><div class="s">限流 → 鉴权 → 路由 → 审计</div><div class="p">src/http/harness-http-api.ts · harness-http-server.ts · rate-limiter.ts · routes/*.ts</div></div>
           <div class="node blue"><div class="t">应用门面</div><div class="s">提交 / 查询 / 中断 / 恢复 / 指标</div><div class="p">src/app/harness-application.ts</div></div>
-          <div class="node blue"><div class="t">调度与准入</div><div class="s">租户队列 · 优先级 · backpressure · 资源准入</div><div class="p">src/scheduling/*.ts · src/resources/*.ts</div></div>
+          <div class="node blue"><div class="t">调度与准入</div><div class="s">用户队列 · 优先级 · backpressure · 资源准入</div><div class="p">src/scheduling/*.ts · src/resources/*.ts</div></div>
           <div class="node blue"><div class="t">Run 执行器</div><div class="s">策略快照 · Attempt · 租约 · 收尾</div><div class="p">src/runtime/run-executor.ts · src/runs/run-service.ts</div></div>
         </div>
         <div class="arrow b">控制面只通过 <em class="code">BrokerSandboxProvider</em> 的 Unix socket 请求沙箱能力，自己不 fork Firecracker、不持有 jailer 权限</div>
@@ -195,7 +195,7 @@ ul.tight{margin:6px 0; padding-left:20px} ul.tight li{margin:3px 0; color:#cfd9f
       <span class="zlabel">② 沙箱 Broker（root，唯一特权面，窄接口 create / execute / terminate）</span>
       <div class="flow">
         <div class="cols3">
-          <div class="node orange"><div class="t">Broker 服务端</div><div class="s">协议校验 · 能力令牌 · 租户归属 · SO_PEERCRED</div><div class="p">src/sandbox/broker/sandbox-broker-server.ts · broker-protocol.ts · peer-credentials.ts</div></div>
+          <div class="node orange"><div class="t">Broker 服务端</div><div class="s">协议校验 · 能力令牌 · 用户归属 · SO_PEERCRED</div><div class="p">src/sandbox/broker/sandbox-broker-server.ts · broker-protocol.ts · peer-credentials.ts</div></div>
           <div class="node orange"><div class="t">microVM Provider</div><div class="s">profile / 磁盘 / 快照 / 并发闸门 / 孤儿回收</div><div class="p">src/sandbox/microvm/microvm-sandbox-provider.ts</div></div>
           <div class="node orange"><div class="t">Firecracker 驱动</div><div class="s">jailer + chroot + cgroup + vsock + snapshot</div><div class="p">src/sandbox/microvm/firecracker-sandbox-driver.ts</div></div>
         </div>
@@ -232,7 +232,7 @@ ul.tight{margin:6px 0; padding-left:20px} ul.tight li{margin:3px 0; color:#cfd9f
         <div class="node purple"><div class="t">SQLite</div><div class="s">20 张表：run / attempt / event / policy / sandbox / checkpoint / audit</div><div class="p">/data/harness/live-full-flow/harness.sqlite</div></div>
         <div class="node purple"><div class="t">文件目录</div><div class="s">workspaces · vm-runtime · snapshot pool · artifacts · backups</div><div class="p">/data/harness/*</div></div>
         <div class="node purple"><div class="t">审计链</div><div class="s">只追加 + SHA-256 前向链 + 禁止 UPDATE/DELETE 触发器</div><div class="p">src/audit/access-audit-store.ts</div></div>
-        <div class="node purple"><div class="t">指标 / 账单</div><div class="s">GET /metrics · GET /billing</div><div class="p">src/observability/metrics.ts · src/billing/tenant-billing.ts</div></div>
+        <div class="node purple"><div class="t">指标 / 账单</div><div class="s">GET /metrics · GET /billing</div><div class="p">src/observability/metrics.ts · src/billing/user-billing.ts</div></div>
       </div>
     </div>
   </div>
@@ -247,21 +247,21 @@ ul.tight{margin:6px 0; padding-left:20px} ul.tight li{margin:3px 0; color:#cfd9f
     </div>
 
     <ol class="steps">
-      <li><b>入口限流（两级桶）</b>：<span class="code">RateLimiter.consumeIp</span> 先按 IP 计数，<span class="code">/health</span>、<span class="code">/ready</span> 跳过；<span class="code">requirePrincipal</span> 成功后再 <span class="code">consumeTenant</span> 按租户计数。超限抛 <span class="code">HttpError(429)</span> 带 <span class="code">retry-after</span> / <span class="code">x-ratelimit-*</span>；固定窗口 60s，默认 120/IP、600/租户，<span class="code">HARNESS_TRUST_PROXY=true</span> 时按 <span class="code">X-Forwarded-For</span> 首跳归因。
+      <li><b>入口限流（两级桶）</b>：<span class="code">RateLimiter.consumeIp</span> 先按 IP 计数，<span class="code">/health</span>、<span class="code">/ready</span> 跳过；<span class="code">requirePrincipal</span> 成功后再 <span class="code">consumeUser</span> 按用户计数。超限抛 <span class="code">HttpError(429)</span> 带 <span class="code">retry-after</span> / <span class="code">x-ratelimit-*</span>；固定窗口 60s，默认 120/IP、600/用户，<span class="code">HARNESS_TRUST_PROXY=true</span> 时按 <span class="code">X-Forwarded-For</span> 首跳归因。
         <span class="where">src/http/rate-limiter.ts · src/http/harness-http-api.ts</span></li>
-      <li><b>鉴权与租户归因</b>：<span class="code">HttpAccessControl.authenticate(rawKey)</span> → <span class="code">ApiCredentialStore.authenticate</span> 比对 API key 摘要（SHA-256）→ 返回 <span class="code">RequestPrincipal { tenantId, scopes, userId }</span>。路由用 scope 门禁：<span class="code">tasks:write</span>、<span class="code">workspaces:read</span>、<span class="code">metrics:read</span> 等。带 accessControl 时 <span class="code">tenantId 由 principal 决定并忽略 body.tenantId</span>，租户边界不可能靠请求体伪造。
+      <li><b>鉴权与用户归因</b>：<span class="code">HttpAccessControl.authenticate(rawKey)</span> → <span class="code">ApiCredentialStore.authenticate</span> 比对 API key 摘要（SHA-256）→ 返回 <span class="code">RequestPrincipal { userId, scopes, userId }</span>。路由用 scope 门禁：<span class="code">tasks:write</span>、<span class="code">workspaces:read</span>、<span class="code">metrics:read</span> 等。带 accessControl 时 <span class="code">userId 由 principal 决定并忽略 body.userId</span>，用户边界不可能靠请求体伪造。
         <span class="where">src/auth/api-credential-store.ts · src/http/routes/*.ts</span></li>
       <li><b>访问审计（先记账）</b>：鉴权结果写 <span class="code">access_audit_events</span>（action / outcome / resource / attemptedKeyDigest），并计算 <span class="code">prev_hash → hash</span> 前向链；表上有禁止 UPDATE / DELETE 的触发器，正常路径无法改写审计事实。
         <span class="where">src/audit/access-audit-store.ts:record / verifyChain</span></li>
-      <li><b>提交 Run</b>：<span class="code">POST /runs { workspaceId, userInput, runPolicy?, thinkingLevel?, priority?, idempotencyKey? }</span> → <span class="code">HarnessApplication.submitRun</span> → <span class="code">RunService.createQueuedRun</span>：先按 <span class="code">findByTenantIdempotencyKey</span> 查重（弱网重放返回同一个 Run），再在**一个事务**里写 <span class="code">agent_runs</span> 行 + <span class="code">RUN_CREATED</span> 事件；唯一索引 <span class="code">agent_runs_tenant_idempotency_key</span> 兜住并发重放。
+      <li><b>提交 Run</b>：<span class="code">POST /runs { workspaceId, userInput, runPolicy?, thinkingLevel?, priority?, idempotencyKey? }</span> → <span class="code">HarnessApplication.submitRun</span> → <span class="code">RunService.createQueuedRun</span>：先按 <span class="code">findByUserIdempotencyKey</span> 查重（弱网重放返回同一个 Run），再在**一个事务**里写 <span class="code">agent_runs</span> 行 + <span class="code">RUN_CREATED</span> 事件；唯一索引 <span class="code">agent_runs_user_idempotency_key</span> 兜住并发重放。
         <span class="where">src/runs/run-service.ts · src/runs/runstore.ts:create</span></li>
-      <li><b>入队 + 独立抢 slot</b>：<span class="code">RunScheduler.submit</span> 先做队列深度 backpressure（超 <span class="code">HARNESS_MAX_QUEUED_RUNS</span> 抛 <span class="code">QueueBackpressureError</span> → HTTP 429），再 <span class="code">TenantRunScheduler.enqueue</span> 进租户队列；随后 <span class="code">requestPump().kick()</span> 立刻起一个 attempt（不 await 批次），保证「HTTP 后提交的 Run 不会被上一批 drain 串行化」。
-        <span class="where">src/scheduling/run-scheduler.ts:submit / kick · tenant-run-scheduler.ts:enqueue</span></li>
-      <li><b>取任务（公平 + 优先级 + 老化）</b>：<span class="code">claimNext</span> 先看老化队列（等待超过 <span class="code">HARNESS_SCHEDULER_AGING_MS</span> 的队首租户插队），再按 <span class="code">priority desc, enqueuedAt asc</span> 轮转各租户，并检查全局/租户并发上限与会话串行化。
-        <span class="where">src/scheduling/tenant-run-scheduler.ts:claimNext / canClaim</span></li>
+      <li><b>入队 + 独立抢 slot</b>：<span class="code">RunScheduler.submit</span> 先做队列深度 backpressure（超 <span class="code">HARNESS_MAX_QUEUED_RUNS</span> 抛 <span class="code">QueueBackpressureError</span> → HTTP 429），再 <span class="code">UserRunScheduler.enqueue</span> 进用户队列；随后 <span class="code">requestPump().kick()</span> 立刻起一个 attempt（不 await 批次），保证「HTTP 后提交的 Run 不会被上一批 drain 串行化」。
+        <span class="where">src/scheduling/run-scheduler.ts:submit / kick · user-run-scheduler.ts:enqueue</span></li>
+      <li><b>取任务（公平 + 优先级 + 老化）</b>：<span class="code">claimNext</span> 先看老化队列（等待超过 <span class="code">HARNESS_SCHEDULER_AGING_MS</span> 的队首用户插队），再按 <span class="code">priority desc, enqueuedAt asc</span> 轮转各用户，并检查全局/用户并发上限与会话串行化。
+        <span class="where">src/scheduling/user-run-scheduler.ts:claimNext / canClaim</span></li>
       <li><b>资源准入</b>：<span class="code">ResourceObserver.observe()</span> → <span class="code">ResourceClassifier</span> 分档（NORMAL / BUSY / CRITICAL / UNKNOWN）→ <span class="code">ExecutionPolicy</span> 给出 <span class="code">START / QUEUE / DENY</span> 决策，落 <span class="code">policy_decisions</span> + <span class="code">resource_snapshots</span>；外部模型服务模式下用 <span class="code">ExternalModelServiceResourceObserver</span>（<span class="code">HARNESS_MODEL_SERVICE_MODE=external</span>），不伪造 GPU 数据。
         <span class="where">src/resources/resource-admission-service.ts · external-model-service-observer.ts</span></li>
-      <li><b>执行前置：策略快照 + Attempt + 租约</b>：<span class="code">RunExecutor.start</span> 先 <span class="code">ensureSession</span>，再 <span class="code">computeEffectivePolicy</span> 把 platform / tenant / template / workspace / run 五层取交集（deny wins）并叠加 sandbox profile；<span class="code">assertNetworkRequestAllowed</span> 在**创建 VM 之前**把「请求 allowNetwork=true 但平台不给网卡」fail-closed 成 INTERRUPTED；快照存 <span class="code">effective_policy_snapshots</span>；然后 <span class="code">createRunAttempt</span>（<span class="code">run_attempts</span>）并 <span class="code">leaseManager.acquire</span> 拿到租约。
+      <li><b>执行前置：策略快照 + Attempt + 租约</b>：<span class="code">RunExecutor.start</span> 先 <span class="code">ensureSession</span>，再 <span class="code">computeEffectivePolicy</span> 把 platform / user / template / workspace / run 五层取交集（deny wins）并叠加 sandbox profile；<span class="code">assertNetworkRequestAllowed</span> 在**创建 VM 之前**把「请求 allowNetwork=true 但平台不给网卡」fail-closed 成 INTERRUPTED；快照存 <span class="code">effective_policy_snapshots</span>；然后 <span class="code">createRunAttempt</span>（<span class="code">run_attempts</span>）并 <span class="code">leaseManager.acquire</span> 拿到租约。
         <span class="where">src/runtime/run-executor.ts:104-150 · src/policies/effective-policy.ts · src/runs/run-lease-manager.ts</span></li>
       <li><b>创建沙箱（跨进程）</b>：<span class="code">SandboxProviderRouter</span> 按 provider 选实现；broker 模式下 <span class="code">BrokerSandboxProvider.create</span> 经 Unix socket 发 <span class="code">{op:"create", input:{policy, controlToken, token}}</span> → Broker 服务端校验 <span class="code">controlToken</span> 与 <span class="code">SO_PEERCRED</span>（只允许 Master UID）→ <span class="code">MicrovmSandboxProvider.create</span> → jailer + Firecracker 起 VM → 返回 <span class="code">SandboxRecord</span> + <span class="code">BrokerSandboxHandlePayload</span>（含 <span class="code">enforcement</span> 能力声明与 <span class="code">acquisition.warmHit</span>）。
         <span class="where">src/sandbox/sandbox-provider-router.ts · broker/broker-sandbox-provider.ts · broker/sandbox-broker-server.ts</span></li>
@@ -269,16 +269,16 @@ ul.tight{margin:6px 0; padding-left:20px} ul.tight li{margin:3px 0; color:#cfd9f
         <span class="where">src/runs/run-attempt.ts · src/runtime/worker-process-runtime.ts · scripts/harness-worker-run.sh</span></li>
       <li><b>Agent 循环</b>：Worker 内 <span class="code">PiAdapter</span> 用 <span class="code">ModelRuntime</span> 拉模型（外部 opencode-go），把系统提示词 + 工具清单 + 会话历史发给模型；模型流式返回 thinking / text / tool_call；每次 Run 结束检查会话压缩（Pi 原生 compaction，参数由 Harness 显式下发）。
         <span class="where">src/runtime/pi-adapter.ts · src/app/harness-config.ts:piCompaction*</span></li>
-      <li><b>工具调用（副作用先记账后执行）</b>：Pi 工具被 <span class="code">wrapPiToolWithGateway</span> 包一层 → <span class="code">classifyPiToolEffect</span> 判定 READ_ONLY / IDEMPOTENT_WRITE / UNKNOWN_EFFECT → <span class="code">ToolGateway.prepare</span> **先**写 <span class="code">tool_executions</span>（PREPARED）→ 经 Worker↔Master 的 <span class="code">TOOL_PREPARE / TOOL_COMPLETE</span> RPC 与 Broker <span class="code">{op:"execute", sandboxId, tenantId, token, command, options}</span> 在 microVM 内执行 → 结果回传 → <span class="code">ToolGateway.complete</span> 落 SUCCEEDED / FAILED；安全工具成功后可 <span class="code">completeWithCheckpoint</span> 写 <span class="code">checkpoints</span> 并回填 <span class="code">agent_runs.checkpoint_id</span>。
+      <li><b>工具调用（副作用先记账后执行）</b>：Pi 工具被 <span class="code">wrapPiToolWithGateway</span> 包一层 → <span class="code">classifyPiToolEffect</span> 判定 READ_ONLY / IDEMPOTENT_WRITE / UNKNOWN_EFFECT → <span class="code">ToolGateway.prepare</span> **先**写 <span class="code">tool_executions</span>（PREPARED）→ 经 Worker↔Master 的 <span class="code">TOOL_PREPARE / TOOL_COMPLETE</span> RPC 与 Broker <span class="code">{op:"execute", sandboxId, userId, token, command, options}</span> 在 microVM 内执行 → 结果回传 → <span class="code">ToolGateway.complete</span> 落 SUCCEEDED / FAILED；安全工具成功后可 <span class="code">completeWithCheckpoint</span> 写 <span class="code">checkpoints</span> 并回填 <span class="code">agent_runs.checkpoint_id</span>。
         <span class="where">src/runtime/pi-tool-gateway.ts · src/tools/tool-gateway.ts · tool-execution-store.ts</span></li>
       <li><b>事件与输出回流</b>：RuntimeEvent → <span class="code">RuntimeEventBridge</span> → <span class="code">RunStore.appendEvent</span>（<span class="code">run_events</span>，带 dedupe key）+ <span class="code">run_output_chunks</span> 存流式分片；前端轮询 <span class="code">GET /runs/:id/events</span> 与 <span class="code">/output</span> 渲染时间线与 Markdown。
         <span class="where">src/events/runtime-event-bridge.ts · src/runs/run-output-store.ts</span></li>
       <li><b>终态收尾</b>：<span class="code">executeRunLifecycle</span> 在 finally 里做 <span class="code">captureAfter</span>（workspace 快照 + diff → <span class="code">run_workspace_snapshots</span> / <span class="code">run_workspace_diffs</span>）与 <span class="code">captureArtifacts</span>（按 diff 收集产物，受每 Run 文件数/总字节限额），追加 <span class="code">RUN_ARTIFACTS_READY</span> 事件消除「状态已终态但产物还没就绪」的一致性窗口；<span class="code">RunStore.update</span> 走状态机校验后落 <span class="code">RUN_COMPLETED</span>。
         <span class="where">src/runs/run-service.ts:executeRunLifecycle · workspaces/run-workspace-result.ts</span></li>
-      <li><b>释放资源</b>：执行器 finally 里 <span class="code">leaseManager.release</span> → <span class="code">sandbox.terminate</span>（Broker 校验 token + tenantId → 销毁 VM → 导出 workspace 磁盘 → 清理 run 目录）；调度器释放 slot，下一个排队 Run 被 pump 拉起。
+      <li><b>释放资源</b>：执行器 finally 里 <span class="code">leaseManager.release</span> → <span class="code">sandbox.terminate</span>（Broker 校验 token + userId → 销毁 VM → 导出 workspace 磁盘 → 清理 run 目录）；调度器释放 slot，下一个排队 Run 被 pump 拉起。
         <span class="where">src/runtime/run-executor.ts:finally · broker/sandbox-broker-server.ts:terminate</span></li>
-      <li><b>观测与账单</b>：<span class="code">GET /metrics</span> 聚合 Run 状态分布、沙箱获取耗时（warmHit 命中率）、HTTP 状态计数；<span class="code">GET /billing</span> 按模型 token / 沙箱秒 / 工具调用聚合租户成本（默认单价 0，个人项目不投入）。
-        <span class="where">src/observability/metrics.ts · src/billing/tenant-billing.ts</span></li>
+      <li><b>观测与账单</b>：<span class="code">GET /metrics</span> 聚合 Run 状态分布、沙箱获取耗时（warmHit 命中率）、HTTP 状态计数；<span class="code">GET /billing</span> 按模型 token / 沙箱秒 / 工具调用聚合用户成本（默认单价 0，个人项目不投入）。
+        <span class="where">src/observability/metrics.ts · src/billing/user-billing.ts</span></li>
     </ol>
   </div>
 
@@ -309,7 +309,7 @@ ul.tight{margin:6px 0; padding-left:20px} ul.tight li{margin:3px 0; color:#cfd9f
       </div>
     </div>
     <div class="note warn"><span class="h">踩过的坑（真实缺陷）</span>
-      非 jailer 模式下每 Run 的磁盘路径含 sandboxId，而 Firecracker <span class="code">/snapshot/load</span> 不支持覆盖 block device 路径 —— 快照里固化了黄金 VM 的宿主绝对路径，恢复出的多台 VM 会**共用同一块 workspace 磁盘**，造成跨租户串写、产物导出为空。修复方式是在驱动构造函数里 fail-closed：非 jailer + 快照开关同时出现直接抛错。
+      非 jailer 模式下每 Run 的磁盘路径含 sandboxId，而 Firecracker <span class="code">/snapshot/load</span> 不支持覆盖 block device 路径 —— 快照里固化了黄金 VM 的宿主绝对路径，恢复出的多台 VM 会**共用同一块 workspace 磁盘**，造成跨用户串写、产物导出为空。修复方式是在驱动构造函数里 fail-closed：非 jailer + 快照开关同时出现直接抛错。
     </div>
   </div>
 
@@ -322,7 +322,7 @@ ul.tight{margin:6px 0; padding-left:20px} ul.tight li{margin:3px 0; color:#cfd9f
       <div class="arrow g">先记账，再执行（先写 PREPARED 再动手）</div>
       <div class="node blue"><div class="t">ToolGateway.prepare</div><div class="s">写 tool_executions(status=PREPARED) + tool_policy_decisions；策略拒绝则直接 DENY</div><div class="p">src/tools/tool-gateway.ts:61 · src/policies/tool-policy-guard.ts</div></div>
       <div class="arrow b">经 Broker 进 microVM 执行</div>
-      <div class="node orange"><div class="t">Broker execute</div><div class="s">校验 capability token + tenantId → guest agent 起进程 → 结果分块回传</div><div class="p">broker-protocol.ts op=execute</div></div>
+      <div class="node orange"><div class="t">Broker execute</div><div class="s">校验 capability token + userId → guest agent 起进程 → 结果分块回传</div><div class="p">broker-protocol.ts op=execute</div></div>
       <div class="arrow o">回填结果</div>
       <div class="node purple"><div class="t">ToolGateway.complete</div><div class="s">SUCCEEDED / FAILED + 输出与错误；安全工具成功后写 checkpoints（CHECKPOINT_SAVED）</div><div class="p">tool-execution-store.ts:completeWithCheckpoint</div></div>
     </div>
@@ -360,14 +360,14 @@ ul.tight{margin:6px 0; padding-left:20px} ul.tight li{margin:3px 0; color:#cfd9f
       <div class="node grey"><div class="t">输入</div><div class="s">Bun.serve 请求对象 + 客户端 IP（requestIP）</div></div>
       <div class="arrow">① 全局前置：IP 限流（/health、/ready 白名单）</div>
       <div class="arrow">② 路由分发：按 <span class="code">segments</span> 交给 auth / workspaces / conversations / runs / system / gateway</div>
-      <div class="arrow">③ 鉴权：Bearer → principal（tenantId + scopes）→ 租户限流 → 审计 record(ALLOW/DENY)</div>
+      <div class="arrow">③ 鉴权：Bearer → principal（userId + scopes）→ 用户限流 → 审计 record(ALLOW/DENY)</div>
       <div class="arrow">④ 参数校验：<span class="code">requiredString / optionalNonNegativeInteger / optionalString</span>，非法 → 400 带字段名</div>
       <div class="arrow">⑤ 调用应用门面：<span class="code">HarnessHttpApplication.*</span>（submitRun / getRun / interruptRun / resolveUnknownEffect / getMetricsSnapshot）</div>
       <div class="arrow">⑥ 统一出口：<span class="code">jsonResponse(value, status, headers)</span>；已知错误 → 4xx/429 带 retry-after；未知异常 → 500 + requestId（不再把 SQL 错误文本透给调用方）</div>
       <div class="node purple"><div class="t">输出 / 落库</div><div class="s">JSON 响应；<span class="code">access_audit_events</span>（每次访问一条链上记录）；<span class="code">httpRequestCounts</span>（供 /metrics）</div></div>
     </div>
     <div class="note"><span class="h">设计要点</span>
-      租户身份只来自凭据，不来自请求体；限流分 IP / 租户两级且租户桶在鉴权成功后才计（否则一个攻击者能用别人的 tenantId 打满对方的桶）；错误分层（400 参数、403 策略、404 租户边界、409 冲突、429 限流/背压、500 内部）让前端能精确处理。
+      用户身份只来自凭据，不来自请求体；限流分 IP / 用户两级且用户桶在鉴权成功后才计（否则一个攻击者能用别人的 userId 打满对方的桶）；错误分层（400 参数、403 策略、404 用户边界、409 冲突、429 限流/背压、500 内部）让前端能精确处理。
     </div>
   </div>
 
@@ -383,16 +383,16 @@ ul.tight{margin:6px 0; padding-left:20px} ul.tight li{margin:3px 0; color:#cfd9f
     </div>
   </div>
 
-  <h3>2.3 调度器：TenantRunScheduler（选谁跑）+ RunScheduler（谁去跑） <span class="tag">src/scheduling · 1,432 行</span></h3>
+  <h3>2.3 调度器：UserRunScheduler（选谁跑）+ RunScheduler（谁去跑） <span class="tag">src/scheduling · 1,432 行</span></h3>
   <div class="card">
     <div class="grid2">
       <div>
-        <h4>TenantRunScheduler：队列与公平性</h4>
+        <h4>UserRunScheduler：队列与公平性</h4>
         <div class="flow">
-          <div class="node blue"><div class="t">数据结构</div><div class="s"><span class="code">queuesByTenant</span>（每租户一条按 priority desc + enqueuedAt asc 的队列）· <span class="code">tenantOrder</span>（轮转指针）· <span class="code">activeCountByTenant</span> · <span class="code">activeSessionIds</span></div></div>
+          <div class="node blue"><div class="t">数据结构</div><div class="s"><span class="code">queuesByUser</span>（每用户一条按 priority desc + enqueuedAt asc 的队列）· <span class="code">userOrder</span>（轮转指针）· <span class="code">activeCountByUser</span> · <span class="code">activeSessionIds</span></div></div>
           <div class="arrow b">enqueue：防重复（同 Run 重复入队直接忽略）、防「已在执行」</div>
-          <div class="arrow b">claimNext：① 老化插队（等待超阈值）② 轮转租户 ③ priority 优先 ④ canClaim 检查全局/租户并发 + 会话串行化</div>
-          <div class="arrow b">activate / release 维护索引；QueueReasonCode 把「为什么没跑」结构化（GLOBAL_CONCURRENCY_LIMIT / TENANT_CONCURRENCY_LIMIT / SESSION_SERIALIZATION / RESOURCE_BUSY…）</div>
+          <div class="arrow b">claimNext：① 老化插队（等待超阈值）② 轮转用户 ③ priority 优先 ④ canClaim 检查全局/用户并发 + 会话串行化</div>
+          <div class="arrow b">activate / release 维护索引；QueueReasonCode 把「为什么没跑」结构化（GLOBAL_CONCURRENCY_LIMIT / USER_CONCURRENCY_LIMIT / SESSION_SERIALIZATION / RESOURCE_BUSY…）</div>
           <div class="node purple"><div class="t">输出</div><div class="s">claim 结果 + 阻塞原因（前端能看到「排在第几位、因为什么在等」）</div></div>
         </div>
       </div>
@@ -439,7 +439,7 @@ ul.tight{margin:6px 0; padding-left:20px} ul.tight li{margin:3px 0; color:#cfd9f
   <h3>2.5 RunExecutor：把 Attempt / Policy / Sandbox / Runtime 串起来 <span class="tag">src/runtime/run-executor.ts · 340 行</span></h3>
   <div class="card">
     <div class="flow">
-      <div class="node grey"><div class="t">输入</div><div class="s">RuntimeStartRequest / RuntimeResumeRequest（runId + tenantId + workspacePath + runPolicy + thinkingLevel）</div></div>
+      <div class="node grey"><div class="t">输入</div><div class="s">RuntimeStartRequest / RuntimeResumeRequest（runId + userId + workspacePath + runPolicy + thinkingLevel）</div></div>
       <div class="arrow b">① runs.get(runId) → ensureSession（harness_sessions）</div>
       <div class="arrow b">② computeEffectivePolicy（五层交集，deny wins）+ withSandboxProfile → assertNetworkRequestAllowed → saveSnapshot（effective_policy_snapshots）</div>
       <div class="arrow b">③ createRunAttempt → attempts.create → leaseManager.acquire（租约落库）→ emit control_prepared</div>
@@ -470,7 +470,7 @@ ul.tight{margin:6px 0; padding-left:20px} ul.tight li{margin:3px 0; color:#cfd9f
         <h4>SandboxProvider 契约（能力声明而非布尔开关）</h4>
         <div class="flow">
           <div class="node purple"><div class="t">create / terminate / subscribe</div><div class="s">返回 SandboxHandle（含 enforcement）与 SandboxRecord（落 sandboxes 表）</div></div>
-          <div class="node purple"><div class="t">SandboxEnforcementCapabilities</div><div class="s">toolExecutionBoundary(HOST/SANDBOX) · filesystemIsolation · processIsolation · networkPolicyEnforced · cpu/memory/disk/pidLimitEnforced · workspaceScope(RUN/TENANT/NONE)</div></div>
+          <div class="node purple"><div class="t">SandboxEnforcementCapabilities</div><div class="s">toolExecutionBoundary(HOST/SANDBOX) · filesystemIsolation · processIsolation · networkPolicyEnforced · cpu/memory/disk/pidLimitEnforced · workspaceScope(RUN/USER/NONE)</div></div>
           <div class="node purple"><div class="t">fail-closed 用法</div><div class="s">工具策略守卫读这份能力声明：如果 <span class="code">toolExecutionBoundary !== SANDBOX</span>，直接拒绝执行 shell，而不是「凑合在本机跑」</div></div>
         </div>
       </div>
@@ -487,11 +487,11 @@ ul.tight{margin:6px 0; padding-left:20px} ul.tight li{margin:3px 0; color:#cfd9f
       <div class="arrow o">三种操作，各自的门禁</div>
       <div class="cols3">
         <div class="node orange"><div class="t">create</div><div class="s">必须带 <span class="code">controlToken</span>（Broker 启动时从环境读的静态共享 secret，Worker 不持有）+ 新建的 <span class="code">token</span>；<span class="code">SO_PEERCRED</span> 校验对端是 Master UID</div></div>
-        <div class="node orange"><div class="t">execute</div><div class="s">必须带 <span class="code">token</span>（capability token，Broker 存 token→sandboxId）+ <span class="code">tenantId</span>（归属校验）；对端 UID 必须是 Worker</div></div>
-        <div class="node orange"><div class="t">terminate</div><div class="s">capability token 或 controlToken（Master 侧恢复/清理后门）+ tenantId 校验</div></div>
+        <div class="node orange"><div class="t">execute</div><div class="s">必须带 <span class="code">token</span>（capability token，Broker 存 token→sandboxId）+ <span class="code">userId</span>（归属校验）；对端 UID 必须是 Worker</div></div>
+        <div class="node orange"><div class="t">terminate</div><div class="s">capability token 或 controlToken（Master 侧恢复/清理后门）+ userId 校验</div></div>
       </div>
       <div class="arrow o">纵深防御</div>
-      <div class="node purple"><div class="t">三重校验</div><div class="s">① 进程身份（SO_PEERCRED：uid/gid/pid）② 静态 secret（controlToken，常量时间比较）③ 每 sandbox 能力令牌 + 租户归属 Map（<span class="code">tenantBySandbox</span>）</div></div>
+      <div class="node purple"><div class="t">三重校验</div><div class="s">① 进程身份（SO_PEERCRED：uid/gid/pid）② 静态 secret（controlToken，常量时间比较）③ 每 sandbox 能力令牌 + 用户归属 Map（<span class="code">userBySandbox</span>）</div></div>
       <div class="node purple"><div class="t">失败即回收</div><div class="s">create 之后如果记录读不回来（readRecord 为 null），立刻 terminate 该 sandbox，避免「不可寻址的孤儿 VM」</div></div>
     </div>
     <div class="note ok"><span class="h">为什么要有 Broker</span>
@@ -527,7 +527,7 @@ ul.tight{margin:6px 0; padding-left:20px} ul.tight li{margin:3px 0; color:#cfd9f
       <div class="arrow g">协议</div>
       <div class="node green"><div class="t">worker-protocol v2</div><div class="s">Master→Worker：START_RUN / RESUME_RUN / INTERRUPT_RUN / SHUTDOWN / TOOL_PREPARE_RESPONSE / TOOL_COMPLETE_RESPONSE；Worker→Master：WORKER_READY / RUNTIME_EVENT / RUN_COMPLETED / RUN_FAILED / TOOL_PREPARE_REQUEST / TOOL_COMPLETE_REQUEST</div></div>
       <div class="arrow g">内部装配</div>
-      <div class="node green"><div class="t">setupRuntime</div><div class="s">PiAdapter（模型 + 工具 + MCP registry）+ ContainerSandboxProvider（container 模式）或 BrokerSandboxProvider（broker 模式，带 tenantId）+ Landlock；工具执行只走 broker，不继承宿主 env</div></div>
+      <div class="node green"><div class="t">setupRuntime</div><div class="s">PiAdapter（模型 + 工具 + MCP registry）+ ContainerSandboxProvider（container 模式）或 BrokerSandboxProvider（broker 模式，带 userId）+ Landlock；工具执行只走 broker，不继承宿主 env</div></div>
     </div>
     <div class="note"><span class="h">为什么 Worker 单独一个进程</span>
       ① 爆炸半径：模型循环、用户 skill、MCP 客户端都在 Worker 里，出问题不牵连调度与 DB；② 资源边界：systemd 能给它 CPU/内存/任务数/系统调用/文件系统/网络六道限制；③ 可替换：同一份 worker 协议可以换成容器或远程 Worker，控制面不变。
@@ -605,8 +605,8 @@ ul.tight{margin:6px 0; padding-left:20px} ul.tight li{margin:3px 0; color:#cfd9f
     </tr>
     <tr>
       <td><b>调度</b><br><span class="code">src/scheduling</span> 1,432 行</td>
-      <td><code>run-scheduler.ts</code> 822<br><code>tenant-run-scheduler.ts</code> 610</td>
-      <td><code>TenantRunScheduler.enqueue/claimNext/canClaim/isActive/isQueued</code><br><code>RunScheduler.submit/kick/tick/drain/reconcileQueuedRuns/submitResume</code></td>
+      <td><code>run-scheduler.ts</code> 822<br><code>user-run-scheduler.ts</code> 610</td>
+      <td><code>UserRunScheduler.enqueue/claimNext/canClaim/isActive/isQueued</code><br><code>RunScheduler.submit/kick/tick/drain/reconcileQueuedRuns/submitResume</code></td>
       <td>纯内存队列 + DB 事实对齐；优先级/老化/轮转三种公平策略叠加；backpressure 在创建 Run 之前判定（不落库）；<code>kick</code> 与 <code>drain</code> 分离</td>
       <td><code>tests/scheduling/*</code> 11 个文件</td>
     </tr>
@@ -635,7 +635,7 @@ ul.tight{margin:6px 0; padding-left:20px} ul.tight li{margin:3px 0; color:#cfd9f
       <td><b>Broker</b><br><span class="code">src/sandbox/broker</span> 1,075 行</td>
       <td><code>sandbox-broker-server.ts</code> 356<br><code>broker-sandbox-provider.ts</code> 274<br><code>broker-main.ts</code> 199<br><code>peer-credentials.ts</code> 96</td>
       <td><code>BrokerRequest = ping | create | execute | terminate</code><br><code>isBrokerRequest(value)</code><br><code>readPeerCredentials(fd) → {pid,uid,gid}</code></td>
-      <td>一行一 JSON + id 关联；SO_PEERCRED 走 Bun FFI <code>getsockopt(fd, SOL_SOCKET, SO_PEERCRED, …)</code>；token→sandboxId 与 sandboxId→tenantId 两张 Map 做能力与归属校验</td>
+      <td>一行一 JSON + id 关联；SO_PEERCRED 走 Bun FFI <code>getsockopt(fd, SOL_SOCKET, SO_PEERCRED, …)</code>；token→sandboxId 与 sandboxId→userId 两张 Map 做能力与归属校验</td>
       <td><code>tests/sandbox/sandbox-broker.test.ts</code> 等</td>
     </tr>
     <tr>
@@ -669,7 +669,7 @@ ul.tight{margin:6px 0; padding-left:20px} ul.tight li{margin:3px 0; color:#cfd9f
     <tr>
       <td><b>HTTP</b><br><span class="code">src/http</span> 837 + routes 856 行</td>
       <td><code>http-utils.ts</code> 271<br><code>harness-http-api.ts</code> 245<br><code>rate-limiter.ts</code> 88<br><code>routes/runs.ts</code> 276</td>
-      <td><code>HarnessHttpApi.fetch(request, clientIp?)</code><br><code>RateLimiter.consumeTenant/consumeIp</code><br><code>HttpError(status, message, headers?)</code></td>
+      <td><code>HarnessHttpApi.fetch(request, clientIp?)</code><br><code>RateLimiter.consumeUser/consumeIp</code><br><code>HttpError(status, message, headers?)</code></td>
       <td>限流两级、身份只来自凭据、错误分层、未知异常 500 + requestId；静态控制台同源无构建</td>
       <td><code>tests/http/*</code> 12 个文件</td>
     </tr>
@@ -698,11 +698,11 @@ ul.tight{margin:6px 0; padding-left:20px} ul.tight li{margin:3px 0; color:#cfd9f
 
   <h3>3.2 数据模型（SQLite，20 张表 / migration v1-v4）</h3>
   <div class="grid3">
-    <div class="card tight"><h4>身份与租户</h4>
+    <div class="card tight"><h4>身份与用户</h4>
       <div class="kv"><div>users</div><div>账号（email 唯一、密码 hash）</div>
-      <div>api_credentials</div><div>API key 摘要 + scopes + tenant_id</div>
+      <div>api_credentials</div><div>API key 摘要 + scopes + user_id</div>
       <div>user_sessions</div><div>登录会话 token 与过期时间</div>
-      <div>workspaces</div><div>租户下的工作区</div>
+      <div>workspaces</div><div>用户下的工作区</div>
       <div>harness_sessions</div><div>Agent 会话（含 runtime_session_ref）</div></div>
     </div>
     <div class="card tight"><h4>Run 事实</h4>
@@ -725,7 +725,7 @@ ul.tight{margin:6px 0; padding-left:20px} ul.tight li{margin:3px 0; color:#cfd9f
     </div>
     <div class="card tight"><h4>审计与计费</h4>
       <div class="kv"><div>access_audit_events</div><div>只追加 + prev_hash/hash 链 + 禁改触发器</div>
-      <div>billing 聚合</div><div>按租户聚合模型 token / 沙箱秒 / 工具调用</div></div>
+      <div>billing 聚合</div><div>按用户聚合模型 token / 沙箱秒 / 工具调用</div></div>
     </div>
     <div class="card tight"><h4>迁移</h4>
       <div class="kv"><div>v1</div><div>initial_schema（20 张表 + 21 个索引）</div>
@@ -740,10 +740,10 @@ ul.tight{margin:6px 0; padding-left:20px} ul.tight li{margin:3px 0; color:#cfd9f
     <tr><th>分类</th><th>变量</th><th>默认 / 说明</th></tr>
     <tr><td>沙箱</td><td><code>HARNESS_SANDBOX_PROVIDER</code> · <code>HARNESS_SANDBOX_PROFILE</code> · <code>HARNESS_SANDBOX_RUNTIME</code> · <code>HARNESS_MICROVM_DRIVER</code> · <code>HARNESS_USE_JAILER</code> · <code>HARNESS_VM_SNAPSHOTS_ENABLED</code></td><td>production 强制 microvm + strict + firecracker + jailer；<b>必须显式写 driver=firecracker</b>，否则会静默退到 Mock</td></tr>
     <tr><td>Broker</td><td><code>HARNESS_SANDBOX_BROKER_SOCKET</code> · <code>HARNESS_SANDBOX_BROKER_CONTROL_TOKEN</code> · <code>HARNESS_SANDBOX_BROKER_PEER_UIDS</code> / <code>_MASTER_UID</code> / <code>_WORKER_UID</code></td><td>Unix socket + 静态共享 secret + SO_PEERCRED 白名单（生产至少配一项）</td></tr>
-    <tr><td>并发与队列</td><td><code>HARNESS_MAX_ACTIVE_RUNS</code>(30) · <code>HARNESS_MAX_ACTIVE_RUNS_PER_TENANT</code>(10) · <code>HARNESS_MAX_QUEUED_RUNS</code>(0=不限) · <code>HARNESS_MAX_QUEUED_RUNS_PER_TENANT</code> · <code>HARNESS_SCHEDULER_AGING_MS</code> · <code>HARNESS_QUEUE_TTL_MS</code> · <code>HARNESS_PUMP_INTERVAL_MS</code>(1000)</td><td>per-tenant 必须 ≤ 全局，否则启动即报错</td></tr>
+    <tr><td>并发与队列</td><td><code>HARNESS_MAX_ACTIVE_RUNS</code>(30) · <code>HARNESS_MAX_ACTIVE_RUNS_PER_USER</code>(10) · <code>HARNESS_MAX_QUEUED_RUNS</code>(0=不限) · <code>HARNESS_MAX_QUEUED_RUNS_PER_USER</code> · <code>HARNESS_SCHEDULER_AGING_MS</code> · <code>HARNESS_QUEUE_TTL_MS</code> · <code>HARNESS_PUMP_INTERVAL_MS</code>(1000)</td><td>per-user 必须 ≤ 全局，否则启动即报错</td></tr>
     <tr><td>可靠性与重试</td><td><code>HARNESS_RUN_LEASE_TTL_MS</code>(60000) · <code>HARNESS_RUN_LEASE_HEARTBEAT_MS</code>(10000) · <code>HARNESS_RUN_MAX_ATTEMPTS</code>(3) · <code>HARNESS_RUN_RETRY_BASE_MS</code>(1000) · <code>HARNESS_RUN_RETRY_MAX_MS</code>(30000) · <code>HARNESS_INSTANCE_ID</code></td><td>heartbeat 必须 &lt; TTL；退避为指数 + 上限</td></tr>
     <tr><td>执行超时</td><td><code>HARNESS_EXECUTION_TIMEOUT_MS</code> · <code>HARNESS_INTERRUPT_GRACE_MS</code></td><td>超时优雅中断，宽限期后 SIGKILL</td></tr>
-    <tr><td>入口防护</td><td><code>HARNESS_RATE_LIMIT_ENABLED</code>(true) · <code>_WINDOW_MS</code>(60000) · <code>_MAX_PER_TENANT</code>(600) · <code>_MAX_PER_IP</code>(120) · <code>HARNESS_TRUST_PROXY</code>(false) · <code>HARNESS_REGISTRATION_MODE</code>(open/invite/closed) · <code>HARNESS_REGISTRATION_INVITE_CODE</code></td><td>限流两级；注册收口用 invite + 邀请码（常量时间比较）</td></tr>
+    <tr><td>入口防护</td><td><code>HARNESS_RATE_LIMIT_ENABLED</code>(true) · <code>_WINDOW_MS</code>(60000) · <code>_MAX_PER_USER</code>(600) · <code>_MAX_PER_IP</code>(120) · <code>HARNESS_TRUST_PROXY</code>(false) · <code>HARNESS_REGISTRATION_MODE</code>(open/invite/closed) · <code>HARNESS_REGISTRATION_INVITE_CODE</code></td><td>限流两级；注册收口用 invite + 邀请码（常量时间比较）</td></tr>
     <tr><td>Worker 隔离</td><td><code>HARNESS_WORKER_ISOLATION</code>(in-process/systemd/process) · <code>HARNESS_WORKER_LANDLOCK</code>(required) · <code>HARNESS_WORKER_LANDLOCK_WRITABLE_PATHS</code> · <code>WORKER_EGRESS_ALLOW</code></td><td>Landlock 失败即退出；egress 走 systemd <code>IPAddressDeny/Allow</code> 白名单</td></tr>
     <tr><td>配额与产物</td><td><code>HARNESS_WORKSPACE_SNAPSHOT_MAX_FILES</code>(20000) · <code>_MAX_DEPTH</code>(32) · <code>HARNESS_ARTIFACT_MAX_FILES_PER_RUN</code>(200) · <code>_MAX_BYTES_PER_RUN</code>(50MiB) · <code>HARNESS_MAX_USER_INPUT_CHARS</code></td><td>超限 fail-closed / 停止收集并告警</td></tr>
     <tr><td>模型</td><td><code>PI_PROVIDER</code>(opencode-go) · <code>PI_MODEL_ID</code> / <code>VLLM_MODEL_ID</code> · <code>PI_AUTH_PATH</code> · <code>PI_MODELS_PATH</code> · <code>PI_COMPACTION_RESERVE_TOKENS</code> · <code>PI_COMPACTION_KEEP_RECENT_TOKENS</code> · <code>HARNESS_MODEL_SERVICE_MODE</code>(local/external)</td><td>模型服务在平台之外；key 只存在 Worker 的 auth.json</td></tr>
@@ -768,7 +768,7 @@ ul.tight{margin:6px 0; padding-left:20px} ul.tight li{margin:3px 0; color:#cfd9f
     <div class="kpi"><div class="v">2.87s</div><div class="k">首次 create（冷启动 + 制作快照）</div></div>
     <div class="kpi"><div class="v">11.6ms</div><div class="k">恢复后 guest 内 <code>uname -r</code> median</div></div>
     <div class="kpi"><div class="v">766ms</div><div class="k">10 并发同时恢复墙钟（N=1 595ms → N=10 766ms）</div></div>
-    <div class="kpi"><div class="v">437ms</div><div class="k">多租户审计：jailer + 快照 24/24，P95（非 jailer 10 并发 1593ms）</div></div>
+    <div class="kpi"><div class="v">437ms</div><div class="k">多用户审计：jailer + 快照 24/24，P95（非 jailer 10 并发 1593ms）</div></div>
     <div class="kpi"><div class="v">10/10</div><div class="k">warmHit 命中（并发冷启动时 warmHit=0，暴露「首个快照完成后不复查」的优化点）</div></div>
     <div class="kpi"><div class="v">592</div><div class="k">测试通过 / 0 失败（126 个文件，真机同结果）</div></div>
   </div>
@@ -779,7 +779,7 @@ ul.tight{margin:6px 0; padding-left:20px} ul.tight li{margin:3px 0; color:#cfd9f
   <div class="cols">
     <div class="card tight"><h4>分布（126 个测试文件）</h4>
       <div class="kv"><div>sandbox</div><div>21（隔离、快照门禁、broker 协议、超时、孤儿回收）</div>
-      <div>runs / http</div><div>12 / 12（幂等、重试、租约、限流、跨租户边界）</div>
+      <div>runs / http</div><div>12 / 12（幂等、重试、租约、限流、跨用户边界）</div>
       <div>scheduling</div><div>11（优先级、老化、backpressure、kick 并发、retryAt 门控）</div>
       <div>runtime</div><div>10（工具网关、效果分类、语言跟随、worker 崩溃）</div>
       <div>resources / deploy</div><div>6 / 6（准入决策、systemd 属性、egress、TLS、升级 runbook）</div>
@@ -790,9 +790,9 @@ ul.tight{margin:6px 0; padding-left:20px} ul.tight li{margin:3px 0; color:#cfd9f
       <ul class="tight">
         <li><b>单元/集成</b>：<code>bun test ./tests</code>（本地 585+，真机 592，0 失败）</li>
         <li><b>类型</b>：<code>bun run typecheck</code> 维持 9 条历史基线错误（都在脚本与串口桥接，不新增）</li>
-        <li><b>端到端</b>：<code>scripts/p0-e2e-smoke.ts</code>（串行 maxActive=1 / 并发 maxActive=2 且事件重叠 / 跨租户全部 404）</li>
-        <li><b>对抗</b>：<code>scripts/microvm-multitenant-audit.ts</code>（并发 + 跨租户文件/secret/marker 隔离 + 残留检查）</li>
-        <li><b>故障注入</b>：<code>scripts/phase5-fault-injection.ts</code>（幂等重放 / backpressure / 跨租户）、<code>scripts/phase5-worker-crash.ts</code>（杀 Worker / 停 Broker）</li>
+        <li><b>端到端</b>：<code>scripts/p0-e2e-smoke.ts</code>（串行 maxActive=1 / 并发 maxActive=2 且事件重叠 / 跨用户全部 404）</li>
+        <li><b>对抗</b>：<code>scripts/microvm-multiuser-audit.ts</code>（并发 + 跨用户文件/secret/marker 隔离 + 残留检查）</li>
+        <li><b>故障注入</b>：<code>scripts/phase5-fault-injection.ts</code>（幂等重放 / backpressure / 跨用户）、<code>scripts/phase5-worker-crash.ts</code>（杀 Worker / 停 Broker）</li>
         <li><b>审计与备份</b>：<code>scripts/audit-chain-smoke.ts</code>、<code>scripts/harness-ops.ts backup/disk-check/cleanup</code></li>
       </ul>
     </div>
@@ -803,13 +803,13 @@ ul.tight{margin:6px 0; padding-left:20px} ul.tight li{margin:3px 0; color:#cfd9f
     最小特权原则：需要 <code>/dev/kvm</code>、jailer chroot、cgroup 写入的只有 Broker。Master 承担鉴权、调度、DB、模型编排，把它做成非 root 后，即使 Master 被攻破也拿不到 KVM/设备权限；Broker 只暴露 create/execute/terminate 三个操作，且用 controlToken + SO_PEERCRED + capability token 三重校验。代价是部署复杂一点（两个 unit、一个 socket、sudoers 只放行 worker launcher），换来权限域清晰。
   </details>
   <details><summary>Q2. 快照加速很香，为什么还要 fail-closed？</summary>
-    Firecracker 的 <code>/snapshot/load</code> 不支持覆盖 block device 路径，快照里固化的是黄金 VM 的宿主绝对路径。非 jailer 模式下每 Run 的磁盘路径不同，恢复出来的多台 VM 会指向同一块 workspace 磁盘 —— 跨租户串写、产物导出为空。jailer 之所以安全，是因为 chroot + mount namespace 里路径固定为 <code>/workspace.ext4</code>。所以驱动构造函数里直接拒绝「非 jailer + 快照」这个组合，而不是靠文档提醒。
+    Firecracker 的 <code>/snapshot/load</code> 不支持覆盖 block device 路径，快照里固化的是黄金 VM 的宿主绝对路径。非 jailer 模式下每 Run 的磁盘路径不同，恢复出来的多台 VM 会指向同一块 workspace 磁盘 —— 跨用户串写、产物导出为空。jailer 之所以安全，是因为 chroot + mount namespace 里路径固定为 <code>/workspace.ext4</code>。所以驱动构造函数里直接拒绝「非 jailer + 快照」这个组合，而不是靠文档提醒。
   </details>
   <details><summary>Q3. 为什么 UNKNOWN_EFFECT 绝不自动重放？</summary>
     重放的代价不对称：READ_ONLY 重跑最多浪费一次读；<code>bash</code> 或未声明效果的 MCP 工具重跑可能重复下单、重复写文件、重复扣款。所以自动重放的门槛是「PREPARED + READ_ONLY」，其余一律人工复核（<code>resolve-unknown-effect</code> 给一个显式出口）。这是 fail-closed 的典型应用：不确定时选更保守的那个。
   </details>
-  <details><summary>Q4. 限流为什么分 IP 和租户两级？</summary>
-    只用 IP：一个 NAT 后的实验室所有人在同一桶里互相挤。只用租户：未鉴权的请求没有租户，攻击者可以无限打鉴权接口。所以 IP 桶在鉴权前（保护登录/注册/探测），租户桶在鉴权成功后（保护配额公平）。租户桶必须在 principal 解析之后计，否则伪造 body.tenantId 就能打满别人的桶。
+  <details><summary>Q4. 限流为什么分 IP 和用户两级？</summary>
+    只用 IP：一个 NAT 后的实验室所有人在同一桶里互相挤。只用用户：未鉴权的请求没有用户，攻击者可以无限打鉴权接口。所以 IP 桶在鉴权前（保护登录/注册/探测），用户桶在鉴权成功后（保护配额公平）。用户桶必须在 principal 解析之后计，否则伪造 body.userId 就能打满别人的桶。
   </details>
   <details><summary>Q5. 调度器为什么要有 kick 和 drain 两套？</summary>
     drain 是「批量推进 + 等本批结束」，适合周期补偿；但如果新提交的 Run 只能等下一批，用户体验就是「并发提交实际串行」（我们在 p0 smoke 里真的观察到了）。kick 只起一个 attempt 且不 await，让新 Run 立刻抢 slot，同时保留 drain 的批次语义与单飞保护。reconcile 还要跳过已 claim 的 Run，否则会抛「Run 正在执行中」。
@@ -818,10 +818,10 @@ ul.tight{margin:6px 0; padding-left:20px} ul.tight li{margin:3px 0; color:#cfd9f
     如果先执行后记账，进程在两者之间崩溃就会留下「做过的副作用没人知道」的黑洞，恢复时无法判断该不该重跑。先写 PREPARED 后执行，崩溃后至少知道「有个效果不明的执行」；配合 <code>canAutomaticallyReplay</code>，安全的重放，不安全的转人工。
   </details>
   <details><summary>Q7. 单机 SQLite 会不会成为瓶颈？</summary>
-    对 10-20 人实验室规模够用：WAL + busy_timeout=5000 让读写并发不互相阻塞，写路径都在单个 Master 进程内（无多写者竞争）。真正的瓶颈更可能是模型服务往返和 VM 创建（冷启动 1.5s / 恢复 0.5s）。要上多机，第一步是把「Run 事实 + 租约」换成带 lease/heartbeat 的共享存储，再引入按租户的 Worker 池。
+    对 10-20 人实验室规模够用：WAL + busy_timeout=5000 让读写并发不互相阻塞，写路径都在单个 Master 进程内（无多写者竞争）。真正的瓶颈更可能是模型服务往返和 VM 创建（冷启动 1.5s / 恢复 0.5s）。要上多机，第一步是把「Run 事实 + 租约」换成带 lease/heartbeat 的共享存储，再引入按用户的 Worker 池。
   </details>
   <details><summary>Q8. 怎么证明隔离真的生效，而不是「看起来隔离」？</summary>
-    三层证据：① 代码层能力声明（<code>SandboxEnforcementCapabilities</code>），工具策略守卫据此 fail-closed；② 对抗脚本（多 VM 并发 + 跨租户 marker/secret/文件可见性 + 残留进程与目录检查）；③ 真实事件与宿主观测（<code>ss</code> 看 guest 无网卡只有 vsock、<code>pgrep</code> 看进程数与归属、unit 属性看 cgroup/seccomp/Landlock 是否真的应用）。还踩过一个「假隔离」：provider=microvm 但没显式指定 driver 时会静默退到 Mock，事件里的 runtime 字段只是策略值 —— 这也是为什么我把 warmHit 做成如实回传、把能力声明做成显式数据。
+    三层证据：① 代码层能力声明（<code>SandboxEnforcementCapabilities</code>），工具策略守卫据此 fail-closed；② 对抗脚本（多 VM 并发 + 跨用户 marker/secret/文件可见性 + 残留进程与目录检查）；③ 真实事件与宿主观测（<code>ss</code> 看 guest 无网卡只有 vsock、<code>pgrep</code> 看进程数与归属、unit 属性看 cgroup/seccomp/Landlock 是否真的应用）。还踩过一个「假隔离」：provider=microvm 但没显式指定 driver 时会静默退到 Mock，事件里的 runtime 字段只是策略值 —— 这也是为什么我把 warmHit 做成如实回传、把能力声明做成显式数据。
   </details>
   <details><summary>Q9. 最难定位的一个真实 bug？</summary>
     真机上任务「卡在 RUNNING」：宿主 <code>curl https://opencode.ai</code> 返回 200，但 Worker 里模型调用一直不动。取证链：worker 进程的 <code>ss</code> 显示对 Cloudflare IPv4 全部 SYN-SENT；<code>curl -4</code> 超时、<code>curl -6</code> 成功 → 宿主 IPv4 出站到该网段黑洞；而 Worker 因为之前修「IPv6 被 IPAddressDeny 丢弃」把 <code>RestrictAddressFamilies</code> 钉死成 AF_INET，于是永远走不通。修复是恢复双栈 + 显式 IPv6 前缀白名单 + 临时 <code>/etc/hosts</code> pin；同时暴露出「模型调用没有超时」这个更深的问题（心跳还在续租，reaper 不会回收）。

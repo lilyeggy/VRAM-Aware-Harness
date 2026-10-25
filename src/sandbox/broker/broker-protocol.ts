@@ -57,8 +57,8 @@ export type BrokerRequest =
         readonly id: string;
         readonly op: "execute";
         readonly sandboxId: string;
-        /** 请求方租户；Broker 用它做 sandbox 归属校验，防止跨租户执行。 */
-        readonly tenantId: string;
+        /** 请求方用户；Broker 用它做 sandbox 归属校验，防止跨用户执行。 */
+        readonly userId: string;
         /** 该 sandbox 的 capability token；缺失或错误一律拒绝。 */
         readonly token: string;
         readonly command: readonly string[];
@@ -68,8 +68,8 @@ export type BrokerRequest =
         readonly id: string;
         readonly op: "terminate";
         readonly sandboxId: string;
-        /** 请求方租户；Broker 用它做 sandbox 归属校验，防止跨租户终止。 */
-        readonly tenantId: string;
+        /** 请求方用户；Broker 用它做 sandbox 归属校验，防止跨用户终止。 */
+        readonly userId: string;
         /** 该 sandbox 的 capability token；Master 侧也可用 controlToken 覆盖。 */
         readonly token: string;
     };
@@ -85,7 +85,7 @@ export function isBrokerRequest(value: unknown): value is BrokerRequest {
     const candidate = value as {
         id?: unknown;
         op?: unknown;
-        tenantId?: unknown;
+        userId?: unknown;
         token?: unknown;
         input?: unknown;
     };
@@ -93,8 +93,8 @@ export function isBrokerRequest(value: unknown): value is BrokerRequest {
         return false;
     }
     if (candidate.op === "execute" || candidate.op === "terminate") {
-        return typeof candidate.tenantId === "string"
-            && candidate.tenantId.length > 0
+        return typeof candidate.userId === "string"
+            && candidate.userId.length > 0
             && typeof candidate.token === "string"
             && candidate.token.length > 0;
     }

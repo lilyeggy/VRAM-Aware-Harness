@@ -82,7 +82,7 @@ test("队列深度超限的提交抛 QueueBackpressureError 且不创建 Run", a
         HARNESS_SANDBOX_PROVIDER: "managed-local",
         HARNESS_WORKER_ISOLATION: "in-process",
         HARNESS_MAX_ACTIVE_RUNS: "1",
-        HARNESS_MAX_ACTIVE_RUNS_PER_TENANT: "1",
+        HARNESS_MAX_ACTIVE_RUNS_PER_USER: "1",
         HARNESS_MAX_QUEUED_RUNS: "1",
     });
     const runtime = new GatedRuntime();
@@ -92,12 +92,12 @@ test("队列深度超限的提交抛 QueueBackpressureError 且不创建 Run", a
 
     try {
         await composition.application.start();
-        const workspaceA = composition.workspaceService.create("tenant-fault-a", "fault-a");
-        const workspaceB = composition.workspaceService.create("tenant-fault-b", "fault-b");
-        const workspaceC = composition.workspaceService.create("tenant-fault-c", "fault-c");
+        const workspaceA = composition.workspaceService.create("user-fault-a", "fault-a");
+        const workspaceB = composition.workspaceService.create("user-fault-b", "fault-b");
+        const workspaceC = composition.workspaceService.create("user-fault-c", "fault-c");
 
         const runA = composition.application.submitRun({
-            tenantId: "tenant-fault-a",
+            userId: "user-fault-a",
             harnessSessionId: "session-a",
             userInput: "占住并发 slot",
             workspacePath: workspaceA.rootPath,
@@ -111,7 +111,7 @@ test("队列深度超限的提交抛 QueueBackpressureError 且不创建 Run", a
         expect(composition.runStore.get(runA.id)?.status).toBe("RUNNING");
 
         const runB = composition.application.submitRun({
-            tenantId: "tenant-fault-b",
+            userId: "user-fault-b",
             harnessSessionId: "session-b",
             userInput: "排队等待",
             workspacePath: workspaceB.rootPath,
@@ -120,13 +120,13 @@ test("队列深度超限的提交抛 QueueBackpressureError 且不创建 Run", a
         expect(composition.scheduler.listQueue()).toHaveLength(1);
 
         expect(() => composition.application.submitRun({
-            tenantId: "tenant-fault-c",
+            userId: "user-fault-c",
             harnessSessionId: "session-c",
             userInput: "应被 backpressure 拒绝",
             workspacePath: workspaceC.rootPath,
         })).toThrow(QueueBackpressureError);
 
-        expect(composition.runStore.listForTenant("tenant-fault-c", 50)).toHaveLength(0);
+        expect(composition.runStore.listForUser("user-fault-c", 50)).toHaveLength(0);
     } finally {
         runtime.release();
         await composition.close();

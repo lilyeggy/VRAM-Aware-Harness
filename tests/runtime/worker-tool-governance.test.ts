@@ -33,7 +33,7 @@ function createSampleStartRequest(runId: string): RuntimeStartRequest {
     return {
         run: {
             runId,
-            tenantId: "tenant-governance",
+            userId: "user-governance",
             harnessSessionId: "session-governance",
             workspacePath: "/tmp/workspace-governance",
             thinkingLevel: "off",

@@ -19,7 +19,7 @@ export * from "./runs/run-output-store.ts";
 
 // Scheduling & Admission (concurrency / fairness / queueing)
 export * from "./scheduling/run-scheduler.ts";
-export * from "./scheduling/tenant-run-scheduler.ts";
+export * from "./scheduling/user-run-scheduler.ts";
 
 // Policies & Tool Governance
 export * from "./policies/effective-policy.ts";

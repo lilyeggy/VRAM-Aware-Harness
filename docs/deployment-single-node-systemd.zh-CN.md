@@ -202,7 +202,7 @@ HARNESS_BOOTSTRAP_API_KEY=replace-with-bootstrap-key
 HARNESS_REGISTRATION_MODE=invite
 HARNESS_REGISTRATION_INVITE_CODE=replace-with-lab-invite-code
 # HTTP 入口限流（默认开启；实验室可按人数/习惯调整）
-HARNESS_RATE_LIMIT_MAX_PER_TENANT=600
+HARNESS_RATE_LIMIT_MAX_PER_USER=600
 HARNESS_RATE_LIMIT_MAX_PER_IP=1200
 # 仅当 Master 只监听 loopback、前面是可信 Caddy/Nginx 时才开启。
 #HARNESS_TRUST_PROXY=true
@@ -297,15 +297,15 @@ WantedBy=multi-user.target
   bun run scripts/audit-chain-smoke.ts --database /srv/VRAM-Aware-Harness/data/live-full-flow/harness.sqlite
   ```
   期望 `AUDIT_CHAIN_SMOKE_OK` 与 `AUDIT_CHAIN_VERIFY_OK`。
-- 租户成本账单（§9.7 v1.3 第 5 项）：`GET /billing` 需要 `billing:read` scope，按 Principal Tenant 收口；默认只汇总 Provider 上报的模型成本（`MODEL_COMPLETED.usage.cost.total`），可用 `HARNESS_BILLING_CURRENCY` / `HARNESS_BILLING_MODEL_INPUT_PER_MTOK` / `HARNESS_BILLING_MODEL_OUTPUT_PER_MTOK` / `HARNESS_BILLING_SANDBOX_SECOND` / `HARNESS_BILLING_TOOL_CALL` 叠加 token、沙箱秒与工具调用费用。验证命令：
+- 用户成本账单（§9.7 v1.3 第 5 项）：`GET /billing` 需要 `billing:read` scope，按 Principal User 收口；默认只汇总 Provider 上报的模型成本（`MODEL_COMPLETED.usage.cost.total`），可用 `HARNESS_BILLING_CURRENCY` / `HARNESS_BILLING_MODEL_INPUT_PER_MTOK` / `HARNESS_BILLING_MODEL_OUTPUT_PER_MTOK` / `HARNESS_BILLING_SANDBOX_SECOND` / `HARNESS_BILLING_TOOL_CALL` 叠加 token、沙箱秒与工具调用费用。验证命令：
   ```bash
   cd /srv/VRAM-Aware-Harness
-  bun run scripts/tenant-billing-smoke.ts
-  bun run scripts/tenant-billing-smoke.ts --database /srv/VRAM-Aware-Harness/data/live-full-flow/harness.sqlite
+  bun run scripts/user-billing-smoke.ts
+  bun run scripts/user-billing-smoke.ts --database /srv/VRAM-Aware-Harness/data/live-full-flow/harness.sqlite
   ```
-  期望 `TENANT_BILLING_SMOKE_OK` 与 `TENANT_BILLING_VERIFY_OK`。
+  期望 `USER_BILLING_SMOKE_OK` 与 `USER_BILLING_VERIFY_OK`。
 - 注册收口（实验室接入）：`HARNESS_REGISTRATION_MODE=open|invite|closed` 默认 `open` 保持旧部署兼容；`invite` 必须同时设置 `HARNESS_REGISTRATION_INVITE_CODE`，服务端用 timing-safe 比较；策略拒绝返回 403（不是账号冲突的 409）。交给实验室或他人使用前建议显式设为 `invite` 或 `closed`。
-- HTTP 入口限流：默认开启；固定窗口 `HARNESS_RATE_LIMIT_WINDOW_MS`（默认 60000）内每租户 `HARNESS_RATE_LIMIT_MAX_PER_TENANT`（默认 600）、每 IP `HARNESS_RATE_LIMIT_MAX_PER_IP`（默认 1200；实验室常共用一个 NAT 出口 IP，调低会让所有人的正常 UI 轮询一起 429）；超限返回 429 + `Retry-After`；`/health`、`/ready` 不参与限流。`HARNESS_TRUST_PROXY=true` 只在 Master 只监听 loopback、前面是可信 Caddy/Nginx 时开启；直接暴露时开启会让客户端伪造 `X-Forwarded-For` 绕过限流。
+- HTTP 入口限流：默认开启；固定窗口 `HARNESS_RATE_LIMIT_WINDOW_MS`（默认 60000）内每用户 `HARNESS_RATE_LIMIT_MAX_PER_USER`（默认 600）、每 IP `HARNESS_RATE_LIMIT_MAX_PER_IP`（默认 1200；实验室常共用一个 NAT 出口 IP，调低会让所有人的正常 UI 轮询一起 429）；超限返回 429 + `Retry-After`；`/health`、`/ready` 不参与限流。`HARNESS_TRUST_PROXY=true` 只在 Master 只监听 loopback、前面是可信 Caddy/Nginx 时开启；直接暴露时开启会让客户端伪造 `X-Forwarded-For` 绕过限流。
 - 验证：Run 执行期间 `systemctl show 'harness-worker-<runId>.service' -p SystemCallFilter -p ProtectSystem -p ReadWritePaths -p IPAddressDeny -p IPAddressAllow` 应看到上述属性；Worker stderr 会打印 `[worker] landlock=on abi=<n>`。
 - 最小可观测性（§9.8 v1.4）：`GET /metrics` 返回 Prometheus 文本，需要 `metrics:read` scope（bootstrap key 的 `*` 可读）。包含 `harness_up`、`harness_uptime_seconds`、`harness_runs_queued`、`harness_runs{status}`、`harness_sandbox_acquisitions_total{warm}`、`harness_sandbox_acquire_duration_ms_sum`、`harness_http_requests_total{status}`。验证：
   ```bash
@@ -322,8 +322,8 @@ sudo systemctl enable --now harness-master.service
 systemctl status harness-broker harness-master --no-pager
 curl -fsS http://127.0.0.1:3100/health
 
-# 端到端 smoke：串行 + 并发 + 跨租户拒绝
-# 脚本会注册两个临时租户，不需要额外 API key；默认连 127.0.0.1:3100。
+# 端到端 smoke：串行 + 并发 + 跨用户拒绝
+# 脚本会注册两个临时用户，不需要额外 API key；默认连 127.0.0.1:3100。
 cd /srv/VRAM-Aware-Harness
 HARNESS_BASE_URL=http://127.0.0.1:3100 bun run scripts/p0-e2e-smoke.ts
 # 期望最后一行：P0_E2E_SMOKE_OK
@@ -382,10 +382,10 @@ systemctl show harness-master -p IPAddressDeny -p IPAddressAllow
 - Agent 无网络：microVM 无网卡；`allowNetwork=true` 在平台侧被拒绝；不要给 Broker/Worker 添加 NAT/代理。
 - 控制面 egress：Broker 禁 IP 出站；Master 默认只允许 loopback，若在可信内网直接暴露 3100 需把实验室网段加入 `IPAddressAllow`；Worker 默认只允许 loopback，仅 `WORKER_EGRESS_ALLOW` 放行的模型服务 CIDR（IPv4/IPv6）可达。
 - Broker 只暴露 `create/execute/terminate`；control token 只存在于 root 可读文件与 Master 进程，Worker 只拿自己 sandbox 的 capability token；`HARNESS_SANDBOX_BROKER_MASTER_UID` / `HARNESS_SANDBOX_BROKER_WORKER_UID` 再把操作绑定到进程 UID。
-- Master 应只监听内网/本机，前置反向代理时自行加 TLS 与访问控制；平台只做 API Key/租户级授权。
+- Master 应只监听内网/本机，前置反向代理时自行加 TLS 与访问控制；平台只做 API Key/用户级授权。
 - 快照池、VM runtime、workspaces 都属于 Broker/Master 的本地数据目录；不要手工修改正在使用的磁盘。生产建议用 systemd timer 定时执行 `harness-ops.ts backup` 与 `cleanup`（cleanup 先 dry-run 观察）。
 - 注册收口：`HARNESS_REGISTRATION_MODE` 默认 `open`；交给实验室/他人使用前应设为 `invite`（配 `HARNESS_REGISTRATION_INVITE_CODE`）或 `closed`，避免服务可达即可自助注册。
-- 已实现：Broker SO_PEERCRED（v1.3 第 1 项）、Worker seccomp/Landlock/只读 rootfs（v1.3 第 2 项）、控制面 egress ACL（v1.3 第 3 项）、不可变审计存储（v1.3 第 4 项）与租户成本账单（v1.3 第 5 项，见 `docs/platform-boundary.md §9.7`）。
+- 已实现：Broker SO_PEERCRED（v1.3 第 1 项）、Worker seccomp/Landlock/只读 rootfs（v1.3 第 2 项）、控制面 egress ACL（v1.3 第 3 项）、不可变审计存储（v1.3 第 4 项）与用户成本账单（v1.3 第 5 项，见 `docs/platform-boundary.md §9.7`）。
 
 ## 9. TLS / 反向代理
 

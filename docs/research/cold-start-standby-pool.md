@@ -14,7 +14,7 @@
 3. 业界四种形态（§2）：**(A) 预热池**（Daytona / Cloud Run min-instances / Modal `min_containers`）、**(B) 待机快照**（Fly suspend / Blaxel standby / E2B pause）、**(C) 发布期重建**（AWS SnapStart 每次 publish 建快照 / Codespaces prebuilds 每次 push 更新）、**(D) fork 运行中 VM**（CodeSandbox / E2B fork / Morph Infinibranch）。我们已有的"黄金快照 + 开机/每小时预热"= **A 的轻量版 + C 的一半**。
 4. **fork 运行中 VM 对我们不可行也不划算**：需要宿主 5.19+ 的 userfaultfd 共享内存写保护（宿主 6.8 满足），但 **guest 4.14 不消费 VMGenID**（≥5.18 才有），重复恢复会复制熵/唯一 ID；且相比"同一黄金快照多次热恢复"它能省下的只有一次性 make-snapshot 成本。**定为过度设计。**（§4）
 5. 最划算的排序见 **§7**：① 把"池永不缺失"闭环补全（含修 GC TTL 竞态）→ ② 驱逐策略改为"当前 templateHash 永久保留 + 旧版本留 N-1" → ③ 真机有余量时再上 K=1~2 台常驻 running standby VM（把 101ms 再压到 5~20ms） → ④ 把 make-snapshot 移出关键路径（`sync_snapshot_files:false` + 首次 Diff + tmpfs，见配套文档 §5/§6）。
-6. **过度设计**：自研 userfaultfd fork、内存压缩惰性解压、多副本/跨机池、按租户预热池、池大小 >2~3、独立预热守护进程与复杂水位控制。
+6. **过度设计**：自研 userfaultfd fork、内存压缩惰性解压、多副本/跨机池、按用户预热池、池大小 >2~3、独立预热守护进程与复杂水位控制。
 
 ---
 
@@ -111,7 +111,7 @@
 **内存预算**：即便按最坏"每台 standby VM 独占 256MB"算，K=2 也只有 512MB，占 251GB 的 **0.2%**；P2 的瓶颈从来不是内存，而是**每台常驻 VM 都是一个会漂移/崩溃/需健康检查与回收的进程**（我们已有 vm-orphan-reaper 兜底）。**磁盘**：即便 8 个模板 × 0.9GB = 7.2GB，对 2×3.5TB 也可忽略。
 
 ### 5.2 命中率要不要算？
-我们对齐的粒度是 **templateHash**，不是租户/用户。稳态下内存里只需要 1 份快照，命中率天然接近 100%；**唯一会 miss 的时刻是"模板刚变、预热还没跑完"的窗口**（重建 2.25~2.42s，若用配套文档 §5/§6 的优化可压到 ~0.2~0.4s）。所以"池大小 vs 命中率"的曲线在我们这个规模**几乎没有拐点可言**——这跟 Daytona/Modal 那种"多租户、多 snapshot、高并发"的场景完全不同，**照抄他们的池语义（按 snapshot×region 建池、池大小计入配额）对我们没有收益**。**[推测]**
+我们对齐的粒度是 **templateHash**，不是用户/用户。稳态下内存里只需要 1 份快照，命中率天然接近 100%；**唯一会 miss 的时刻是"模板刚变、预热还没跑完"的窗口**（重建 2.25~2.42s，若用配套文档 §5/§6 的优化可压到 ~0.2~0.4s）。所以"池大小 vs 命中率"的曲线在我们这个规模**几乎没有拐点可言**——这跟 Daytona/Modal 那种"多用户、多 snapshot、高并发"的场景完全不同，**照抄他们的池语义（按 snapshot×region 建池、池大小计入配额）对我们没有收益**。**[推测]**
 
 ### 5.3 ⚠️ 现有 GC 的一个竞态（建议修）
 `pruneSnapshotPool` 按目录 **mtime 降序**，`tooOld = now - mtime > maxAgeMs`。而**当前在用的黄金快照目录的 mtime 就是它被发布的时间**：每小时预热脚本发现 `hasSnapshot=true` 会 `VM_PREWARM_SKIP` 直接返回，**不会 touch 目录**。于是 `--max-age-hours 72` 会在 72 小时后**把唯一在用的那份快照删掉**，直到下一次预热重建之间，落进来的 Run 会吃到 1334ms 冷启动。**[已验证：源码逻辑推导]**
@@ -141,13 +141,13 @@
 | **3** | **（可选，真机有余量再做）K=1~2 台常驻 running standby VM** | K=2；领取即补；空闲 10~30min 回收（M6）；health check + 复用已有 vm-orphan-reaper | 101ms → **~5~20ms**；收益**只对突发首请求**（稳态用户已在 101ms） | 中 | 中（idle VM 漂移、孤儿、健康检查、少量内存） |
 | **4** | **把 make-snapshot 移出关键路径**（跨引用 `docs/research/cold-start-snapshot-cost.md` §5/§6） | `"sync_snapshot_files": false`；首次就用 `snapshot_type:"Diff"`（配 `track_dirty_pages`）；必要时 `mem_file_path` 指向 tmpfs 后后台落盘 | 重建从 2.25~2.42s → **[推测] ~0.2~0.4s**；让 #1/#2 的重建几乎无感 | 中 | 中低（宿主崩溃丢快照 → 池可重建，已有基础设施） |
 | **5** | **（不建议）fork 运行中 VM / 自研 UFFD** | — | 相比"同一黄金快照多次热恢复"**几乎无增量收益** | 高 | 高（handler 崩溃 → Firecracker 永久 hang；guest 4.14 熵去重） |
-| **6** | **（不建议）按租户预热池** | — | **零收益**：我们按 `templateHash` 而不是租户共享快照，租户之间是同一份 | — | 复杂度、内存/磁盘浪费 |
+| **6** | **（不建议）按用户预热池** | — | **零收益**：我们按 `templateHash` 而不是用户共享快照，用户之间是同一份 | — | 复杂度、内存/磁盘浪费 |
 
 ### 明确属于过度设计（对"单机 + 十几人 + 并发 2–10"）
 1. **fork 运行中 VM / 自研 userfaultfd handler**（§4）——收益 <100ms 量级，复杂度/风险不成比例。
 2. **内存镜像压缩 + 惰性解压**（CodeSandbox 式）——我们 256MB guest、恢复已 101ms，压缩主要省磁盘/内存而非时间。
 3. **跨机/多 region 池、多副本快照**——单机部署，无此需求。
-4. **按租户/按用户预热**——快照按模板共享，租户维度不产生 miss。
+4. **按用户/按用户预热**——快照按模板共享，用户维度不产生 miss。
 5. **池大小 >2~3、复杂水位控制器、独立预热守护进程**——用一个幂等 oneshot + systemd timer 已经够；再加水位控制只会增加失效面。
 6. **为"更快恢复"上 UFFD 后端**——`/snapshot/load` 已 4~7ms、`File` 后端本身是 `MAP_PRIVATE` 惰性加载（见配套文档 §2），收益趋近 0 且引入 hang 风险。
 

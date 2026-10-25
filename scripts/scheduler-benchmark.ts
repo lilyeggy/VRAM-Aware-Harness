@@ -2,8 +2,8 @@
  * 调度层量化基准（可离线运行，不依赖模型/沙箱）。
  *
  * 产出四个数：
- *   A. 静态 per-tenant cap  vs  自动公平份额的容量利用率
- *   B. 10 租户公平性：各租户完成数与排队等待 p50 / p95
+ *   A. 静态 per-user cap  vs  自动公平份额的容量利用率
+ *   B. 10 用户公平性：各用户完成数与排队等待 p50 / p95
  *   C. 混合时长负载下，批屏障修复后的 slot 利用率
  *
  * 用法：bun run scripts/scheduler-benchmark.ts
@@ -17,7 +17,7 @@ import type {
     RuntimeStartRequest,
 } from "../src/runtime/agent-runtime.ts";
 import { RunScheduler } from "../src/scheduling/run-scheduler.ts";
-import { TenantRunScheduler } from "../src/scheduling/tenant-run-scheduler.ts";
+import { UserRunScheduler } from "../src/scheduling/user-run-scheduler.ts";
 import { openHarnessDatabase } from "../src/storage/database.ts";
 
 interface ClaimTrace {
@@ -25,7 +25,7 @@ interface ClaimTrace {
     readonly enqueuedAt: Map<string, number>;
 }
 
-function instrument(scheduler: TenantRunScheduler): ClaimTrace {
+function instrument(scheduler: UserRunScheduler): ClaimTrace {
     const claimedAt = new Map<string, number>();
     const enqueuedAt = new Map<string, number>();
     const originalClaim = scheduler.claimNext.bind(scheduler);
@@ -70,22 +70,22 @@ function waitsMs(trace: ClaimTrace): number[] {
 }
 
 function enqueueMany(
-    scheduler: TenantRunScheduler,
-    tenantId: string,
+    scheduler: UserRunScheduler,
+    userId: string,
     count: number,
     prefix: string,
 ): void {
     for (let index = 0; index < count; index += 1) {
-        scheduler.enqueue({ runId: `${prefix}${index}`, tenantId });
+        scheduler.enqueue({ runId: `${prefix}${index}`, userId });
     }
 }
 
-function claimUntilFull(scheduler: TenantRunScheduler): Record<string, number> {
+function claimUntilFull(scheduler: UserRunScheduler): Record<string, number> {
     const claimed: Record<string, number> = {};
     while (true) {
         const run = scheduler.claimNext();
         if (run === null) break;
-        claimed[run.tenantId] = (claimed[run.tenantId] ?? 0) + 1;
+        claimed[run.userId] = (claimed[run.userId] ?? 0) + 1;
     }
     return claimed;
 }
@@ -100,23 +100,23 @@ function total(record: Record<string, number>): number {
 function scenarioA(): void {
     const globalConcurrency = 30;
 
-    const staticScheduler = new TenantRunScheduler({
+    const staticScheduler = new UserRunScheduler({
         maxActiveRuns: globalConcurrency,
-        maxActiveRunsPerTenant: 10,
+        maxActiveRunsPerUser: 10,
     });
-    enqueueMany(staticScheduler, "tenant-a", 40, "sa");
-    enqueueMany(staticScheduler, "tenant-b", 40, "sb");
+    enqueueMany(staticScheduler, "user-a", 40, "sa");
+    enqueueMany(staticScheduler, "user-b", 40, "sb");
     const staticClaimed = total(claimUntilFull(staticScheduler));
 
-    const fairScheduler = new TenantRunScheduler({
+    const fairScheduler = new UserRunScheduler({
         maxActiveRuns: globalConcurrency,
-        maxActiveRunsPerTenant: 0,
+        maxActiveRunsPerUser: 0,
     });
-    enqueueMany(fairScheduler, "tenant-a", 40, "fa");
-    enqueueMany(fairScheduler, "tenant-b", 40, "fb");
+    enqueueMany(fairScheduler, "user-a", 40, "fa");
+    enqueueMany(fairScheduler, "user-b", 40, "fb");
     const fairClaimed = total(claimUntilFull(fairScheduler));
 
-    console.log("== A. 容量利用率（2 租户，全局 30）==");
+    console.log("== A. 容量利用率（2 用户，全局 30）==");
     console.log(
         `静态 cap=10 : claimed=${staticClaimed}/${globalConcurrency} `
         + `utilization=${((staticClaimed / globalConcurrency) * 100).toFixed(1)}%`,
@@ -128,28 +128,28 @@ function scenarioA(): void {
 }
 
 // ---------------------------------------------------------------------------
-// B. 10 租户公平性 + 排队等待
+// B. 10 用户公平性 + 排队等待
 // ---------------------------------------------------------------------------
 async function scenarioB(): Promise<void> {
     const globalConcurrency = 30;
-    const tenantCount = 10;
-    const runsPerTenant = 12;
-    const scheduler = new TenantRunScheduler({
+    const userCount = 10;
+    const runsPerUser = 12;
+    const scheduler = new UserRunScheduler({
         maxActiveRuns: globalConcurrency,
-        maxActiveRunsPerTenant: 0,
+        maxActiveRunsPerUser: 0,
         agingMs: 60_000,
     });
     const trace = instrument(scheduler);
 
-    for (let tenant = 0; tenant < tenantCount; tenant += 1) {
-        enqueueMany(scheduler, `tenant-${tenant}`, runsPerTenant, `t${tenant}-`);
+    for (let user = 0; user < userCount; user += 1) {
+        enqueueMany(scheduler, `user-${user}`, runsPerUser, `t${user}-`);
     }
 
     const completed: Record<string, number> = {};
     while (true) {
         const run = scheduler.claimNext();
         if (run === null) break;
-        completed[run.tenantId] = (completed[run.tenantId] ?? 0) + 1;
+        completed[run.userId] = (completed[run.userId] ?? 0) + 1;
         scheduler.release(run.runId);
         await Bun.sleep(1);
     }
@@ -158,8 +158,8 @@ async function scenarioB(): Promise<void> {
     const counts = Object.values(completed);
     const spread = Math.max(...counts) - Math.min(...counts);
 
-    console.log("\n== B. 10 租户公平性（全局 30，每租户 12 条）==");
-    console.log(`每租户完成数: ${counts.join(", ")}（极差 ${spread}）`);
+    console.log("\n== B. 10 用户公平性（全局 30，每用户 12 条）==");
+    console.log(`每用户完成数: ${counts.join(", ")}（极差 ${spread}）`);
     console.log(
         `排队等待 p50=${percentile(waits, 50).toFixed(1)}ms `
         + `p95=${percentile(waits, 95).toFixed(1)}ms`,
@@ -197,30 +197,30 @@ class TimedRuntime implements AgentRuntime {
 
 async function scenarioC(): Promise<void> {
     const maxActiveRuns = 6;
-    const tenantCount = 2;
-    const runsPerTenant = 30;
+    const userCount = 2;
+    const runsPerUser = 30;
     const durationPattern = [5, 10, 20, 50, 200];
 
     const db = openHarnessDatabase(":memory:");
     const store = new RunStore(db);
     const runtime = new TimedRuntime();
     const runService = new RunService(store, runtime);
-    const scheduler = new TenantRunScheduler({
+    const scheduler = new UserRunScheduler({
         maxActiveRuns,
-        maxActiveRunsPerTenant: 0,
+        maxActiveRunsPerUser: 0,
     });
     const trace = instrument(scheduler);
     const coordinator = new RunScheduler(runService, scheduler);
 
     let busySlotMs = 0;
-    for (let tenant = 0; tenant < tenantCount; tenant += 1) {
-        for (let index = 0; index < runsPerTenant; index += 1) {
+    for (let user = 0; user < userCount; user += 1) {
+        for (let index = 0; index < runsPerUser; index += 1) {
             const duration = durationPattern[index % durationPattern.length] ?? 10;
             const run = coordinator.submit({
-                tenantId: `tenant-${tenant}`,
-                harnessSessionId: `session-${tenant}-${index}`,
+                userId: `user-${user}`,
+                harnessSessionId: `session-${user}-${index}`,
                 userInput: `bench-${duration}ms`,
-                workspacePath: `/tmp/bench-${tenant}-${index}`,
+                workspacePath: `/tmp/bench-${user}-${index}`,
             });
             runtime.setDuration(run.id, duration);
             busySlotMs += duration;
@@ -256,16 +256,16 @@ async function scenarioD(): Promise<void> {
         const store = new RunStore(db);
         const runtime = new TimedRuntime();
         const runService = new RunService(store, runtime);
-        const scheduler = new TenantRunScheduler({
+        const scheduler = new UserRunScheduler({
             maxActiveRuns,
-            maxActiveRunsPerTenant: 0,
+            maxActiveRunsPerUser: 0,
         });
         const coordinator = new RunScheduler(runService, scheduler);
 
         for (let index = 0; index < 18; index += 1) {
             const duration = durationPattern[index % durationPattern.length] ?? 10;
             const run = coordinator.submit({
-                tenantId: `tenant-${index % 2}`,
+                userId: `user-${index % 2}`,
                 harnessSessionId: `session-d-${index}`,
                 userInput: `bench-${duration}ms`,
                 workspacePath: `/tmp/bench-d-${index}`,

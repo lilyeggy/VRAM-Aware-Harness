@@ -38,7 +38,7 @@ interface LastEventSequenceRow {
 
 interface AgentRunRow {
     id: string;
-    tenantId: string;
+    userId: string;
     harnessSessionId: string;
     status: AgentRunStatus;
     userInput: string;
@@ -63,7 +63,7 @@ export type DeduplicatedRunEvent = RunEvent & {
 
 const RUN_LIST_COLUMNS = `
     id,
-    tenant_id AS tenantId,
+    user_id AS userId,
     harness_session_id AS harnessSessionId,
     status,
     user_input AS userInput,
@@ -82,7 +82,7 @@ const RUN_LIST_COLUMNS = `
 
 const RUN_DETAIL_COLUMNS = `
     id,
-    tenant_id AS tenantId,
+    user_id AS userId,
     harness_session_id AS harnessSessionId,
     status,
     user_input AS userInput,
@@ -125,7 +125,7 @@ export class RunStore {
                 .query<unknown, typeof parameters>(`
                     INSERT INTO agent_runs (
                         id,
-                        tenant_id,
+                        user_id,
                         harness_session_id,
                         status,
                         user_input,
@@ -144,7 +144,7 @@ export class RunStore {
                     )
                     VALUES (
                         $id,
-                        $tenantId,
+                        $userId,
                         $harnessSessionId,
                         $status,
                         $userInput,
@@ -188,39 +188,39 @@ export class RunStore {
         return row === null ? null : this.runFromRow(row);
     }
 
-    /** Product-facing history read; callers must supply the authenticated Tenant. */
-    listForTenant(tenantId: string, limit = 50): AgentRun[] {
+    /** Product-facing history read; callers must supply the authenticated User. */
+    listForUser(userId: string, limit = 50): AgentRun[] {
         if (!Number.isInteger(limit) || limit < 1 || limit > 200) {
             throw new Error("Run 列表 limit 必须在 1 到 200 之间");
         }
-        return this.db.query<AgentRunRow, { tenantId: string; limit: number }>(`
+        return this.db.query<AgentRunRow, { userId: string; limit: number }>(`
             SELECT ${RUN_LIST_COLUMNS}
             FROM agent_runs
-            WHERE tenant_id = $tenantId
+            WHERE user_id = $userId
             ORDER BY created_at DESC, rowid DESC
             LIMIT $limit;
-        `).all({ tenantId, limit }).map((row) => this.runFromRow(row));
+        `).all({ userId, limit }).map((row) => this.runFromRow(row));
     }
 
     /** Conversation history in message order. */
-    listForSession(tenantId: string, harnessSessionId: string): AgentRun[] {
-        return this.db.query<AgentRunRow, { tenantId: string; harnessSessionId: string }>(`
+    listForSession(userId: string, harnessSessionId: string): AgentRun[] {
+        return this.db.query<AgentRunRow, { userId: string; harnessSessionId: string }>(`
             SELECT ${RUN_LIST_COLUMNS}
             FROM agent_runs
-            WHERE tenant_id = $tenantId AND harness_session_id = $harnessSessionId
+            WHERE user_id = $userId AND harness_session_id = $harnessSessionId
             ORDER BY created_at ASC, rowid ASC;
-        `).all({ tenantId, harnessSessionId }).map((row) => this.runFromRow(row));
+        `).all({ userId, harnessSessionId }).map((row) => this.runFromRow(row));
     }
 
     /**
-     * B6：返回该 harness 会话已被哪个租户使用过（以最早一条 Run 为准）。
-     * null 表示会话尚未被任何租户使用——首次使用即认领。
+     * B6：返回该 harness 会话已被哪个用户使用过（以最早一条 Run 为准）。
+     * null 表示会话尚未被任何用户使用——首次使用即认领。
      * 会话归属以服务端持久化事实为准，客户端自选的 sessionId 不能抢注。
      */
     findSessionOwner(harnessSessionId: string): string | null {
         const row = this.db
-            .query<Pick<AgentRunRow, "tenantId">, { harnessSessionId: string }>(`
-                SELECT tenant_id AS tenantId
+            .query<Pick<AgentRunRow, "userId">, { harnessSessionId: string }>(`
+                SELECT user_id AS userId
                 FROM agent_runs
                 WHERE harness_session_id = $harnessSessionId
                 ORDER BY created_at ASC, rowid ASC
@@ -228,7 +228,7 @@ export class RunStore {
             `)
             .get({ harnessSessionId });
 
-        return row?.tenantId ?? null;
+        return row?.userId ?? null;
     }
 
     /**
@@ -254,22 +254,22 @@ export class RunStore {
      * SQLite 保存 QUEUED 事实，Scheduler 只保存当前进程的公平轮转状态。
      */
     /**
-     * §9.8 v1.4 Phase 3：按租户 + 幂等键查既有 Run。
-     * 幂等键在租户内唯一（部分唯一索引），用于重复提交返回既有 Run。
+     * §9.8 v1.4 Phase 3：按用户 + 幂等键查既有 Run。
+     * 幂等键在用户内唯一（部分唯一索引），用于重复提交返回既有 Run。
      */
-    findByTenantIdempotencyKey(
-        tenantId: string,
+    findByUserIdempotencyKey(
+        userId: string,
         idempotencyKey: string,
     ): AgentRun | null {
         const row = this.db
             .query<AgentRunRow, [string, string]>(`
                 SELECT ${RUN_DETAIL_COLUMNS}
                 FROM agent_runs
-                WHERE tenant_id = ?
+                WHERE user_id = ?
                   AND idempotency_key = ?
                 LIMIT 1;
             `)
-            .get(tenantId, idempotencyKey);
+            .get(userId, idempotencyKey);
         return row === null ? null : this.runFromRow(row);
     }
 
@@ -384,7 +384,7 @@ export class RunStore {
                 .query<unknown, typeof parameters>(`
                     UPDATE agent_runs
                     SET
-                        tenant_id = $tenantId,
+                        user_id = $userId,
                         harness_session_id = $harnessSessionId,
                         status = $status,
                         user_input = $userInput,
@@ -418,7 +418,7 @@ export class RunStore {
     private runParameters(run: AgentRun) {
         return {
             id: run.id,
-            tenantId: run.tenantId,
+            userId: run.userId,
             harnessSessionId: run.harnessSessionId,
             status: run.status,
             userInput: run.userInput,
@@ -442,7 +442,7 @@ export class RunStore {
     private runFromRow(row: AgentRunRow): AgentRun {
         const run: AgentRun = {
             id: row.id,
-            tenantId: row.tenantId,
+            userId: row.userId,
             harnessSessionId: row.harnessSessionId,
             status: row.status,
             userInput: row.userInput,

@@ -47,8 +47,8 @@ const submitResponse = await fetch(`${baseUrl}/runs`, {
     method:"POST",
     headers:{ "content-type":"application/json", ...authenticatedHeaders },
     body:JSON.stringify({
-        tenantId:process.env.HARNESS_SMOKE_TENANT_ID
-            ?? "smoke-tenant",
+        userId:process.env.HARNESS_SMOKE_USER_ID
+            ?? "smoke-user",
         sessionId:`smoke-${crypto.randomUUID()}`,
         userInput:process.env.HARNESS_SMOKE_USER_INPUT
             ?? "请使用 read 工具读取 README.md，并只回答第一行。",

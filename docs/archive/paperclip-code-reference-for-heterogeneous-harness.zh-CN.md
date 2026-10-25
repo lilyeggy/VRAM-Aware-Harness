@@ -2,9 +2,9 @@
 
 > **定位说明（2026-08-12）**：本文是源码参考和秋招后演进材料，不是当前实施
 > 路线。Claude/多 Adapter、通用 Provider 与大型控制面已经暂停；只借鉴与
-> Workspace/Sandbox、工具副作用、状态竞争、恢复、Tenant 权限和故障证据直接相关
+> Workspace/Sandbox、工具副作用、状态竞争、恢复、User 权限和故障证据直接相关
 > 的设计。当前路线见
-> [多租户 Agent 任务服务路线图](multi-tenant-agent-task-service-roadmap.zh-CN.md)。
+> [多用户 Agent 任务服务路线图](multi-user-agent-task-service-roadmap.zh-CN.md)。
 
 > 文档性质：面向本项目后续开发的源码级参考与实施建议  
 > 分析日期：2026-08-10  
@@ -25,14 +25,14 @@ Paperclip 是目前最值得我们作为**工程实现主参考**的项目，但
 3. 持久化 Runtime Session，并在 Adapter、工作目录或远端环境变化时谨慎决定是否恢复；
 4. 使用数据库 compare-and-set 抢占 Run、阻止晚到结果覆盖已有终态；
 5. 管理进程元数据、环境 Lease、孤儿回收、重启调和和日志持久化；
-6. 在 Tool Gateway 中实现租户作用域、权限、审批、参数签名、限流、审计和幂等键；
+6. 在 Tool Gateway 中实现用户作用域、权限、审批、参数签名、限流、审计和幂等键；
 7. 把 Adapter 的配置 Schema、环境诊断、模型发现、Skill 同步、配额查询一并纳入契约。
 
 我们不应该把 Paperclip 当作可以改名复用的底座。Paperclip 的中心对象是
 `company → agent → issue/task → heartbeat run`；我们的中心对象是：
 
 ```text
-Tenant
+User
   └── HarnessTemplate(version)
         └── HarnessInstance
               └── Session
@@ -62,7 +62,7 @@ Tenant
 | Adapter | 多种 Coding Agent、CLI/ACP/HTTP/插件 | 当前 Pi，下一阶段 Claude | Paperclip 是直接实现参考 |
 | 核心对象 | Agent、Issue、Task Session、Heartbeat Run | Template、Instance、Session、Run、Attempt | 不照搬领域模型 |
 | 执行环境 | local、SSH、Sandbox plugin、Lease | ManagedLocal Sandbox，Provider 接口已存在 | 借鉴 target/driver/lease 分层 |
-| 调度 | Agent 串行、Issue 锁、依赖、预算、定时唤醒 | Tenant 公平队列、资源准入、ResourcePool 方向 | 组合，而不是替换 |
+| 调度 | Agent 串行、Issue 锁、依赖、预算、定时唤醒 | User 公平队列、资源准入、ResourcePool 方向 | 组合，而不是替换 |
 | 恢复 | Session 续用、进程丢失重试、热重启 adoption、liveness | Checkpoint + ToolEffect + RecoveryDecision + Attempt | 我们的安全恢复应更严格 |
 | 工具治理 | 权限、审批、签名、连接、限流、审计 | 前置策略守卫、副作用台账、结果复用 | 两套优点必须合并 |
 | 资源 | token/cost/quota、环境容量等 | GPU/VRAM 已真实参与准入，准备扩成异构资源池 | 这是我们的核心差异之一 |
@@ -88,7 +88,7 @@ Tenant
 
 | 文件 | 重点 |
 | --- | --- |
-| [Tool Access Policy](/Users/mac/Desktop/agent_harness/paperclip/server/src/services/tool-access-policy.ts) | 租户/主体/Run/Issue 作用域校验、策略优先级、限流与调用记录 |
+| [Tool Access Policy](/Users/mac/Desktop/agent_harness/paperclip/server/src/services/tool-access-policy.ts) | 用户/主体/Run/Issue 作用域校验、策略优先级、限流与调用记录 |
 | [Tool Gateway](/Users/mac/Desktop/agent_harness/paperclip/server/src/services/tool-gateway.ts) | 审批参数签名、一次性消费、远程 MCP/stdio/plugin 调度、审计 |
 | [Tool schema](/Users/mac/Desktop/agent_harness/paperclip/packages/db/src/schema/tool_access.ts) | Invocation、ActionRequest、CallEvent、Gateway Session 的数据模型 |
 | [Run Log Store](/Users/mac/Desktop/agent_harness/paperclip/server/src/services/run-log-store.ts) | NDJSON、字节范围读取、SHA-256、S3 完成/进行中镜像 |
@@ -432,7 +432,7 @@ configured API key
 
 ```ts
 interface CredentialResolution {
-  selectedSource: "TEMPLATE_BINDING" | "TENANT_BINDING" |
+  selectedSource: "TEMPLATE_BINDING" | "USER_BINDING" |
     "INSTANCE_IDENTITY" | "SANDBOX_IDENTITY" | "NONE";
   injectedKeys: readonly string[];
   shadowedSources: readonly string[];
@@ -574,7 +574,7 @@ interface ExecutionTargetDriver {
 
 其中 `ExecutionTargetLease` 必须绑定：
 
-- tenantId；
+- userId；
 - harnessInstanceId；
 - runId 与 attemptId；
 - provider 与 providerLeaseId；
@@ -959,7 +959,7 @@ Runtime 原始 stdout/stderr/SDK event
   │     ├── immutable chunks / NDJSON
   │     ├── content hash
   │     ├── adapter + parser version
-  │     └── retention / tenant scope
+  │     └── retention / user scope
   │
   └── RuntimeEventNormalizer
         └── RunEventTimeline

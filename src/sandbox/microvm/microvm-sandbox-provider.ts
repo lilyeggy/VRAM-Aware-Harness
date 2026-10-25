@@ -102,7 +102,7 @@ export class MicrovmSandboxProvider implements SandboxProvider, SandboxCommandEx
         const resolvedSecrets: Record<string, string> = {};
         const secretNames: string[] = [];
         for (const name of (input.policy.allowedSecrets ?? [])) {
-            const val = this.secrets.get(input.policy.tenantId, name);
+            const val = this.secrets.get(input.policy.userId, name);
             if (val !== null) {
                 resolvedSecrets[name] = val;
                 secretNames.push(name);

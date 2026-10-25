@@ -20,8 +20,8 @@ test("loadHarnessConfig 提供本地安全默认值并派生 metrics URL", () =>
         piModelId:"qwen3.5-4b",
         piModelsPath:"/tmp/harness-project/.pi/spike/models.json",
         maxActiveRuns:6,
-        // 0 = 自动公平份额（全局并发 / 有需求租户数）。
-        maxActiveRunsPerTenant:0,
+        // 0 = 自动公平份额（全局并发 / 有需求用户数）。
+        maxActiveRunsPerUser:0,
         llmGatewayStrategy:"round-robin",
         llmHealthProbeIntervalMs:10_000,
         pumpIntervalMs:2_000,
@@ -100,7 +100,7 @@ test("限流默认开启，可显式配置窗口与上限", () => {
     const defaults = loadHarnessConfig({ VLLM_MODEL_ID:"m" });
     expect(defaults.rateLimitEnabled).toBe(true);
     expect(defaults.rateLimitWindowMs).toBe(60_000);
-    expect(defaults.rateLimitMaxPerTenant).toBe(600);
+    expect(defaults.rateLimitMaxPerUser).toBe(600);
     expect(defaults.rateLimitMaxPerIp).toBe(1200);
     expect(defaults.trustProxy).toBe(false);
 
@@ -108,13 +108,13 @@ test("限流默认开启，可显式配置窗口与上限", () => {
         VLLM_MODEL_ID:"m",
         HARNESS_RATE_LIMIT_ENABLED:"false",
         HARNESS_RATE_LIMIT_WINDOW_MS:"30000",
-        HARNESS_RATE_LIMIT_MAX_PER_TENANT:"50",
+        HARNESS_RATE_LIMIT_MAX_PER_USER:"50",
         HARNESS_RATE_LIMIT_MAX_PER_IP:"20",
         HARNESS_TRUST_PROXY:"true",
     });
     expect(custom.rateLimitEnabled).toBe(false);
     expect(custom.rateLimitWindowMs).toBe(30_000);
-    expect(custom.rateLimitMaxPerTenant).toBe(50);
+    expect(custom.rateLimitMaxPerUser).toBe(50);
     expect(custom.rateLimitMaxPerIp).toBe(20);
     expect(custom.trustProxy).toBe(true);
 
@@ -133,7 +133,7 @@ test("loadHarnessConfig 解析显式环境变量", () => {
         HARNESS_HOST:"0.0.0.0",
         HARNESS_PORT:"8080",
         HARNESS_MAX_ACTIVE_RUNS:"4",
-        HARNESS_MAX_ACTIVE_RUNS_PER_TENANT:"2",
+        HARNESS_MAX_ACTIVE_RUNS_PER_USER:"2",
         HARNESS_PUMP_INTERVAL_MS:"250",
         PI_TOOLS:"read,grep",
         PI_MODELS_PATH:"config/models.json",
@@ -144,7 +144,7 @@ test("loadHarnessConfig 解析显式环境变量", () => {
         httpHost:"0.0.0.0",
         httpPort:8080,
         maxActiveRuns:4,
-        maxActiveRunsPerTenant:2,
+        maxActiveRunsPerUser:2,
         pumpIntervalMs:250,
         piTools:["read", "grep"],
         piModelsPath:"/tmp/harness-project/config/models.json",
@@ -245,9 +245,9 @@ test("loadHarnessConfig 拒绝缺失模型和非法并发配置", () => {
     expect(() => loadHarnessConfig({
         VLLM_MODEL_ID:"model",
         HARNESS_MAX_ACTIVE_RUNS:"1",
-        HARNESS_MAX_ACTIVE_RUNS_PER_TENANT:"2",
+        HARNESS_MAX_ACTIVE_RUNS_PER_USER:"2",
     })).toThrow(
-        "HARNESS_MAX_ACTIVE_RUNS_PER_TENANT 不能大于 HARNESS_MAX_ACTIVE_RUNS",
+        "HARNESS_MAX_ACTIVE_RUNS_PER_USER 不能大于 HARNESS_MAX_ACTIVE_RUNS",
     );
     expect(() => loadHarnessConfig({
         VLLM_MODEL_ID:"model",

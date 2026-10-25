@@ -11,8 +11,8 @@ import type {
 import type {
     QueueBlocker,
     SchedulerCapacity,
-    TenantRunScheduler,
-} from "../scheduling/tenant-run-scheduler.ts";
+    UserRunScheduler,
+} from "../scheduling/user-run-scheduler.ts";
 import { estimateWaitMs } from "../runs/queue-eta.ts";
 import { buildRunTrace, type RunTrace } from "../runs/run-trace.ts";
 import type {
@@ -75,13 +75,13 @@ export class HarnessApplication {
         private readonly coordinator: RunScheduler,
         private readonly queuePump: QueuePump,
         private readonly runStore: RunStore,
-        private readonly scheduler: TenantRunScheduler,
+        private readonly scheduler: UserRunScheduler,
         private readonly startupRecovery:StartupRecoveryCoordinator,
         private readonly runOutputStore?: RunOutputStore,
         private readonly workspaceResults?: RunWorkspaceResultCoordinator,
         private readonly conversationStore?: Pick<
             HarnessSessionStore,
-            "create" | "getForTenant" | "listForWorkspace" | "touch"
+            "create" | "getForUser" | "listForWorkspace" | "touch"
         >,
         private readonly toolPolicyStore?: { listToolDecisions(runId: string): readonly { toolName: string; action: string; reason: string; decidedAt: string }[] },
         /** N16：工具执行库（人工消解 UNKNOWN_EFFECT）。 */
@@ -187,12 +187,12 @@ export class HarnessApplication {
         return this.runStore.get(runId);
     }
 
-    getRunsForTenant(tenantId: string): AgentRun[] {
-        return this.runStore.listForTenant(tenantId);
+    getRunsForUser(userId: string): AgentRun[] {
+        return this.runStore.listForUser(userId);
     }
 
     createConversation(input: {
-        tenantId: string;
+        userId: string;
         workspaceId: string;
         title?: string;
     }): Conversation {
@@ -204,28 +204,28 @@ export class HarnessApplication {
         return conversation;
     }
 
-    getConversation(id: string, tenantId: string): Conversation | null {
-        return this.conversationStore?.getForTenant(id, tenantId) ?? null;
+    getConversation(id: string, userId: string): Conversation | null {
+        return this.conversationStore?.getForUser(id, userId) ?? null;
     }
 
-    getConversationsForWorkspace(tenantId: string, workspaceId: string): Conversation[] {
-        return this.conversationStore?.listForWorkspace(tenantId, workspaceId) ?? [];
+    getConversationsForWorkspace(userId: string, workspaceId: string): Conversation[] {
+        return this.conversationStore?.listForWorkspace(userId, workspaceId) ?? [];
     }
 
-    getRunsForConversation(tenantId: string, conversationId: string): AgentRun[] {
-        return this.runStore.listForSession(tenantId, conversationId);
+    getRunsForConversation(userId: string, conversationId: string): AgentRun[] {
+        return this.runStore.listForSession(userId, conversationId);
     }
 
     /**
-     * B6：会话归属（以最早一条 Run 的租户为准）；null 表示未被使用。
-     * HTTP 层用它阻止客户端自选 sessionId 抢注其他租户的会话。
+     * B6：会话归属（以最早一条 Run 的用户为准）；null 表示未被使用。
+     * HTTP 层用它阻止客户端自选 sessionId 抢注其他用户的会话。
      */
     resolveSessionOwner(harnessSessionId: string): string | null {
         return this.runStore.findSessionOwner(harnessSessionId);
     }
 
-    touchConversation(id: string, tenantId: string): void {
-        this.conversationStore?.touch(id, tenantId);
+    touchConversation(id: string, userId: string): void {
+        this.conversationStore?.touch(id, userId);
     }
 
     getRunEvents(runId:string):RunEvent[] {
@@ -294,8 +294,8 @@ export class HarnessApplication {
         }));
     }
 
-    getTenantCapacity(tenantId:string):SchedulerCapacity {
-        return this.scheduler.getCapacity(tenantId);
+    getUserCapacity(userId:string):SchedulerCapacity {
+        return this.scheduler.getCapacity(userId);
     }
 
     /** §9.8 v1.4：最小可观测性快照；计数来自 RunStore，队列长度来自调度器。 */

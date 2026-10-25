@@ -12,9 +12,9 @@ import { FakeAgentRuntime } from "../fakes/fake-agent-runtime.ts";
 import { tempWorkspaceEnv } from "../support/temp-workspace-root.ts";
 
 /**
- * §9.9 v1.5 Phase 5 F7：故障态 Run 的跨租户隔离。
+ * §9.9 v1.5 Phase 5 F7：故障态 Run 的跨用户隔离。
  *
- * Run 因租约过期进入 INTERRUPTED 后，其它租户对 run/events/output/artifacts/
+ * Run 因租约过期进入 INTERRUPTED 后，其它用户对 run/events/output/artifacts/
  * interrupt 以及「在对方 workspace 提交」都必须 404。
  */
 
@@ -35,7 +35,7 @@ function createEvent(
     };
 }
 
-test("故障态 Run 对其它租户完全不可见（run/events/output/artifacts/interrupt/workspace 提交均 404）", async () => {
+test("故障态 Run 对其它用户完全不可见（run/events/output/artifacts/interrupt/workspace 提交均 404）", async () => {
     const config = loadHarnessConfig({
         VLLM_MODEL_ID: "fake-model",
         ...tempWorkspaceEnv(),
@@ -50,7 +50,7 @@ test("故障态 Run 对其它租户完全不可见（run/events/output/artifacts
 
     try {
         await composition.application.start();
-        const workspace = composition.workspaceService.create("tenant-fault-owner", "fault");
+        const workspace = composition.workspaceService.create("user-fault-owner", "fault");
 
         // 制造故障态：RUNNING Run + 过期租约，tick 后回收为 INTERRUPTED。
         const runId = `run-fault-${crypto.randomUUID()}`;
@@ -58,7 +58,7 @@ test("故障态 Run 对其它租户完全不可见（run/events/output/artifacts
         composition.runStore.create(
             {
                 id: runId,
-                tenantId: "tenant-fault-owner",
+                userId: "user-fault-owner",
                 harnessSessionId: `session-${runId}`,
                 status: "RUNNING",
                 userInput: "故障态隔离",
@@ -97,24 +97,24 @@ test("故障态 Run 对其它租户完全不可见（run/events/output/artifacts
         await composition.queuePump.tick();
         expect(composition.runStore.get(runId)?.status).toBe("INTERRUPTED");
 
-        const apiFor = (tenantId: string) => new HarnessHttpApi(
+        const apiFor = (userId: string) => new HarnessHttpApi(
             composition.application,
             composition.checkpointStore,
             {
-                authenticate: (key: string) => (key === `${tenantId}-key`
-                    ? { tenantId, scopes: ["*"] }
+                authenticate: (key: string) => (key === `${userId}-key`
+                    ? { userId, scopes: ["*"] }
                     : null),
                 workspaceService: composition.workspaceService,
             },
         );
-        const ownerApi = apiFor("tenant-fault-owner");
-        const otherApi = apiFor("tenant-fault-other");
+        const ownerApi = apiFor("user-fault-owner");
+        const otherApi = apiFor("user-fault-other");
         const otherHeaders = {
-            authorization: "Bearer tenant-fault-other-key",
+            authorization: "Bearer user-fault-other-key",
             "content-type": "application/json",
         };
         const ownerHeaders = {
-            authorization: "Bearer tenant-fault-owner-key",
+            authorization: "Bearer user-fault-owner-key",
             "content-type": "application/json",
         };
 

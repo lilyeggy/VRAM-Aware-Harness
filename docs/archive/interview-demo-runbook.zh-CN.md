@@ -7,7 +7,7 @@
 
 ## 30 秒定位
 
-这是一个面向团队共享模型的**多租户 Agent 任务控制面**。用户创建 Workspace、提交任务、观察输出并获得 Diff/Artifact；系统重点实现可信 Tenant、每 Attempt 容器化工具执行、资源准入/公平队列、安全恢复，以及最近的执行质量评测、观测驾驶舱和 LLM 路由网关。
+这是一个面向团队共享模型的**多用户 Agent 任务控制面**。用户创建 Workspace、提交任务、观察输出并获得 Diff/Artifact；系统重点实现可信 User、每 Attempt 容器化工具执行、资源准入/公平队列、安全恢复，以及最近的执行质量评测、观测驾驶舱和 LLM 路由网关。
 
 **一句话边界**：Pi/vLLM 负责 Agent loop 与模型推理；Harness 负责谁能执行、在哪执行、何时执行、失败后能否安全继续、**执行质量如何度量、模型调用如何路由**，以及用户最终得到什么。
 
@@ -15,7 +15,7 @@
 
 ## 一分钟电梯演讲（推荐背诵）
 
-> 我做了一个多租户 Agent 任务控制面。Agent 负责"动脑"，我的系统负责"安排与安保"：多租户身份、GPU 资源准入与背压、runsc 沙箱隔离、工具副作用记账与崩溃恢复，以及最近的执行质量评测、观测驾驶舱和 LLM 路由网关。254 个测试全绿，T4 GPU 和 ECS runsc 真机都已验证。
+> 我做了一个多用户 Agent 任务控制面。Agent 负责"动脑"，我的系统负责"安排与安保"：多用户身份、GPU 资源准入与背压、runsc 沙箱隔离、工具副作用记账与崩溃恢复，以及最近的执行质量评测、观测驾驶舱和 LLM 路由网关。254 个测试全绿，T4 GPU 和 ECS runsc 真机都已验证。
 
 ---
 
@@ -35,8 +35,8 @@ bun run scripts/eval-report.ts
 
 | 时间 | 操作与应说的话 | 代码锚点 | 可见证据 |
 | --- | --- | --- | --- |
-| 0:00–0:25 | 创建 Workspace。客户端不提交宿主机路径，也不自报 Tenant。 | `src/http/harness-http-api.ts` `submitRun()`；`src/workspaces/workspace-service.ts` | UI 只提交 `workspaceId`；目录由服务端生成。 |
-| 0:25–0:45 | 提交任务。API Key 解出 Principal，Tenant 不可伪造。 | `src/auth/api-credential-store.ts`；`HarnessHttpApi.requirePrincipal()` | `tests/http/tenant-boundary.test.ts`：伪造 `tenantId` 无效、跨 Tenant Run 返回 404。 |
+| 0:00–0:25 | 创建 Workspace。客户端不提交宿主机路径，也不自报 User。 | `src/http/harness-http-api.ts` `submitRun()`；`src/workspaces/workspace-service.ts` | UI 只提交 `workspaceId`；目录由服务端生成。 |
+| 0:25–0:45 | 提交任务。API Key 解出 Principal，User 不可伪造。 | `src/auth/api-credential-store.ts`；`HarnessHttpApi.requirePrincipal()` | `tests/http/user-boundary.test.ts`：伪造 `userId` 无效、跨 User Run 返回 404。 |
 | 0:45–1:15 | 打开任务历史和输出。任务先进入 Queue，资源决策决定何时运行。 | `src/scheduling/run-queue-coordinator.ts`；`src/resources/resource-admission-service.ts`；`src/runs/run-output-store.ts` | Run 状态、输出、决策和队列位置均可查询。 |
 | 1:15–1:55 | 说明真实执行路径：Run → Attempt → Sandbox → Pi tools → 容器执行；default 还必须取得 `runsc` inspect 证据。 | `src/runtime/managed-agent-runtime.ts`；`src/sandbox/oci-sandbox-spec.ts`；`src/sandbox/container-runtime-adapter.ts`；`src/runtime/pi-tool-gateway.ts` | profile、runtime、Sandbox ID、OCI 限制与 ToolGateway checkpoint 是可审计事实；runtime 不匹配会 fail closed。 |
 | 1:55–2:25 | 展示终态输出、Diff 和 Artifact；说明 Artifact 为何不是当前 Workspace 的软链接。 | `src/workspaces/run-workspace-result.ts`；`src/workspaces/run-artifact-store.ts` | Artifact 复制前验证 hash，使用 `wx` 固化；随后 Workspace 改动不影响它。 |
@@ -65,8 +65,8 @@ bun run scripts/eval-report.ts
 **问题**：指标算出来，怎么让人一眼看懂？
 
 **回答**：
-> 我做了个独立页面 `/observe`，和任务操作台 `/` 解耦。它只读，不会误触任务；支持多租户切换；数据来自 `GET /eval`。
-> 可视化包括任务状态环形图、完成度渐变条、租户对比条形图、资源背压堆叠条，以及任务明细表。
+> 我做了个独立页面 `/observe`，和任务操作台 `/` 解耦。它只读，不会误触任务；支持多用户切换；数据来自 `GET /eval`。
+> 可视化包括任务状态环形图、完成度渐变条、用户对比条形图、资源背压堆叠条，以及任务明细表。
 
 **代码锚点**：`src/http/harness-observe-page.ts`、`src/eval/evaluation-aggregator.ts`。
 
@@ -89,7 +89,7 @@ bun run scripts/eval-report.ts
 
 ### 为什么不是进程隔离？
 
-同一宿主机普通进程默认仍共享宿主文件系统和网络命名空间，无法构成 Tenant 执行边界。这里每 Attempt 使用独立 OCI 容器，只挂载自己的 Workspace，并应用非 root、只读 RootFS、cap drop、no-new-privileges、PID/CPU/内存、默认无网络；多租户 default 还必须由 `docker inspect` 证明实际 runtime 是 `runsc`。入口是 `OciSandboxSpecCompiler` 与 `DockerRunscRuntimeAdapter`。这仍不等于独立 guest kernel 或生产级隔离。
+同一宿主机普通进程默认仍共享宿主文件系统和网络命名空间，无法构成 User 执行边界。这里每 Attempt 使用独立 OCI 容器，只挂载自己的 Workspace，并应用非 root、只读 RootFS、cap drop、no-new-privileges、PID/CPU/内存、默认无网络；多用户 default 还必须由 `docker inspect` 证明实际 runtime 是 `runsc`。入口是 `OciSandboxSpecCompiler` 与 `DockerRunscRuntimeAdapter`。这仍不等于独立 guest kernel 或生产级隔离。
 
 ### 容器 UID 如何访问 0700 Workspace？
 
@@ -97,7 +97,7 @@ bun run scripts/eval-report.ts
 
 ### Secret 如何隔离？
 
-策略的 `allowedSecrets` 只决定名称是否允许；值经 `SecretProvider.get(tenantId, name)` 按 Tenant namespace 读取。默认环境变量格式为 `HARNESS_SECRET_<TENANT_UTF8_HEX>_<NAME>`，不允许全局同名 fallback，且数据库只保存名称。
+策略的 `allowedSecrets` 只决定名称是否允许；值经 `SecretProvider.get(userId, name)` 按 User namespace 读取。默认环境变量格式为 `HARNESS_SECRET_<USER_UTF8_HEX>_<NAME>`，不允许全局同名 fallback，且数据库只保存名称。
 
 ### 容器被 kill 后怎么办？
 
@@ -109,7 +109,7 @@ AutoDL Tesla T4 + vLLM 0.7.3，120 并发压测下，资源分类器进入 `CRIT
 
 ### 沙箱隔离是怎么被验证的？
 
-ECS 真机运行 runsc 默认沙箱，`scripts/container-sandbox-attack-smoke.ts` 9 项攻击（跨租户、宿主路径、穿越、Secret、网络、PID、tmpfs、kill→LOST 等）全部 PASS。见 `docs/sandbox-runtime-benchmark-runbook.zh-CN.md`。
+ECS 真机运行 runsc 默认沙箱，`scripts/container-sandbox-attack-smoke.ts` 9 项攻击（跨用户、宿主路径、穿越、Secret、网络、PID、tmpfs、kill→LOST 等）全部 PASS。见 `docs/sandbox-runtime-benchmark-runbook.zh-CN.md`。
 
 ---
 
@@ -127,8 +127,8 @@ ECS 真机运行 runsc 默认沙箱，`scripts/container-sandbox-attack-smoke.ts
 ## 复盘必读顺序
 
 1. `docs/interview-prep-guide.zh-CN.md`：30 分钟 / 2 小时 / 半天三种准备路线，推荐从这里开始。
-2. `docs/adr/0009-build-a-multi-tenant-agent-task-service.md`：项目为什么是用户服务、为何内部聚焦③④层。
-3. `docs/multi-tenant-agent-task-service-roadmap.zh-CN.md`：当前范围、完成条件和非目标。
+2. `docs/adr/0009-build-a-multi-user-agent-task-service.md`：项目为什么是用户服务、为何内部聚焦③④层。
+3. `docs/multi-user-agent-task-service-roadmap.zh-CN.md`：当前范围、完成条件和非目标。
 4. `docs/complete-project-detail-course.zh-CN.md`：特别是第八部分（P0.5 验收与 A/B/C）。
-5. `docs/implementation-log/2026-08-p0-tenant-sandbox.zh-CN.md`：每条能力的代码调用链与测试索引。
+5. `docs/implementation-log/2026-08-p0-user-sandbox.zh-CN.md`：每条能力的代码调用链与测试索引。
 6. 本文：将代码事实压缩成一次可讲的用户旅程。

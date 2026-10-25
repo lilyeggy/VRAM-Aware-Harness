@@ -3,8 +3,8 @@
 > **定位说明（2026-08-12）**：本文解释已经实现的 Stage 1–2 代码，相关模块继续
 > 保留。文中 Claude、异构 Runtime 和 ResourcePool 只代表原设计背景，不是秋招前
 > 实施任务。这些模块现在作为产品内部第③④层的已有底座；当前产品范围见
-> [ADR 0009](adr/0009-build-a-multi-tenant-agent-task-service.md)，实施顺序见
-> [多租户 Agent 任务服务路线图](multi-tenant-agent-task-service-roadmap.zh-CN.md)。
+> [ADR 0009](adr/0009-build-a-multi-user-agent-task-service.md)，实施顺序见
+> [多用户 Agent 任务服务路线图](multi-user-agent-task-service-roadmap.zh-CN.md)。
 
 > 本文面向希望真正吃透当前实现的读者，严格按照推荐阅读顺序讲解 Stage 1 和
 > Stage 2 的代码。它不是架构设想，而是对仓库中已经运行、已经测试的真实代码的
@@ -28,7 +28,7 @@
 ```text
 submitRun
   → RunService 创建 AgentRun
-  → ResourceAdmission + TenantFairQueue
+  → ResourceAdmission + UserFairQueue
   → AgentRuntime.start/resume
   → RuntimeEventBridge
   → RunEvent / ToolExecution / Checkpoint
@@ -266,7 +266,7 @@ Instance 把模板、能力和运行环境连接起来：
 ```ts
 export interface HarnessInstance {
     readonly id: string;
-    readonly tenantId: string;
+    readonly userId: string;
     readonly templateVersionId: string;
     readonly capabilityProfileId: string;
     readonly runtimeKind: RuntimeKind;
@@ -479,7 +479,7 @@ Stage 0 的调用方只提交：
 
 ```ts
 {
-    tenantId,
+    userId,
     harnessSessionId,
     userInput,
     workspacePath,
@@ -519,16 +519,16 @@ const run: AgentRun = {
 this.capabilities.save(this.profile);
 ```
 
-第二步，按 Tenant 生成稳定默认 ID：
+第二步，按 User 生成稳定默认 ID：
 
 ```ts
-const suffix = encodeURIComponent(input.tenantId);
+const suffix = encodeURIComponent(input.userId);
 const templateId = `default-pi-template:${suffix}`;
 const templateVersionId = `default-pi-template-version:${suffix}:1`;
 const instanceId = `default-pi-instance:${suffix}`;
 ```
 
-这样不同 Tenant 不会错误共享同一个 Template 或 Instance。
+这样不同 User 不会错误共享同一个 Template 或 Instance。
 
 第三步，首次使用时发布不可变模板版本：
 
@@ -562,7 +562,7 @@ this.templates.publishVersion(templateId, createPiTemplateVersion({
 ```ts
 instance = createHarnessInstance({
     id: instanceId,
-    tenantId: input.tenantId,
+    userId: input.userId,
     templateVersionId,
     capabilityProfileId: this.profile.id,
     runtimeKind: "PI",
@@ -580,19 +580,19 @@ const existingSession = this.sessions.get(input.harnessSessionId);
 if (existingSession === null) {
     this.sessions.create(createHarnessSession({
         id: input.harnessSessionId,
-        tenantId: input.tenantId,
+        userId: input.userId,
         instanceId: instance.id,
         createdAt: now,
     }));
 } else if (
-    existingSession.tenantId !== input.tenantId
+    existingSession.userId !== input.userId
     || existingSession.instanceId !== instance.id
 ) {
     throw new Error("HarnessSession 归属与本次 Run 不匹配");
 }
 ```
 
-这个校验防止调用方用相同 sessionId 穿越 Tenant 或 Instance 边界。
+这个校验防止调用方用相同 sessionId 穿越 User 或 Instance 边界。
 
 ### 5.3 为什么修改模板不影响已排队 Run
 
@@ -604,7 +604,7 @@ Run 保存的是 `templateVersionId`，不是“当前最新模板”。排队�
 
 ### 5.4 读完检查
 
-1. 为什么默认对象按 Tenant 创建，而不是全平台共享？
+1. 为什么默认对象按 User 创建，而不是全平台共享？
 2. 为什么 Resolver 必须在 `RunStore.create()` 之前调用？
 3. 为什么这个类是兼容入口，而不是最终用户直接操作的 CRUD Service？
 
@@ -619,14 +619,14 @@ Run 保存的是 `templateVersionId`，不是“当前最新模板”。排队�
 有效策略由五个来源共同约束：
 
 ```text
-Platform ∩ Tenant ∩ Template ∩ Workspace ∩ Run
+Platform ∩ User ∩ Template ∩ Workspace ∩ Run
 ```
 
 任何下层都不能放宽上层限制。例如：
 
 ```text
 Platform tools = [read, write, bash]
-Tenant   tools = [read, write]
+User   tools = [read, write]
 Template tools = [read, bash]
 Run      tools = [read]
 
@@ -664,7 +664,7 @@ export interface PolicyConstraints {
 ```ts
 const kinds = new Set(input.layers.map((layer) => layer.kind));
 for (const kind of [
-    "PLATFORM", "TENANT", "TEMPLATE", "WORKSPACE", "RUN",
+    "PLATFORM", "USER", "TEMPLATE", "WORKSPACE", "RUN",
 ] as const) {
     if (!kinds.has(kind)) {
         throw new Error(`缺少策略层：${kind}`);
@@ -727,7 +727,7 @@ export function isWithin(path: string, root: string): boolean {
 export interface EffectivePolicySnapshot extends PolicyConstraints {
     readonly id: string;
     readonly runId: string;
-    readonly tenantId: string;
+    readonly userId: string;
     readonly templateVersionId: string;
     readonly layers: readonly PolicyLayer[];
     readonly createdAt: string;
@@ -739,7 +739,7 @@ export interface EffectivePolicySnapshot extends PolicyConstraints {
 ```text
 write 被拒绝
   → Effective allowedTools 中不存在
-  → Tenant layer 只允许 read
+  → User layer 只允许 read
   → 决策使用 snapshot X
 ```
 
@@ -806,7 +806,7 @@ start(request: RuntimeStartRequest): Promise<void> {
 直接 Runtime 单元测试没有 Template/Instance 绑定时会透传给 inner。正式 Composition
 Root 创建的 Run 一定有绑定，因此会进入受管路径。这是有意识的渐进迁移边界。
 
-### 7.3 第一道门：引用和 Tenant 归属
+### 7.3 第一道门：引用和 User 归属
 
 ```ts
 const run = this.runs.get(request.run.runId);
@@ -821,16 +821,16 @@ const instance = this.instances.get(run.harnessInstanceId);
 const session = this.sessions.get(run.harnessSessionId);
 
 if (
-    instance.tenantId !== run.tenantId
+    instance.userId !== run.userId
     || instance.templateVersionId !== template.id
-    || session.tenantId !== run.tenantId
+    || session.userId !== run.userId
     || session.instanceId !== instance.id
 ) throw new Error(`Run 控制面归属不一致：${run.id}`);
 ```
 
 这里不相信调用请求携带的对象关系，而是重新从数据库读取并验证。它防止：
 
-- Tenant A 的 Run 引用 Tenant B 的 Instance；
+- User A 的 Run 引用 User B 的 Instance；
 - Instance 使用的 TemplateVersion 与 Run 固定版本不同；
 - Session 属于另一个 Instance。
 
@@ -840,7 +840,7 @@ if (
 const snapshot = computeEffectivePolicy({
     id: crypto.randomUUID(),
     runId: run.id,
-    tenantId: run.tenantId,
+    userId: run.userId,
     templateVersionId: template.id,
     layers: this.policyLayers(run, template.spec),
     createdAt: now,
@@ -1089,7 +1089,7 @@ if (snapshot === null || snapshot.runId !== input.runId) {
 }
 ```
 
-不能只按 Snapshot ID 加载后直接使用，否则调用方可能把另一个 Tenant/Run 的宽松
+不能只按 Snapshot ID 加载后直接使用，否则调用方可能把另一个 User/Run 的宽松
 Snapshot 放进本次请求。
 
 ### 8.3 三类拒绝
@@ -1371,7 +1371,7 @@ Pi SDK event     → RuntimeEvent
 它不负责：
 
 - 计算五层策略；
-- 决定 Tenant 权限；
+- 决定 User 权限；
 - 创建 Attempt；
 - 管理 Sandbox 状态；
 - 直接写 SQLite。
@@ -1607,23 +1607,23 @@ async interrupt(runId: string): Promise<void> {
 测试不是最后才看的附属品。它定义了当前实现真正承诺什么，也揭示哪些能力仍然没有
 宣称完成。
 
-### 11.1 场景一：两个 Tenant 产生不同权限
+### 11.1 场景一：两个 User 产生不同权限
 
 Arrange：
 
 ```ts
-registry.setTenantPolicy(
-    "tenant-a",
-    "tenant-a-readonly",
+registry.setUserPolicy(
+    "user-a",
+    "user-a-readonly",
     policy(["read"], {
         allowNetwork: false,
         allowProcess: false,
     }),
 );
 
-registry.setTenantPolicy(
-    "tenant-b",
-    "tenant-b-editor",
+registry.setUserPolicy(
+    "user-b",
+    "user-b-editor",
     policy(["read", "write"], {
         allowNetwork: false,
         allowProcess: false,
@@ -1631,7 +1631,7 @@ registry.setTenantPolicy(
 );
 ```
 
-Act：两个 Tenant 通过同一个 Composition 和同一个 Fake Runtime 提交 Run。
+Act：两个 User 通过同一个 Composition 和同一个 Fake Runtime 提交 Run。
 
 Assert：
 
@@ -1643,7 +1643,7 @@ expect(requestB?.execution?.runtimeConfig.tools).toEqual([
 ]);
 ```
 
-这证明差异不是不同 Runtime 实例硬编码出来的，而是 Tenant Policy 经 Snapshot 和
+这证明差异不是不同 Runtime 实例硬编码出来的，而是 User Policy 经 Snapshot 和
 Compiler 进入了每个执行请求。
 
 同一测试还检查完整引用链：
@@ -2011,7 +2011,7 @@ bun test tests/integration/stage1-stage2-control-plane.e2e.test.ts
 自己重画下面这张关系图，并为每条边写出对应数据库字段：
 
 ```text
-Tenant
+User
   └── Template
         └── TemplateVersion
               └── Instance ── CapabilityProfile

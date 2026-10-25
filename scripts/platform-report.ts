@@ -3,7 +3,7 @@
  *
  * 覆盖：任务成功率、端到端 p50/p95/p99、排队等待、工具成功率与耗时分布、
  * 沙箱 warmHit 与获取时延、模型 TTFT/token/成本、恢复率（interrupted→resumed）、
- * 每租户成本归因。
+ * 每用户成本归因。
  *
  * 用法：
  *   bun run scripts/platform-report.ts --database /path/to/harness.sqlite
@@ -12,7 +12,7 @@ import { Database } from "bun:sqlite";
 
 interface RunRow {
     id: string;
-    tenant_id: string;
+    user_id: string;
     status: string;
     created_at: string;
     finished_at: string | null;
@@ -62,7 +62,7 @@ function payloadOf(raw: string): Record<string, unknown> {
 }
 
 const runs = db.query<RunRow, []>(`
-    SELECT id, tenant_id, status, created_at, finished_at FROM agent_runs
+    SELECT id, user_id, status, created_at, finished_at FROM agent_runs
 `).all();
 
 const eventsByRun = new Map<string, EventRow[]>();
@@ -83,7 +83,7 @@ const ttft: number[] = [];
 let totalTokens = 0;
 let totalCost = 0;
 
-const perTenant = new Map<string, { runs: number; completed: number; tokens: number; cost: number; wall: number[] }>();
+const perUser = new Map<string, { runs: number; completed: number; tokens: number; cost: number; wall: number[] }>();
 const toolStats = new Map<string, { calls: number; errors: number; durations: number[] }>();
 const sandbox: { acquisitions: number; warm: number; durations: number[] } = { acquisitions: 0, warm: 0, durations: [] };
 let interruptedRuns = 0;
@@ -100,18 +100,18 @@ const RECOVERABLE_REASONS = new Set([
 for (const run of runs) {
     statusCounts.set(run.status, (statusCounts.get(run.status) ?? 0) + 1);
 
-    const tenant = perTenant.get(run.tenant_id)
+    const user = perUser.get(run.user_id)
         ?? { runs: 0, completed: 0, tokens: 0, cost: 0, wall: [] };
-    tenant.runs += 1;
-    perTenant.set(run.tenant_id, tenant);
+    user.runs += 1;
+    perUser.set(run.user_id, user);
 
     const runWall = ms(run.created_at, run.finished_at);
     if (runWall !== null) {
         wall.push(runWall);
-        tenant.wall.push(runWall);
+        user.wall.push(runWall);
     }
     if (run.status === "COMPLETED") {
-        tenant.completed += 1;
+        user.completed += 1;
     }
 
     const events = eventsByRun.get(run.id) ?? [];
@@ -161,11 +161,11 @@ for (const run of runs) {
                 : {};
             if (typeof usage.totalTokens === "number") {
                 totalTokens += usage.totalTokens;
-                tenant.tokens += usage.totalTokens;
+                user.tokens += usage.totalTokens;
             }
             if (typeof cost.total === "number") {
                 totalCost += cost.total;
-                tenant.cost += cost.total;
+                user.cost += cost.total;
             }
         }
 
@@ -220,9 +220,9 @@ for (const [name, stat] of [...toolStats.entries()].sort((a, b) => b[1].calls - 
         + `p50=${percentile(stat.durations, 50).toFixed(0)}ms p95=${percentile(stat.durations, 95).toFixed(0)}ms`);
 }
 
-console.log("\n== 每租户 ==");
-for (const [tenantId, stat] of [...perTenant.entries()].sort((a, b) => b[1].runs - a[1].runs).slice(0, 15)) {
-    console.log(`${tenantId.slice(0, 18)}: runs=${stat.runs} completed=${stat.completed} `
+console.log("\n== 每用户 ==");
+for (const [userId, stat] of [...perUser.entries()].sort((a, b) => b[1].runs - a[1].runs).slice(0, 15)) {
+    console.log(`${userId.slice(0, 18)}: runs=${stat.runs} completed=${stat.completed} `
         + `tokens=${stat.tokens} cost=$${stat.cost.toFixed(6)} avgWall=${stat.wall.length === 0 ? 0 : Math.round(stat.wall.reduce((sum, value) => sum + value, 0) / stat.wall.length)}ms`);
 }
 

@@ -24,7 +24,7 @@ const finishedAt = "2026-07-27T10:00:01.000Z";
 function seedRun(db: Database, runId = "run-1"): AgentRun {
     const run: AgentRun = {
         id: runId,
-        tenantId: "tenant-1",
+        userId: "user-1",
         harnessSessionId: "session-1",
         status: "RUNNING",
         userInput: "读取项目文件",

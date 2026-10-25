@@ -26,7 +26,7 @@ test("createHarnessApplication 用 Fake 外部依赖组装完整真实应用链"
     try {
         await composition.application.start();
         const run = composition.application.submitRun({
-            tenantId:"tenant-composition",
+            userId:"user-composition",
             harnessSessionId:"session-composition",
             userInput:"验证完整应用组装",
             workspacePath:"/tmp/composition-workspace",
@@ -99,7 +99,7 @@ test("B2：runPolicy.allowNetwork=true 在 strict 平台策略下 fail-closed，
     try {
         await composition.application.start();
         const run = composition.application.submitRun({
-            tenantId:"tenant-network",
+            userId:"user-network",
             harnessSessionId:"session-network",
             userInput:"联网任务",
             workspacePath:"/tmp/network-workspace",

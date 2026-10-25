@@ -17,7 +17,7 @@ export function canonicalSandboxSpec(spec: SandboxSpec): string {
         userId: spec.userId,
         workspaceMount: spec.workspaceMount,
         // 视野粒度改变的是"本 Run 被承诺了什么"，属于隔离边界，因此进指纹；
-        // 而 mountedRoot 是实例局部值（含租户与工作区 ID），不进指纹。
+        // 而 mountedRoot 是实例局部值（含用户与工作区 ID），不进指纹。
         workspaceScope: spec.workspaceScope,
         networkMode: spec.networkMode,
         readOnlyRootfs: spec.readOnlyRootfs,

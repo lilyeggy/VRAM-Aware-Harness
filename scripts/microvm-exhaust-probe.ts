@@ -112,7 +112,7 @@ async function main(): Promise<void> {
             layers: [],
             id: "policy-exhaust",
             runId: "run-exhaust",
-            tenantId: "exhaust-tenant",
+            userId: "exhaust-user",
             createdAt: new Date().toISOString(),
             workspaceRoots: [root],
             allowNetwork: false,

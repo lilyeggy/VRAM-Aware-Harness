@@ -6,7 +6,7 @@
 
 ## 背景
 
-Harness 的核心价值是 Run 生命周期、工具治理、恢复、多租户资源准入和审计，
+Harness 的核心价值是 Run 生命周期、工具治理、恢复、多用户资源准入和审计，
 不是绑定某一个模型，也不是把模型能力作为项目正确性的前提。
 
 当前实验室可用的单卡基线是 RTX A6000 48 GB。我们可以修改自己编译的 vLLM
@@ -37,7 +37,7 @@ vLLM Scheduler，控制面和推理层会形成难以测试、难以升级的强
 
 6. vLLM fork 允许修改，但按以下层级推进：
    - 第一层：标准 OpenAI-compatible API、usage 和 Metrics；
-   - 第二层：增加 `tenantId`、`runId`、`traceId` 等请求归因和观测事件；
+   - 第二层：增加 `userId`、`runId`、`traceId` 等请求归因和观测事件；
    - 第三层：在数据证明有收益后，再研究 priority、KV Events、offload 或
      Agent-aware scheduling。
 7. 第一周 MVP 不依赖深度重写 vLLM Scheduler 或物理 KV Cache。必要的观测、

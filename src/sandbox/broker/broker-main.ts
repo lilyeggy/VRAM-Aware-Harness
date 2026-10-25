@@ -12,7 +12,7 @@ import { SandboxBrokerServer } from "./sandbox-broker-server.ts";
 /**
  * 特权最小 Sandbox Broker 入口。
  *
- * 该进程是唯一持有 Firecracker/jailer 与租户 secret 的组件；Master/Worker
+ * 该进程是唯一持有 Firecracker/jailer 与用户 secret 的组件；Master/Worker
  * 通过 `HARNESS_SANDBOX_BROKER_SOCKET` 指向的 Unix socket 调用它。
  *
  * 启动要求：

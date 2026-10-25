@@ -6,8 +6,8 @@ import {
     RunScheduler,
 } from "../../src/scheduling/run-scheduler.ts";
 import {
-    TenantRunScheduler,
-} from "../../src/scheduling/tenant-run-scheduler.ts";
+    UserRunScheduler,
+} from "../../src/scheduling/user-run-scheduler.ts";
 import {
     openHarnessDatabase,
 } from "../../src/storage/database.ts";
@@ -23,7 +23,7 @@ import {
  */
 function buildCoordinator(
     runService: RunService,
-    scheduler: TenantRunScheduler,
+    scheduler: UserRunScheduler,
     options: ConstructorParameters<typeof RunScheduler>[2],
 ): RunScheduler {
     return new RunScheduler(runService, scheduler, options);
@@ -35,23 +35,23 @@ test("B5：DB QUEUED 但脱离内存队列的孤儿 Run 被 reconcile 补回，�
     try {
         const store = new RunStore(db);
         const runService = new RunService(store, new FakeAgentRuntime());
-        const scheduler = new TenantRunScheduler({
+        const scheduler = new UserRunScheduler({
             maxActiveRuns: 4,
-            maxActiveRunsPerTenant: 4,
+            maxActiveRunsPerUser: 4,
         });
         const coordinator = buildCoordinator(runService, scheduler, {
             queuedRunReader: store,
         });
 
         const inQueue = coordinator.submit({
-            tenantId: "tenant-a",
+            userId: "user-a",
             harnessSessionId: "session-a",
             userInput: "正常排队的任务",
             workspacePath: "/tmp/ws-a",
         });
         // 模拟 TOCTOU 孤儿：创建后从未入队（或崩溃于 claimNext 后 re-enqueue 前）。
         const orphan = runService.createQueuedRun({
-            tenantId: "tenant-a",
+            userId: "user-a",
             harnessSessionId: "session-a",
             userInput: "被归档窗口遗落的任务",
             workspacePath: "/tmp/ws-a",
@@ -77,14 +77,14 @@ test("B4：重启后 DB 侧等待超 TTL 的 QUEUED Run 被 reconcile 熔断，�
     try {
         const store = new RunStore(db);
         const runService = new RunService(store, new FakeAgentRuntime());
-        const scheduler = new TenantRunScheduler({
+        const scheduler = new UserRunScheduler({
             maxActiveRuns: 4,
-            maxActiveRunsPerTenant: 4,
+            maxActiveRunsPerUser: 4,
         });
         const queueTtlMs = 60_000;
 
         const run = runService.createQueuedRun({
-            tenantId: "tenant-b",
+            userId: "user-b",
             harnessSessionId: "session-b",
             userInput: "重启前就在排队的任务",
             workspacePath: "/tmp/ws-b",
@@ -118,9 +118,9 @@ test("B5：内存队列与 DB 一致时 reconcile 不产生任何动作", () => 
     try {
         const store = new RunStore(db);
         const runService = new RunService(store, new FakeAgentRuntime());
-        const scheduler = new TenantRunScheduler({
+        const scheduler = new UserRunScheduler({
             maxActiveRuns: 4,
-            maxActiveRunsPerTenant: 4,
+            maxActiveRunsPerUser: 4,
         });
         const coordinator = buildCoordinator(runService, scheduler, {
             queueTtlMs: 60_000,
@@ -128,7 +128,7 @@ test("B5：内存队列与 DB 一致时 reconcile 不产生任何动作", () => 
         });
 
         coordinator.submit({
-            tenantId: "tenant-c",
+            userId: "user-c",
             harnessSessionId: "session-c",
             userInput: "一致状态的任务",
             workspacePath: "/tmp/ws-c",

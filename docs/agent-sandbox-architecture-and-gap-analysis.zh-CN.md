@@ -37,7 +37,7 @@
 ```
 
 ### 1. 极致的生命周期治理（Ephemeral Lifecycle）
-- **单次使用原则（Disposable / Leased Once）**：沙箱租用后绝不归还复用，任务结束立刻销毁，杜绝同租户或跨租户的状态污染与文件残留。
+- **单次使用原则（Disposable / Leased Once）**：沙箱租用后绝不归还复用，任务结束立刻销毁，杜绝同用户或跨用户的状态污染与文件残留。
 - **预热池与启动清场（Warm Pool & Reconciliation）**：通过后台维持规格池化容器，将任务获取沙箱的耗时降至亚秒级；服务崩溃重启时，具备对账屏障清除所有悬挂孤儿资源。
 
 ### 2. 宿主零信任与内生安全硬化（Zero-Trust In-Depth Defense）
@@ -68,11 +68,11 @@
 | **安全隔离内核** | `src/sandbox/container-sandbox-provider.ts`<br>`src/sandbox/sandbox-profile.ts` | **完全达标（gVisor 级）**：默认采用 `runsc` 用户态内核，强制禁止静默降级 runc；真机 9 项黑盒逃逸测试全 PASS。 |
 | **容器安全硬化** | `src/sandbox/oci-sandbox-spec.ts` | **完全达标**：强制非 root (`userId > 0`)、`--read-only`、`--cap-drop ALL`、`--security-opt no-new-privileges`、`--network none`。 |
 | **防炸弹与存储配额** | `src/sandbox/oci-sandbox-spec.ts` | **完全达标**：硬编码 `--pids-limit 128` 拦截 Fork 炸弹；`--tmpfs /tmp:rw,noexec,nosuid,size=64m` 防磁盘撑爆。 |
-| **单次租用预热池** | `src/sandbox/container-warm-pool.ts` | **高度达标**：单次租用绝不归还；租户级参数池化；引入连续未命中熔断（`wasteStreaks`）；基于部署路径导出稳定 Owner 标签。 |
+| **单次租用预热池** | `src/sandbox/container-warm-pool.ts` | **高度达标**：单次租用绝不归还；用户级参数池化；引入连续未命中熔断（`wasteStreaks`）；基于部署路径导出稳定 Owner 标签。 |
 | **凭据安全注入** | `src/sandbox/container-sandbox-provider.ts#L330-L345` | **高度达标**：仅把 Secret 名字放进 argv，明文走进程环境变量，杜绝 `/proc/*/cmdline` 和 `docker inspect` 泄露。 |
 | **启动对账与清场** | `src/sandbox/sandbox-startup-reconciler.ts` | **完全达标**：系统重启时自动扫描并清理所有历史残留、悬挂容器，确保状态机与物理环境一致。 |
 | **宿主副作用账本** | `src/tools/` & `src/checkpoints/` | **业界顶尖水准**：严格推行 `READ_ONLY / IDEMPOTENT_WRITE / UNKNOWN_EFFECT` 三态账本，先记账后执行，崩溃确定性恢复。 |
-| **模型算力瓶颈准入**| `src/resources/` & `src/scheduling/` | **独创亮点**：基于 vLLM 显存与 KV-Cache 压力的动态准入与租户公平队列（多数纯沙箱项目未考虑此项）。 |
+| **模型算力瓶颈准入**| `src/resources/` & `src/scheduling/` | **独创亮点**：基于 vLLM 显存与 KV-Cache 压力的动态准入与用户公平队列（多数纯沙箱项目未考虑此项）。 |
 
 ---
 

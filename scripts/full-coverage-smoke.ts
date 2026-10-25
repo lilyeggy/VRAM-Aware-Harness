@@ -11,7 +11,7 @@
  *                              （否则脚本自己的注册/登录就会被 429 拦下）
  *   FULLCOVER_MCP=1            需要 HARNESS_MCP_SERVERS 配置 echo fixture
  *   FULLCOVER_ONLY=id1,id2     只跑指定 id（用于隔离 phase）
- *   FULLCOVER_SKIP_BOOTSTRAP=1 隔离 phase 时不预建租户
+ *   FULLCOVER_SKIP_BOOTSTRAP=1 隔离 phase 时不预建用户
  *
  * 结果 JSON 写入 HARNESS_FULLCOVER_OUT。
  */
@@ -264,13 +264,13 @@ async function submitAndWait(workspaceId: string, userInput: string, token: stri
     return { runId, detail, events, status: detail.run.status };
 }
 
-async function bootstrapTenant(context: any, email: string): Promise<void> {
+async function bootstrapUser(context: any, email: string): Promise<void> {
     const registered = await api("POST", "/auth/register", { token: null, body: { email, password: "password123", inviteCode } });
     assertEq(registered.status, 201, "引导注册状态 body=" + registered.text.slice(0, 200));
     const login = await api("POST", "/auth/login", { token: null, body: { email, password: "password123" } });
     assertEq(login.status, 200, "引导登录状态 body=" + login.text.slice(0, 200));
     context.token = login.json.token;
-    context.tenantId = login.json.tenantId;
+    context.userId = login.json.userId;
     const workspace = await api("POST", "/workspaces", { token: context.token, body: { name: "fc-only-ws-" + tag } });
     assertEq(workspace.status, 201, "引导 workspace 状态 body=" + workspace.text.slice(0, 200));
     context.workspaceId = workspace.json.workspace.id;
@@ -285,7 +285,7 @@ async function main(): Promise<void> {
     context.email = email;
 
     if (onlyIds !== null && skipBootstrap === false) {
-        await bootstrapTenant(context, "fullcov-only-" + tag + "@example.com");
+        await bootstrapUser(context, "fullcov-only-" + tag + "@example.com");
     }
 
     // ---------------- 系统探针 ----------------
@@ -350,8 +350,8 @@ async function main(): Promise<void> {
         const token = response.json && response.json.token;
         assert(typeof token === "string" && token.length > 0, "登录响应缺少 token body=" + response.text.slice(0, 200));
         context.token = token;
-        context.tenantId = response.json.tenantId;
-        return "200 tenantId=" + String(response.json.tenantId) + " expiresAt=" + String(response.json.expiresAt);
+        context.userId = response.json.userId;
+        return "200 userId=" + String(response.json.userId) + " expiresAt=" + String(response.json.expiresAt);
     });
 
     await step("auth.logout", "POST /auth/logout → 200 且 token 失效", async () => {
@@ -683,14 +683,14 @@ async function main(): Promise<void> {
         return "runId=" + outcome.runId + " result=" + text.slice(0, 160);
     });
 
-    // ---------------- 跨租户隔离 ----------------
-    await step("tenant.cross_isolation", "跨租户访问他人 Run → 全部 404", async () => {
-        assert(typeof context.journeyRunId === "string", "journey run 未创建，无法验证跨租户隔离");
-        const otherEmail = "fc-tenantb-" + tag + "@example.com";
+    // ---------------- 跨用户隔离 ----------------
+    await step("user.cross_isolation", "跨用户访问他人 Run → 全部 404", async () => {
+        assert(typeof context.journeyRunId === "string", "journey run 未创建，无法验证跨用户隔离");
+        const otherEmail = "fc-userb-" + tag + "@example.com";
         const registered = await api("POST", "/auth/register", { token: null, body: { email: otherEmail, password: "password123", inviteCode } });
-        assertEq(registered.status, 201, "第二租户注册状态 body=" + registered.text.slice(0, 200));
+        assertEq(registered.status, 201, "第二用户注册状态 body=" + registered.text.slice(0, 200));
         const login = await api("POST", "/auth/login", { token: null, body: { email: otherEmail, password: "password123" } });
-        assertEq(login.status, 200, "第二租户登录状态 body=" + login.text.slice(0, 200));
+        assertEq(login.status, 200, "第二用户登录状态 body=" + login.text.slice(0, 200));
         const otherToken = login.json.token;
         const targetRun = context.journeyRunId;
         const checks: Array<{ label: string; method: string; path: string; body?: unknown }> = [
@@ -710,7 +710,7 @@ async function main(): Promise<void> {
                 wrong.push(check.label + "=" + response.status + " body=" + response.text.slice(0, 80));
             }
         }
-        assert(wrong.length === 0, "跨租户未返回 404：" + wrong.join("; "));
+        assert(wrong.length === 0, "跨用户未返回 404：" + wrong.join("; "));
         return observed.join(", ");
     });
 

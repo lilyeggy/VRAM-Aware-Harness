@@ -262,7 +262,7 @@ microsandbox `agentd`、E2B `envd`）无一例外都是"静态单二进制 + `in
   `HARNESS_OPS_CLEANUP_PROTECTED 54b4cce787cc…`，即当前模板快照被正确豁免。
 - `harness-vm-prewarm.service` 手动触发：`VM_PREWARM_SKIP template=54b4cce787cc… reason=snapshot-present`。
 - `scripts/p0-e2e-smoke.ts` → `P0_E2E_SMOKE_OK label=e893796f`（串行 maxActive=1、并发 maxActive=2
-  overlap=true、跨租户 run/events/output/interrupt/对方 workspace 提交全部 404）。
+  overlap=true、跨用户 run/events/output/interrupt/对方 workspace 提交全部 404）。
 
 **生产验证（GC 豁免）**：见上一段最后两条（`snapshotPoolProtected=1` / `VM_PREWARM_SKIP`）。
 
@@ -335,7 +335,7 @@ microsandbox `agentd`、E2B `envd`）无一例外都是"静态单二进制 + `in
 | `quiet loglevel=3` 启动参数 | 期望少写串口、间接加速 | **已实施但无时间收益**：实测 1334ms vs 1334ms；保留只为减少未消费的管道数据（`HARNESS_VM_BOOT_VERBOSE=1` 可打开详细日志） |
 | COW 文件系统（xfs reflink=1 / btrfs） | 可写盘拷贝近 0、`make-snapshot` 更快 | 未采用：远程无 `mkfs.xfs`/`mkfs.btrfs`，需换盘/装工具 |
 | UFFD diff snapshot / 懒加载（CodeSandbox 式） | 内存镜像不再整块写 | 未采用：需自写 `UFFDIO_COPY` handler，复杂度高 |
-| 预热池（Daytona/Modal/Fly 式常驻待命 VM） | 交接 ~10~50ms | 未采用：内存常驻成本、租户隔离与回收复杂度 |
+| 预热池（Daytona/Modal/Fly 式常驻待命 VM） | 交接 ~10~50ms | 未采用：内存常驻成本、用户隔离与回收复杂度 |
 | 关闭 guest 内核 i8042/PS-2 探测（`i8042.noaux i8042.nomux i8042.nopnp i8042.dumbkbd`） | 冷启动 1338 → ~540ms | **已实施（O6）**：实测 539ms；建快照首台 2235 → 1452ms；热恢复不变 |
 | 用静态小监听器替换 `socat` | 期望冷启动再减 ~300ms | **已否证（O8/O10）**：socat 本身只值 ~16ms；O10 修掉握手量化后，socat 与 C agent 的差别就是 connect 后的 ~70ms agent 加载 |
 | jailer 下把 chroot 内快照**硬链接**进 staging（替代 `cp --reflink=auto` 的全量复制） | `make-snapshot` 少一遍 256MiB 读+写 | **已实施（O7）**：908 → 753ms；首建 1452 → 1293ms |

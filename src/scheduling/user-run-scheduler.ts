@@ -1,11 +1,11 @@
 
 // 并发上限配置
-export interface TenantRunSchedulerConfig {
+export interface UserRunSchedulerConfig {
     maxActiveRuns: number;
-    maxActiveRunsPerTenant: number;
+    maxActiveRunsPerUser: number;
     /**
-     * N10：老化阈值（ms）。某个租户的队首 Run 等待超过该值时，它不再等
-     * 轮转排到，而是直接插队优先调度——给「被洪泛租户挡在后面的正常租户」
+     * N10：老化阈值（ms）。某个用户的队首 Run 等待超过该值时，它不再等
+     * 轮转排到，而是直接插队优先调度——给「被洪泛用户挡在后面的正常用户」
      * 一个确定的等待上界。未配置 / <= 0 = 关闭（纯轮转，旧行为）。
      */
     agingMs?: number;
@@ -17,13 +17,13 @@ export interface TenantRunSchedulerConfig {
 export type QueueReasonCode =
     | "AWAITING_SCHEDULING"
     | "GLOBAL_CONCURRENCY_LIMIT"
-    | "TENANT_CONCURRENCY_LIMIT"
+    | "USER_CONCURRENCY_LIMIT"
     | "SESSION_SERIALIZATION";
 
 // 队列里面的 Run 的格式要求
 export interface EnqueueRunInput {
     runId: string;
-    tenantId: string;
+    userId: string;
     /** Runs sharing a conversation must never be active concurrently. */
     sessionId?: string;
     reasonCode?: QueueReasonCode;
@@ -32,7 +32,7 @@ export interface EnqueueRunInput {
 
 export interface QueuedRun {
     runId: string;
-    tenantId: string;
+    userId: string;
     sessionId?: string;
     reasonCode: QueueReasonCode;
     enqueuedAt: string;
@@ -40,12 +40,12 @@ export interface QueuedRun {
 
 export interface QueueEntry extends Omit<QueuedRun, "sessionId"> {
     position: number;
-    tenantPosition: number;
+    userPosition: number;
 }
 
 export interface SchedulerCapacity {
     activeRunCount:number;
-    activeTenantRunCount:number;
+    activeUserRunCount:number;
 }
 
 /**
@@ -56,48 +56,48 @@ export interface SchedulerCapacity {
 export interface QueueBlocker extends QueueEntry {
     reasonCode: QueueReasonCode;
     activeRunCount: number;
-    activeTenantRunCount: number;
+    activeUserRunCount: number;
 }
 
 /**
- * 在 Tenant 之间公平选择 Run，并维护 Harness 的逻辑模型并发 slot。
+ * 在 User 之间公平选择 Run，并维护 Harness 的逻辑模型并发 slot。
  *
  * Scheduler 不负责 GPU 压力分类，也不负责 vLLM 内部 token 调度。
  */
-export class TenantRunScheduler {
-    private readonly queuesByTenant = new Map<string, QueuedRun[]>();
-    private readonly tenantOrder: string[] = [];
-    private readonly activeTenantByRunId = new Map<string, string>();
+export class UserRunScheduler {
+    private readonly queuesByUser = new Map<string, QueuedRun[]>();
+    private readonly userOrder: string[] = [];
+    private readonly activeUserByRunId = new Map<string, string>();
     private readonly activeSessionByRunId = new Map<string, string>();
     /** runId → QueuedRun 索引，避免 findQueuedRun 全队列线性扫描。 */
     private readonly queuedRunByRunId = new Map<string, QueuedRun>();
-    /** tenantId → 活跃 Run 数，随 claim/release 增量维护。 */
-    private readonly activeCountByTenant = new Map<string, number>();
+    /** userId → 活跃 Run 数，随 claim/release 增量维护。 */
+    private readonly activeCountByUser = new Map<string, number>();
     /** 当前有活跃 Run 的会话集合，随 claim/release 增量维护。 */
     private readonly activeSessionIds = new Set<string>();
 
-    constructor(private readonly config: TenantRunSchedulerConfig) {
+    constructor(private readonly config: UserRunSchedulerConfig) {
         assertPositiveInteger(config.maxActiveRuns, "maxActiveRuns");
 
-        // 0 = 自动公平份额（maxActiveRuns 除以有需求租户数）。
+        // 0 = 自动公平份额（maxActiveRuns 除以有需求用户数）。
         assertNonNegativeInteger(
-            config.maxActiveRunsPerTenant,
-            "maxActiveRunsPerTenant",
+            config.maxActiveRunsPerUser,
+            "maxActiveRunsPerUser",
         );
 
         if (
-            config.maxActiveRunsPerTenant > 0
-            && config.maxActiveRunsPerTenant
+            config.maxActiveRunsPerUser > 0
+            && config.maxActiveRunsPerUser
             > config.maxActiveRuns
         ) {
             throw new Error(
-                "maxActiveRunsPerTenant 不能大于 maxActiveRuns",
+                "maxActiveRunsPerUser 不能大于 maxActiveRuns",
             );
         }
     }
 
     enqueue(input: EnqueueRunInput): QueuedRun {
-        if (this.activeTenantByRunId.has(input.runId)) {
+        if (this.activeUserByRunId.has(input.runId)) {
             throw new Error(`Run 正在执行中：${input.runId}`);
         }
 
@@ -107,21 +107,21 @@ export class TenantRunScheduler {
 
         const queuedRun: QueuedRun = {
             runId: input.runId,
-            tenantId: input.tenantId,
+            userId: input.userId,
             ...(input.sessionId === undefined ? {} : { sessionId: input.sessionId }),
             reasonCode:
                 input.reasonCode ?? "AWAITING_SCHEDULING",
             enqueuedAt:
                 input.enqueuedAt ?? new Date().toISOString(),
         };
-        const tenantQueue = this.queuesByTenant.get(input.tenantId);
+        const userQueue = this.queuesByUser.get(input.userId);
 
-        if (tenantQueue === undefined) {
-            this.queuesByTenant.set(input.tenantId, [queuedRun]);
-            this.tenantOrder.push(input.tenantId);
+        if (userQueue === undefined) {
+            this.queuesByUser.set(input.userId, [queuedRun]);
+            this.userOrder.push(input.userId);
         } else {
-            tenantQueue.push(queuedRun);
-            tenantQueue.sort(compareQueuedRuns);
+            userQueue.push(queuedRun);
+            userQueue.sort(compareQueuedRuns);
         }
 
         this.queuedRunByRunId.set(queuedRun.runId, queuedRun);
@@ -140,10 +140,10 @@ export class TenantRunScheduler {
     /** claim 成功后登记活跃 slot，并同步维护派生索引。 */
     private activate(run: QueuedRun): void {
         this.queuedRunByRunId.delete(run.runId);
-        this.activeTenantByRunId.set(run.runId, run.tenantId);
-        this.activeCountByTenant.set(
-            run.tenantId,
-            (this.activeCountByTenant.get(run.tenantId) ?? 0) + 1,
+        this.activeUserByRunId.set(run.runId, run.userId);
+        this.activeCountByUser.set(
+            run.userId,
+            (this.activeCountByUser.get(run.userId) ?? 0) + 1,
         );
         if (run.sessionId !== undefined) {
             this.activeSessionByRunId.set(run.runId, run.sessionId);
@@ -156,14 +156,14 @@ export class TenantRunScheduler {
     /**
      * {
      *  runId:"A1",
-     *  tenantId:"tenant-a",
+     *  userId:"user-a",
      *  ...
      * }
      * 这代表的是 A1 已经离开等待队列，A1 已经占用一个 slot，调用方可以启动 A1
      */
     claimNext() : QueuedRun | null {
         // 全局 slot 已满：任何人都不能 claim。
-        if (this.activeTenantByRunId.size >= this.config.maxActiveRuns) {
+        if (this.activeUserByRunId.size >= this.config.maxActiveRuns) {
             return null;
         }
 
@@ -174,64 +174,64 @@ export class TenantRunScheduler {
             return aged;
         }
 
-        // 等权轮转：按租户环逐个看，每个租户内部跳过"当前不可 claim"的
-        // 队首（会话锁被占 / 租户并发已满），取第一个可 claim 的 Run。
-        // 这样队首被阻塞时不会连带堵死同租户后面的 Run。
-        const tenantsToInspect = this.tenantOrder.length;
+        // 等权轮转：按用户环逐个看，每个用户内部跳过"当前不可 claim"的
+        // 队首（会话锁被占 / 用户并发已满），取第一个可 claim 的 Run。
+        // 这样队首被阻塞时不会连带堵死同用户后面的 Run。
+        const usersToInspect = this.userOrder.length;
 
         for (
             let inspected = 0;
-            inspected < tenantsToInspect;
+            inspected < usersToInspect;
             inspected += 1
         ) {
-            const tenantId = this.tenantOrder.shift();
+            const userId = this.userOrder.shift();
 
-            if (tenantId === undefined) {
+            if (userId === undefined) {
                 return null;
             }
 
-            const tenantQueue = this.queuesByTenant.get(tenantId);
+            const userQueue = this.queuesByUser.get(userId);
 
-            if (tenantQueue === undefined || tenantQueue.length === 0) {
-                this.queuesByTenant.delete(tenantId);
+            if (userQueue === undefined || userQueue.length === 0) {
+                this.queuesByUser.delete(userId);
                 continue;
             }
 
-            const claimableIndex = tenantQueue.findIndex(
-                (candidate) => this.canClaim(tenantId, candidate),
+            const claimableIndex = userQueue.findIndex(
+                (candidate) => this.canClaim(userId, candidate),
             );
 
             if (claimableIndex === -1) {
-                // 本租户本轮没有可 claim 的 Run（并发满或会话锁被占）：
-                // 整租户让位一轮，但不阻塞其它租户。
-                this.tenantOrder.push(tenantId);
+                // 本用户本轮没有可 claim 的 Run（并发满或会话锁被占）：
+                // 整用户让位一轮，但不阻塞其它用户。
+                this.userOrder.push(userId);
                 continue;
             }
 
-            const [run] = tenantQueue.splice(claimableIndex, 1);
+            const [run] = userQueue.splice(claimableIndex, 1);
 
             if (run === undefined) {
-                this.tenantOrder.push(tenantId);
+                this.userOrder.push(userId);
                 continue;
             }
 
-            if (tenantQueue.length > 0) {
-                this.tenantOrder.push(tenantId);
+            if (userQueue.length > 0) {
+                this.userOrder.push(userId);
             } else {
-                this.queuesByTenant.delete(tenantId);
+                this.queuesByUser.delete(userId);
             }
 
             this.activate(run);
             return run;
         }
 
-        // 有等待任务，但是所有租户都不可 claim（并发满 / 会话锁）。
+        // 有等待任务，但是所有用户都不可 claim（并发满 / 会话锁）。
         return null;
     }
 
     /**
-     * N10：老化插队。跨租户找出"等待时间最长且已超过 agingMs"、当前可
-     * claim 的 Run。租户内部同样跳过被会话锁/并发上限挡住的前缀，避免
+     * N10：老化插队。跨用户找出"等待时间最长且已超过 agingMs"、当前可
+     * claim 的 Run。用户内部同样跳过被会话锁/并发上限挡住的前缀，避免
      * 老化补偿本身被队首阻塞吃掉。
      *
      * 没有任何 Run 超过阈值时返回 null，行为交回等权轮转。
@@ -244,19 +244,19 @@ export class TenantRunScheduler {
         }
 
         const now = (this.config.now ?? Date.now)();
-        let bestTenantId: string | null = null;
+        let bestUserId: string | null = null;
         let bestRun: QueuedRun | null = null;
         let bestWaitedMs = agingMs;
 
-        for (const tenantId of this.tenantOrder) {
-            const tenantQueue = this.queuesByTenant.get(tenantId);
+        for (const userId of this.userOrder) {
+            const userQueue = this.queuesByUser.get(userId);
 
-            if (tenantQueue === undefined) {
+            if (userQueue === undefined) {
                 continue;
             }
 
-            for (const candidate of tenantQueue) {
-                if (this.canClaim(tenantId, candidate) === false) {
+            for (const candidate of userQueue) {
+                if (this.canClaim(userId, candidate) === false) {
                     // 会话锁/并发上限挡住：跳过它继续找后面可 claim 的。
                     continue;
                 }
@@ -264,60 +264,60 @@ export class TenantRunScheduler {
                 const waitedMs = now - Date.parse(candidate.enqueuedAt);
 
                 if (Number.isFinite(waitedMs) && waitedMs >= bestWaitedMs) {
-                    bestTenantId = tenantId;
+                    bestUserId = userId;
                     bestRun = candidate;
                     bestWaitedMs = waitedMs;
                 }
 
-                // FIFO：一旦遇到第一个可 claim 但尚未老化的 Run，本租户
+                // FIFO：一旦遇到第一个可 claim 但尚未老化的 Run，本用户
                 // 后面的 Run 不允许越过它。
                 break;
             }
         }
 
-        if (bestTenantId === null || bestRun === null) {
+        if (bestUserId === null || bestRun === null) {
             return null;
         }
 
-        return this.claimSpecific(bestTenantId, bestRun.runId);
+        return this.claimSpecific(bestUserId, bestRun.runId);
     }
 
-    /** 从指定租户队列里精确摘出一个 Run 并激活；用于老化路径。 */
-    private claimSpecific(tenantId: string, runId: string): QueuedRun | null {
-        const tenantQueue = this.queuesByTenant.get(tenantId);
+    /** 从指定用户队列里精确摘出一个 Run 并激活；用于老化路径。 */
+    private claimSpecific(userId: string, runId: string): QueuedRun | null {
+        const userQueue = this.queuesByUser.get(userId);
 
-        if (tenantQueue === undefined) {
+        if (userQueue === undefined) {
             return null;
         }
 
-        const index = tenantQueue.findIndex((run) => run.runId === runId);
+        const index = userQueue.findIndex((run) => run.runId === runId);
 
         if (index === -1) {
             return null;
         }
 
-        const [run] = tenantQueue.splice(index, 1);
+        const [run] = userQueue.splice(index, 1);
 
         if (run === undefined) {
             return null;
         }
 
-        if (tenantQueue.length > 0) {
-            // 老化插队后，把该租户放到环尾，避免它下一轮继续优先。
-            const ringIndex = this.tenantOrder.indexOf(tenantId);
+        if (userQueue.length > 0) {
+            // 老化插队后，把该用户放到环尾，避免它下一轮继续优先。
+            const ringIndex = this.userOrder.indexOf(userId);
 
             if (ringIndex !== -1) {
-                this.tenantOrder.splice(ringIndex, 1);
+                this.userOrder.splice(ringIndex, 1);
             }
 
-            this.tenantOrder.push(tenantId);
+            this.userOrder.push(userId);
         } else {
-            this.queuesByTenant.delete(tenantId);
+            this.queuesByUser.delete(userId);
 
-            const ringIndex = this.tenantOrder.indexOf(tenantId);
+            const ringIndex = this.userOrder.indexOf(userId);
 
             if (ringIndex !== -1) {
-                this.tenantOrder.splice(ringIndex, 1);
+                this.userOrder.splice(ringIndex, 1);
             }
         }
 
@@ -326,62 +326,62 @@ export class TenantRunScheduler {
     }
 
     /**
-     * 单个 Run 当前是否具备启动资格：tenant 并发未满，且同一会话没有前序
+     * 单个 Run 当前是否具备启动资格：user 并发未满，且同一会话没有前序
      * Run 在跑。claimNext 与 claimAged 共用，避免两套判断逻辑漂移。
      */
-    private canClaim(tenantId: string, run: QueuedRun): boolean {
+    private canClaim(userId: string, run: QueuedRun): boolean {
         if (run.sessionId !== undefined && this.hasActiveSession(run.sessionId)) {
             return false;
         }
 
-        const activeInTenant = this.getActiveTenantRunCount(tenantId);
+        const activeInUser = this.getActiveUserRunCount(userId);
 
         // 显式配置的上限是硬上限：到了就不许再借。
-        const ceiling = this.config.maxActiveRunsPerTenant > 0
-            ? this.config.maxActiveRunsPerTenant
+        const ceiling = this.config.maxActiveRunsPerUser > 0
+            ? this.config.maxActiveRunsPerUser
             : this.config.maxActiveRuns;
 
-        if (activeInTenant >= ceiling) {
+        if (activeInUser >= ceiling) {
             return false;
         }
 
         const cap = this.fairShareCap();
 
-        if (activeInTenant < cap) {
+        if (activeInUser < cap) {
             return true;
         }
 
-        // 已达公平份额：只有在没有别的租户还能用这个 slot 时才允许借用，
+        // 已达公平份额：只有在没有别的用户还能用这个 slot 时才允许借用，
         // 保证 work-conserving，不因为配额而空转全局槽位。
-        return this.hasCompetingTenantBelowShare(tenantId, cap) === false;
+        return this.hasCompetingUserBelowShare(userId, cap) === false;
     }
 
     /**
-     * 单租户当前可用并发上限：max(1, floor(C / N))，N = 当前有排队需求的
-     * 租户数。显式配置 maxActiveRunsPerTenant > 0 时作为硬上限叠加。
-     * 等权定位下这就是公平份额；N 随租户进入/退出队列自然重算。
+     * 单用户当前可用并发上限：max(1, floor(C / N))，N = 当前有排队需求的
+     * 用户数。显式配置 maxActiveRunsPerUser > 0 时作为硬上限叠加。
+     * 等权定位下这就是公平份额；N 随用户进入/退出队列自然重算。
      */
-    private effectiveTenantCap(): number {
-        const ceiling = this.config.maxActiveRunsPerTenant > 0
-            ? this.config.maxActiveRunsPerTenant
+    private effectiveUserCap(): number {
+        const ceiling = this.config.maxActiveRunsPerUser > 0
+            ? this.config.maxActiveRunsPerUser
             : this.config.maxActiveRuns;
         return Math.min(ceiling, this.fairShareCap());
     }
 
-    /** 等权公平份额：floor(C / 有需求租户数)，最小 1。 */
+    /** 等权公平份额：floor(C / 有需求用户数)，最小 1。 */
     private fairShareCap(): number {
-        const demand = Math.max(1, this.demandTenantCount());
+        const demand = Math.max(1, this.demandUserCount());
         return Math.max(
             1,
             Math.floor(this.config.maxActiveRuns / demand),
         );
     }
 
-    /** 当前还有排队 Run 的租户数（有需求的租户）。 */
-    private demandTenantCount(): number {
+    /** 当前还有排队 Run 的用户数（有需求的用户）。 */
+    private demandUserCount(): number {
         let count = 0;
 
-        for (const queue of this.queuesByTenant.values()) {
+        for (const queue of this.queuesByUser.values()) {
             if (queue.length > 0) {
                 count += 1;
             }
@@ -391,19 +391,19 @@ export class TenantRunScheduler {
     }
 
     /**
-     * 除 excludeTenantId 外，是否存在还有可跑 Run 且未达公平份额的租户。
+     * 除 excludeUserId 外，是否存在还有可跑 Run 且未达公平份额的用户。
      * 有竞争就守份额，没竞争就允许占满全局槽位。
      */
-    private hasCompetingTenantBelowShare(
-        excludeTenantId: string,
+    private hasCompetingUserBelowShare(
+        excludeUserId: string,
         cap: number,
     ): boolean {
-        for (const [tenantId, queue] of this.queuesByTenant) {
-            if (tenantId === excludeTenantId || queue.length === 0) {
+        for (const [userId, queue] of this.queuesByUser) {
+            if (userId === excludeUserId || queue.length === 0) {
                 continue;
             }
 
-            if (this.getActiveTenantRunCount(tenantId) >= cap) {
+            if (this.getActiveUserRunCount(userId) >= cap) {
                 continue;
             }
 
@@ -420,8 +420,8 @@ export class TenantRunScheduler {
         return false;
     }
 
-    private getActiveTenantRunCount(tenantId:string):number {
-        return this.activeCountByTenant.get(tenantId) ?? 0;
+    private getActiveUserRunCount(userId:string):number {
+        return this.activeCountByUser.get(userId) ?? 0;
     }
 
     private hasActiveSession(sessionId: string): boolean {
@@ -438,38 +438,38 @@ export class TenantRunScheduler {
             this.activeSessionIds.delete(sessionId);
         }
 
-        const tenantId = this.activeTenantByRunId.get(runId);
-        if (tenantId === undefined) {
+        const userId = this.activeUserByRunId.get(runId);
+        if (userId === undefined) {
             return false;
         }
 
-        this.activeTenantByRunId.delete(runId);
-        const remaining = (this.activeCountByTenant.get(tenantId) ?? 1) - 1;
+        this.activeUserByRunId.delete(runId);
+        const remaining = (this.activeCountByUser.get(userId) ?? 1) - 1;
         if (remaining > 0) {
-            this.activeCountByTenant.set(tenantId, remaining);
+            this.activeCountByUser.set(userId, remaining);
         } else {
-            this.activeCountByTenant.delete(tenantId);
+            this.activeCountByUser.delete(userId);
         }
         return true;
     }
 
     /** 该 Run 是否已被 claim、当前占用活跃 slot。 */
     isActive(runId:string):boolean {
-        return this.activeTenantByRunId.has(runId);
+        return this.activeUserByRunId.has(runId);
     }
 
     // 获取最大并发上限
-    getCapacity(tenantId:string):SchedulerCapacity {
+    getCapacity(userId:string):SchedulerCapacity {
         return {
-            activeRunCount : this.activeTenantByRunId.size,
-            activeTenantRunCount : this.getActiveTenantRunCount(tenantId),
+            activeRunCount : this.activeUserByRunId.size,
+            activeUserRunCount : this.getActiveUserRunCount(userId),
         }
     }
 
     removeQueued(runId:string):QueuedRun | null {
-        // 遍历 tenant 队列
-        for (const [tenantId,tenantQueue] of this.queuesByTenant.entries()) {
-            const runIndex = tenantQueue.findIndex(
+        // 遍历 user 队列
+        for (const [userId,userQueue] of this.queuesByUser.entries()) {
+            const runIndex = userQueue.findIndex(
                 (run) => run.runId === runId,
             );
             // 如果没有找到对应的runIndex
@@ -477,21 +477,21 @@ export class TenantRunScheduler {
                 continue;
             }
 
-            const [removedRun] = tenantQueue.splice(runIndex,1)
+            const [removedRun] = userQueue.splice(runIndex,1)
             if (removedRun === undefined) {
                 return null;
             }
 
             this.queuedRunByRunId.delete(runId);
-            // 清理空的tenant
-            if (tenantQueue.length === 0){
-                this.queuesByTenant.delete(tenantId);
+            // 清理空的user
+            if (userQueue.length === 0){
+                this.queuesByUser.delete(userId);
 
-                const tenantOrderIndex = this.tenantOrder.indexOf(tenantId);
+                const userOrderIndex = this.userOrder.indexOf(userId);
 
                 // 如果找到的话，那么就删除
-                if (tenantOrderIndex !== -1){
-                    this.tenantOrder.splice(tenantOrderIndex,1);
+                if (userOrderIndex !== -1){
+                    this.userOrder.splice(userOrderIndex,1);
                 }
             }
             return removedRun;
@@ -504,69 +504,69 @@ export class TenantRunScheduler {
     // 这个函数就是如何查看当前队列情况
     // 具体如下：
     /**
-     * Tenant A: A1, A2, A3
-     * Tenant B: B1, B2
-     * tenantOrder : [A,B]
+     * User A: A1, A2, A3
+     * User B: B1, B2
+     * userOrder : [A,B]
      * 
      * 公平的调度顺序应该是
      * A1->B1->A2
      * 
      * 我们下面的函数应该把这个顺序展示为
-     * { runId:"A1", position:1,tenantPosition:1 },
-     * { runId:"B1", position:2,tenantPosition:1 },
-     * { runId:"A2", position:3,tenantPosition:2 },
+     * { runId:"A1", position:1,userPosition:1 },
+     * { runId:"B1", position:2,userPosition:1 },
+     * { runId:"A2", position:3,userPosition:2 },
      */
-    // 我们要输出的就是两个位置,position和tenantPosition
+    // 我们要输出的就是两个位置,position和userPosition
     listQueue():QueueEntry[] {
         const queueCopies = new Map<string,QueuedRun[]>();
 
         for (
-            const [tenantId,tenantQueue]
-            of this.queuesByTenant.entries()
+            const [userId,userQueue]
+            of this.queuesByUser.entries()
         )   {
-            queueCopies.set(tenantId,[...tenantQueue]);
+            queueCopies.set(userId,[...userQueue]);
         }
 
-        const tenantOrderCopy = [...this.tenantOrder];
+        const userOrderCopy = [...this.userOrder];
         const entries:QueueEntry[] = [];
-        const tenantPositions = new Map<string,number>();
+        const userPositions = new Map<string,number>();
 
-        // 只要副本轮转队列还有tenant
-        while (tenantOrderCopy.length > 0){
-            const tenantId = tenantOrderCopy.shift();
+        // 只要副本轮转队列还有user
+        while (userOrderCopy.length > 0){
+            const userId = userOrderCopy.shift();
 
-            // 没有 tenant 了
-            if (tenantId === undefined) {
+            // 没有 user 了
+            if (userId === undefined) {
                 break;
             }
 
-            // 查找对应的tenant的队列
-            const tenantQueue = queueCopies.get(tenantId);
+            // 查找对应的user的队列
+            const userQueue = queueCopies.get(userId);
 
-            if (tenantQueue === undefined || tenantQueue.length === 0){
+            if (userQueue === undefined || userQueue.length === 0){
                 continue;
             }
 
             // 获取一个 run
-            const run = tenantQueue.shift();
+            const run = userQueue.shift();
             if (run === undefined) {
                 continue;
             }
 
-            const tenantPosition = (tenantPositions.get(tenantId) ?? 0) + 1;
-            tenantPositions.set(tenantId,tenantPosition);
+            const userPosition = (userPositions.get(userId) ?? 0) + 1;
+            userPositions.set(userId,userPosition);
 
             entries.push({
                 runId: run.runId,
-                tenantId: run.tenantId,
+                userId: run.userId,
                 reasonCode: run.reasonCode,
                 enqueuedAt: run.enqueuedAt,
                 position:entries.length + 1,
-                tenantPosition,
+                userPosition,
             })
 
-            if (tenantQueue.length > 0) {
-                tenantOrderCopy.push(tenantId);
+            if (userQueue.length > 0) {
+                userOrderCopy.push(userId);
             }
         }
 
@@ -581,21 +581,21 @@ export class TenantRunScheduler {
      */
     listQueueBlockers(): QueueBlocker[] {
         const globalAtLimit =
-            this.activeTenantByRunId.size >= this.config.maxActiveRuns;
+            this.activeUserByRunId.size >= this.config.maxActiveRuns;
 
         return this.listQueue().map((entry) => {
             const queued = this.findQueuedRun(entry.runId);
-            const activeTenantRunCount = this.getActiveTenantRunCount(
-                entry.tenantId,
+            const activeUserRunCount = this.getActiveUserRunCount(
+                entry.userId,
             );
             let reasonCode = entry.reasonCode;
 
             if (globalAtLimit) {
                 reasonCode = "GLOBAL_CONCURRENCY_LIMIT";
             } else if (
-                activeTenantRunCount >= this.effectiveTenantCap()
+                activeUserRunCount >= this.effectiveUserCap()
             ) {
-                reasonCode = "TENANT_CONCURRENCY_LIMIT";
+                reasonCode = "USER_CONCURRENCY_LIMIT";
             } else if (
                 queued?.sessionId !== undefined
                 && this.hasActiveSession(queued.sessionId)
@@ -606,8 +606,8 @@ export class TenantRunScheduler {
             return {
                 ...entry,
                 reasonCode,
-                activeRunCount: this.activeTenantByRunId.size,
-                activeTenantRunCount,
+                activeRunCount: this.activeUserByRunId.size,
+                activeUserRunCount,
             };
         });
     }

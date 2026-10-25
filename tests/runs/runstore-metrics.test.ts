@@ -6,10 +6,10 @@ import { openHarnessDatabase } from "../../src/storage/database.ts";
 
 const createdAt = "2026-07-25T10:00:00.000Z";
 
-function createQueuedRun(runId: string, tenantId = "tenant-1"): AgentRun {
+function createQueuedRun(runId: string, userId = "user-1"): AgentRun {
     return {
         id: runId,
-        tenantId,
+        userId,
         harnessSessionId: "session-1",
         status: "QUEUED",
         userInput: "完成测试任务",

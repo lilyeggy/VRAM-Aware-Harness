@@ -19,7 +19,7 @@ function makeRequest(runId: string, sandboxId?: string): RuntimeStartRequest {
     return {
         run: {
             runId,
-            tenantId: "tenant-pillar3",
+            userId: "user-pillar3",
             harnessSessionId: "session-pillar3",
             workspacePath: "/tmp/pillar3-workspace",
         },

@@ -224,7 +224,7 @@ export function summarizeSeedDirectory(dir: string): { entries: number; bytes: n
 /**
  * F-K 修复：把宿主工作区目录播种进本 Run 的工作区盘。
  *
- * 每个 Run 的工作区盘原本只是模板副本（空 ext4），于是 guest 看不到租户上次
+ * 每个 Run 的工作区盘原本只是模板副本（空 ext4），于是 guest 看不到用户上次
  * Run 写进工作区的文件——真机证据：同一 workspace 连续三个 Run，
  * 写 persist.txt 成功之后 `ls -1` 只回 lost+found、`cat persist.txt` 报
  * "No such file or directory"（见 docs/full-coverage-report.zh-CN.md F-K）。
@@ -364,7 +364,7 @@ export class FirecrackerSandboxDriver implements MicrovmDriver {
      *
      * 多台 VM 若同时首次启动且 kernel/rootfs 相同，它们的 templateHash 也相同，
      * 于是会**并发写同一个快照文件**，且各自 pause/resume 触发 vsock 断连重连。
-     * 真机 10 并发实测：两台不同租户（tenant-02 / tenant-04）稳定复现
+     * 真机 10 并发实测：两台不同用户（user-02 / user-04）稳定复现
      * "vsock agent 20s 未就绪"；关闭快照后 10/10 通过 —— 确认是快照路径的
      * 并发竞态，而非并发能力不足。
      *
@@ -429,13 +429,13 @@ export class FirecrackerSandboxDriver implements MicrovmDriver {
         // 非 jailer 模式禁止启用快照：Firecracker 快照会把 block device 的
         // path_on_host 原样固化进 vm.snap。非 jailer 下该路径是宿主上的
         // 每 Run 绝对路径，后续恢复的 VM 无法各自替换成自己的运行目录，
-        // 最终会共用黄金 VM 的工作区磁盘，造成跨租户串写且 terminate 导出为空。
+        // 最终会共用黄金 VM 的工作区磁盘，造成跨用户串写且 terminate 导出为空。
         // jailer 模式下每个 VM 有独立 chroot/mount namespace，固化路径是
         // /rootfs.ext4、/workspace.ext4，因此每台 VM 仍各自独立。
         if (this.snapshotsEnabled && this.useJailer === false) {
             throw new Error(
                 "非 jailer 模式不允许启用 microVM 快照加速：快照会固化宿主绝对磁盘路径，"
-                + "多台恢复 VM 将共享同一工作区磁盘（跨租户串写、产物无法导出）。"
+                + "多台恢复 VM 将共享同一工作区磁盘（跨用户串写、产物无法导出）。"
                 + "请设置 HARNESS_USE_JAILER=true，或关闭 HARNESS_VM_SNAPSHOTS_ENABLED。",
             );
         }

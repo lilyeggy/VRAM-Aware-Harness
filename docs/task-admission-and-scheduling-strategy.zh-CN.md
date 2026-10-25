@@ -1,6 +1,6 @@
 # VRAM-Aware Harness 任务放行与调度策略技术白皮书（历史；M4 后 VRAM/GPU 观测与预热池已删除）
 
-> **文档定位（历史设计）**：本文档记录早期 VRAM-Aware 版本的放行/观测/调度策略；M4 已删除 vLLM/GPU 观测与预热池，模型服务位于平台外，资源压力固定 NORMAL，准入只由全局/租户并发上限、会话串行与 Queue TTL 决定。
+> **文档定位（历史设计）**：本文档记录早期 VRAM-Aware 版本的放行/观测/调度策略；M4 已删除 vLLM/GPU 观测与预热池，模型服务位于平台外，资源压力固定 NORMAL，准入只由全局/用户并发上限、会话串行与 Queue TTL 决定。
 
 ---
 
@@ -13,9 +13,9 @@
                         │
                         ▼
  ┌─────────────────────────────────────────────────────────────┐
- │ 第一道门禁：调度队列治理 (TenantRunScheduler)                │
+ │ 第一道门禁：调度队列治理 (UserRunScheduler)                │
  │ 1. 会话串行化拦截：同 Session 运行中则排队                   │
- │ 2. 租户公平队列：租户内严格 FIFO，租户间 Round-Robin 全局轮转  │
+ │ 2. 用户公平队列：用户内严格 FIFO，用户间 Round-Robin 全局轮转  │
  │ 3. 老化插队补偿：等待超 agingMs 优先提权，杜绝饿死           │
  └──────────────────────────────┬──────────────────────────────┘
                                 │ (出队候选任务)
@@ -31,7 +31,7 @@
                                 ▼
  ┌─────────────────────────────────────────────────────────────┐
  │ 第三道门禁：确定性准入决策 (DeterministicExecutionPolicy)    │
- │ 综合判断：资源等级 + 全局并发上限 + 租户并发占用             │
+ │ 综合判断：资源等级 + 全局并发上限 + 用户并发占用             │
  │                                                             │
  │   [ START 放行 ]   ➔ 拉取预热沙箱，执行任务                  │
  │   [ QUEUE 排队 ]   ➔ 回退队列，记录决策台账，等待下一轮唤醒   │
@@ -42,20 +42,20 @@
 
 ## 二、 第一道门禁：调度器层队列与并发治理
 
-代码实现位置：[`src/scheduling/tenant-run-scheduler.ts`](file:///Users/mac/Desktop/resume_proj/VRAM-Aware-Harness/src/scheduling/tenant-run-scheduler.ts)
+代码实现位置：[`src/scheduling/user-run-scheduler.ts`](file:///Users/mac/Desktop/resume_proj/VRAM-Aware-Harness/src/scheduling/user-run-scheduler.ts)
 
 ### 1. 会话串行化（Session Serialization）
 * **规则**：属于同一个会话（Session）的多个任务必须严格串行执行。
 * **原因**：Agent 对话上下文具有因果依赖性，并发执行会导致对话历史和文件工作区产生读写冲突。若检测到同 Session 已有任务处于 `ACTIVE`，后续任务直接判定为 `SESSION_SERIALIZATION` 并挂起排队。
 
-### 2. 租户两级公平排队模型
-* **租户内部（Intra-Tenant）**：严格实行 **FIFO（先进先出）** 顺序；
-* **租户之间（Inter-Tenant）**：通过维护一个**全局租户环（Round-Robin Ring）**进行轮询调度。
-* **业务价值**：防止“大租户一口气提交 100 个任务把并发全占满，导致小租户的一个简单任务饿死数小时”。
+### 2. 用户两级公平排队模型
+* **用户内部（Intra-User）**：严格实行 **FIFO（先进先出）** 顺序；
+* **用户之间（Inter-User）**：通过维护一个**全局用户环（Round-Robin Ring）**进行轮询调度。
+* **业务价值**：防止“大用户一口气提交 100 个任务把并发全占满，导致小用户的一个简单任务饿死数小时”。
 
 ### 3. 老化插队补偿机制（Aging Policy，N10）
-* **痛点**：若某个活跃租户不断追加短任务，排在后面的冷门租户即使轮转也可能遭遇较大延迟。
-* **规则**：当某个租户队首任务等待时间超过 `schedulerAgingMs`（如 60 秒），该任务获得**最高调度优先级（插队）**，保障了系统的最长等待时延上界。
+* **痛点**：若某个活跃用户不断追加短任务，排在后面的冷门用户即使轮转也可能遭遇较大延迟。
+* **规则**：当某个用户队首任务等待时间超过 `schedulerAgingMs`（如 60 秒），该任务获得**最高调度优先级（插队）**，保障了系统的最长等待时延上界。
 
 ### 4. 排队超时安全熔断（Queue TTL）
 * 在 [`src/scheduling/run-scheduler.ts`](file:///Users/mac/Desktop/resume_proj/VRAM-Aware-Harness/src/scheduling/run-scheduler.ts) 中配置了 `queueTtlMs`。
@@ -105,15 +105,15 @@
 
 这是系统决定任务到底是 **`START`（放行）** 还是 **`QUEUE`（排队）** 的核心大脑：
 
-| 资源压力等级 | 全局在跑任务数 (activeRunCount) | 当前租户在跑任务数 (activeTenantRunCount) | 决策动作 (Action) | 原因码 (ReasonCode) | 架构意图与保护策略 |
+| 资源压力等级 | 全局在跑任务数 (activeRunCount) | 当前用户在跑任务数 (activeUserRunCount) | 决策动作 (Action) | 原因码 (ReasonCode) | 架构意图与保护策略 |
 | :--- | :--- | :--- | :---: | :--- | :--- |
 | **`CRITICAL`** | 任意 | 任意 | **`QUEUE`** | `RESOURCE_CRITICAL` | **强制过载保护**：推理后端濒临 OOM，严禁任何新任务进入！ |
 | **`UNKNOWN`** | 任意 | 任意 | **`QUEUE`** | `RESOURCE_UNKNOWN` | **安全断路（Fail-closed）**：未获得客观证据前不盲目放行。 |
 | **`BUSY`** | `>= maxActiveRuns` | 任意 | **`QUEUE`** | `GLOBAL_CONCURRENCY_LIMIT` | 触达全局静态硬配额上限。 |
-| **`BUSY`** | `< maxActiveRuns` | `> 0`（该租户已有任务在跑） | **`QUEUE`** | `RESOURCE_BUSY_TENANT_LIMIT` | **降级防霸占**：系统繁忙时，每个租户最多只允许 1 个任务并发！ |
-| **`BUSY`** | `< maxActiveRuns` | `= 0`（该租户当前无任务） | **`START`** | `RESOURCE_BUSY_TENANT_AVAILABLE` | 繁忙时依然保障每个租户享有保底 1 个执行槽位。 |
+| **`BUSY`** | `< maxActiveRuns` | `> 0`（该用户已有任务在跑） | **`QUEUE`** | `RESOURCE_BUSY_USER_LIMIT` | **降级防霸占**：系统繁忙时，每个用户最多只允许 1 个任务并发！ |
+| **`BUSY`** | `< maxActiveRuns` | `= 0`（该用户当前无任务） | **`START`** | `RESOURCE_BUSY_USER_AVAILABLE` | 繁忙时依然保障每个用户享有保底 1 个执行槽位。 |
 | **`NORMAL`** | `>= maxActiveRuns` | 任意 | **`QUEUE`** | `GLOBAL_CONCURRENCY_LIMIT` | 资源健康，但达到系统配置的全局并发上限。 |
-| **`NORMAL`** | `< maxActiveRuns` | 满足租户配额 | **`START`** | `RESOURCE_NORMAL` | **完全健康**：绿灯放行，立即创建/恢复沙箱启动任务。 |
+| **`NORMAL`** | `< maxActiveRuns` | 满足用户配额 | **`START`** | `RESOURCE_NORMAL` | **完全健康**：绿灯放行，立即创建/恢复沙箱启动任务。 |
 
 ---
 
@@ -136,11 +136,11 @@
 
 > “我们的任务放行策略是一个**三层漏斗模型（Three-Stage Admission Gate）**：
 >
-> 1. **第一层是多租户队列编排**：同一 Session 严格串行化，租户内部严格 FIFO，租户之间通过全局环实行 Round-Robin 公平轮转，并带有超时熔断（Queue TTL）和老化插队补偿机制；
+> 1. **第一层是多用户队列编排**：同一 Session 严格串行化，用户内部严格 FIFO，用户之间通过全局环实行 Round-Robin 公平轮转，并带有超时熔断（Queue TTL）和老化插队补偿机制；
 > 2. **第二层是 vLLM 显存增量观测**：我们通过 Prometheus 采集 vLLM 的 **KV-Cache 占用率** 和排队请求数。针对 vLLM 默认预分配 90% 显存的特性，我们设计了**稳态基线扣除算法**，专门度量基线之上的真实动态压力，将健康度精准分类为 `NORMAL`、`BUSY`、`CRITICAL`；
 > 3. **第三层是确定性准入决策矩阵**：
 >    * `CRITICAL` 或探测失败直接强制排队，**物理防范显存 OOM 导致推理引擎雪崩**；
->    * `BUSY` 状态下实施**降级收缩**：单租户并发上限自动压低至 1 个，优先保障无任务租户的最低可用性；
+>    * `BUSY` 状态下实施**降级收缩**：单用户并发上限自动压低至 1 个，优先保障无任务用户的最低可用性；
 >    * 仅在 `NORMAL` 且未突破全局配额时，才放行（`START`）拉起沙箱执行。
 > 
 > 每次决策都会落地一条包含瞬时资源快照的**可解释决策台账**，实现了资源调度与推理底座的安全闭环。”

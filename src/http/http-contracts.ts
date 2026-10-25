@@ -12,7 +12,7 @@ import type {
     StartRunInput,
 } from "../runs/run-service.ts";
 import type {
-} from "../scheduling/tenant-run-scheduler.ts";
+} from "../scheduling/user-run-scheduler.ts";
 import type { RequestPrincipal } from "../auth/request-principal.ts";
 import type { WorkspaceService } from "../workspaces/workspace-service.ts";
 import type { RunLimitation } from "../policies/run-limitations.ts";
@@ -20,7 +20,7 @@ import type { RunOutputChunk } from "../runs/run-output-store.ts";
 import type { WorkspaceDiff } from "../workspaces/workspace-snapshot.ts";
 import type { RunArtifact } from "../workspaces/run-artifact-store.ts";
 import type { AccessAuditStore } from "../audit/access-audit-store.ts";
-import type { TenantBillingStore } from "../billing/tenant-billing.ts";
+import type { UserBillingStore } from "../billing/user-billing.ts";
 import type { Conversation } from "../sessions/harness-session.ts";
 import type { ToolExecution } from "../tools/tool-execution.ts";
 import type { HarnessMetricsSnapshot } from "../observability/metrics.ts";
@@ -30,12 +30,12 @@ export interface HarnessHttpApplication {
     isStarted():boolean;
     submitRun(input:StartRunInput):AgentRun;
     getRun(runId:string):AgentRun | null;
-    getRunsForTenant(tenantId:string):AgentRun[];
-    createConversation?(input: { tenantId: string; workspaceId: string; title?: string }): Conversation;
-    getConversation?(id: string, tenantId: string): Conversation | null;
-    getConversationsForWorkspace?(tenantId: string, workspaceId: string): Conversation[];
-    getRunsForConversation?(tenantId: string, conversationId: string): AgentRun[];
-    touchConversation?(id: string, tenantId: string): void;
+    getRunsForUser(userId:string):AgentRun[];
+    createConversation?(input: { userId: string; workspaceId: string; title?: string }): Conversation;
+    getConversation?(id: string, userId: string): Conversation | null;
+    getConversationsForWorkspace?(userId: string, workspaceId: string): Conversation[];
+    getRunsForConversation?(userId: string, conversationId: string): AgentRun[];
+    touchConversation?(id: string, userId: string): void;
     /** B6：会话归属查询；未提供时跳过会话抢注校验（兼容最小装配）。 */
     resolveSessionOwner?(harnessSessionId: string): string | null;
     getRunEvents(runId:string):RunEvent[];
@@ -51,7 +51,7 @@ export interface HarnessHttpApplication {
     getMetricsSnapshot?():HarnessMetricsSnapshot;
     interruptRun(runId:string):Promise<AgentRun>;
     resumeRun(input:ResumeRunInput):AgentRun;
-    /** N15：策略管理面（读写租户/平台策略层）。未装配时相关路由返回 503。 */
+    /** N15：策略管理面（读写用户/平台策略层）。未装配时相关路由返回 503。 */
     /** N16：UNKNOWN_EFFECT 的人工消解出口。 */
     getRunUnknownEffects?(runId:string):ToolExecution[];
     resolveUnknownEffect?(
@@ -66,14 +66,14 @@ export interface CheckpointLookup {
 
 export interface HttpAccessControl {
     authenticate(rawKey: string): RequestPrincipal | null;
-    registerUser?(email: string, password: string, inviteCode?: string): Promise<{ userId: string; tenantId: string }>;
-    loginUser?(email: string, password: string): Promise<{ token: string; userId: string; tenantId: string; expiresAt: string } | null>;
+    registerUser?(email: string, password: string, inviteCode?: string): Promise<{ userId: string }>;
+    loginUser?(email: string, password: string): Promise<{ token: string; userId: string; expiresAt: string } | null>;
     revokeSession?(token: string): boolean;
     revokeAllSessions?(userId: string): number;
     /** D4：会话归属查询，供登出审计归因。 */
     sessionOwner?(token: string): string | null;
     workspaceService: WorkspaceService;
     auditStore?: AccessAuditStore;
-    /** §9.7 v1.3 第 5 项：租户成本账单；未装配时 GET /billing 返回 501。 */
-    billingStore?: TenantBillingStore;
+    /** §9.7 v1.3 第 5 项：用户成本账单；未装配时 GET /billing 返回 501。 */
+    billingStore?: UserBillingStore;
 }

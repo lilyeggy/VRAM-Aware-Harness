@@ -14,7 +14,7 @@
       --muted: #9fb1c7;
       --line: #2d4867;
       --active: #83c5ff;
-      --tenant: #59d4c6;
+      --user: #59d4c6;
       --service: #7ab6ff;
       --data: #c9a4ff;
       --runtime: #ffd166;
@@ -274,7 +274,7 @@
       align-items: stretch;
     }
 
-    .tenant-layer { --layer-color: var(--tenant); }
+    .user-layer { --layer-color: var(--user); }
     .service-layer { --layer-color: var(--service); }
     .data-layer { --layer-color: var(--data); }
     .runtime-layer { --layer-color: var(--runtime); }
@@ -324,7 +324,7 @@
       font-size: 11px;
     }
 
-    .node[data-group="tenant"] { --node-color: var(--tenant); }
+    .node[data-group="user"] { --node-color: var(--user); }
     .node[data-group="service"] { --node-color: var(--service); }
     .node[data-group="data"] { --node-color: var(--data); }
     .node[data-group="runtime"] { --node-color: var(--runtime); }
@@ -571,7 +571,7 @@
           <div class="plus">+</div>
           <div class="formula-box"><strong>Fact</strong><span>已经发生了什么，例如“tool started”。</span></div>
           <div class="plus">+</div>
-          <div class="formula-box"><strong>Policy</strong><span>在资源、租户、风险约束下，下一步能不能做。</span></div>
+          <div class="formula-box"><strong>Policy</strong><span>在资源、用户、风险约束下，下一步能不能做。</span></div>
         </div>
       </aside>
     </section>
@@ -582,7 +582,7 @@
       <button class="pill" type="button" aria-pressed="false" data-scenario="tool">工具调用</button>
       <button class="pill" type="button" aria-pressed="false" data-scenario="pressure">GPU 压力排队</button>
       <button class="pill" type="button" aria-pressed="false" data-scenario="crash">崩溃恢复</button>
-      <button class="pill" type="button" aria-pressed="false" data-scenario="fairness">多租户公平</button>
+      <button class="pill" type="button" aria-pressed="false" data-scenario="fairness">多用户公平</button>
       <button class="pill" type="button" aria-pressed="false" data-scenario="all">完整系统</button>
     </nav>
 
@@ -594,7 +594,7 @@
             <p>点击任意模块，看它的本质、为什么需要、落到哪些代码。</p>
           </div>
           <div class="legend" aria-label="图例">
-            <span><i class="dot" style="--c:var(--tenant)"></i>入口/租户</span>
+            <span><i class="dot" style="--c:var(--user)"></i>入口/用户</span>
             <span><i class="dot" style="--c:var(--service)"></i>服务策略</span>
             <span><i class="dot" style="--c:var(--data)"></i>事实数据</span>
             <span><i class="dot" style="--c:var(--runtime)"></i>Agent 层</span>
@@ -603,13 +603,13 @@
         </div>
 
         <div class="layers">
-          <section class="layer tenant-layer">
-            <div class="layer-label"><small>LAYER 01</small><strong>入口与租户</strong><span>谁提交、属于哪个长期上下文</span></div>
+          <section class="layer user-layer">
+            <div class="layer-label"><small>LAYER 01</small><strong>入口与用户</strong><span>谁提交、属于哪个长期上下文</span></div>
             <div class="lane">
-              <button class="node" data-node="tenant" data-group="tenant"><h3>Tenant</h3><p>配额、公平性、资源归属的主体</p><code>tenantId</code></button>
-              <button class="node" data-node="harnessSession" data-group="tenant"><h3>HarnessSession</h3><p>Harness 眼里的长期业务会话</p><code>harnessSessionId</code></button>
-              <button class="node" data-node="userInput" data-group="tenant"><h3>User Input</h3><p>一次用户输入或追问</p><code>input</code></button>
-              <button class="node" data-node="api" data-group="tenant"><h3>API / CLI</h3><p>系统入口，把请求变成命令</p><code>startRun()</code></button>
+              <button class="node" data-node="user" data-group="user"><h3>User</h3><p>配额、公平性、资源归属的主体</p><code>userId</code></button>
+              <button class="node" data-node="harnessSession" data-group="user"><h3>HarnessSession</h3><p>Harness 眼里的长期业务会话</p><code>harnessSessionId</code></button>
+              <button class="node" data-node="userInput" data-group="user"><h3>User Input</h3><p>一次用户输入或追问</p><code>input</code></button>
+              <button class="node" data-node="api" data-group="user"><h3>API / CLI</h3><p>系统入口，把请求变成命令</p><code>startRun()</code></button>
             </div>
           </section>
 
@@ -667,7 +667,7 @@
           <div class="detail-grid">
             <div class="detail-item"><strong>本质</strong><p id="detailEssence">业务执行记录，也就是可持久化的任务实例。</p></div>
             <div class="detail-item"><strong>为什么需要</strong><p id="detailWhy">PiAdapter 只能让 Pi 跑起来；AgentRun 让 Harness 知道任务是否排队、运行、失败、完成或等待恢复。</p></div>
-            <div class="detail-item"><strong>没有它会怎样</strong><p id="detailMissing">进程重启后只剩下 Pi 的会话历史，但 Harness 不知道业务任务是否完成、属于哪个 Tenant、是否应该恢复。</p></div>
+            <div class="detail-item"><strong>没有它会怎样</strong><p id="detailMissing">进程重启后只剩下 Pi 的会话历史，但 Harness 不知道业务任务是否完成、属于哪个 User、是否应该恢复。</p></div>
             <div class="detail-item"><strong>代码落点</strong><p id="detailCode">`src/runs/agent-run.ts`，后续会有 `RunStore` 和 `RunService`。</p></div>
             <div class="detail-item"><strong>面试一句话</strong><p id="detailInterview">AgentRun 是 Harness 对一次任务执行的事实建模，Runtime 只是它的执行后端。</p></div>
           </div>
@@ -703,19 +703,19 @@
 
   <script>
     const nodeDetails = {
-      tenant: {
-        type: "入口与租户层",
-        title: "Tenant",
+      user: {
+        type: "入口与用户层",
+        title: "User",
         summary: "资源配额、公平性和审计归属的主体。系统不是只服务一个匿名用户，而是要知道每个任务属于谁。",
         essence: "隔离和公平性的最小单位。",
-        why: "当 GPU 紧张时，不能让一个 Tenant 连续占满所有运行槽；后续策略要按 Tenant 做配额、优先级和统计。",
+        why: "当 GPU 紧张时，不能让一个 User 连续占满所有运行槽；后续策略要按 User 做配额、优先级和统计。",
         missing: "任务都混在一起，只能全局 FIFO，无法解释为什么某个用户一直被饿死或占用资源过多。",
-        code: "`RuntimeRunRef.tenantId`，后续会进入 `RunQueue`、`ExecutionPolicy` 和 API 层。",
-        interview: "Tenant 不是 Agent 概念，而是 Harness 做资源治理和公平调度的业务主体。",
+        code: "`RuntimeRunRef.userId`，后续会进入 `RunQueue`、`ExecutionPolicy` 和 API 层。",
+        interview: "User 不是 Agent 概念，而是 Harness 做资源治理和公平调度的业务主体。",
         tags: ["fairness", "quota", "audit"]
       },
       harnessSession: {
-        type: "入口与租户层",
+        type: "入口与用户层",
         title: "HarnessSession",
         summary: "Harness 眼里的长期业务会话，用来串联同一上下文下的多次 AgentRun。",
         essence: "业务会话身份，不等于 Pi 内部的 AgentSession。",
@@ -726,7 +726,7 @@
         tags: ["business session", "many runs", "mapping"]
       },
       userInput: {
-        type: "入口与租户层",
+        type: "入口与用户层",
         title: "User Input",
         summary: "一次用户输入就是一次要被执行的命令来源。第一次提问和后续追问都可以产生新的 AgentRun。",
         essence: "外部意图进入系统的原始材料。",
@@ -737,7 +737,7 @@
         tags: ["command", "prompt"]
       },
       api: {
-        type: "入口与租户层",
+        type: "入口与用户层",
         title: "API / CLI",
         summary: "外部系统调用 Harness 的入口，负责校验参数并向 RunService 发命令。",
         essence: "把外部请求转成内部 Command 的边界。",
@@ -761,7 +761,7 @@
       policy: {
         type: "服务与策略层",
         title: "ExecutionPolicy",
-        summary: "根据资源快照、并发配置、Tenant 情况决定一个 run 能不能开始。",
+        summary: "根据资源快照、并发配置、User 情况决定一个 run 能不能开始。",
         essence: "准入控制规则。",
         why: "Harness 的核心价值之一就是不要在 GPU 已经紧张时盲目提交新 Agent 执行。",
         missing: "所有任务都会直接打到 Pi/vLLM，资源抖动时更容易雪崩。",
@@ -775,7 +775,7 @@
         summary: "当 run 不能立刻开始时，它必须进入可解释的等待结构。",
         essence: "等待执行的任务集合，带公平性规则。",
         why: "资源不足不是失败；系统应该能记录排队原因，并在资源恢复时选择下一个 run。",
-        missing: "任务要么丢失，要么一直重试，要么被某个 Tenant 长期占用机会。",
+        missing: "任务要么丢失，要么一直重试，要么被某个 User 长期占用机会。",
         code: "后续 `src/policy/run-queue.ts` 或 `src/scheduler`。",
         interview: "Queue 把暂时不能运行的任务保存为可恢复、可审计的等待状态。",
         tags: ["backpressure", "fairness"]
@@ -830,7 +830,7 @@
         summary: "无论 Scheduling Agent 怎么建议，都必须通过确定性校验。",
         essence: "安全底线。",
         why: "Agent 的建议可能过时、幻觉或违反资源上限；工程系统不能把安全交给自由文本判断。",
-        missing: "一旦 Agent 判断错误，可能把 GPU 打爆或破坏 Tenant 公平性。",
+        missing: "一旦 Agent 判断错误，可能把 GPU 打爆或破坏 User 公平性。",
         code: "ADR 0003；后续 `PolicyValidator`。",
         interview: "Agentic 调度负责提出建议，Guardrails 负责保证建议可执行且安全。",
         tags: ["safety", "validator"]
@@ -841,7 +841,7 @@
         summary: "一次用户任务在 Harness 里的执行实体。它不是 Agent，也不负责调用模型；它负责记录“这次任务现在处于什么状态”。",
         essence: "业务执行记录，也就是可持久化的任务实例。",
         why: "PiAdapter 只能让 Pi 跑起来；AgentRun 让 Harness 知道任务是否排队、运行、失败、完成或等待恢复。",
-        missing: "进程重启后只剩下 Pi 的会话历史，但 Harness 不知道业务任务是否完成、属于哪个 Tenant、是否应该恢复。",
+        missing: "进程重启后只剩下 Pi 的会话历史，但 Harness 不知道业务任务是否完成、属于哪个 User、是否应该恢复。",
         code: "`src/runs/agent-run.ts`，后续会有 `RunStore` 和 `RunService`。",
         interview: "AgentRun 是 Harness 对一次任务执行的事实建模，Runtime 只是它的执行后端。",
         tags: ["state", "business entity"]
@@ -950,7 +950,7 @@
         title: "Workspace",
         summary: "Agent 工具实际读写的文件边界。每个 run 都要知道自己在哪个 workspace 内工作。",
         essence: "副作用发生的范围。",
-        why: "工具治理必须知道读写发生在哪里，Tenant 隔离和审计也依赖这个边界。",
+        why: "工具治理必须知道读写发生在哪里，User 隔离和审计也依赖这个边界。",
         missing: "工具可能读错目录或写到不该写的位置，恢复时也无法解释文件变化来源。",
         code: "`RuntimeRunRef.workspacePath`。",
         interview: "workspacePath 是工具副作用治理的基础，不是随便传给 Pi 的字符串。",
@@ -972,10 +972,10 @@
     const scenarios = {
       submit: {
         title: "首次提交任务",
-        nodes: ["tenant", "harnessSession", "userInput", "api", "runService", "policy", "resourceObserver", "agentRun", "runEvent", "runStore", "agentRuntime", "piAdapter", "piSession", "vllm", "gpu"],
+        nodes: ["user", "harnessSession", "userInput", "api", "runService", "policy", "resourceObserver", "agentRun", "runEvent", "runStore", "agentRuntime", "piAdapter", "piSession", "vllm", "gpu"],
         statuses: ["QUEUED", "RUNNING", "COMPLETED"],
         steps: [
-          ["请求进入", "API/CLI 收到 tenantId、harnessSessionId、input、workspacePath。"],
+          ["请求进入", "API/CLI 收到 userId、harnessSessionId、input、workspacePath。"],
           ["创建事实", "RunService 创建 AgentRun，并追加 RUN_CREATED / RUN_QUEUED 事件。"],
           ["准入判断", "ExecutionPolicy 读取 ResourceObserver 的资源快照，决定是否可以启动。"],
           ["调用 Runtime", "RunService 调用 AgentRuntime.start；PiAdapter 创建或打开 Pi AgentSession。"],
@@ -997,13 +997,13 @@
       },
       pressure: {
         title: "GPU 压力排队",
-        nodes: ["tenant", "userInput", "api", "runService", "policy", "queue", "resourceObserver", "agentRun", "runEvent", "runStore", "vllm", "gpu", "guards"],
+        nodes: ["user", "userInput", "api", "runService", "policy", "queue", "resourceObserver", "agentRun", "runEvent", "runStore", "vllm", "gpu", "guards"],
         statuses: ["QUEUED", "QUEUED", "RUNNING"],
         steps: [
           ["新任务到达", "RunService 先创建 AgentRun，而不是直接调用 Pi。"],
           ["资源快照", "ResourceObserver 报告 VRAM 或并发压力较高。"],
           ["策略拒绝立即启动", "ExecutionPolicy 返回 QUEUE，Guardrails 保证不越过硬上限。"],
-          ["进入队列", "RunQueue 按 Tenant 公平性保存等待顺序。"],
+          ["进入队列", "RunQueue 按 User 公平性保存等待顺序。"],
           ["资源恢复", "下一次调度 tick 选择可运行的 run，再调用 Runtime.start。"]
         ]
       },
@@ -1020,13 +1020,13 @@
         ]
       },
       fairness: {
-        title: "多租户公平",
-        nodes: ["tenant", "harnessSession", "api", "runService", "policy", "queue", "resourceObserver", "agentRun", "runEvent", "runStore", "schedulerAgent", "guards", "gpu"],
+        title: "多用户公平",
+        nodes: ["user", "harnessSession", "api", "runService", "policy", "queue", "resourceObserver", "agentRun", "runEvent", "runStore", "schedulerAgent", "guards", "gpu"],
         statuses: ["QUEUED", "RUNNING", "QUEUED", "RUNNING"],
         steps: [
-          ["多个 Tenant 同时提交", "每个请求都会生成独立 AgentRun，并带上 tenantId。"],
-          ["进入统一队列", "RunQueue 不只是全局 FIFO，而要考虑每个 Tenant 的等待时间和配额。"],
-          ["资源和公平性一起判断", "Policy 同时看 GPU 压力、当前并发、Tenant 历史占用。"],
+          ["多个 User 同时提交", "每个请求都会生成独立 AgentRun，并带上 userId。"],
+          ["进入统一队列", "RunQueue 不只是全局 FIFO，而要考虑每个 User 的等待时间和配额。"],
+          ["资源和公平性一起判断", "Policy 同时看 GPU 压力、当前并发、User 历史占用。"],
           ["可解释选择", "系统能说清楚为什么这次启动 A，而不是继续启动 B。"],
           ["未来智能策略", "Scheduling Agent 可以提出建议，但必须通过 Guardrails。"]
         ]
@@ -1036,7 +1036,7 @@
         nodes: Object.keys(nodeDetails),
         statuses: ["QUEUED", "RUNNING", "WAITING_TOOL", "INTERRUPTED", "COMPLETED", "FAILED"],
         steps: [
-          ["入口层接收命令", "Tenant、HarnessSession、User Input 定义业务归属和输入来源。"],
+          ["入口层接收命令", "User、HarnessSession、User Input 定义业务归属和输入来源。"],
           ["服务层编排", "RunService 结合 Policy、Queue、Observer、Checkpoint 和 ToolGateway 推进生命周期。"],
           ["事实层持久化", "AgentRun 保存当前状态，RunEvent 保存历史事实，RunStore 保证一致性。"],
           ["Runtime 层转接", "AgentRuntime 抽象上层依赖，PiAdapter 连接真实 Pi，FakeRuntime 服务测试。"],
@@ -1046,7 +1046,7 @@
     };
 
     const groupNames = {
-      tenant: "入口与租户",
+      user: "入口与用户",
       service: "服务与策略",
       data: "事实与状态",
       runtime: "Agent Runtime",

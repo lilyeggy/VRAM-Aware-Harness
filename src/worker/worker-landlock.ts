@@ -3,7 +3,7 @@
  *
  * 目标：Worker 进程（Pi/LLM loop）只读宿主，只允许写自己的 HOME、TMPDIR 与
  * 必要的设备/运行时路径；即使 Worker 被模型输出或插件利用，也无法改写仓库、
- * 控制面数据或其他租户目录。
+ * 控制面数据或其他用户目录。
  *
  * 约束通过 Linux Landlock LSM 的三个 syscall 完成：
  *   landlock_create_ruleset(444) / landlock_add_rule(445) / landlock_restrict_self(446)

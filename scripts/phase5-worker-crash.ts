@@ -23,7 +23,7 @@ const inviteCode = process.env.HARNESS_SMOKE_INVITE_CODE;
 const brokerSocket = process.env.HARNESS_PHASE5_BROKER_SOCKET ?? "/run/harness/sandbox-broker.sock";
 const skipBroker = process.env.HARNESS_PHASE5_SKIP_BROKER === "1";
 
-type Principal = { tenantId: string; token: string; email: string };
+type Principal = { userId: string; token: string; email: string };
 
 const TERMINAL = new Set<string>(["COMPLETED", "FAILED", "INTERRUPTED"]);
 
@@ -91,7 +91,7 @@ function authHeaders(token: string): Record<string, string> {
     return { authorization: "Bearer " + token, "content-type": "application/json" };
 }
 
-async function registerTenant(prefix: string): Promise<Principal> {
+async function registerUser(prefix: string): Promise<Principal> {
     const email = prefix + "-" + label + "-" + Date.now() + "@crash.local";
     const password = "crash-password-1234";
     const registration = await requestJson("/auth/register", {
@@ -114,8 +114,8 @@ async function registerTenant(prefix: string): Promise<Principal> {
     if (login.response.status !== 200) {
         throw new Error("登录失败 HTTP " + login.response.status);
     }
-    const payload = login.payload as { token: string; tenantId: string };
-    return { tenantId: payload.tenantId, token: payload.token, email };
+    const payload = login.payload as { token: string; userId: string };
+    return { userId: payload.userId, token: payload.token, email };
 }
 
 async function createWorkspace(principal: Principal, name: string): Promise<string> {
@@ -184,7 +184,7 @@ function payloadText(payload: unknown): string {
     return JSON.stringify(payload ?? null);
 }
 
-async function assertCrossTenantHidden(other: Principal, runId: string): Promise<void> {
+async function assertCrossUserHidden(other: Principal, runId: string): Promise<void> {
     for (const path of [
         "/runs/" + runId,
         "/runs/" + runId + "/events",
@@ -192,7 +192,7 @@ async function assertCrossTenantHidden(other: Principal, runId: string): Promise
     ]) {
         const result = await requestJson(path, { headers: authHeaders(other.token) });
         if (result.response.status !== 404) {
-            throw new Error("F7 跨租户 GET " + path + " 期望 404，实际 " + result.response.status);
+            throw new Error("F7 跨用户 GET " + path + " 期望 404，实际 " + result.response.status);
         }
     }
 }
@@ -267,7 +267,7 @@ async function faultInjectionF1(owner: Principal, other: Principal, workspaceId:
         throw new Error("F1 期望 INTERRUPTED（租约回收）或 FAILED（WORKER_CRASHED），实际 " + terminalStatus);
     }
 
-    await assertCrossTenantHidden(other, runId);
+    await assertCrossUserHidden(other, runId);
 
     // 回收后不应残留 microVM 进程。
     let firecracker = countProcesses("firecracker");
@@ -329,8 +329,8 @@ async function faultInjectionF2(owner: Principal, workspaceId: string): Promise<
 }
 
 async function main(): Promise<void> {
-    const owner = await registerTenant("phase5-crash-owner");
-    const other = await registerTenant("phase5-crash-other");
+    const owner = await registerUser("phase5-crash-owner");
+    const other = await registerUser("phase5-crash-other");
     const ownerWorkspace = await createWorkspace(owner, "phase5-crash-owner");
     await createWorkspace(other, "phase5-crash-other");
 

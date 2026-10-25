@@ -15,11 +15,11 @@ test("checkpoint 归属在数据库层被 FK 兜底：孤儿 run 与跨 run 的�
     try {
         db.query(`
             INSERT INTO agent_runs (
-                id, tenant_id, harness_session_id, status, user_input,
+                id, user_id, harness_session_id, status, user_input,
                 workspace_path, created_at, updated_at,
                 started_at, finished_at, checkpoint_id, failure_reason
             ) VALUES (
-                'run-1', 'tenant-a', 'session-a', 'RUNNING', '合法 Run',
+                'run-1', 'user-a', 'session-a', 'RUNNING', '合法 Run',
                 '/tmp/ws', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z',
                 NULL, NULL, NULL, NULL
             );
@@ -52,11 +52,11 @@ test("checkpoint 归属在数据库层被 FK 兜底：孤儿 run 与跨 run 的�
         // 2) tool_execution 属于另一个 run → 复合 FK 拒绝。
         db.query(`
             INSERT INTO agent_runs (
-                id, tenant_id, harness_session_id, status, user_input,
+                id, user_id, harness_session_id, status, user_input,
                 workspace_path, created_at, updated_at,
                 started_at, finished_at, checkpoint_id, failure_reason
             ) VALUES (
-                'run-other', 'tenant-a', 'session-a', 'RUNNING', '另一个 Run',
+                'run-other', 'user-a', 'session-a', 'RUNNING', '另一个 Run',
                 '/tmp/ws', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z',
                 NULL, NULL, NULL, NULL
             );

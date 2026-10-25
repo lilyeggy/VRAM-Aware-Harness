@@ -34,7 +34,7 @@ export HARNESS_REGISTRATION_MODE=invite
 export HARNESS_REGISTRATION_INVITE_CODE=concurrency-test-2026
 export HARNESS_RATE_LIMIT_ENABLED=false
 export HARNESS_MAX_ACTIVE_RUNS=30
-export HARNESS_MAX_ACTIVE_RUNS_PER_TENANT=10
+export HARNESS_MAX_ACTIVE_RUNS_PER_USER=10
 cd /home/cxr/agent-harness-mt
 setsid bash -c "echo \$\$ > \"$ROOT/master.pid\"; exec /usr/local/bin/bun run src/main.ts" > "$ROOT/master.log" 2>&1 &
 sleep 1

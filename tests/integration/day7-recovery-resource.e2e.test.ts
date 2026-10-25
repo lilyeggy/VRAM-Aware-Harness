@@ -16,8 +16,8 @@ import {
     RunScheduler,
 } from "../../src/scheduling/run-scheduler.ts";
 import {
-    TenantRunScheduler,
-} from "../../src/scheduling/tenant-run-scheduler.ts";
+    UserRunScheduler,
+} from "../../src/scheduling/user-run-scheduler.ts";
 import { openHarnessDatabase } from "../../src/storage/database.ts";
 import type {
     ToolExecution,
@@ -46,7 +46,7 @@ test("Day7：重启后恢复安全 Run，并在资源恢复时自动推进全部
                 new FakeAgentRuntime(),
             );
             const activeRun = firstRunService.createQueuedRun({
-                tenantId:"tenant-a",
+                userId:"user-a",
                 harnessSessionId:"session-a",
                 userInput:"分析当前项目测试结构",
                 workspacePath:"/tmp/workspace-a",
@@ -100,7 +100,7 @@ test("Day7：重启后恢复安全 Run，并在资源恢复时自动推进全部
             }, checkpoint);
 
             const queuedRun = firstRunService.createQueuedRun({
-                tenantId:"tenant-b",
+                userId:"user-b",
                 harnessSessionId:"session-b",
                 userInput:"总结 Harness 的架构边界",
                 workspacePath:"/tmp/workspace-b",
@@ -118,9 +118,9 @@ test("Day7：重启后恢复安全 Run，并在资源恢复时自动推进全部
 
         const runtime = new FakeAgentRuntime();
         const runService = new RunService(runStore, runtime);
-        const scheduler = new TenantRunScheduler({
+        const scheduler = new UserRunScheduler({
             maxActiveRuns:2,
-            maxActiveRunsPerTenant:1,
+            maxActiveRunsPerUser:1,
         });
         const coordinator = new RunScheduler(
             runService,
@@ -180,9 +180,9 @@ test("Day7：重启后恢复安全 Run，并在资源恢复时自动推进全部
             expect(activeEvents).toContain("RUN_RESUMED");
             expect(activeEvents).toContain("RUN_COMPLETED");
             expect(application.getQueue()).toEqual([]);
-            expect(application.getTenantCapacity("tenant-a")).toEqual({
+            expect(application.getUserCapacity("user-a")).toEqual({
                 activeRunCount:0,
-                activeTenantRunCount:0,
+                activeUserRunCount:0,
             });
         } finally {
             await application.stop();

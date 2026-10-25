@@ -136,7 +136,7 @@ async function setupRuntime(
     config: WorkerRuntimeConfig,
     sandboxId?: string,
     thinkingLevel?: "off" | "minimal" | "low" | "medium" | "high",
-    tenantId?: string,
+    userId?: string,
     capabilityToken?: string,
 ) {
     let containerProvider: ContainerSandboxProvider | undefined;
@@ -145,7 +145,7 @@ async function setupRuntime(
     if (config.sandboxProvider === "container") {
         const sandboxStore = new EphemeralSandboxStore();
         const secretProvider: SecretProvider = {
-            get: (_tenantId, name) => process.env[name] ?? null,
+            get: (_userId, name) => process.env[name] ?? null,
         };
 
         containerProvider = new ContainerSandboxProvider(
@@ -170,7 +170,7 @@ async function setupRuntime(
     if (config.sandboxBrokerSocketPath !== undefined) {
         brokerProvider = new BrokerSandboxProvider({
             socketPath: config.sandboxBrokerSocketPath,
-            ...(tenantId === undefined ? {} : { tenantId }),
+            ...(userId === undefined ? {} : { userId }),
             ...(capabilityToken === undefined ? {} : { capabilityToken }),
         });
     }
@@ -283,7 +283,7 @@ async function executeRunMessage(msg: RunRequestMessage): Promise<void> {
             config,
             msg.request.execution?.sandboxId,
             msg.request.run.thinkingLevel,
-            msg.request.run.tenantId,
+            msg.request.run.userId,
             msg.request.execution?.sandboxToken,
         );
         const piAdapter = setup.piAdapter;

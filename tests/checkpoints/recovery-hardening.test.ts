@@ -47,7 +47,7 @@ function createRun(runId: string, checkpointId: string | null): AgentRun {
     const timestamp = "2026-09-08T10:00:00.000Z";
     return {
         id: runId,
-        tenantId: "tenant-pillar3",
+        userId: "user-pillar3",
         harnessSessionId: "session-pillar3",
         status: "INTERRUPTED",
         userInput: "测试恢复",

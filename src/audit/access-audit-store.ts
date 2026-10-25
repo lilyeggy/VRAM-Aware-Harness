@@ -6,13 +6,13 @@ export interface AccessAuditEvent {
     readonly timestamp: string;
     readonly action: string;
     readonly outcome: "ALLOW" | "DENY";
-    readonly tenantId: string | null;
+    readonly userId: string | null;
     readonly resourceType: string | null;
     readonly resourceId: string | null;
     readonly reason: string;
     /**
      * D4：鉴权失败时被尝试密钥的 SHA-256 摘要（仅摘要，绝不存明文）。
-     * 对无效密钥租户归属天然不可知（tenantId 为 NULL），
+     * 对无效密钥用户归属天然不可知（userId 为 NULL），
      * 摘要让爆破/重放尝试可以被关联分析。
      */
     readonly attemptedKeyDigest: string | null;
@@ -71,16 +71,16 @@ export class AccessAuditStore {
         });
         this.db.query<unknown, {
             id: string; timestamp: string; action: string; outcome: "ALLOW" | "DENY";
-            tenantId: string | null; resourceType: string | null;
+            userId: string | null; resourceType: string | null;
             resourceId: string | null; reason: string;
             attemptedKeyDigest: string | null; prevHash: string; hash: string;
         }>(`
             INSERT INTO access_audit_events (
-                id, timestamp, action, outcome, tenant_id,
+                id, timestamp, action, outcome, user_id,
                 resource_type, resource_id, reason, attempted_key_digest,
                 prev_hash, hash
             ) VALUES (
-                $id, $timestamp, $action, $outcome, $tenantId,
+                $id, $timestamp, $action, $outcome, $userId,
                 $resourceType, $resourceId, $reason, $attemptedKeyDigest,
                 $prevHash, $hash
             );
@@ -94,24 +94,24 @@ export class AccessAuditStore {
         });
     }
 
-    listForTenant(
-        tenantId: string,
+    listForUser(
+        userId: string,
         options: ListAuditEventsOptions = {},
     ): AccessAuditEvent[] {
         const limit = normalizePageLimit(options.limit);
         const offset = Math.max(0, Math.floor(options.offset ?? 0));
         return this.db.query<AccessAuditEvent, {
-            tenantId: string; limit: number; offset: number;
+            userId: string; limit: number; offset: number;
         }>(`
             SELECT id, timestamp, action, outcome,
-                tenant_id AS tenantId, resource_type AS resourceType,
+                user_id AS userId, resource_type AS resourceType,
                 resource_id AS resourceId, reason,
                 attempted_key_digest AS attemptedKeyDigest,
                 prev_hash AS prevHash, hash AS hash
-            FROM access_audit_events WHERE tenant_id = $tenantId
+            FROM access_audit_events WHERE user_id = $userId
             ORDER BY timestamp ASC, rowid ASC
             LIMIT $limit OFFSET $offset;
-        `).all({ tenantId, limit, offset });
+        `).all({ userId, limit, offset });
     }
 
     /**
@@ -124,7 +124,7 @@ export class AccessAuditStore {
     verifyChain(): AuditChainVerification {
         const rows = this.db.query<AuditChainRow, []>(`
             SELECT id, timestamp, action, outcome,
-                tenant_id AS tenantId, resource_type AS resourceType,
+                user_id AS userId, resource_type AS resourceType,
                 resource_id AS resourceId, reason,
                 attempted_key_digest AS attemptedKeyDigest,
                 prev_hash AS prevHash, hash AS hash
@@ -191,7 +191,7 @@ function computeAuditHash(
         event.timestamp,
         event.action,
         event.outcome,
-        event.tenantId,
+        event.userId,
         event.resourceType,
         event.resourceId,
         event.reason,

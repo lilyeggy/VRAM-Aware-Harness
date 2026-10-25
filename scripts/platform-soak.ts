@@ -5,13 +5,13 @@
  *   - 所有 Run 都能完成（无丢失、无死锁）
  *   - 同时活跃 Run 数不超过配置上限
  *   - 同一会话永远只有一个 Run 在跑
- *   - 租户之间完成数公平（等权份额）
+ *   - 用户之间完成数公平（等权份额）
  *   - 结束后没有 slot / 队列泄漏
  *   - 排队等待的 p50 / p95
  *
  * 用法：
  *   bun run scripts/platform-soak.ts
- *   SOAK_TENANTS=20 SOAK_RUNS_PER_TENANT=25 SOAK_MAX_ACTIVE=8 bun run scripts/platform-soak.ts
+ *   SOAK_USERS=20 SOAK_RUNS_PER_USER=25 SOAK_MAX_ACTIVE=8 bun run scripts/platform-soak.ts
  */
 import { RunService } from "../src/runs/run-service.ts";
 import { RunStore } from "../src/runs/runstore.ts";
@@ -22,11 +22,11 @@ import type {
     RuntimeStartRequest,
 } from "../src/runtime/agent-runtime.ts";
 import { RunScheduler } from "../src/scheduling/run-scheduler.ts";
-import { TenantRunScheduler } from "../src/scheduling/tenant-run-scheduler.ts";
+import { UserRunScheduler } from "../src/scheduling/user-run-scheduler.ts";
 import { openHarnessDatabase } from "../src/storage/database.ts";
 
-const tenantCount = Number(process.env.SOAK_TENANTS ?? 10);
-const runsPerTenant = Number(process.env.SOAK_RUNS_PER_TENANT ?? 30);
+const userCount = Number(process.env.SOAK_USERS ?? 10);
+const runsPerUser = Number(process.env.SOAK_RUNS_PER_USER ?? 30);
 const maxActiveRuns = Number(process.env.SOAK_MAX_ACTIVE ?? 6);
 const seed = Number(process.env.SOAK_SEED ?? 20261022);
 const minDurationMs = Number(process.env.SOAK_MIN_MS ?? 5);
@@ -141,9 +141,9 @@ const db = openHarnessDatabase(":memory:");
 const store = new RunStore(db);
 const runtime = new SoakRuntime();
 const runService = new RunService(store, runtime);
-const scheduler = new TenantRunScheduler({
+const scheduler = new UserRunScheduler({
     maxActiveRuns,
-    maxActiveRunsPerTenant: 0,
+    maxActiveRunsPerUser: 0,
     agingMs: 60_000,
 });
 
@@ -167,22 +167,22 @@ scheduler.claimNext = () => {
 
 const coordinator = new RunScheduler(runService, scheduler);
 
-const submitted: Array<{ id: string; tenantId: string }> = [];
-for (let tenant = 0; tenant < tenantCount; tenant += 1) {
-    const tenantId = `tenant-${tenant}`;
-    for (let index = 0; index < runsPerTenant; index += 1) {
-        const sessionId = `session-${tenant}-${index}`;
+const submitted: Array<{ id: string; userId: string }> = [];
+for (let user = 0; user < userCount; user += 1) {
+    const userId = `user-${user}`;
+    for (let index = 0; index < runsPerUser; index += 1) {
+        const sessionId = `session-${user}-${index}`;
         const run = coordinator.submit({
-            tenantId,
+            userId,
             harnessSessionId: sessionId,
-            userInput: `soak ${tenant}/${index}`,
-            workspacePath: `/tmp/soak/${tenant}/${index}`,
+            userInput: `soak ${user}/${index}`,
+            workspacePath: `/tmp/soak/${user}/${index}`,
         });
         runtime.durations.set(
             run.id,
             Math.round(minDurationMs + random() * (maxDurationMs - minDurationMs)),
         );
-        submitted.push({ id: run.id, tenantId });
+        submitted.push({ id: run.id, userId });
     }
 }
 
@@ -190,7 +190,7 @@ const startedAt = performance.now();
 await coordinator.drain();
 const wallMs = performance.now() - startedAt;
 
-const completedByTenant = new Map<string, number>();
+const completedByUser = new Map<string, number>();
 const waits: number[] = [];
 let completed = 0;
 let failed = 0;
@@ -200,9 +200,9 @@ for (const item of submitted) {
 
     if (run?.status === "COMPLETED") {
         completed += 1;
-        completedByTenant.set(
-            item.tenantId,
-            (completedByTenant.get(item.tenantId) ?? 0) + 1,
+        completedByUser.set(
+            item.userId,
+            (completedByUser.get(item.userId) ?? 0) + 1,
         );
     } else {
         failed += 1;
@@ -215,16 +215,16 @@ for (const item of submitted) {
     }
 }
 
-const counts = [...completedByTenant.values()];
+const counts = [...completedByUser.values()];
 const spread = counts.length === 0 ? 0 : Math.max(...counts) - Math.min(...counts);
-const capacity = scheduler.getCapacity("tenant-0");
+const capacity = scheduler.getCapacity("user-0");
 const queueLeft = scheduler.listQueue().length;
 
 console.log("== 平台并发浸泡 ==");
-console.log(`runs=${submitted.length} tenants=${tenantCount} maxActive=${maxActiveRuns} wall=${wallMs.toFixed(0)}ms`);
+console.log(`runs=${submitted.length} users=${userCount} maxActive=${maxActiveRuns} wall=${wallMs.toFixed(0)}ms`);
 console.log(`completed=${completed} failed=${failed} peakActive=${runtime.peak}`);
 console.log(`sessionViolations=${runtime.sessionViolations}`);
-console.log(`perTenantCompleted=${counts.join(",")} spread=${spread}`);
+console.log(`perUserCompleted=${counts.join(",")} spread=${spread}`);
 console.log(`queueWait p50=${percentile(waits, 50).toFixed(1)}ms p95=${percentile(waits, 95).toFixed(1)}ms p99=${percentile(waits, 99).toFixed(1)}ms`);
 console.log(`leak: activeRunCount=${capacity.activeRunCount} queuedLeft=${queueLeft}`);
 

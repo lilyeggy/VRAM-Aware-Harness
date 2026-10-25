@@ -2,11 +2,11 @@ import { describe, expect, test } from "bun:test";
 import type { Database } from "bun:sqlite";
 
 import {
-    DEFAULT_TENANT_BILLING_PRICING,
-    TenantBillingStore,
-    resolveTenantBillingPricing,
-    type TenantBillingPricing,
-} from "../../src/billing/tenant-billing.ts";
+    DEFAULT_USER_BILLING_PRICING,
+    UserBillingStore,
+    resolveUserBillingPricing,
+    type UserBillingPricing,
+} from "../../src/billing/user-billing.ts";
 import { openHarnessDatabase } from "../../src/storage/database.ts";
 
 const BASE_TIME = "2026-10-10T00:00:00.000Z";
@@ -15,7 +15,7 @@ function seedRun(
     db: Database,
     input: {
         id: string;
-        tenantId: string;
+        userId: string;
         status?: "COMPLETED" | "FAILED" | "RUNNING";
         startedAt?: string | null;
         finishedAt?: string | null;
@@ -23,17 +23,17 @@ function seedRun(
 ): void {
     db.query(`
         INSERT INTO agent_runs (
-            id, tenant_id, harness_session_id, status, user_input, workspace_path,
+            id, user_id, harness_session_id, status, user_input, workspace_path,
             created_at, updated_at, started_at, finished_at, checkpoint_id,
             failure_reason, run_policy_json, thinking_level
         ) VALUES (
-            $id, $tenantId, $sessionId, $status, $userInput, $workspacePath,
+            $id, $userId, $sessionId, $status, $userInput, $workspacePath,
             $createdAt, $updatedAt, $startedAt, $finishedAt, NULL,
             NULL, NULL, 'off'
         );
     `).run({
         id: input.id,
-        tenantId: input.tenantId,
+        userId: input.userId,
         sessionId: `session-${input.id}`,
         status: input.status ?? "COMPLETED",
         userInput: "billing test task",
@@ -45,11 +45,11 @@ function seedRun(
     });
 }
 
-function seedSnapshot(db: Database, input: { id: string; runId: string; tenantId: string }): void {
+function seedSnapshot(db: Database, input: { id: string; runId: string; userId: string }): void {
     db.query(`
         INSERT INTO effective_policy_snapshots (
-            id, run_id, tenant_id, layers_json, effective_json, created_at
-        ) VALUES ($id, $runId, $tenantId, '[]', '{}', $createdAt);
+            id, run_id, user_id, layers_json, effective_json, created_at
+        ) VALUES ($id, $runId, $userId, '[]', '{}', $createdAt);
     `).run({ ...input, createdAt: BASE_TIME });
 }
 
@@ -157,20 +157,20 @@ function seedTool(
     });
 }
 
-describe("TenantBillingStore", () => {
-    test("按租户汇总 provider 成本、沙箱秒、工具调用，并按平台单价计费", () => {
+describe("UserBillingStore", () => {
+    test("按用户汇总 provider 成本、沙箱秒、工具调用，并按平台单价计费", () => {
         const db = openHarnessDatabase(":memory:");
-        const pricing: TenantBillingPricing = {
+        const pricing: UserBillingPricing = {
             currency: "USD",
             modelInputPerMillionTokens: 0,
             modelOutputPerMillionTokens: 0,
             sandboxSecond: 0.01,
             toolCall: 0.001,
         };
-        const store = new TenantBillingStore(db, pricing);
+        const store = new UserBillingStore(db, pricing);
 
-        seedRun(db, { id: "run-a1", tenantId: "tenant-a" });
-        seedSnapshot(db, { id: "snap-a1", runId: "run-a1", tenantId: "tenant-a" });
+        seedRun(db, { id: "run-a1", userId: "user-a" });
+        seedSnapshot(db, { id: "snap-a1", runId: "run-a1", userId: "user-a" });
         seedSandbox(db, {
             id: "sandbox-a1",
             runId: "run-a1",
@@ -192,8 +192,8 @@ describe("TenantBillingStore", () => {
         seedTool(db, { id: "tool-a2", runId: "run-a1", status: "SUCCEEDED" });
         seedTool(db, { id: "tool-a3", runId: "run-a1", status: "FAILED" });
 
-        seedRun(db, { id: "run-b1", tenantId: "tenant-b" });
-        seedSnapshot(db, { id: "snap-b1", runId: "run-b1", tenantId: "tenant-b" });
+        seedRun(db, { id: "run-b1", userId: "user-b" });
+        seedSnapshot(db, { id: "snap-b1", runId: "run-b1", userId: "user-b" });
         seedModelCompleted(db, {
             eventId: "event-b1",
             runId: "run-b1",
@@ -205,8 +205,8 @@ describe("TenantBillingStore", () => {
         });
         seedTool(db, { id: "tool-b1", runId: "run-b1", status: "SUCCEEDED" });
 
-        const summary = store.summarize("tenant-a");
-        expect(summary.tenantId).toBe("tenant-a");
+        const summary = store.summarize("user-a");
+        expect(summary.userId).toBe("user-a");
         expect(summary.currency).toBe("USD");
         expect(summary.totals.modelCalls).toBe(1);
         expect(summary.totals.inputTokens).toBe(1000);
@@ -222,13 +222,13 @@ describe("TenantBillingStore", () => {
             "TOOL_CALLS",
         ]);
 
-        const other = store.summarize("tenant-b");
+        const other = store.summarize("user-b");
         expect(other.totals.providerCost).toBe(99.6);
         expect(other.totals.sandboxSeconds).toBe(0);
         expect(other.totals.toolCalls).toBe(1);
         expect(other.totals.amount).toBe(99.601);
 
-        const missing = store.summarize("tenant-missing");
+        const missing = store.summarize("user-missing");
         expect(missing.totals.amount).toBe(0);
         expect(missing.totals.modelCalls).toBe(0);
         expect(missing.totals.toolCalls).toBe(0);
@@ -236,16 +236,16 @@ describe("TenantBillingStore", () => {
 
     test("配置平台 token 单价后叠加 token 费用", () => {
         const db = openHarnessDatabase(":memory:");
-        const pricing: TenantBillingPricing = {
+        const pricing: UserBillingPricing = {
             currency: "USD",
             modelInputPerMillionTokens: 2,
             modelOutputPerMillionTokens: 4,
             sandboxSecond: 0,
             toolCall: 0,
         };
-        const store = new TenantBillingStore(db, pricing);
+        const store = new UserBillingStore(db, pricing);
 
-        seedRun(db, { id: "run-token", tenantId: "tenant-token" });
+        seedRun(db, { id: "run-token", userId: "user-token" });
         seedModelCompleted(db, {
             eventId: "event-token",
             runId: "run-token",
@@ -256,7 +256,7 @@ describe("TenantBillingStore", () => {
             providerCost: 0,
         });
 
-        const summary = store.summarize("tenant-token");
+        const summary = store.summarize("user-token");
         expect(summary.totals.amount).toBe(4);
         expect(summary.totals.inputTokens).toBe(1_000_000);
         expect(summary.totals.outputTokens).toBe(500_000);
@@ -264,10 +264,10 @@ describe("TenantBillingStore", () => {
         expect(summary.lineItems.find((item) => item.category === "MODEL_OUTPUT_TOKENS")?.amount).toBe(2);
     });
 
-    test("resolveTenantBillingPricing 读取环境变量，非法值回退默认", () => {
-        expect(resolveTenantBillingPricing({})).toEqual(DEFAULT_TENANT_BILLING_PRICING);
+    test("resolveUserBillingPricing 读取环境变量，非法值回退默认", () => {
+        expect(resolveUserBillingPricing({})).toEqual(DEFAULT_USER_BILLING_PRICING);
 
-        const configured = resolveTenantBillingPricing({
+        const configured = resolveUserBillingPricing({
             HARNESS_BILLING_CURRENCY: "CNY",
             HARNESS_BILLING_MODEL_INPUT_PER_MTOK: "2.5",
             HARNESS_BILLING_MODEL_OUTPUT_PER_MTOK: "5",
@@ -282,7 +282,7 @@ describe("TenantBillingStore", () => {
             toolCall: 0.003,
         });
 
-        const invalid = resolveTenantBillingPricing({
+        const invalid = resolveUserBillingPricing({
             HARNESS_BILLING_MODEL_INPUT_PER_MTOK: "-1",
             HARNESS_BILLING_MODEL_OUTPUT_PER_MTOK: "abc",
             HARNESS_BILLING_SANDBOX_SECOND: "",

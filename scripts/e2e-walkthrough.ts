@@ -105,11 +105,11 @@ function findFreePort(): number {
     return port;
 }
 
-/** 注册并登录一个新用户；其 tenantId 等于 userId，会话凭证持有全部 scope。 */
-async function registerTenant(
+/** 注册并登录一个新用户；其 userId 等于 userId，会话凭证持有全部 scope。 */
+async function registerUser(
     baseUrl: string,
     email: string,
-): Promise<{ tenantId: string; token: string }> {
+): Promise<{ userId: string; token: string }> {
     const password = "demo-password-1234";
     const registered = await fetch(`${baseUrl}/auth/register`, {
         method: "POST",
@@ -127,8 +127,8 @@ async function registerTenant(
     if (!loggedIn.ok) {
         throw new Error(`登录失败：HTTP ${loggedIn.status} ${await loggedIn.text()}`);
     }
-    const payload = await loggedIn.json() as { token: string; tenantId: string };
-    return { tenantId: payload.tenantId, token: payload.token };
+    const payload = await loggedIn.json() as { token: string; userId: string };
+    return { userId: payload.userId, token: payload.token };
 }
 
 async function main(): Promise<void> {
@@ -288,10 +288,10 @@ async function main(): Promise<void> {
         console.log(`\n事件时间线：`);
         console.log(formatRunEventTimeline(eventsB.json.events));
 
-        heading("4. 场景 C：双租户并发排队 → 每租户 FIFO、租户间轮转");
-        const tenantB = await registerTenant(running.baseUrl, "demo-tenant-b@example.com");
-        console.log(`新租户 tenantId = ${tenantB.tenantId}`);
-        const contextB: HttpContext = { baseUrl: running.baseUrl, apiKey: tenantB.token };
+        heading("4. 场景 C：双用户并发排队 → 每用户 FIFO、用户间轮转");
+        const userB = await registerUser(running.baseUrl, "demo-user-b@example.com");
+        console.log(`新用户 userId = ${userB.userId}`);
+        const contextB: HttpContext = { baseUrl: running.baseUrl, apiKey: userB.token };
         const workspaceC = await call(contextB, "POST", "/workspaces", {
             name: `demo-c-${Date.now()}`,
         });
@@ -301,51 +301,51 @@ async function main(): Promise<void> {
         });
         const workspaceIdA2 = workspaceA2.json.workspace.id as string;
 
-        const tenantARuns: string[] = [];
-        const tenantBRuns: string[] = [];
-        tenantARuns.push((await call(context, "POST", "/runs", {
+        const userARuns: string[] = [];
+        const userBRuns: string[] = [];
+        userARuns.push((await call(context, "POST", "/runs", {
             sessionId: `a1-${crypto.randomUUID()}`,
-            userInput: "租户 A 的第 1 个任务",
+            userInput: "用户 A 的第 1 个任务",
             workspaceId: workspaceIdA,
         })).json.run.id);
-        tenantBRuns.push((await call(contextB, "POST", "/runs", {
+        userBRuns.push((await call(contextB, "POST", "/runs", {
             sessionId: `b1-${crypto.randomUUID()}`,
-            userInput: "租户 B 的第 1 个任务",
+            userInput: "用户 B 的第 1 个任务",
             workspaceId: workspaceIdC,
         })).json.run.id);
-        tenantARuns.push((await call(context, "POST", "/runs", {
+        userARuns.push((await call(context, "POST", "/runs", {
             sessionId: `a2-${crypto.randomUUID()}`,
-            userInput: "租户 A 的第 2 个任务",
+            userInput: "用户 A 的第 2 个任务",
             workspaceId: workspaceIdA2,
         })).json.run.id);
-        tenantBRuns.push((await call(contextB, "POST", "/runs", {
+        userBRuns.push((await call(contextB, "POST", "/runs", {
             sessionId: `b2-${crypto.randomUUID()}`,
-            userInput: "租户 B 的第 2 个任务",
+            userInput: "用户 B 的第 2 个任务",
             workspaceId: workspaceIdC,
         })).json.run.id);
 
-        await waitForQueueReason(context, tenantARuns[1]!, "RESOURCE_CRITICAL");
-        await waitForQueueReason(contextB, tenantBRuns[1]!, "RESOURCE_CRITICAL");
+        await waitForQueueReason(context, userARuns[1]!, "RESOURCE_CRITICAL");
+        await waitForQueueReason(contextB, userBRuns[1]!, "RESOURCE_CRITICAL");
 
         const queueA = await call(context, "GET", "/queue");
         const queueB = await call(contextB, "GET", "/queue");
-        console.log(`\n租户 A 视角的 /queue（position 是全局轮转序号）：`);
+        console.log(`\n用户 A 视角的 /queue（position 是全局轮转序号）：`);
         for (const entry of queueA.json.queue) {
-            console.log(`  position=${entry.position} tenantPosition=${entry.tenantPosition} reason=${entry.reasonCode} run=${entry.runId}`);
+            console.log(`  position=${entry.position} userPosition=${entry.userPosition} reason=${entry.reasonCode} run=${entry.runId}`);
         }
-        console.log(`\n租户 B 视角的 /queue（同一份全局序号，另一租户的切片）：`);
+        console.log(`\n用户 B 视角的 /queue（同一份全局序号，另一用户的切片）：`);
         for (const entry of queueB.json.queue) {
-            console.log(`  position=${entry.position} tenantPosition=${entry.tenantPosition} reason=${entry.reasonCode} run=${entry.runId}`);
+            console.log(`  position=${entry.position} userPosition=${entry.userPosition} reason=${entry.reasonCode} run=${entry.runId}`);
         }
-        console.log(`\n租户 A 的 runId 顺序 = ${JSON.stringify(tenantARuns)}`);
-        console.log(`租户 B 的 runId 顺序 = ${JSON.stringify(tenantBRuns)}`);
-        console.log("（对照 position：全局投影顺序为 A1, B1, A2, B2 —— 每租户内部 FIFO，租户之间轮转）");
+        console.log(`\n用户 A 的 runId 顺序 = ${JSON.stringify(userARuns)}`);
+        console.log(`用户 B 的 runId 顺序 = ${JSON.stringify(userBRuns)}`);
+        console.log("（对照 position：全局投影顺序为 A1, B1, A2, B2 —— 每用户内部 FIFO，用户之间轮转）");
 
         console.log(`\n>>> 等待 4 个 Run 全部收敛`);
-        for (const runId of [...tenantARuns, ...tenantBRuns]) {
-            const owner = tenantARuns.includes(runId) ? context : contextB;
+        for (const runId of [...userARuns, ...userBRuns]) {
+            const owner = userARuns.includes(runId) ? context : contextB;
             const settled = await waitForTerminal(owner, runId);
-            console.log(`run=${runId} status=${settled.run.status} tenant=${settled.run.tenantId}`);
+            console.log(`run=${runId} status=${settled.run.status} user=${settled.run.userId}`);
         }
 
         heading("5. 落库证据：Attempt / Sandbox / 策略快照 / 输出");
@@ -382,35 +382,35 @@ async function main(): Promise<void> {
             console.log(`outputChunks = ${chunks.length} 条，finalText=${JSON.stringify(running.composition.runOutputStore.finalText(runId))}`);
         }
 
-        heading("6. 审计：ALLOW / DENY 均落库，按租户可查");
+        heading("6. 审计：ALLOW / DENY 均落库，按用户可查");
         const audit = await call(context, "GET", "/audit");
         const events: any[] = audit.json.events ?? [];
-        console.log(`GET /audit（租户 bootstrap 视角）-> ${audit.status}，共 ${events.length} 条`);
+        console.log(`GET /audit（用户 bootstrap 视角）-> ${audit.status}，共 ${events.length} 条`);
         const auditB = await call(contextB, "GET", "/audit");
-        console.log(`GET /audit（租户 B 视角）        -> ${auditB.status}，共 ${auditB.json.events.length} 条（租户隔离）`);
+        console.log(`GET /audit（用户 B 视角）        -> ${auditB.status}，共 ${auditB.json.events.length} 条（用户隔离）`);
 
-        // 无凭证 / 无效密钥的 DENY 没有可归属的租户，tenant_id 记为 NULL，
-        // 因此不出现在任何租户视图里；这里直接查库把证据链补全。
+        // 无凭证 / 无效密钥的 DENY 没有可归属的用户，user_id 记为 NULL，
+        // 因此不出现在任何用户视图里；这里直接查库把证据链补全。
         const allAudit = running.composition.database.query<{
             timestamp: string;
             action: string;
             outcome: string;
-            tenantId: string | null;
+            userId: string | null;
             reason: string;
             attemptedKeyDigest: string | null;
         }, Record<string, never>>(`
-            SELECT timestamp, action, outcome, tenant_id AS tenantId, reason,
+            SELECT timestamp, action, outcome, user_id AS userId, reason,
                 attempted_key_digest AS attemptedKeyDigest
             FROM access_audit_events
             ORDER BY timestamp ASC, rowid ASC
         `).all({});
         console.log(`\n全库审计共 ${allAudit.length} 条。DENY 记录（含被尝试密钥摘要，不存明文）：`);
         for (const event of allAudit.filter((item) => item.outcome === "DENY")) {
-            console.log(`  ${event.timestamp} action=${event.action} tenant=${event.tenantId ?? "NULL"} reason=${event.reason} keyDigest=${event.attemptedKeyDigest ?? "none"}`);
+            console.log(`  ${event.timestamp} action=${event.action} user=${event.userId ?? "NULL"} reason=${event.reason} keyDigest=${event.attemptedKeyDigest ?? "none"}`);
         }
         console.log(`\nRUN_SUBMIT 类 ALLOW 记录：`);
         for (const event of allAudit.filter((item) => item.action === "RUN_SUBMIT")) {
-            console.log(`  ${event.timestamp} tenant=${event.tenantId ?? "NULL"} reason=${event.reason}`);
+            console.log(`  ${event.timestamp} user=${event.userId ?? "NULL"} reason=${event.reason}`);
         }
 
         heading("7. 生命周期：安全关闭");

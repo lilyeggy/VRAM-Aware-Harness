@@ -7,13 +7,13 @@ function makePolicy(overrides: Partial<EffectivePolicySnapshot> = {}): Effective
     return {
         id: "policy-pids",
         runId: "run",
-        tenantId: "tenant",
+        userId: "user",
         createdAt: "2026-09-11T00:00:00.000Z",
         sandboxProfile: "default",
         allowedTools: null,
         allowedSkills: null,
         allowedModels: null,
-        workspaceRoots: ["/srv/workspaces/tenant"],
+        workspaceRoots: ["/srv/workspaces/user"],
         allowNetwork: false,
         allowProcess: false,
         allowedSecrets: null,
@@ -23,7 +23,7 @@ function makePolicy(overrides: Partial<EffectivePolicySnapshot> = {}): Effective
     };
 }
 
-const WORKSPACE = "/srv/workspaces/tenant/run";
+const WORKSPACE = "/srv/workspaces/user/run";
 
 test("N14：未配置时沿用 128，并进入可审计的 spec 指纹", () => {
     const compiler = new OciSandboxSpecCompiler({

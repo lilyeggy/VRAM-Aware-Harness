@@ -51,19 +51,19 @@ function createService(
     return { store, toolExecutions, runtime, service };
 }
 
-test("Phase 3：同租户幂等键返回既有 Run，跨租户互不影响", () => {
+test("Phase 3：同用户幂等键返回既有 Run，跨用户互不影响", () => {
     const db = openHarnessDatabase(":memory:");
     try {
         const { service } = createService(db);
         const first = service.createQueuedRun({
-            tenantId: "tenant-a",
+            userId: "user-a",
             harnessSessionId: "session-a",
             userInput: "first",
             workspacePath: "/tmp/a",
             idempotencyKey: "key-1",
         });
         const second = service.createQueuedRun({
-            tenantId: "tenant-a",
+            userId: "user-a",
             harnessSessionId: "session-a",
             userInput: "first",
             workspacePath: "/tmp/a",
@@ -71,14 +71,14 @@ test("Phase 3：同租户幂等键返回既有 Run，跨租户互不影响", () 
         });
         expect(second.id).toBe(first.id);
 
-        const otherTenant = service.createQueuedRun({
-            tenantId: "tenant-b",
+        const otherUser = service.createQueuedRun({
+            userId: "user-b",
             harnessSessionId: "session-b",
             userInput: "first",
             workspacePath: "/tmp/b",
             idempotencyKey: "key-1",
         });
-        expect(otherTenant.id).not.toBe(first.id);
+        expect(otherUser.id).not.toBe(first.id);
     } finally {
         db.close();
     }
@@ -89,7 +89,7 @@ test("Phase 3：无副作用失败排入退避重试（RUN_QUEUED reason=RETRY�
     try {
         const { store, runtime, service } = createService(db);
         const run = service.createQueuedRun({
-            tenantId: "tenant-a",
+            userId: "user-a",
             harnessSessionId: "session-a",
             userInput: "retry me",
             workspacePath: "/tmp/a",
@@ -124,7 +124,7 @@ test("Phase 3：已有 PREPARED 工具副作用时不自动重试", async () => 
     try {
         const { store, toolExecutions, service } = createService(db);
         const run = service.createQueuedRun({
-            tenantId: "tenant-a",
+            userId: "user-a",
             harnessSessionId: "session-a",
             userInput: "side effect",
             workspacePath: "/tmp/a",
@@ -160,7 +160,7 @@ test("Phase 3：达到 maxAttempts 后不再重试，保持 INTERRUPTED", async 
     try {
         const { store, service } = createService(db, { maxAttempts: 1 });
         const run = service.createQueuedRun({
-            tenantId: "tenant-a",
+            userId: "user-a",
             harnessSessionId: "session-a",
             userInput: "no retry",
             workspacePath: "/tmp/a",

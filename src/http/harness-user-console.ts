@@ -5,7 +5,7 @@
  *
  * It is a pure same-origin static page: no framework, no build step, and the
  * session token lives only in this browser's localStorage.  All privileged
- * operations still derive their Tenant from the Bearer credential on the
+ * operations still derive their User from the Bearer credential on the
  * server, never from the page.
  */
 export function userConsoleResponse(): Response {
@@ -52,7 +52,7 @@ ${USER_CONSOLE_CSS}
     <div id="authError" class="autherr"></div>
     <button id="authSubmit" class="authbtn" type="button">登录</button>
     <div class="authalt">或</div>
-    <div class="field"><label>API Key（可选）</label><input id="authApiKey" type="password" autocomplete="off" placeholder="使用租户签发的 API Key 直接进入"></div>
+    <div class="field"><label>API Key（可选）</label><input id="authApiKey" type="password" autocomplete="off" placeholder="使用用户签发的 API Key 直接进入"></div>
     <button id="keySubmit" class="ghostbtn" type="button">使用 API Key 进入</button>
     <div id="demoEntry" class="demoentry hidden"><button id="demoSubmit" class="ghostbtn" type="button">本地模式进入（未启用账户服务）</button></div>
   </div>

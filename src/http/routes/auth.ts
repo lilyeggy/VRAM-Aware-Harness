@@ -25,7 +25,7 @@ export interface AuthRouteContext {
         resourceId: string | null,
         action: string,
         outcome: "ALLOW" | "DENY",
-        tenantId: string | null,
+        userId: string | null,
         reason: string,
     ): void;
 }
@@ -99,8 +99,8 @@ export async function handleAuthRoute(
             if (ctx.accessControl?.revokeAllSessions === undefined) {
                 throw new HttpError(503, "账户服务未启用");
             }
-            const revoked = ctx.accessControl.revokeAllSessions(principal.tenantId);
-            ctx.auditResource("SESSION", null, "SESSION_REVOKE_ALL", "ALLOW", principal.tenantId, `revoked_${revoked}_sessions`);
+            const revoked = ctx.accessControl.revokeAllSessions(principal.userId);
+            ctx.auditResource("SESSION", null, "SESSION_REVOKE_ALL", "ALLOW", principal.userId, `revoked_${revoked}_sessions`);
             return jsonResponse({ ok: true, revoked });
         }
     return null;

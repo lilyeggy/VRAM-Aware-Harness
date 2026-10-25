@@ -12,7 +12,7 @@
       --line: #27415e;
       --text: #eef6ff;
       --muted: #9eb1c7;
-      --tenant: #4ecdc4;
+      --user: #4ecdc4;
       --service: #60a5fa;
       --domain: #c084fc;
       --agent: #fbbf24;
@@ -80,13 +80,13 @@
     .layer-label p { color: var(--muted); font-size: 12px; margin: 0; }
     .layer-content { position: relative; padding: 20px 30px; display: grid; align-items: center; gap: 20px; }
 
-    .tenant-layer { --layer-color: var(--tenant); }
+    .user-layer { --layer-color: var(--user); }
     .service-layer { --layer-color: var(--service); }
     .domain-layer { --layer-color: var(--domain); }
     .agent-layer { --layer-color: var(--agent); }
     .infra-layer { --layer-color: var(--infra); }
 
-    .tenant-grid { grid-template-columns: 170px 24px minmax(290px, 1.3fr) 24px minmax(190px, .8fr); }
+    .user-grid { grid-template-columns: 170px 24px minmax(290px, 1.3fr) 24px minmax(190px, .8fr); }
     .service-grid { grid-template-columns: repeat(5, minmax(135px, 1fr)); }
     .domain-grid { grid-template-columns: minmax(210px, .8fr) 24px minmax(310px, 1.2fr) 24px minmax(250px, 1fr); }
     .agent-grid { grid-template-columns: minmax(190px, .8fr) 24px minmax(210px, .9fr) 24px minmax(270px, 1.1fr) 24px minmax(190px, .8fr); }
@@ -101,7 +101,7 @@
     .node h3 { margin: 0 0 4px; font-size: 15px; }
     .node p { margin: 0; font-size: 12px; color: var(--muted); }
     .node .id { display: inline-block; margin-top: 8px; padding: 3px 7px; color: var(--node-color); background: color-mix(in srgb, var(--node-color) 12%, transparent); border-radius: 5px; font: 11px ui-monospace, monospace; }
-    .node[data-group="tenant"] { --node-color: var(--tenant); }
+    .node[data-group="user"] { --node-color: var(--user); }
     .node[data-group="service"] { --node-color: var(--service); }
     .node[data-group="domain"] { --node-color: var(--domain); }
     .node[data-group="agent"] { --node-color: var(--agent); }
@@ -164,7 +164,7 @@
       .topbar { align-items: flex-start; flex-direction: column; }
       .layer { grid-template-columns: 112px 1fr; }
       .layer-content { overflow-x: auto; }
-      .tenant-grid, .service-grid, .domain-grid, .agent-grid, .infra-grid { min-width: 930px; }
+      .user-grid, .service-grid, .domain-grid, .agent-grid, .infra-grid { min-width: 930px; }
       .vertical-flow { margin-left: 112px; min-width: 930px; }
       .relationship-panel { grid-template-columns: 1fr; }
     }
@@ -188,10 +188,10 @@
       <div>
         <div class="title-kicker">System Architecture Map</div>
         <h1>VRAM-Aware Harness 分层关系图</h1>
-        <p class="subtitle">从租户与长期会话出发，经过服务编排、AgentRun 事实模型、Pi Runtime，最终抵达 vLLM、GPU 与工具。点击场景，只高亮该场景真正经过的对象。</p>
+        <p class="subtitle">从用户与长期会话出发，经过服务编排、AgentRun 事实模型、Pi Runtime，最终抵达 vLLM、GPU 与工具。点击场景，只高亮该场景真正经过的对象。</p>
       </div>
       <div class="legend" aria-label="层级图例">
-        <span><i class="dot" style="--c:var(--tenant)"></i>租户/会话</span>
+        <span><i class="dot" style="--c:var(--user)"></i>用户/会话</span>
         <span><i class="dot" style="--c:var(--service)"></i>服务编排</span>
         <span><i class="dot" style="--c:var(--domain)"></i>运行事实</span>
         <span><i class="dot" style="--c:var(--agent)"></i>Agent Runtime</span>
@@ -209,14 +209,14 @@
     </nav>
 
     <section class="architecture" aria-label="Harness 分层架构">
-      <div class="layer tenant-layer">
-        <aside class="layer-label"><span class="layer-index">LAYER 01</span><h2>租户层</h2><p>身份、长期工作上下文、任务来源</p></aside>
-        <div class="layer-content tenant-grid">
-          <article class="node" id="tenant" data-group="tenant"><h3>Tenant</h3><p>配额与公平性的主体</p><span class="id">tenant-a</span></article>
-          <div class="arrow" id="a-tenant-session"></div>
-          <article class="node" id="harness-session" data-group="tenant"><h3>HarnessSession</h3><p>稳定的业务会话身份；关联多次用户任务</p><span class="id">session-s100</span></article>
+      <div class="layer user-layer">
+        <aside class="layer-label"><span class="layer-index">LAYER 01</span><h2>用户层</h2><p>身份、长期工作上下文、任务来源</p></aside>
+        <div class="layer-content user-grid">
+          <article class="node" id="user" data-group="user"><h3>User</h3><p>配额与公平性的主体</p><span class="id">user-a</span></article>
+          <div class="arrow" id="a-user-session"></div>
+          <article class="node" id="harness-session" data-group="user"><h3>HarnessSession</h3><p>稳定的业务会话身份；关联多次用户任务</p><span class="id">session-s100</span></article>
           <div class="arrow" id="a-session-input"></div>
-          <article class="node" id="user-input" data-group="tenant"><h3>User Input</h3><p>一次新输入/追问</p><span class="id">“读取 README”</span></article>
+          <article class="node" id="user-input" data-group="user"><h3>User Input</h3><p>一次新输入/追问</p><span class="id">“读取 README”</span></article>
         </div>
       </div>
 
@@ -227,7 +227,7 @@
         <div class="layer-content service-grid">
           <article class="node" id="run-service" data-group="service"><h3>RunService</h3><p>创建并推进 AgentRun 状态</p></article>
           <article class="node" id="policy" data-group="service"><h3>ExecutionPolicy</h3><p>MVP 规则基线；未来 Guarded Agentic</p></article>
-          <article class="node" id="queue" data-group="service"><h3>RunQueue</h3><p>Tenant round-robin 公平排队</p></article>
+          <article class="node" id="queue" data-group="service"><h3>RunQueue</h3><p>User round-robin 公平排队</p></article>
           <article class="node" id="resource-observer" data-group="service"><h3>ResourceObserver</h3><p>采集 GPU Snapshot</p></article>
           <article class="node" id="checkpoint-service" data-group="service"><h3>CheckpointService</h3><p>寻找安全恢复边界</p></article>
           <div class="service-link-row"></div>
@@ -286,7 +286,7 @@
       <div class="relationship-map">
         <h2>核心基数关系</h2>
         <div class="cardinality">
-          <div class="entity"><b>Tenant</b><small>公平性主体</small></div>
+          <div class="entity"><b>User</b><small>公平性主体</small></div>
           <div class="relation"><b>1 : N</b>拥有</div>
           <div class="entity"><b>HarnessSession</b><small>长期业务会话</small></div>
           <div class="relation"><b>1 : N</b>产生</div>
@@ -312,24 +312,24 @@
         title: "先创建 Run，再决定是否执行",
         text: "用户输入属于 HarnessSession；RunService 为这一次输入创建 AgentRun。ExecutionPolicy 基于 ResourceObserver 决定是否启动；MVP 使用确定性规则，未来允许 Scheduling Agent 在硬约束内提出建议。通过准入后，PiAdapter 创建或打开 PiAgentSession，再调用 prompt。",
         owner: ["业务身份：HarnessSession", "执行单位：AgentRun", "历史上下文：PiAgentSession"],
-        nodes: ["tenant", "harness-session", "user-input", "run-service", "policy", "resource-observer", "agent-run", "agent-runtime", "pi-adapter", "pi-session", "vllm", "gpu"],
-        arrows: ["a-tenant-session", "a-session-input", "a-runtime-adapter", "a-adapter-session"]
+        nodes: ["user", "harness-session", "user-input", "run-service", "policy", "resource-observer", "agent-run", "agent-runtime", "pi-adapter", "pi-session", "vllm", "gpu"],
+        arrows: ["a-user-session", "a-session-input", "a-runtime-adapter", "a-adapter-session"]
       },
       "follow-up": {
         step: "场景 02 · 同一会话追问",
         title: "新 Run，复用同一段会话历史",
         text: "第二次用户输入仍属于 S-100，但会创建新的 R-002。PiAdapter 根据 S-100 的 piSessionRef 打开同一个 Pi 会话历史，因此模型能理解“继续解释”指向上一轮内容。",
         owner: ["Session 不变：S-100", "新执行：R-002", "复用历史：piSessionRef"],
-        nodes: ["tenant", "harness-session", "user-input", "run-service", "agent-run", "run-history", "agent-runtime", "pi-adapter", "pi-session", "vllm"],
-        arrows: ["a-tenant-session", "a-session-input", "a-run-history", "a-runtime-adapter", "a-adapter-session"]
+        nodes: ["user", "harness-session", "user-input", "run-service", "agent-run", "run-history", "agent-runtime", "pi-adapter", "pi-session", "vllm"],
+        arrows: ["a-user-session", "a-session-input", "a-run-history", "a-runtime-adapter", "a-adapter-session"]
       },
       "critical": {
         step: "场景 03 · GPU 临界",
         title: "Run 存在，但暂时不触发 Pi",
         text: "ResourceObserver 返回 CRITICAL。Hard Guardrail 禁止启动，ExecutionPolicy 记录 QUEUE 决策，RunQueue 保存 R-001。未来 Scheduling Agent 可以解释趋势并提出建议，但不能突破绝对显存安全线；GPU 恢复后由服务层重新准入。",
         owner: ["观测：ResourceObserver", "安全边界：Hard Guardrail", "决策：ExecutionPolicy", "等待：RunQueue"],
-        nodes: ["tenant", "harness-session", "user-input", "run-service", "policy", "queue", "resource-observer", "agent-run", "run-facts", "gpu"],
-        arrows: ["a-tenant-session", "a-session-input", "a-run-facts"]
+        nodes: ["user", "harness-session", "user-input", "run-service", "policy", "queue", "resource-observer", "agent-run", "run-facts", "gpu"],
+        arrows: ["a-user-session", "a-session-input", "a-run-facts"]
       },
       "recovery": {
         step: "场景 04 · 崩溃恢复",
@@ -342,7 +342,7 @@
       "all": {
         step: "完整架构",
         title: "五层协作，但职责互不混用",
-        text: "租户层提供身份和长期上下文；服务层负责控制；运行事实层提供持久证据；Agent 层驱动 Pi；基础设施层真正推理或产生外部副作用。",
+        text: "用户层提供身份和长期上下文；服务层负责控制；运行事实层提供持久证据；Agent 层驱动 Pi；基础设施层真正推理或产生外部副作用。",
         owner: ["控制面：Harness", "Agent Loop：Pi", "推理执行：vLLM"],
         nodes: "all",
         arrows: "all"

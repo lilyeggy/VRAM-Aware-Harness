@@ -65,7 +65,7 @@ function policy(workspacePath: string): EffectivePolicySnapshot {
         ...unrestrictedPolicy,
         layers: [],
         createdAt: new Date().toISOString(),
-        id: crypto.randomUUID(), runId: crypto.randomUUID(), tenantId: "SMOKE_TENANT",
+        id: crypto.randomUUID(), runId: crypto.randomUUID(), userId: "SMOKE_USER",
         workspaceRoots: [workspacePath], allowNetwork: false,
         resourceLimits: { cpuCores: 0.5, memoryMiB: 128, diskMiB: null },
     };
