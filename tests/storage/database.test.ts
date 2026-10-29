@@ -54,6 +54,42 @@ test("打开新数据库时会创建当前版本所需的表", () => {
     }
 });
 
+test("v6 只为旧 Run 回填唯一匹配的用户工作区", () => {
+    const db = openHarnessDatabase(":memory:");
+    try {
+        db.exec(`INSERT INTO workspaces (id, user_id, name, root_path, created_at)
+            VALUES ('w1', 'u1', 'one', '/tmp/one', 'now'),
+                   ('w2', 'u1', 'two', '/tmp/two', 'now');
+            INSERT INTO harness_sessions (id, user_id, workspace_id, title, runtime_session_ref, created_at, updated_at)
+            VALUES ('s1', 'u1', NULL, NULL, 'old-ref', 'now', 'now'),
+                   ('s2', 'u1', NULL, NULL, 'old-ref', 'now', 'now');
+            INSERT INTO agent_runs (id, user_id, harness_session_id, status, user_input,
+                workspace_path, created_at, updated_at)
+            VALUES ('r1', 'u1', 's1', 'QUEUED', 'x', '/tmp/one', 'now', 'now'),
+                   ('r2', 'u1', 's2', 'QUEUED', 'x', '/tmp/missing', 'now', 'now'),
+                   ('r3', 'u2', 's3', 'QUEUED', 'x', '/tmp/one', 'now', 'now'),
+                   ('r4', 'u1', 's4', 'QUEUED', 'x', '/tmp/two', 'now', 'now');
+            DELETE FROM schema_migrations WHERE version = 6;`);
+        runMigrations(db);
+        const rows = db.query<{ id: string; workspaceId: string | null }, []>(
+            "SELECT id, workspace_id AS workspaceId FROM agent_runs ORDER BY id",
+        ).all();
+        expect(rows).toEqual([
+            { id: "r1", workspaceId: "w1" },
+            { id: "r2", workspaceId: null },
+            { id: "r3", workspaceId: null },
+            { id: "r4", workspaceId: "w2" },
+        ]);
+        expect(db.query<{ id: string; workspaceId: string | null }, []>(
+            "SELECT id, workspace_id AS workspaceId FROM harness_sessions ORDER BY id",
+        ).all()).toEqual([
+            { id: "s1", workspaceId: "w1" },
+            { id: "s2", workspaceId: null },
+            { id: "s4", workspaceId: "w2" },
+        ]);
+    } finally { db.close(); }
+});
+
 test("重复运行 migration 不会重复应用已有版本", () => {
     const db = openHarnessDatabase(":memory:");
 
@@ -70,7 +106,7 @@ test("重复运行 migration 不会重复应用已有版本", () => {
             `)
             .all();
 
-        expect(rows.map((row) => row.version)).toEqual([1, 2, 3, 4, 5]);
+        expect(rows.map((row) => row.version)).toEqual([1, 2, 3, 4, 5, 6]);
     } finally {
         db.close();
     }
@@ -94,7 +130,7 @@ test("v5 migration 把旧库的 tenant_id 列原地改名为 user_id", () => {
         for (const table of legacyTables) {
             db.exec("ALTER TABLE " + table + " RENAME COLUMN user_id TO tenant_id;");
         }
-        db.exec("DELETE FROM schema_migrations WHERE version = 5;");
+        db.exec("DELETE FROM schema_migrations WHERE version IN (5, 6);");
 
         runMigrations(db);
 
@@ -113,7 +149,7 @@ test("v5 migration 把旧库的 tenant_id 列原地改名为 user_id", () => {
             .query<MigrationVersionRow, []>("SELECT version FROM schema_migrations ORDER BY version ASC")
             .all()
             .map((row) => row.version);
-        expect(versions).toEqual([1, 2, 3, 4, 5]);
+        expect(versions).toEqual([1, 2, 3, 4, 5, 6]);
     } finally {
         db.close();
     }

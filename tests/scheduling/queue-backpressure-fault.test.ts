@@ -101,6 +101,7 @@ test("队列深度超限的提交抛 QueueBackpressureError 且不创建 Run", a
             harnessSessionId: "session-a",
             userInput: "占住并发 slot",
             workspacePath: workspaceA.rootPath,
+            workspaceId: workspaceA.id,
         });
         for (let i = 0; i < 200; i += 1) {
             if (composition.runStore.get(runA.id)?.status === "RUNNING") {
@@ -115,6 +116,7 @@ test("队列深度超限的提交抛 QueueBackpressureError 且不创建 Run", a
             harnessSessionId: "session-b",
             userInput: "排队等待",
             workspacePath: workspaceB.rootPath,
+            workspaceId: workspaceB.id,
         });
         expect(composition.runStore.get(runB.id)?.status).toBe("QUEUED");
         expect(composition.scheduler.listQueue()).toHaveLength(1);
@@ -124,6 +126,7 @@ test("队列深度超限的提交抛 QueueBackpressureError 且不创建 Run", a
             harnessSessionId: "session-c",
             userInput: "应被 backpressure 拒绝",
             workspacePath: workspaceC.rootPath,
+            workspaceId: workspaceC.id,
         })).toThrow(QueueBackpressureError);
 
         expect(composition.runStore.listForUser("user-fault-c", 50)).toHaveLength(0);

@@ -14,15 +14,19 @@ export class HarnessSessionStore {
             createdAt: session.createdAt,
             updatedAt: session.updatedAt,
         };
-        this.db.query<unknown, typeof parameters>(`
+        const result = this.db.query<unknown, typeof parameters>(`
             INSERT INTO harness_sessions (
                 id, user_id, workspace_id, title, runtime_session_ref,
                 created_at, updated_at
-            ) VALUES (
+            ) SELECT
                 $id, $userId, $workspaceId, $title, $runtimeSessionRef,
                 $createdAt, $updatedAt
-            );
+            WHERE EXISTS (SELECT 1 FROM workspaces
+                WHERE id = $workspaceId AND user_id = $userId);
         `).run(parameters);
+        if (result.changes !== 1) {
+            throw new Error("Session 必须绑定所属用户的 Workspace");
+        }
     }
 
     get(id: string): HarnessSession | null {

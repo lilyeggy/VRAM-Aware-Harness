@@ -64,6 +64,7 @@ export * from "./sessions/harness-session-store.ts";
 export * from "./workspaces/workspace-service.ts";
 export * from "./workspaces/workspace-store.ts";
 export * from "./workspaces/workspace-snapshot.ts";
+export * from "./workspaces/workspace-capture-store.ts";
 export * from "./workspaces/run-workspace-result.ts";
 export * from "./workspaces/run-workspace-result-store.ts";
 export * from "./workspaces/run-artifact-store.ts";

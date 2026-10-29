@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { mkdtempSync, writeFileSync, mkdirSync, readFileSync, existsSync, rmSync } from "node:fs";
+import { cpSync, mkdtempSync, writeFileSync, mkdirSync, readFileSync, existsSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { unrestrictedPolicy, type EffectivePolicySnapshot } from "../../src/policies/effective-policy.ts";
@@ -205,4 +205,43 @@ test("P1-1: 硬件隔离驱动未回传 workspaceDiskHostPath 时 fail-closed �
     } finally {
         cleanup();
     }
+});
+
+test("同一 Workspace 的 VM 使用独立基线，不同文件提交，同文件冲突保留成果", async () => {
+    const { templatePath, workspacePath, cleanup } = makeWorkspace();
+    const root = join(workspacePath, "..");
+    const disks = new Map<string, string>();
+    const driver: MicrovmDriver = {
+        name: "firecracker", providesHardwareIsolation: true,
+        async isAvailable() { return true; },
+        async create(options) {
+            const disk = mkdtempSync(join(root, "disk-"));
+            cpSync(options.workspaceSeedPath!, disk, { recursive: true });
+            disks.set(options.id, disk);
+            return { id: options.id, driver: "firecracker", workspacePath: options.workspacePath,
+                workspaceDiskHostPath: disk, createdAt: new Date().toISOString() };
+        },
+        async execute() { return { exitCode: 0, stdout: "", stderr: "" }; },
+        async flushFilesystem() {}, async stopVm() {},
+        async terminate(id) { const disk = disks.get(id); if (disk) rmSync(disk, { recursive: true, force: true }); },
+    };
+    const store = new MemorySandboxStore();
+    const provider = new MicrovmSandboxProvider(store as unknown as SandboxStore, mockSecrets, {
+        driver, workspaceDiskTemplatePath: templatePath, workspaceCommitRoot: join(root, "captures"), vmRuntimeRoot: join(root, "vm"),
+    });
+    try {
+        writeFileSync(join(workspacePath, "shared"), "initial");
+        for (const id of ["one", "two", "three"]) await provider.create({ id, runId: id, workspacePath, policy: strictPolicy() });
+        writeFileSync(join(disks.get("one")!, "shared"), "one");
+        writeFileSync(join(disks.get("two")!, "other"), "two");
+        writeFileSync(join(disks.get("three")!, "shared"), "three");
+        writeFileSync(join(disks.get("three")!, "partial"), "must not appear");
+        await Promise.all([provider.terminate("one"), provider.terminate("two")]);
+        await expect(provider.terminate("three")).rejects.toThrow("提交冲突");
+        expect(readFileSync(join(workspacePath, "shared"), "utf8")).toBe("one");
+        expect(readFileSync(join(workspacePath, "other"), "utf8")).toBe("two");
+        expect(existsSync(join(workspacePath, "partial"))).toBe(false);
+        expect(store.get("three")?.status).toBe("FAILED");
+        expect(existsSync(join(root, "captures", "raw-disks", "three.ext4"))).toBe(true);
+    } finally { cleanup(); }
 });

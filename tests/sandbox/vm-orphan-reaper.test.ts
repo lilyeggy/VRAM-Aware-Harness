@@ -101,6 +101,19 @@ describe("vm-orphan-reaper: pidfile 读写与校验（无平台依赖）", () =>
             expect(readPidFile(tmp)).toBeNull();
         }
     });
+
+    it("保存孤儿磁盘失败时保留运行目录，不能先删成果", async () => {
+        const runDir = resolve(tmp, "vm", "orphan");
+        mkdirSync(runDir, { recursive: true });
+        writePidFile(runDir, 4194301, "fc117", "orphan");
+        writeFileSync(resolve(runDir, "workspace.ext4"), "data");
+        const report = await reapOrphans(resolve(tmp, "vm"), {
+            beforeRemove: async () => { throw new Error("disk full"); },
+        });
+        expect(report.reaped).toBe(0);
+        expect(report.details.join("\n")).toContain("保留孤儿目录");
+        expect(existsSync(resolve(runDir, "workspace.ext4"))).toBe(true);
+    });
 });
 
 describe("vm-orphan-reaper: killPid 安全性（无平台依赖）", () => {

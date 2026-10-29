@@ -11,6 +11,10 @@ test("Session 固定归属 User 和 Workspace，并按最近消息排序", () =>
             VALUES ('workspace-a', 'user-a', 'project', '/tmp/project-a', '2026-08-30T00:00:00.000Z')
         `).run();
         const store = new HarnessSessionStore(db);
+        expect(() => store.create({
+            id: "invalid", userId: "user-b", workspaceId: "workspace-a", title: null,
+            runtimeSessionRef: null, createdAt: "now", updatedAt: "now",
+        })).toThrow("所属用户的 Workspace");
         const conversation = createConversation({
             id: "conversation-a",
             userId: "user-a",

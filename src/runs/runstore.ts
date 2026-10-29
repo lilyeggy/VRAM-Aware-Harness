@@ -43,6 +43,7 @@ interface AgentRunRow {
     status: AgentRunStatus;
     userInput: string;
     workspacePath: string;
+    workspaceId: string | null;
     createdAt: string;
     updatedAt: string;
     startedAt: string | null;
@@ -61,6 +62,13 @@ export type DeduplicatedRunEvent = RunEvent & {
     dedupeKey: string;
 };
 
+export class RunBindingError extends Error {
+    constructor(message: string) {
+        super(message);
+        this.name = "RunBindingError";
+    }
+}
+
 const RUN_LIST_COLUMNS = `
     id,
     user_id AS userId,
@@ -68,6 +76,7 @@ const RUN_LIST_COLUMNS = `
     status,
     user_input AS userInput,
     workspace_path AS workspacePath,
+    workspace_id AS workspaceId,
     created_at AS createdAt,
     updated_at AS updatedAt,
     started_at AS startedAt,
@@ -87,6 +96,7 @@ const RUN_DETAIL_COLUMNS = `
     status,
     user_input AS userInput,
     workspace_path AS workspacePath,
+    workspace_id AS workspaceId,
     created_at AS createdAt,
     updated_at AS updatedAt,
     started_at AS startedAt,
@@ -121,6 +131,7 @@ export class RunStore {
         const parameters = this.runParameters(run);
 
         const createRunAndInitialEvent = this.db.transaction(() => {
+            if (run.workspaceId !== undefined) this.bindManagedSession(run);
             this.db
                 .query<unknown, typeof parameters>(`
                     INSERT INTO agent_runs (
@@ -130,6 +141,7 @@ export class RunStore {
                         status,
                         user_input,
                         workspace_path,
+                        workspace_id,
                         created_at,
                         updated_at,
                         started_at,
@@ -149,6 +161,7 @@ export class RunStore {
                         $status,
                         $userInput,
                         $workspacePath,
+                        $workspaceId,
                         $createdAt,
                         $updatedAt,
                         $startedAt,
@@ -168,6 +181,51 @@ export class RunStore {
         });
 
         createRunAndInitialEvent();
+    }
+
+    /** Claim or validate a managed Session in the same transaction as its first Run. */
+    private bindManagedSession(run: AgentRun): void {
+        const workspace = this.db.query<{ rootPath: string }, [string, string]>(
+            "SELECT root_path AS rootPath FROM workspaces WHERE id = ? AND user_id = ?",
+        ).get(run.workspaceId!, run.userId);
+        if (workspace === null || workspace.rootPath !== run.workspacePath) {
+            throw new RunBindingError("Workspace 不存在或归属不匹配");
+        }
+        const session = this.db.query<{ userId: string; workspaceId: string | null; runtimeRef: string | null }, [string]>(
+            "SELECT user_id AS userId, workspace_id AS workspaceId, runtime_session_ref AS runtimeRef FROM harness_sessions WHERE id = ?",
+        ).get(run.harnessSessionId);
+        if (session !== null && session.userId !== run.userId) {
+            throw new RunBindingError("harnessSessionId 已被其他用户占用");
+        }
+        if (session?.workspaceId != null && session.workspaceId !== run.workspaceId) {
+            throw new RunBindingError("Session 已绑定其他 Workspace");
+        }
+        const history = this.db.query<{ userId: string; workspacePath: string }, [string]>(
+            "SELECT user_id AS userId, workspace_path AS workspacePath FROM agent_runs WHERE harness_session_id = ?",
+        ).all(run.harnessSessionId);
+        if (history.some((item) => item.userId !== run.userId || item.workspacePath !== workspace.rootPath)) {
+            throw new RunBindingError("Session 历史归属不一致，无法确定 Workspace");
+        }
+        if (session?.workspaceId === null) {
+            if (history.length === 0 && session.runtimeRef !== null) {
+                throw new RunBindingError("Session 缺少可验证的 Workspace 绑定");
+            }
+            if (history.length > 0) {
+                const matches = this.db.query<{ count: number }, [string, string]>(
+                    "SELECT COUNT(*) AS count FROM workspaces WHERE user_id = ? AND root_path = ?",
+                ).get(run.userId, workspace.rootPath);
+                if (matches?.count !== 1) {
+                    throw new RunBindingError("Session 历史 Workspace 存在歧义");
+                }
+            }
+            this.db.query("UPDATE harness_sessions SET workspace_id = ? WHERE id = ? AND workspace_id IS NULL")
+                .run(run.workspaceId!, run.harnessSessionId);
+        } else if (session === null) {
+            this.db.query(`INSERT INTO harness_sessions
+                (id, user_id, workspace_id, title, runtime_session_ref, created_at, updated_at)
+                VALUES (?, ?, ?, NULL, NULL, ?, ?)`)
+                .run(run.harnessSessionId, run.userId, run.workspaceId!, run.createdAt, run.createdAt);
+        }
     }
 
     /**
@@ -210,25 +268,6 @@ export class RunStore {
             WHERE user_id = $userId AND harness_session_id = $harnessSessionId
             ORDER BY created_at ASC, rowid ASC;
         `).all({ userId, harnessSessionId }).map((row) => this.runFromRow(row));
-    }
-
-    /**
-     * B6：返回该 harness 会话已被哪个用户使用过（以最早一条 Run 为准）。
-     * null 表示会话尚未被任何用户使用——首次使用即认领。
-     * 会话归属以服务端持久化事实为准，客户端自选的 sessionId 不能抢注。
-     */
-    findSessionOwner(harnessSessionId: string): string | null {
-        const row = this.db
-            .query<Pick<AgentRunRow, "userId">, { harnessSessionId: string }>(`
-                SELECT user_id AS userId
-                FROM agent_runs
-                WHERE harness_session_id = $harnessSessionId
-                ORDER BY created_at ASC, rowid ASC
-                LIMIT 1;
-            `)
-            .get({ harnessSessionId });
-
-        return row?.userId ?? null;
     }
 
     /**
@@ -372,6 +411,13 @@ export class RunStore {
                 throw new Error(`找不到 AgentRun：${run.id}`);
             }
 
+            if (currentRun.userId !== run.userId
+                || currentRun.harnessSessionId !== run.harnessSessionId
+                || currentRun.workspaceId !== run.workspaceId
+                || currentRun.workspacePath !== run.workspacePath) {
+                throw new RunBindingError("Run 的用户、Session 和 Workspace 绑定不可更改");
+            }
+
             assertValidTransition(currentRun.status, run.status);
 
             const parameters = {
@@ -389,6 +435,7 @@ export class RunStore {
                         status = $status,
                         user_input = $userInput,
                         workspace_path = $workspacePath,
+                        workspace_id = $workspaceId,
                         created_at = $createdAt,
                         updated_at = $updatedAt,
                         started_at = $startedAt,
@@ -423,6 +470,7 @@ export class RunStore {
             status: run.status,
             userInput: run.userInput,
             workspacePath: run.workspacePath,
+            workspaceId: run.workspaceId ?? null,
             createdAt: run.createdAt,
             updatedAt: run.updatedAt,
             startedAt: run.startedAt,
@@ -447,6 +495,7 @@ export class RunStore {
             status: row.status,
             userInput: row.userInput,
             workspacePath: row.workspacePath,
+            ...(row.workspaceId === null ? {} : { workspaceId: row.workspaceId }),
             createdAt: row.createdAt,
             updatedAt: row.updatedAt,
             startedAt: row.startedAt,

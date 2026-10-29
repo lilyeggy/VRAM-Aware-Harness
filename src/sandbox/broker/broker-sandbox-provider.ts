@@ -44,6 +44,12 @@ export interface BrokerSandboxProviderOptions {
     readonly resolveUserId?: (sandboxId: string) => string | null;
 }
 
+/** Finalization outcome is not safe to repeat automatically. */
+export class WorkspaceCommitUncertainError extends Error {
+    constructor(message: string) { super(message); this.name = "WorkspaceCommitUncertainError"; }
+}
+class BrokerRemoteError extends Error {}
+
 /**
  * Master/Worker 侧的 Broker 客户端。
  *
@@ -55,6 +61,7 @@ export class BrokerSandboxProvider implements SandboxProvider, SandboxCommandExe
     private readonly userBySandbox = new Map<string, string>();
     /** sandboxId -> capability token，create 时生成/记录，terminate 成功后删除。 */
     private readonly tokenBySandbox = new Map<string, string>();
+    private readonly workspaceBySandbox = new Map<string, string>();
 
     constructor(private readonly options: BrokerSandboxProviderOptions) {}
 
@@ -78,6 +85,7 @@ export class BrokerSandboxProvider implements SandboxProvider, SandboxCommandExe
         });
         this.userBySandbox.set(result.record.id, input.policy.userId);
         this.tokenBySandbox.set(result.record.id, token);
+        this.workspaceBySandbox.set(result.record.id, input.workspacePath);
         this.options.store?.create(result.record);
         return toHandle(result.handle, token);
     }
@@ -95,15 +103,27 @@ export class BrokerSandboxProvider implements SandboxProvider, SandboxCommandExe
                 "无法确定 sandbox " + sandboxId + " 的 capability token，拒绝 terminate（防止越权终止）",
             );
         }
-        await this.request<Record<string, never>>({
-            id: crypto.randomUUID(),
-            op: "terminate",
-            sandboxId,
-            userId,
-            token,
-        });
+        let cleanupConfirmed = true;
+        try {
+            await this.request<Record<string, never>>({ id: crypto.randomUUID(), op: "terminate", sandboxId, userId, token });
+        } catch (error) {
+            if (error instanceof BrokerRemoteError && !this.options.controlToken) throw error;
+            let receipt: { status: "COMMITTED" | "CONFLICT" | "UNKNOWN"; conflicts: readonly string[] } | null;
+            try {
+                receipt = await this.getCommitReceipt(sandboxId);
+            } catch (queryError) {
+                throw new WorkspaceCommitUncertainError(`Workspace 提交结果未知，回执查询失败: ${String(queryError)}`);
+            }
+            if (receipt?.status === "CONFLICT") throw new WorkspaceCommitUncertainError(`Workspace 提交冲突: ${receipt.conflicts.join(", ")}；${String(error)}`);
+            if (receipt?.status !== "COMMITTED") throw new WorkspaceCommitUncertainError(`Workspace 提交结果未知: ${String(error)}`);
+            cleanupConfirmed = false;
+        }
+        // A commit receipt proves filesystem publication, not that VM cleanup
+        // completed. Keep the sandbox unsettled for startup reconciliation.
+        if (!cleanupConfirmed) return;
         this.userBySandbox.delete(sandboxId);
         this.tokenBySandbox.delete(sandboxId);
+        this.workspaceBySandbox.delete(sandboxId);
         const store = this.options.store;
         if (store === undefined) {
             return;
@@ -116,6 +136,14 @@ export class BrokerSandboxProvider implements SandboxProvider, SandboxCommandExe
                 updatedAt: new Date().toISOString(),
             }, "ACTIVE");
         }
+    }
+
+    async getCommitReceipt(sandboxId: string): Promise<{ status: "COMMITTED" | "CONFLICT" | "UNKNOWN"; conflicts: readonly string[] } | null> {
+        const userId = this.resolveUser(sandboxId);
+        const workspacePath = this.workspaceBySandbox.get(sandboxId) ?? this.options.store?.get(sandboxId)?.workspacePath;
+        const token = this.options.controlToken;
+        if (!userId || !workspacePath || !token) throw new Error("缺少查询 Workspace 提交回执所需的身份");
+        return this.request({ id: crypto.randomUUID(), op: "commit_receipt", sandboxId, userId, workspacePath, token });
     }
 
     async execute(
@@ -234,7 +262,7 @@ export class BrokerSandboxProvider implements SandboxProvider, SandboxCommandExe
                     if (parsed.ok) {
                         finish(null, parsed.result as T);
                     } else {
-                        finish(new Error(parsed.error));
+                        finish(new BrokerRemoteError(parsed.error));
                     }
                 } catch (error) {
                     finish(new Error("Invalid broker response: " + String(error)));

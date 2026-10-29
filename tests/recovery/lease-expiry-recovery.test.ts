@@ -1,7 +1,4 @@
 import { expect, test } from "bun:test";
-import { mkdtempSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 
 import {
     createHarnessApplication,
@@ -76,7 +73,7 @@ function insertRunningRun(
     runId: string,
 ): void {
     const timestamp = new Date().toISOString();
-    const workspacePath = mkdtempSync(join(tmpdir(), "harness-lease-ws-"));
+    const workspace = composition.workspaceService.create("user-lease", `lease-${crypto.randomUUID()}`);
     composition.runStore.create(
         {
             id: runId,
@@ -84,7 +81,8 @@ function insertRunningRun(
             harnessSessionId: `session-${runId}`,
             status: "RUNNING",
             userInput: "验证租约过期恢复",
-            workspacePath,
+            workspacePath: workspace.rootPath,
+            workspaceId: workspace.id,
             createdAt: timestamp,
             updatedAt: timestamp,
             startedAt: timestamp,

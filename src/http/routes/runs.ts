@@ -120,20 +120,6 @@ async function submitRun(request: Request, ctx: HttpRouteContext): Promise<Respo
         optionalString(body, "sessionId")
         ?? optionalString(body, "harnessSessionId");
 
-    // B6：会话归属校验——sessionId 首次使用即认领给提交用户；已被
-    // 其他用户使用过则拒绝。防止客户端自选 sessionId 抢注/污染他人会话。
-    if (requestedSessionId !== null) {
-        const sessionOwner = ctx.application.resolveSessionOwner?.(requestedSessionId);
-        if (sessionOwner !== null && sessionOwner !== undefined) {
-            const submitterUserId = ctx.accessControl === undefined
-                ? requiredString(body, "userId")
-                : principal.userId;
-            if (sessionOwner !== submitterUserId) {
-                throw new HttpError(409, "harnessSessionId 已被其他用户占用");
-            }
-        }
-    }
-
     // N15：请求级策略层（RUN 层）。此前 StartRunInput.runPolicy
     // 没有任何产品调用方，受限运行只能靠测试直接调 Runtime。
     const runPolicy = parseRunPolicy(body);
@@ -149,6 +135,7 @@ async function submitRun(request: Request, ctx: HttpRouteContext): Promise<Respo
                 ? requiredString(body, "userId")
                 : principal.userId,
             harnessSessionId: requestedSessionId ?? crypto.randomUUID(),
+            ...(workspace === null ? {} : { sessionIdExplicit: requestedSessionId !== null }),
             userInput: requireUserInput(body, ctx.limits?.maxUserInputChars),
             thinkingLevel: parseThinkingLevel(body),
             ...(idempotencyKey === null ? {} : { idempotencyKey }),
@@ -156,6 +143,7 @@ async function submitRun(request: Request, ctx: HttpRouteContext): Promise<Respo
             workspacePath: ctx.accessControl === undefined
                 ? requiredString(body, "workspacePath")
                 : (workspace as NonNullable<typeof workspace>).rootPath,
+            ...(workspace === null ? {} : { workspaceId: workspace.id }),
         });
     } catch (error) {
         if (error instanceof QueueBackpressureError) {

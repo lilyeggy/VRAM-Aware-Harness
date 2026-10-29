@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { expect, test } from "bun:test";
 import {
     BrokerSandboxProvider,
+    WorkspaceCommitUncertainError,
     type BrokerSandboxProviderOptions,
 } from "../../src/sandbox/broker/broker-sandbox-provider.ts";
 import {
@@ -147,6 +148,21 @@ test("Broker 客户端把 Broker 错误转成 reject", async () => {
         );
     });
 });
+
+for (const status of ["COMMITTED", "CONFLICT", "UNKNOWN"] as const) {
+    test(`终止通信失败后查询提交回执: ${status}`, async () => {
+        const fake = createFakeProvider();
+        const provider = Object.assign(fake.provider, {
+            async terminate() { throw new Error("response lost"); },
+            async getCommitReceipt() { return status === "UNKNOWN" ? null : { status, conflicts: status === "CONFLICT" ? ["a.txt"] : [] }; },
+        });
+        await withBroker(async ({ client }) => {
+            await client.create({ id: "receipt-sandbox", runId: "run", workspacePath: "/tmp/receipt-workspace", policy: { userId: "user-1" } as never });
+            if (status === "COMMITTED") await expect(client.terminate("receipt-sandbox")).resolves.toBeUndefined();
+            else await expect(client.terminate("receipt-sandbox")).rejects.toBeInstanceOf(WorkspaceCommitUncertainError);
+        }, {}, { provider, readRecord: (id) => fake.records.get(id) ?? null });
+    });
+}
 
 test("Broker 拒绝跨用户 execute/terminate", async () => {
     await withBroker(async ({ client, makeClient }) => {

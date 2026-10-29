@@ -48,7 +48,7 @@ describe("工作区磁盘播种（F-K 修复）", () => {
         expect(computeWorkspaceImageBlocks(1024)).toBe(1024);
     });
 
-    test("summarizeSeedDirectory 统计内容并跳过 lost+found 与导出临时目录", () => {
+    test("summarizeSeedDirectory 统计所有内容，包括隐藏目录", () => {
         const dir = scratch();
         mkdirSync(join(dir, "lost+found"));
         mkdirSync(join(dir, ".tmp-dump-123"));
@@ -57,9 +57,8 @@ describe("工作区磁盘播种（F-K 修复）", () => {
         writeFileSync(join(dir, "sub", "b.txt"), "bb");
         writeFileSync(join(dir, "lost+found", "ignored"), "xxxxx");
         const summary = summarizeSeedDirectory(dir);
-        // 目录 sub + 文件 a.txt + 文件 sub/b.txt
-        expect(summary.entries).toBe(3);
-        expect(summary.bytes).toBe(6);
+        expect(summary.entries).toBe(6);
+        expect(summary.bytes).toBe(11);
     });
 
     test("工作区为空时走模板复制快路径（不调用 mke2fs）", async () => {
@@ -109,7 +108,7 @@ describe("工作区磁盘播种（F-K 修复）", () => {
         expect(message).toContain("超过模板容量");
     });
 
-    test.skipIf(hasMke2fs === false)("HARNESS_VM_WORKSPACE_SEED=0 时退回模板复制（逃生阀）", async () => {
+    test("禁用播种时拒绝用空盘代替工作区", async () => {
         const dir = scratch();
         const template = makeTemplate(dir, 16 * 1024 * 1024);
         const seed = join(dir, "workspace");
@@ -119,7 +118,7 @@ describe("工作区磁盘播种（F-K 修复）", () => {
         const previous = process.env[WORKSPACE_SEED_ENV];
         process.env[WORKSPACE_SEED_ENV] = "0";
         try {
-            await prepareWorkspaceDiskFromHost(template, seed, dest);
+            await expect(prepareWorkspaceDiskFromHost(template, seed, dest)).rejects.toThrow("已关闭工作区播种");
         } finally {
             if (previous === undefined) {
                 delete process.env[WORKSPACE_SEED_ENV];
@@ -127,17 +126,21 @@ describe("工作区磁盘播种（F-K 修复）", () => {
                 process.env[WORKSPACE_SEED_ENV] = previous;
             }
         }
-        expect(statSync(dest).size).toBe(statSync(template).size);
-        if (hasDebugfs) {
-            const listing = Bun.spawnSync(["debugfs", "-R", "ls -l /", dest]);
-            const text = new TextDecoder().decode(listing.stdout);
-            expect(text).not.toContain("persist.txt");
-        }
+    });
+
+    test("来源不存在或包含 ext4 保留根目录时拒绝播种", async () => {
+        const dir = scratch();
+        const template = makeTemplate(dir, 16 * 1024 * 1024);
+        const seed = join(dir, "workspace");
+        const dest = join(dir, "out", "workspace.ext4");
+        await expect(prepareWorkspaceDiskFromHost(template, seed, dest)).rejects.toThrow("来源不存在");
+        mkdirSync(join(seed, "lost+found"), { recursive: true });
+        await expect(prepareWorkspaceDiskFromHost(template, seed, dest)).rejects.toThrow("保留目录");
     });
 
     test("接线守卫：Provider 传宿主工作区目录，驱动两条创建路径都经过播种", () => {
         const provider = readFileSync("src/sandbox/microvm/microvm-sandbox-provider.ts", "utf8");
-        expect(provider).toContain("workspaceSeedPath: input.workspacePath");
+        expect(provider).toContain("workspaceSeedPath: baseline?.filesPath ?? input.workspacePath");
         const driver = readFileSync("src/sandbox/microvm/firecracker-sandbox-driver.ts", "utf8");
         const seeded = driver.match(/prepareWorkspaceDiskFromHost\(workspaceTemplate, options\.workspaceSeedPath/g);
         expect(seeded === null ? 0 : seeded.length).toBe(2);

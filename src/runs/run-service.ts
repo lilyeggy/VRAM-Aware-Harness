@@ -13,11 +13,12 @@ import type {
     RunEvent,
     ThinkingLevel,
 } from "./agent-run.ts"
-import type { RunStore } from "./runstore.ts"
+import { RunBindingError, type RunStore } from "./runstore.ts"
 import type { PolicyConstraints } from "../policies/effective-policy.ts";
 import { PolicyRejectionError } from "../policies/effective-policy.ts";
 import type { RunOutputStore } from "./run-output-store.ts";
 import type { RunWorkspaceResultCoordinator } from "../workspaces/run-workspace-result.ts";
+import { WorkspaceCommitUncertainError } from "../sandbox/broker/broker-sandbox-provider.ts";
 import type { ToolExecutionStore } from "../tools/tool-execution-store.ts";
 
 
@@ -26,6 +27,9 @@ export interface StartRunInput {
     harnessSessionId : string;
     userInput : string;
     workspacePath : string;
+    workspaceId?: string;
+    /** Whether the caller explicitly selected a Session, for idempotency checks. */
+    sessionIdExplicit?: boolean;
     runPolicy?: PolicyConstraints;
     thinkingLevel?: ThinkingLevel;
     /** §9.8 v1.4 Phase 2：调度优先级（越大越先调度），缺省 0。 */
@@ -113,6 +117,14 @@ export class RunService{
         return this.store.findByUserIdempotencyKey(userId, idempotencyKey);
     }
 
+    assertIdempotentBinding(existing: AgentRun, input: StartRunInput): void {
+        if (input.workspaceId === undefined) return;
+        if (existing.workspaceId !== input.workspaceId
+            || (input.sessionIdExplicit !== false && existing.harnessSessionId !== input.harnessSessionId)) {
+            throw new RunBindingError("幂等键已用于其他 Workspace 或 Session");
+        }
+    }
+
     createQueuedRun(input : StartRunInput) : AgentRun {
         // §9.8 v1.4 Phase 3：幂等键命中时直接返回既有 Run，不再创建新 Run。
         if (input.idempotencyKey !== undefined && input.idempotencyKey.length > 0) {
@@ -121,6 +133,7 @@ export class RunService{
                 input.idempotencyKey,
             );
             if (existing !== null) {
+                this.assertIdempotentBinding(existing, input);
                 return existing;
             }
         }
@@ -135,6 +148,7 @@ export class RunService{
             status : "QUEUED",
             userInput:input.userInput,
             workspacePath:input.workspacePath,
+            ...(input.workspaceId === undefined ? {} : { workspaceId: input.workspaceId }),
             createdAt:timestamp,
             updatedAt:timestamp,
             startedAt:null,
@@ -168,12 +182,14 @@ export class RunService{
         try {
             this.store.create(run,createdEvent);
         } catch (error) {
+            if (error instanceof RunBindingError) throw error;
             if (input.idempotencyKey !== undefined && input.idempotencyKey.length > 0) {
                 const existing = this.store.findByUserIdempotencyKey(
                     input.userId,
                     input.idempotencyKey,
                 );
                 if (existing !== null) {
+                    this.assertIdempotentBinding(existing, input);
                     return existing;
                 }
             }
@@ -673,7 +689,7 @@ export class RunService{
             return false;
         }
         // 确定性策略拒绝必须 fail-closed，不能退避重试。
-        if (error instanceof PolicyRejectionError) {
+        if (error instanceof PolicyRejectionError || error instanceof WorkspaceCommitUncertainError) {
             return false;
         }
         const before = this.store.get(runId);

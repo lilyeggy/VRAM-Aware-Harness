@@ -1,6 +1,7 @@
 
-import { chownSync, mkdirSync } from "node:fs";
-import { dirname } from "node:path";
+import { chownSync, constants, existsSync, mkdirSync } from "node:fs";
+import { chmod, copyFile, lstat, mkdir, open } from "node:fs/promises";
+import { basename, dirname, join, resolve } from "node:path";
 import { FirecrackerSandboxDriver } from "../microvm/firecracker-sandbox-driver.ts";
 import { MicrovmSandboxProvider } from "../microvm/microvm-sandbox-provider.ts";
 import { reapOrphans } from "../microvm/vm-orphan-reaper.ts";
@@ -36,6 +37,7 @@ const kernelPath = process.env.FIRECRACKER_KERNEL_PATH;
 const rootfsPath = process.env.FIRECRACKER_ROOTFS_PATH;
 const workspaceDiskTemplatePath = process.env.FIRECRACKER_WORKSPACE_DISK_TEMPLATE_PATH;
 const runtimeRoot = process.env.HARNESS_VM_RUNTIME_ROOT ?? "/var/lib/harness/vm";
+const captureRoot = process.env.HARNESS_WORKSPACE_CAPTURE_ROOT ?? resolve(runtimeRoot, "..", "workspace-captures");
 const useJailer = process.env.HARNESS_USE_JAILER === "true";
 const snapshotsEnabled = process.env.HARNESS_VM_SNAPSHOTS_ENABLED === "true";
 const controlToken = process.env.HARNESS_SANDBOX_BROKER_CONTROL_TOKEN;
@@ -111,7 +113,20 @@ if (useJailer) {
 }
 
 const binaryName = (useJailer ? (jailerPath ?? binaryPath) : binaryPath).split("/").pop() ?? binaryPath;
-const reapReport = await reapOrphans(runtimeRoot, { binaryName });
+const reapReport = await reapOrphans(runtimeRoot, { binaryName, beforeRemove: async (runDir) => {
+    const id = basename(runDir);
+    const candidates = [join(runDir, "workspace.ext4"), join(runDir, "jailer", basename(binaryPath), id, "root", "workspace.ext4")];
+    const disk = candidates.find((path) => existsSync(path));
+    if (!disk) return;
+    if (!(await lstat(disk)).isFile()) throw new Error("孤儿工作区磁盘不是普通文件");
+    const orphanRoot = join(captureRoot, "orphan-disks");
+    await mkdir(orphanRoot, { recursive: true, mode: 0o700 });
+    const target = join(orphanRoot, `${id}-${crypto.randomUUID()}.ext4`);
+    await copyFile(disk, target, constants.COPYFILE_EXCL);
+    await chmod(target, 0o600);
+    const file = await open(target, "r");
+    try { await file.sync(); } finally { await file.close(); }
+} });
 if (reapReport.reaped > 0) {
     console.log("[sandbox-broker] 回收孤儿 VM " + reapReport.reaped + " 个");
 }
@@ -141,6 +156,7 @@ const provider = new MicrovmSandboxProvider(
         driver,
         workspaceDiskTemplatePath,
         vmRuntimeRoot: runtimeRoot,
+        workspaceCommitRoot: captureRoot,
     },
 );
 

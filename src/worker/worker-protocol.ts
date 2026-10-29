@@ -14,6 +14,7 @@ import type { PiCompactionConfig } from "../runtime/pi-adapter.ts";
 import type { McpServerConfig } from "../mcp/mcp-protocol.ts";
 import type { SandboxProfile } from "../sandbox/sandbox-profile.ts";
 import type { ExecuteToolInput } from "../tools/tool-gateway.ts";
+import type { SandboxEnforcementCapabilities } from "../sandbox/sandbox-provider.ts";
 
 export const WORKER_PROTOCOL_VERSION = 2;
 
@@ -129,13 +130,24 @@ export interface ToolCompleteResponseMessage {
     readonly timestamp?: string;
 }
 
+/** Master grants only the sandbox for this Run, after policy/admission checks. */
+export interface SandboxAcquireResponseMessage {
+    readonly type: "SANDBOX_ACQUIRE_RESPONSE";
+    readonly runId: string;
+    readonly requestId: number;
+    readonly result: { readonly ok: true; readonly sandboxId: string; readonly token?: string;
+        readonly enforcement: SandboxEnforcementCapabilities; readonly mountRoot: string; readonly workdir: string }
+        | { readonly ok: false; readonly error: string };
+}
+
 export type MasterToWorkerMessage =
     | StartRunMessage
     | ResumeRunMessage
     | InterruptRunMessage
     | ShutdownMessage
     | ToolPrepareResponseMessage
-    | ToolCompleteResponseMessage;
+    | ToolCompleteResponseMessage
+    | SandboxAcquireResponseMessage;
 
 // ============================================================================
 // 4. Worker -> Master Messages
@@ -185,6 +197,12 @@ export interface ToolPrepareRequestMessage {
     readonly timestamp?: string;
 }
 
+export interface SandboxAcquireRequestMessage {
+    readonly type: "SANDBOX_ACQUIRE_REQUEST";
+    readonly runId: string;
+    readonly requestId: number;
+}
+
 export interface ToolCompleteRequestMessage {
     readonly type: "TOOL_COMPLETE_REQUEST";
     readonly runId: string;
@@ -203,7 +221,8 @@ export type WorkerToMasterMessage =
     | RunFailedMessage
     | RunInterruptedMessage
     | ToolPrepareRequestMessage
-    | ToolCompleteRequestMessage;
+    | ToolCompleteRequestMessage
+    | SandboxAcquireRequestMessage;
 
 /**
  * ToolGateway prepare 阶段跨 IPC 的裁决载荷。
@@ -233,6 +252,7 @@ const MASTER_TO_WORKER_TYPES = new Set<unknown>([
     "SHUTDOWN",
     "TOOL_PREPARE_RESPONSE",
     "TOOL_COMPLETE_RESPONSE",
+    "SANDBOX_ACQUIRE_RESPONSE",
 ]);
 
 const WORKER_TO_MASTER_TYPES = new Set<unknown>([
@@ -243,6 +263,7 @@ const WORKER_TO_MASTER_TYPES = new Set<unknown>([
     "RUN_INTERRUPTED",
     "TOOL_PREPARE_REQUEST",
     "TOOL_COMPLETE_REQUEST",
+    "SANDBOX_ACQUIRE_REQUEST",
 ]);
 
 function hasMessageType(value: unknown, knownTypes: ReadonlySet<unknown>): boolean {
@@ -252,11 +273,26 @@ function hasMessageType(value: unknown, knownTypes: ReadonlySet<unknown>): boole
 }
 
 export function isMasterToWorkerMessage(value: unknown): value is MasterToWorkerMessage {
-    return hasMessageType(value, MASTER_TO_WORKER_TYPES);
+    if (!hasMessageType(value, MASTER_TO_WORKER_TYPES)) return false;
+    const message = value as { type: string; runId?: unknown; requestId?: unknown; result?: unknown };
+    if (message.type !== "SANDBOX_ACQUIRE_RESPONSE") return true;
+    if (typeof message.runId !== "string" || message.runId.length === 0
+        || !Number.isSafeInteger(message.requestId) || (message.requestId as number) <= 0
+        || typeof message.result !== "object" || message.result === null) return false;
+    const result = message.result as Record<string, unknown>;
+    if (result.ok === false) return typeof result.error === "string";
+    return result.ok === true && typeof result.sandboxId === "string" && result.sandboxId.length > 0
+        && (result.token === undefined || typeof result.token === "string")
+        && typeof result.mountRoot === "string" && typeof result.workdir === "string"
+        && typeof result.enforcement === "object" && result.enforcement !== null;
 }
 
 export function isWorkerToMasterMessage(value: unknown): value is WorkerToMasterMessage {
-    return hasMessageType(value, WORKER_TO_MASTER_TYPES);
+    if (!hasMessageType(value, WORKER_TO_MASTER_TYPES)) return false;
+    const message = value as { type: string; runId?: unknown; requestId?: unknown };
+    if (message.type !== "SANDBOX_ACQUIRE_REQUEST") return true;
+    return typeof message.runId === "string" && message.runId.length > 0
+        && Number.isSafeInteger(message.requestId) && (message.requestId as number) > 0;
 }
 
 // ============================================================================

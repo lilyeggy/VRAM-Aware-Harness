@@ -105,6 +105,39 @@ function renameScopeColumnToUserId(db: Database): void {
     }
 }
 
+function addRunWorkspaceIdentity(db: Database): void {
+    const columns = db.query<{ name: string }, []>("SELECT name FROM pragma_table_info('agent_runs')").all();
+    if (!columns.some((column) => column.name === "workspace_id")) {
+        db.exec("ALTER TABLE agent_runs ADD COLUMN workspace_id TEXT REFERENCES workspaces(id)");
+    }
+    db.exec(`UPDATE agent_runs AS r SET workspace_id = (
+        SELECT w.id FROM workspaces AS w
+        WHERE w.user_id = r.user_id AND w.root_path = r.workspace_path LIMIT 1
+    ) WHERE r.workspace_id IS NULL AND (
+        SELECT COUNT(*) FROM workspaces AS w
+        WHERE w.user_id = r.user_id AND w.root_path = r.workspace_path
+    ) = 1`);
+    // A queued legacy Run could predate creation of its Session. Recreate it only
+    // when every historical Run agrees on one user and one managed Workspace.
+    db.exec(`INSERT INTO harness_sessions
+        (id, user_id, workspace_id, title, runtime_session_ref, created_at, updated_at)
+        SELECT r.harness_session_id, MIN(r.user_id), MIN(r.workspace_id), NULL, NULL,
+               MIN(r.created_at), MAX(r.updated_at)
+        FROM agent_runs AS r
+        WHERE NOT EXISTS (SELECT 1 FROM harness_sessions AS s WHERE s.id = r.harness_session_id)
+        GROUP BY r.harness_session_id
+        HAVING COUNT(DISTINCT r.user_id) = 1 AND COUNT(DISTINCT r.workspace_id) = 1
+           AND COUNT(r.workspace_id) = COUNT(*)`);
+    db.exec(`UPDATE harness_sessions AS s SET workspace_id = (
+        SELECT MIN(r.workspace_id) FROM agent_runs AS r WHERE r.harness_session_id = s.id
+    ) WHERE s.workspace_id IS NULL
+      AND EXISTS (SELECT 1 FROM agent_runs AS r WHERE r.harness_session_id = s.id)
+      AND NOT EXISTS (SELECT 1 FROM agent_runs AS r WHERE r.harness_session_id = s.id
+        AND (r.user_id <> s.user_id OR r.workspace_id IS NULL))
+      AND (SELECT COUNT(DISTINCT r.workspace_id) FROM agent_runs AS r
+           WHERE r.harness_session_id = s.id) = 1`);
+}
+
 
 export const migrations: readonly SchemaMigration[] = [
     {
@@ -131,5 +164,10 @@ export const migrations: readonly SchemaMigration[] = [
         version: 5,
         name: "scope_column_user_id",
         up: renameScopeColumnToUserId,
+    },
+    {
+        version: 6,
+        name: "run_workspace_identity",
+        up: addRunWorkspaceIdentity,
     },
 ];

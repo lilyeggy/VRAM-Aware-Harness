@@ -52,6 +52,7 @@ export interface BrokerExecuteOptions {
 
 export type BrokerRequest =
     | { readonly id: string; readonly op: "ping" }
+    | { readonly id: string; readonly op: "commit_receipt"; readonly sandboxId: string; readonly userId: string; readonly workspacePath: string; readonly token: string }
     | { readonly id: string; readonly op: "create"; readonly input: BrokerCreateInput }
     | {
         readonly id: string;
@@ -107,6 +108,10 @@ export function isBrokerRequest(value: unknown): value is BrokerRequest {
             && input.controlToken.length > 0
             && typeof input.token === "string"
             && input.token.length > 0;
+    }
+    if (candidate.op === "commit_receipt") {
+        const query = value as { sandboxId?: unknown; workspacePath?: unknown; userId?: unknown; token?: unknown };
+        return [query.sandboxId, query.workspacePath, query.userId, query.token].every((v) => typeof v === "string" && v.length > 0);
     }
     return candidate.op === "ping";
 }

@@ -4,6 +4,7 @@ import { digest } from "../auth/api-credential-store.ts";
 import { hasScope } from "../auth/request-principal.ts";
 import type { LlmGateway } from "../llm-gateway/llm-gateway.ts";
 import type { AgentRun } from "../runs/agent-run.ts";
+import { RunBindingError } from "../runs/runstore.ts";
 import type {
     CheckpointLookup,
     HarnessHttpApplication,
@@ -56,6 +57,10 @@ export class HarnessHttpApi implements HttpRouteContext {
             this.recordHttpStatus(response.status);
             return response;
         } catch (error) {
+            if (error instanceof RunBindingError) {
+                this.recordHttpStatus(409);
+                return jsonResponse({ error: error.message }, 409);
+            }
             if (error instanceof HttpError) {
                 this.recordHttpStatus(error.status);
                 return jsonResponse({ error: error.message }, error.status, error.headers);

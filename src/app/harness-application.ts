@@ -29,6 +29,7 @@ import type { HarnessSessionStore } from "../sessions/harness-session-store.ts";
 import { summarizeToolDenials, type RunLimitation } from "../policies/run-limitations.ts";
 import type { ToolExecution } from "../tools/tool-execution.ts";
 import type { HarnessMetricsSnapshot } from "../observability/metrics.ts";
+import { RunBindingError } from "../runs/runstore.ts";
 
 /**
  * N16：人工消解 UNKNOWN_EFFECT 只需要"读未决执行 + 作废它"两个能力，
@@ -86,6 +87,8 @@ export class HarnessApplication {
         private readonly toolPolicyStore?: { listToolDecisions(runId: string): readonly { toolName: string; action: string; reason: string; decidedAt: string }[] },
         /** N16：工具执行库（人工消解 UNKNOWN_EFFECT）。 */
         private readonly toolExecutions?: ToolExecutionReviewStore,
+        private readonly requireManagedWorkspace = false,
+        private readonly workspaceLookup?: { getForUser(id: string, userId: string): unknown | null },
     ) {}
 
     private async startOnce() : Promise<void> {
@@ -164,6 +167,10 @@ export class HarnessApplication {
     submitRun(input:StartRunInput):AgentRun {
         this.assertStarted();
 
+        if (this.requireManagedWorkspace && input.workspaceId === undefined) {
+            throw new RunBindingError("提交 Run 必须指定受管 Workspace");
+        }
+
         const run = this.coordinator.submit(input);
 
         // 不等待 Run 执行结束，但是立即请求调度，不必等下一个轮询周期
@@ -199,6 +206,9 @@ export class HarnessApplication {
         if (this.conversationStore === undefined) {
             throw new Error("对话服务未启用");
         }
+        if (this.requireManagedWorkspace && this.workspaceLookup?.getForUser(input.workspaceId, input.userId) == null) {
+            throw new RunBindingError("Workspace 不存在或归属不匹配");
+        }
         const conversation = createConversation(input);
         this.conversationStore.create({ ...conversation, runtimeSessionRef: null });
         return conversation;
@@ -214,14 +224,6 @@ export class HarnessApplication {
 
     getRunsForConversation(userId: string, conversationId: string): AgentRun[] {
         return this.runStore.listForSession(userId, conversationId);
-    }
-
-    /**
-     * B6：会话归属（以最早一条 Run 的用户为准）；null 表示未被使用。
-     * HTTP 层用它阻止客户端自选 sessionId 抢注其他用户的会话。
-     */
-    resolveSessionOwner(harnessSessionId: string): string | null {
-        return this.runStore.findSessionOwner(harnessSessionId);
     }
 
     touchConversation(id: string, userId: string): void {

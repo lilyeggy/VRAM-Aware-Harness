@@ -190,6 +190,14 @@ export class SandboxBrokerServer {
         switch (request.op) {
             case "ping":
                 return { pid: process.pid };
+            case "commit_receipt": {
+                this.assertControlToken(request.token);
+                const provider = this.options.provider as typeof this.options.provider & {
+                    getCommitReceipt?: (sandboxId: string, userId: string, workspacePath: string) => Promise<unknown>;
+                };
+                if (!provider.getCommitReceipt) throw new Error("Workspace 提交回执未启用");
+                return provider.getCommitReceipt(request.sandboxId, request.userId, request.workspacePath);
+            }
             case "create": {
                 this.assertControlToken(request.input.controlToken);
                 if (this.sandboxByToken.has(request.input.token)) {
@@ -249,7 +257,7 @@ export class SandboxBrokerServer {
         const allowed = this.options.allowedPeerUids;
         const required = request.op === "execute"
             ? this.options.workerPeerUid
-            : request.op === "create" || request.op === "terminate"
+            : request.op === "create" || request.op === "terminate" || request.op === "commit_receipt"
                 ? this.options.masterPeerUid
                 : undefined;
         if ((allowed === undefined || allowed.size === 0) && required === undefined) {

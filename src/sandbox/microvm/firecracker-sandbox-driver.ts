@@ -196,15 +196,12 @@ export function computeWorkspaceImageBlocks(templateBytes: number): number {
     return Math.max(1024, Math.floor(templateBytes / 4096));
 }
 
-/** 统计播种目录内容（跳过 lost+found 与导出临时目录），用于容量预检。 */
+/** 统计实际播种内容，用于容量预检。 */
 export function summarizeSeedDirectory(dir: string): { entries: number; bytes: number } {
     let entries = 0;
     let bytes = 0;
     const walk = (current: string): void => {
         for (const entry of readdirSync(current, { withFileTypes: true })) {
-            if (entry.name === "lost+found" || entry.name.startsWith(".tmp-")) {
-                continue;
-            }
             const itemPath = join(current, entry.name);
             if (entry.isDirectory()) {
                 entries += 1;
@@ -239,11 +236,16 @@ export async function prepareWorkspaceDiskFromHost(
     mkdirSync(dirname(destination), { recursive: true, mode: 0o700 });
     if (
         seedPath === undefined
-        || process.env[WORKSPACE_SEED_ENV] === "0"
-        || existsSync(seedPath) === false
     ) {
         await copyFileReflink(templatePath, destination);
         return { seeded: false };
+    }
+    if (process.env[WORKSPACE_SEED_ENV] === "0") {
+        throw new Error("已关闭工作区播种，拒绝以空盘代替指定的 Workspace");
+    }
+    if (!existsSync(seedPath)) throw new Error(`工作区播种来源不存在: ${seedPath}`);
+    if (existsSync(join(seedPath, "lost+found"))) {
+        throw new Error("Workspace 根目录含 ext4 保留目录 lost+found，无法可靠播种");
     }
     const seed = summarizeSeedDirectory(seedPath);
     if (seed.entries === 0) {
@@ -260,12 +262,8 @@ export async function prepareWorkspaceDiskFromHost(
         );
     }
     const blocks = computeWorkspaceImageBlocks(templateBytes);
-    // 宿主机未装 e2fsprogs 时退化为空盘模板复制并留一行警告：
-    // 仅缺一个工具就让所有 Run 失败不合理；退化不等于静默（有日志可查）。
     if (Bun.which("mke2fs") === null) {
-        console.warn("[workspace-seed] mke2fs 不可用，退化为空盘模板（guest 看不到工作区既有文件）");
-        await copyFileReflink(templatePath, destination);
-        return { seeded: false };
+        throw new Error("mke2fs 不可用，拒绝以空盘代替非空 Workspace");
     }
     const proc = Bun.spawn(
         [
@@ -1220,13 +1218,9 @@ export class FirecrackerSandboxDriver implements MicrovmDriver {
 
     async flushFilesystem(vmId: string): Promise<void> {
         const bridge = this.vsockBridges.get(vmId);
-        if (bridge) {
-            try {
-                await bridge.execute(["sync"], { timeoutMs: 5000 });
-            } catch {
-                // best-effort
-            }
-        }
+        if (!bridge) throw new Error(`无法同步 VM 文件系统：vsock 不存在 (${vmId})`);
+        const result = await bridge.execute(["sync"], { timeoutMs: 5000 });
+        if (result.exitCode !== 0 || result.timedOut) throw new Error(`VM 文件系统同步失败 (${vmId})`);
     }
 
     /**
@@ -1249,12 +1243,15 @@ export class FirecrackerSandboxDriver implements MicrovmDriver {
 
         const proc = this.processes.get(vmId);
         if (proc) {
-            this.processes.delete(vmId);
             try {
                 proc.kill("SIGKILL");
             } catch {
                 // Already killed
             }
+            if (proc.pid !== undefined && !(await waitForExitAsync(proc.pid))) {
+                throw new Error(`无法确认 Firecracker 进程已停止（vmId=${vmId}）`);
+            }
+            this.processes.delete(vmId);
         } else {
             // 内存 Map 查不到（典型场景：Harness 重启后回收上一个进程的遗留 VM）。
             // 改用 pid 兜底，否则这里会静默返回，VM 继续吃宿主内存。

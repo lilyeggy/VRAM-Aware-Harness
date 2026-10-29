@@ -215,11 +215,17 @@ function seedFirstProcess(databasePath:string):{
             runStore,
             new DemoAgentRuntime(),
         );
+        const insertWorkspace = database.query(`INSERT INTO workspaces
+            (id, user_id, name, root_path, created_at) VALUES (?, ?, ?, ?, ?)`);
+        const now = new Date().toISOString();
+        insertWorkspace.run("day7-workspace-a", "user-a", "workspace-a", "/tmp/day7-workspace-a", now);
+        insertWorkspace.run("day7-workspace-b", "user-b", "workspace-b", "/tmp/day7-workspace-b", now);
         const recoveryRun = runService.createQueuedRun({
             userId:"user-a",
             harnessSessionId:"session-a",
             userInput:"分析当前项目测试结构",
             workspacePath:"/tmp/day7-workspace-a",
+            workspaceId:"day7-workspace-a",
         });
         const startedAt = new Date().toISOString();
 
@@ -273,6 +279,7 @@ function seedFirstProcess(databasePath:string):{
             harnessSessionId:"session-b",
             userInput:"总结 Harness 的架构边界",
             workspacePath:"/tmp/day7-workspace-b",
+            workspaceId:"day7-workspace-b",
         });
 
         return {

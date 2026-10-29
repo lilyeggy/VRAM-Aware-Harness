@@ -216,7 +216,9 @@ export function removePidFile(runDir: string): void {
  */
 export async function reapOrphans(
     runtimeRoot: string,
-    options: { readonly binaryName?: string; readonly procRoot?: string; readonly dryRun?: boolean } = {},
+    options: { readonly binaryName?: string; readonly procRoot?: string; readonly dryRun?: boolean;
+        /** Called after the VM is confirmed stopped, before its directory is removed. */
+        readonly beforeRemove?: (runDir: string) => Promise<void> } = {},
 ): Promise<ReapOrphansReport> {
     const binaryName = options.binaryName ?? "firecracker";
     const procRoot = options.procRoot ?? "/proc";
@@ -260,6 +262,10 @@ export async function reapOrphans(
                 + (dryRun ? "（dry-run，未删）" : ""),
             );
             if (!dryRun) {
+                if (options.beforeRemove) {
+                    try { await options.beforeRemove(runDir); }
+                    catch (error) { details.push(`保留孤儿目录 ${runDir}: ${String(error)}`); continue; }
+                }
                 rmSync(runDir, { recursive: true, force: true });
                 reaped += 1;
             }
@@ -276,6 +282,10 @@ export async function reapOrphans(
         const exited = signalled && await waitForExitAsync(pidFile.pid);
 
         if (exited) {
+            if (options.beforeRemove) {
+                try { await options.beforeRemove(runDir); }
+                catch (error) { details.push(`保留孤儿目录 ${runDir}: ${String(error)}`); continue; }
+            }
             details.push(`pid=${pidFile.pid} 孤儿 Firecracker 已回收，清理 ${runDir}`);
             rmSync(runDir, { recursive: true, force: true });
             reaped += 1;

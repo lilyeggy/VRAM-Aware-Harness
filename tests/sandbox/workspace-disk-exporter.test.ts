@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
-import { mkdirSync, rmSync, writeFileSync, symlinkSync, existsSync, readFileSync } from "node:fs";
+import { chmodSync, mkdirSync, rmSync, writeFileSync, symlinkSync, existsSync, readFileSync, statSync } from "node:fs";
 import { resolve, join } from "node:path";
 import { WorkspaceDiskExporter, isWithin } from "../../src/sandbox/microvm/workspace-disk-exporter";
 
@@ -61,4 +61,37 @@ describe("WorkspaceDiskExporter", () => {
         expect(res.bytesWritten).toBe(0);
         expect(res.skipped).toEqual([]);
     });
+
+    it.skipIf(Bun.which("debugfs") === null)("debugfs 对损坏磁盘返回诊断时拒绝假成功", async () => {
+        const disk = join(testDir, "invalid.ext4");
+        writeFileSync(disk, "not an ext4 image");
+        await expect(new WorkspaceDiskExporter().exportToHost(disk, dstDir))
+            .rejects.toThrow("debugfs 工作区导出失败");
+    });
+
+    it("完整采集目录源时不写入共享工作区，缺失来源直接失败", async () => {
+        writeFileSync(join(srcDir, "data"), "result");
+        const exporter = new WorkspaceDiskExporter();
+        const text = await exporter.withStoppedDiskContents(srcDir, async (source) => readFileSync(join(source, "data"), "utf8"));
+        expect(text).toBe("result");
+        expect(existsSync(join(dstDir, "data"))).toBe(false);
+        await expect(exporter.withStoppedDiskContents(join(testDir, "missing"), async () => undefined)).rejects.toThrow();
+    });
+
+    it.skipIf(process.geteuid?.() !== 0 || Bun.which("debugfs") === null || Bun.which("mke2fs") === null)(
+        "真实 ext4 完整导出保留文件权限和空目录，并移除空的系统 lost+found", async () => {
+            mkdirSync(join(srcDir, "empty"));
+            writeFileSync(join(srcDir, "script"), "hello");
+            chmodSync(join(srcDir, "script"), 0o751);
+            const disk = join(testDir, "disk.ext4");
+            expect(Bun.spawnSync(["truncate", "-s", "32M", disk]).exitCode).toBe(0);
+            expect(Bun.spawnSync(["mke2fs", "-q", "-t", "ext4", "-F", "-d", srcDir, disk]).exitCode).toBe(0);
+            await new WorkspaceDiskExporter().withStoppedDiskContents(disk, async (source) => {
+                expect(readFileSync(join(source, "script"), "utf8")).toBe("hello");
+                expect(statSync(join(source, "script")).mode & 0o777).toBe(0o751);
+                expect(statSync(join(source, "empty")).isDirectory()).toBe(true);
+                expect(existsSync(join(source, "lost+found"))).toBe(false);
+            });
+        },
+    );
 });

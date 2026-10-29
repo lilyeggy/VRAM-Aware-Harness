@@ -66,6 +66,10 @@ tmp/
 # 讲解/展示类 HTML 文档只在本地保留，不提交
 docs/isolation-deep-dive.zh-CN.html
 docs/scenario-compliance-report.zh-CN.html
+docs/vm-architecture.zh-CN.html
+docs/vm-deep-dive.zh-CN.html
+docs/vm-hardware-guide.zh-CN.html
+docs/vm-tabs.zh-CN.html
 
 # 本地归档区：只保留本机，不入库
 .local-archive/

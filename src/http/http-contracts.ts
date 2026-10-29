@@ -36,8 +36,6 @@ export interface HarnessHttpApplication {
     getConversationsForWorkspace?(userId: string, workspaceId: string): Conversation[];
     getRunsForConversation?(userId: string, conversationId: string): AgentRun[];
     touchConversation?(id: string, userId: string): void;
-    /** B6：会话归属查询；未提供时跳过会话抢注校验（兼容最小装配）。 */
-    resolveSessionOwner?(harnessSessionId: string): string | null;
     getRunEvents(runId:string):RunEvent[];
     getRunTrace(runId:string):RunTrace | null;
     getRunOutput(runId:string):{ chunks: RunOutputChunk[]; finalText: string; thinkingText?: string };

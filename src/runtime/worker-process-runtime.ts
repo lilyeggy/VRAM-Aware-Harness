@@ -48,6 +48,7 @@ export interface WorkerToolGatewayBridge {
 }
 
 export interface WorkerProcessRuntimeOptions {
+    readonly sandboxAcquirers?: Map<string, () => Promise<import("../sandbox/sandbox-provider.ts").SandboxHandle>>;
     readonly workerScriptPath?: string;
     readonly bunCommand?: string;
     readonly cwd?: string;
@@ -172,6 +173,7 @@ export class WorkerProcessAgentRuntime implements AgentRuntime {
                 send(createStartRunMessage(request.run.runId, request, this.options.workerConfig));
             },
             request.execution?.sandboxId,
+            request.execution?.lazySandbox === true,
         );
     }
 
@@ -182,6 +184,7 @@ export class WorkerProcessAgentRuntime implements AgentRuntime {
                 send(createResumeRunMessage(request.run.runId, request, this.options.workerConfig));
             },
             request.execution?.sandboxId,
+            request.execution?.lazySandbox === true,
         );
     }
 
@@ -248,6 +251,7 @@ export class WorkerProcessAgentRuntime implements AgentRuntime {
         runId: string,
         onReady: (send: (msg: MasterToWorkerMessage) => void) => void,
         sandboxId?: string,
+        lazySandbox = false,
     ): Promise<void> {
         if (this.activeWorkers.has(runId)) {
             throw new Error(`Run 已在 Worker 进程中执行：${runId}`);
@@ -337,6 +341,7 @@ export class WorkerProcessAgentRuntime implements AgentRuntime {
             throw spawnErr;
         }
 
+        let interruptedAcknowledged = false;
         let completedNormally = false;
         let readyReceived = false;
         const stderrLines: string[] = [];
@@ -427,9 +432,26 @@ export class WorkerProcessAgentRuntime implements AgentRuntime {
                                 rejectPromise(new Error(msg.error));
                                 break;
                             case "RUN_INTERRUPTED":
-                                completedNormally = true;
-                                resolvePromise();
+                                interruptedAcknowledged = true;
+                                if (!lazySandbox) { completedNormally = true; resolvePromise(); }
                                 break;
+                            case "SANDBOX_ACQUIRE_REQUEST": {
+                                const acquire = msg.runId === runId ? this.options.sandboxAcquirers?.get(runId) : undefined;
+                                void (async () => {
+                                    try {
+                                        if (!acquire) throw new Error("Run 未授权申请 Sandbox");
+                                        const handle = await acquire();
+                                        send({ type: "SANDBOX_ACQUIRE_RESPONSE", runId, requestId: msg.requestId,
+                                            result: { ok: true, sandboxId: handle.id, token: handle.capabilityToken,
+                                                enforcement: handle.enforcement, mountRoot: handle.mountRoot,
+                                                workdir: handle.containerWorkdir } });
+                                    } catch (error) {
+                                        send({ type: "SANDBOX_ACQUIRE_RESPONSE", runId, requestId: msg.requestId,
+                                            result: { ok: false, error: error instanceof Error ? error.message : String(error) } });
+                                    }
+                                })();
+                                break;
+                            }
                             case "TOOL_PREPARE_REQUEST":
                                 this.handleToolPrepareRequest(runId, msg, send);
                                 break;
@@ -461,6 +483,10 @@ export class WorkerProcessAgentRuntime implements AgentRuntime {
                 }
             }
 
+            if (lazySandbox && interruptedAcknowledged) {
+                completedNormally = true;
+                resolvePromise();
+            }
             if (!completedNormally) {
                 // Ensure orphan sandbox is reclaimed on ANY abnormal worker termination
                 await triggerSandboxCleanup();

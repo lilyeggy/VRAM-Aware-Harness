@@ -23,7 +23,7 @@ export function createHarnessSession(
         HarnessSession,
         "runtimeSessionRef" | "updatedAt" | "workspaceId" | "title"
     > & {
-        workspaceId?: string | null;
+        workspaceId: string;
         title?: string | null;
     },
 ): HarnessSession {
@@ -33,9 +33,9 @@ export function createHarnessSession(
     if (input.userId.trim().length === 0) {
         throw new Error("userId 不能为空");
     }
-    const workspaceId = input.workspaceId ?? null;
+    const workspaceId = input.workspaceId;
     const title = input.title ?? null;
-    if (workspaceId !== null && workspaceId.trim().length === 0) {
+    if (workspaceId.trim().length === 0) {
         throw new Error("workspaceId 不能为空字符串");
     }
     if (title !== null && title.trim().length === 0) {

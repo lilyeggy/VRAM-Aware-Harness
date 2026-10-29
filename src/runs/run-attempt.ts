@@ -60,7 +60,7 @@ export function startRunAttempt(
     attempt: RunAttempt,
     startedAt: string,
     policySnapshotId: string,
-    sandboxId: string,
+    sandboxId: string | null,
 ): RunAttempt {
     if (attempt.status !== "PENDING") {
         throw new Error(`只有 PENDING Attempt 可以启动：${attempt.id}`);

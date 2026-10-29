@@ -64,7 +64,7 @@ export class RecoveryService {
         const preparedExecutions =
             this.toolExecutionStore.listPreparedForRun(runId);
         const checkpoint = this.getValidCheckpoint(run);
-        const decision = decideRecovery(
+        const decision = this.hasUnresolvedCommit(runId) ? uncertainCommitDecision() : decideRecovery(
             checkpoint?.id ?? null,
             preparedExecutions,
             createSessionRefCheck(checkpoint, this.isSessionRefReachable),
@@ -90,7 +90,7 @@ export class RecoveryService {
                 activeRun.id,
             );
         const checkpoint = this.getValidCheckpoint(activeRun);
-        const decision = decideRecovery(
+        const decision = this.hasUnresolvedCommit(activeRun.id) ? uncertainCommitDecision() : decideRecovery(
             checkpoint?.id ?? null,
             preparedExecutions,
             createSessionRefCheck(checkpoint, this.isSessionRefReachable),
@@ -144,6 +144,12 @@ export class RecoveryService {
         };
     }
 
+    private hasUnresolvedCommit(runId: string): boolean {
+        const events = this.runStore.listEvents(runId);
+        const lastStart = events.filter((event) => event.type === "RUN_STARTED" || event.type === "RUN_RESUMED").at(-1)?.sequence ?? 0;
+        return events.some((event) => event.type === "WORKSPACE_COMMIT_STARTED" && event.sequence > lastStart);
+    }
+
     /**
      * agent_runs.checkpoint_id 目前没有 SQLite 外键，因此这里主动校验
      * Checkpoint 是否存在且确实属于当前 Run；不一致时按“无恢复点”处理。
@@ -167,4 +173,8 @@ export class RecoveryService {
 
         return checkpoint;
     }
+}
+
+function uncertainCommitDecision(): RecoveryDecision {
+    return { action: "MANUAL_REVIEW", reason: "WORKSPACE_COMMIT_UNCERTAIN", blockingToolExecutionId: null };
 }

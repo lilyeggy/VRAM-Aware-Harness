@@ -155,6 +155,7 @@ export function createGatewayPiTools(
     sandboxExecutor?: SandboxCommandExecutor,
     mountRoot?: string,
     containerWorkdir?: string,
+    acquireSandbox?: () => Promise<{ sandboxId: string; enforcement: SandboxEnforcementCapabilities; mountRoot: string; workdir: string; executor?: SandboxCommandExecutor }>,
 ): AnyPiToolDefinition[] {
     return toolNames.map((toolName) => {
         if (!isPiBuiltInToolName(toolName)) {
@@ -163,6 +164,17 @@ export function createGatewayPiTools(
             );
         }
 
+        if (acquireSandbox) {
+            const schema = createPiToolDefinition(toolName, workspacePath);
+            return { ...schema, async execute(toolCallId, params, signal, onUpdate, context) {
+                const grant = await acquireSandbox();
+                const definition = createPiToolDefinition(toolName, workspacePath, grant.sandboxId,
+                    grant.executor, grant.enforcement, grant.mountRoot, grant.workdir);
+                const wrapped = wrapPiToolWithGateway(definition, classifyPiToolEffect(toolName), gateway,
+                    { ...runContext, getSandboxId: () => grant.sandboxId, getSandboxEnforcement: () => grant.enforcement });
+                return wrapped.execute(toolCallId, params, signal, onUpdate, context);
+            } };
+        }
         return wrapPiToolWithGateway(
             createPiToolDefinition(
                 toolName,
@@ -266,6 +278,25 @@ function createSandboxedPiToolDefinition(
         const raw = typeof value === "string" && value.length > 0 ? value : ".";
         return containerPath(resolve(workspacePath, raw));
     };
+    // Pi's read/write/edit implementations also probe host paths internally
+    // (including realpath for the mutation queue). A Worker must not need
+    // permission to inspect the real workspace. Give the SDK a virtual cwd;
+    // the pluggable operations below translate it to the VM mount instead.
+    const virtualRoot = `/tmp/.harness-virtual-${Buffer.from(sandboxId).toString("base64url")}`;
+    const virtualCwd = `${virtualRoot}${containerPath(workspacePath).slice("/workspace".length)}`;
+    const vmPath = (path: string) => {
+        if (path === virtualRoot) return "/workspace";
+        if (!path.startsWith(`${virtualRoot}/`)) throw new Error("虚拟工具路径超出沙箱范围");
+        return `/workspace/${path.slice(virtualRoot.length + 1)}`;
+    };
+    const virtualize = (definition: AnyPiToolDefinition): AnyPiToolDefinition => ({
+        ...definition,
+        execute: (id, params, signal, update, context) => {
+            const input = params as { path: string };
+            const path = containerPath(resolve(workspacePath, input.path));
+            return definition.execute(id, { ...input, path: `${virtualRoot}${path.slice("/workspace".length)}` }, signal, update, context);
+        },
+    });
     const quote = (value: string) => "'" + value.replaceAll("'", "'\"'\"'") + "'";
     const ensure = async (command: string) => {
         const result = await shell(command);
@@ -273,12 +304,12 @@ function createSandboxedPiToolDefinition(
         return result;
     };
     const fileOps = {
-        readFile: async (path: string) => Buffer.from((await ensure(`cat -- ${quote(containerPath(path))}`)).stdout),
+        readFile: async (path: string) => Buffer.from((await ensure(`cat -- ${quote(vmPath(path))}`)).stdout),
         writeFile: async (path: string, content: string) => {
             const encoded = Buffer.from(content).toString("base64");
-            await ensure(`printf %s ${quote(encoded)} | base64 -d > ${quote(containerPath(path))}`);
+            await ensure(`printf %s ${quote(encoded)} | base64 -d > ${quote(vmPath(path))}`);
         },
-        access: async (path: string) => { await ensure(`test -r ${quote(containerPath(path))}`); },
+        access: async (path: string) => { await ensure(`test -r ${quote(vmPath(path))}`); },
     };
     switch (toolName) {
         case "bash": {
@@ -291,12 +322,12 @@ function createSandboxedPiToolDefinition(
             };
             return createBashToolDefinition(workspacePath, { operations });
         }
-        case "read": return createReadToolDefinition(workspacePath, { operations: fileOps satisfies ReadOperations });
-        case "write": return createWriteToolDefinition(workspacePath, { operations: {
+        case "read": return virtualize(createReadToolDefinition(virtualCwd, { operations: fileOps satisfies ReadOperations }));
+        case "write": return virtualize(createWriteToolDefinition(virtualCwd, { operations: {
             writeFile: fileOps.writeFile,
-            mkdir: async (path) => { await ensure(`mkdir -p -- ${quote(containerPath(path))}`); },
-        } satisfies WriteOperations });
-        case "edit": return createEditToolDefinition(workspacePath, { operations: fileOps satisfies EditOperations });
+            mkdir: async (path) => { await ensure(`mkdir -p -- ${quote(vmPath(path))}`); },
+        } satisfies WriteOperations }));
+        case "edit": return virtualize(createEditToolDefinition(virtualCwd, { operations: fileOps satisfies EditOperations }));
         case "ls": {
             const operations: LsOperations = {
                 exists: async (path) => (await shell(`test -e ${quote(containerPath(path))}`)).exitCode === 0,

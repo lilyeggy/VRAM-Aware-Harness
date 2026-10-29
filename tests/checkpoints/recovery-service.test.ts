@@ -14,6 +14,9 @@ import type {
 } from "../../src/runs/agent-run.ts";
 import { RunStore } from "../../src/runs/runstore.ts";
 import { openHarnessDatabase } from "../../src/storage/database.ts";
+import { reconcileWorkspaceCommits } from "../../src/app/workspace-commit-startup.ts";
+import { RunAttemptStore } from "../../src/runs/run-attempt-store.ts";
+import { createRunAttempt, startRunAttempt } from "../../src/runs/run-attempt.ts";
 import type {
     ToolEffect,
     ToolExecution,
@@ -124,6 +127,43 @@ function seedCheckpoint(
     );
 
     return checkpoint;
+}
+
+test("进入 Workspace 提交阶段后重启，未对账前必须人工检查而不是自动恢复", () => {
+    const db = openHarnessDatabase(":memory:");
+    try {
+        const run = seedRunningRun(db);
+        const store = new RunStore(db);
+        store.appendEvent({ eventId: "commit-start", runId: run.id, sequence: 3,
+            type: "WORKSPACE_COMMIT_STARTED", timestamp: startedAt, payloadVersion: 1,
+            payload: { attemptId: "attempt", sandboxId: "sandbox", terminal: "SUCCEEDED" } });
+        const [plan] = new RecoveryService(store, new ToolExecutionStore(db), new CheckpointStore(db)).scanInterruptedRuns();
+        expect(plan?.decision).toEqual({ action: "MANUAL_REVIEW", reason: "WORKSPACE_COMMIT_UNCERTAIN", blockingToolExecutionId: null });
+        expect(store.get(run.id)?.status).toBe("INTERRUPTED");
+    } finally { db.close(); }
+});
+
+for (const receipt of ["COMMITTED", "CONFLICT", "UNKNOWN"] as const) {
+    test(`重启对账只在模型成功且文件已提交时补记完成: ${receipt}`, async () => {
+        const db = openHarnessDatabase(":memory:");
+        try {
+            const run = seedRunningRun(db); const store = new RunStore(db); const attempts = new RunAttemptStore(db);
+            const pending = createRunAttempt({ id: "attempt", runId: run.id, attemptNumber: 1,
+                kind: "START", policySnapshotId: null, sandboxId: null, createdAt });
+            attempts.create(pending);
+            attempts.update(startRunAttempt(pending, startedAt, "policy", "sandbox"), "PENDING");
+            store.appendEvent({ eventId: "commit-start", runId: run.id, sequence: 3,
+                type: "WORKSPACE_COMMIT_STARTED", timestamp: startedAt, payloadVersion: 1,
+                payload: { attemptId: "attempt", sandboxId: "sandbox", terminal: "SUCCEEDED" } });
+            await reconcileWorkspaceCommits(store, attempts, async () => receipt === "UNKNOWN" ? null : { status: receipt });
+            expect(store.get(run.id)?.status).toBe(receipt === "COMMITTED" ? "COMPLETED" : "RUNNING");
+            expect(attempts.get("attempt")?.status).toBe(receipt === "COMMITTED" ? "SUCCEEDED" : "RUNNING");
+            if (receipt !== "COMMITTED") {
+                const [plan] = new RecoveryService(store, new ToolExecutionStore(db), new CheckpointStore(db)).scanInterruptedRuns();
+                expect(plan?.decision.reason).toBe("WORKSPACE_COMMIT_UNCERTAIN");
+            }
+        } finally { db.close(); }
+    });
 }
 
 test("启动扫描会中断遗留 Run 并生成自动恢复计划", () => {

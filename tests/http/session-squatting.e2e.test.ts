@@ -123,6 +123,58 @@ test("POST /runs 拒绝其他用户占用已被认领的 harnessSessionId", asyn
     }
 });
 
+test("接受任务前验证 Session 的用户和 Workspace 绑定", async () => {
+    const composition = await createTestComposition();
+    try {
+        await composition.application.start();
+        const owner = await registerUser(composition, "binding-owner@example.com", "binding-owner");
+        const other = await registerUser(composition, "binding-other@example.com", "binding-other");
+        const headers = (token: string) => ({
+            "content-type": "application/json", authorization: `Bearer ${token}`,
+        });
+        const secondWorkspaceResponse = await composition.httpApi.fetch(new Request("http://harness.local/workspaces", {
+            method: "POST", headers: headers(owner.token), body: JSON.stringify({ name: "second" }),
+        }));
+        const { workspace: secondWorkspace } = await secondWorkspaceResponse.json() as { workspace: { id: string } };
+        const conversationResponse = await composition.httpApi.fetch(new Request(
+            `http://harness.local/workspaces/${owner.workspaceId}/conversations`,
+            { method: "POST", headers: headers(owner.token), body: JSON.stringify({ title: "first" }) },
+        ));
+        expect(conversationResponse.status).toBe(201);
+        const { conversation } = await conversationResponse.json() as { conversation: { id: string } };
+        const runCount = () => composition.database.query<{ count: number }, [string]>(
+            "SELECT COUNT(*) AS count FROM agent_runs WHERE harness_session_id = ?",
+        ).get(conversation.id)?.count;
+        const submit = (token: string, workspaceId: string, sessionId: string, idempotencyKey?: string) => composition.httpApi.fetch(
+            new Request("http://harness.local/runs", {
+                method: "POST", headers: headers(token),
+                body: JSON.stringify({ sessionId, workspaceId, userInput: "binding test", idempotencyKey }),
+            }),
+        );
+
+        // Session has no Runs yet: its ownership must still be enforced.
+        const foreign = await submit(other.token, other.workspaceId, conversation.id);
+        expect([404, 409]).toContain(foreign.status);
+        expect(runCount()).toBe(0);
+
+        const mismatched = await submit(owner.token, secondWorkspace.id, conversation.id);
+        expect(mismatched.status).toBe(409);
+        expect(runCount()).toBe(0);
+
+        const valid = await submit(owner.token, owner.workspaceId, conversation.id, "binding-key");
+        expect(valid.status).toBe(202);
+        expect((await submit(owner.token, secondWorkspace.id, conversation.id, "binding-key")).status).toBe(409);
+        const secondConversation = await composition.httpApi.fetch(new Request(
+            `http://harness.local/workspaces/${owner.workspaceId}/conversations`,
+            { method: "POST", headers: headers(owner.token), body: JSON.stringify({ title: "second" }) },
+        ));
+        const { conversation: second } = await secondConversation.json() as { conversation: { id: string } };
+        expect((await submit(owner.token, owner.workspaceId, second.id)).status).toBe(202);
+    } finally {
+        await composition.close();
+    }
+});
+
 /**
  * D3/D4/D7：HTTP 层的可见性标注、资源级审计与登出语义。
  */

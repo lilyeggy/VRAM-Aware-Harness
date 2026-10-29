@@ -104,6 +104,7 @@ export interface PiAdapterToolGatewayBinding {
     gateway: ToolGatewayExecutor;
     getLastEventSequence(runId: string): number;
     sandboxExecutor?: SandboxCommandExecutor;
+    acquireSandbox?: (runId: string) => Promise<{ sandboxId: string; enforcement: SandboxEnforcementCapabilities; mountRoot: string; workdir: string; executor?: SandboxCommandExecutor }>;
 }
 
 export class PiAdapter implements AgentRuntime{
@@ -683,6 +684,7 @@ export class PiAdapter implements AgentRuntime{
             this.toolGatewayBinding.sandboxExecutor,
             sandboxMountRoot,
             sandboxWorkdir,
+            this.toolGatewayBinding.acquireSandbox === undefined ? undefined : () => this.toolGatewayBinding.acquireSandbox!(runId),
         );
         return [...gatewayTools, ...this.createMcpTools(runId, workspacePath, runtimeSessionRefHolder)];
     }

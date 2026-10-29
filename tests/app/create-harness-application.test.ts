@@ -25,11 +25,20 @@ test("createHarnessApplication 用 Fake 外部依赖组装完整真实应用链"
 
     try {
         await composition.application.start();
+        const workspace = composition.workspaceService.create("user-composition", "composition");
+        expect(() => composition.application.submitRun({
+            userId: "user-composition", harnessSessionId: "unbound", userInput: "x",
+            workspacePath: workspace.rootPath,
+        })).toThrow("必须指定受管 Workspace");
+        expect(() => composition.application.createConversation({
+            userId: "other-user", workspaceId: workspace.id,
+        })).toThrow("归属不匹配");
         const run = composition.application.submitRun({
             userId:"user-composition",
             harnessSessionId:"session-composition",
             userInput:"验证完整应用组装",
-            workspacePath:"/tmp/composition-workspace",
+            workspacePath:workspace.rootPath,
+            workspaceId:workspace.id,
         });
 
         await composition.queuePump.tick();
@@ -98,11 +107,15 @@ test("B2：runPolicy.allowNetwork=true 在 strict 平台策略下 fail-closed，
 
     try {
         await composition.application.start();
+        const workspace = { id: crypto.randomUUID(), userId: "user-network", name: "network",
+            rootPath: "/tmp/network-workspace", createdAt: new Date().toISOString() };
+        composition.workspaceStore.create(workspace);
         const run = composition.application.submitRun({
             userId:"user-network",
             harnessSessionId:"session-network",
             userInput:"联网任务",
-            workspacePath:"/tmp/network-workspace",
+            workspacePath:workspace.rootPath,
+            workspaceId:workspace.id,
             runPolicy:{ ...unrestrictedPolicy, allowNetwork:true },
         });
 

@@ -1,3 +1,5 @@
+import { LazySandboxLease } from "../sandbox/lazy-sandbox-lease.ts";
+import type { SandboxHandle } from "../sandbox/sandbox-provider.ts";
 import {
     createRunAttempt,
     finishRunAttempt,
@@ -7,10 +9,7 @@ import {
 import type { RunAttemptStore } from "../runs/run-attempt-store.ts";
 import type { RunLeaseManager } from "../runs/run-lease-manager.ts";
 import type { RunStore } from "../runs/runstore.ts";
-import {
-    bindRuntimeSession,
-    createHarnessSession,
-} from "../sessions/harness-session.ts";
+import { bindRuntimeSession } from "../sessions/harness-session.ts";
 import type { HarnessSessionStore } from "../sessions/harness-session-store.ts";
 import {
     assertNetworkRequestAllowed,
@@ -66,6 +65,7 @@ export class RunExecutor implements AgentRuntime {
         private readonly config: RunExecutorRuntimeConfig,
         private readonly sandboxProfile: SandboxProfile = "development",
         private readonly leaseManager?: RunLeaseManager,
+        private readonly sandboxAcquirers?: Map<string, () => Promise<SandboxHandle>>,
     ) {
         this.sandbox.subscribe((event) => this.onSandboxFailure(event));
     }
@@ -89,7 +89,11 @@ export class RunExecutor implements AgentRuntime {
             this.handlers.set(runId, handlers);
         }
         handlers.add(handler);
-        const unsubscribeInner = this.inner.subscribe(runId, handler);
+        // Model completion is provisional until sandbox finalization has
+        // delivered its files. Forward all other runtime events immediately.
+        const unsubscribeInner = this.inner.subscribe(runId, (event) => {
+            if (event.type !== "agent_completed") handler(event);
+        });
         return () => {
             unsubscribeInner();
             handlers?.delete(handler);
@@ -110,7 +114,7 @@ export class RunExecutor implements AgentRuntime {
             throw new Error(`找不到 AgentRun：${request.run.runId}`);
         }
 
-        const session = this.ensureSession(run.userId, run.harnessSessionId);
+        const session = this.ensureSession(run.userId, run.harnessSessionId, run.workspaceId);
         const now = new Date().toISOString();
         const snapshot = withSandboxProfile(
             computeEffectivePolicy({
@@ -149,45 +153,59 @@ export class RunExecutor implements AgentRuntime {
             durationMs: Math.round(performance.now() - startedAt),
         });
 
-        const sandboxStartedAt = performance.now();
-        let handle;
-        try {
-            handle = await this.sandbox.create({
-                id: crypto.randomUUID(),
-                runId: run.id,
-                    workspacePath: run.workspacePath,
-                policy: snapshot,
-            });
-        } catch (error) {
-            const reason = error instanceof Error ? error.message : String(error);
-            const failed = finishRunAttempt(
-                attempt,
-                "FAILED",
-                new Date().toISOString(),
-                reason,
-            );
-            this.attempts.update(failed, attempt.status);
-            throw error;
-        }
-
-        this.emit({
-            type: "sandbox_acquired",
-            sandboxId: handle.id,
-            attemptId: attempt.id,
-            runId: run.id,
-            timestamp: new Date().toISOString(),
-            durationMs: Math.round(performance.now() - sandboxStartedAt),
-            warmHit: handle.acquisition?.warmHit ?? false,
-            runtime: snapshot.sandboxProfile ?? this.sandboxProfile,
-        });
-
-        attempt = startRunAttempt(attempt, new Date().toISOString(), snapshot.id, handle.id);
-        this.attempts.update(attempt, "PENDING");
-        this.leaseManager?.startHeartbeat(attempt.id);
-        this.activeBySandboxId.set(handle.id, { attemptId: attempt.id });
-
+        let handle: SandboxHandle | undefined;
         let terminal: "SUCCEEDED" | "FAILED" | "INTERRUPTED" | null = null;
         let terminalReason: string | null = null;
+        const acquire = async () => {
+            const sandboxStartedAt = performance.now();
+            const created = await this.sandbox.create({
+                id: crypto.randomUUID(), runId: run.id, workspacePath: run.workspacePath, policy: snapshot,
+            });
+            handle = created;
+            this.activeBySandboxId.set(created.id, { attemptId: attempt.id });
+            try {
+                const current = this.attempts.get(attempt.id);
+                if (current?.status !== "RUNNING") throw new Error("Sandbox 创建完成时 Attempt 已结束");
+                this.attempts.update({ ...current, sandboxId: created.id }, "RUNNING");
+            } catch (error) {
+                // A successfully allocated sandbox must still be finalized if
+                // recording its identity fails. Never hand it to the worker.
+                markCommitStarted(created.id);
+                await this.sandbox.terminate(created.id);
+                this.activeBySandboxId.delete(created.id);
+                throw error;
+            }
+            this.emit({ type: "sandbox_acquired", sandboxId: created.id, attemptId: attempt.id,
+                runId: run.id, timestamp: new Date().toISOString(),
+                durationMs: Math.round(performance.now() - sandboxStartedAt),
+                warmHit: created.acquisition?.warmHit ?? false,
+                runtime: snapshot.sandboxProfile ?? this.sandboxProfile });
+            return created;
+        };
+        const markCommitStarted = (sandboxId: string) => {
+            this.runs.appendEvent({ eventId: crypto.randomUUID(), runId: run.id,
+                sequence: this.runs.getLastEventSequence(run.id) + 1,
+                type: "WORKSPACE_COMMIT_STARTED", timestamp: new Date().toISOString(),
+                payloadVersion: 1, payload: { attemptId: attempt.id, sandboxId, terminal } });
+        };
+        const lease = new LazySandboxLease(acquire, async (created) => {
+            markCommitStarted(created.id);
+            await this.sandbox.terminate(created.id);
+        });
+        attempt = startRunAttempt(attempt, new Date().toISOString(), snapshot.id, null);
+        this.attempts.update(attempt, "PENDING");
+        this.leaseManager?.startHeartbeat(attempt.id);
+        if (this.sandboxAcquirers) this.sandboxAcquirers.set(run.id, () => lease.getOrCreate());
+        else {
+            try { handle = await lease.getOrCreate(); }
+            catch (error) {
+                const current = this.attempts.get(attempt.id);
+                if (current?.status === "RUNNING") this.attempts.update(finishRunAttempt(current, "FAILED", new Date().toISOString(), error instanceof Error ? error.message : String(error)), "RUNNING");
+                this.leaseManager?.release(attempt.id);
+                throw error;
+            }
+        }
+
         const unsubscribe = this.inner.subscribe(run.id, (event) => {
             if (event.type === "agent_started" || event.type === "agent_resumed") {
                 const current = this.sessions.get(run.harnessSessionId);
@@ -219,13 +237,11 @@ export class RunExecutor implements AgentRuntime {
             execution: {
                 attemptId: attempt.id,
                 policySnapshotId: snapshot.id,
-                sandboxId: handle.id,
-                ...(handle.capabilityToken === undefined
-                    ? {}
-                    : { sandboxToken: handle.capabilityToken }),
-                sandboxEnforcement: handle.enforcement,
-                sandboxMountRoot: handle.mountRoot,
-                sandboxWorkdir: handle.containerWorkdir,
+                ...(handle === undefined ? { lazySandbox: true } : {
+                    sandboxId: handle.id, sandboxToken: handle.capabilityToken,
+                    sandboxEnforcement: handle.enforcement, sandboxMountRoot: handle.mountRoot,
+                    sandboxWorkdir: handle.containerWorkdir,
+                }),
                 runtimeConfig: {
                     runtimeKind: "PI" as const,
                     provider: this.config.provider,
@@ -239,6 +255,9 @@ export class RunExecutor implements AgentRuntime {
 
         try {
             await invoke(managedRequest);
+            // Finalization may fail (for example, an export or commit conflict).
+            // Do not publish success or finish the attempt before it completes.
+            await lease.close();
             const current = this.attempts.get(attempt.id);
             if (current?.status === "RUNNING") {
                 const status = (terminal ?? "SUCCEEDED") as
@@ -251,6 +270,9 @@ export class RunExecutor implements AgentRuntime {
                 );
                 this.attempts.update(finished, current.status);
             }
+            if (terminal === "SUCCEEDED" && this.attempts.get(attempt.id)?.status === "SUCCEEDED") {
+                this.emit({ type: "agent_completed", runId: run.id, timestamp: new Date().toISOString() });
+            }
         } catch (error) {
             const current = this.attempts.get(attempt.id);
             if (current?.status === "RUNNING") {
@@ -262,26 +284,28 @@ export class RunExecutor implements AgentRuntime {
         } finally {
             unsubscribe();
             this.leaseManager?.release(attempt.id);
-            this.activeBySandboxId.delete(handle.id);
-            await this.sandbox.terminate(handle.id);
+            this.sandboxAcquirers?.delete(run.id);
+            try { await lease.close(); } finally {
+                if (handle !== undefined) this.activeBySandboxId.delete(handle.id);
+            }
         }
     }
 
-    private ensureSession(userId: string, sessionId: string) {
+    private ensureSession(userId: string, sessionId: string, workspaceId?: string) {
+        if (workspaceId === undefined) {
+            throw new Error(`Run 缺少可验证的 Workspace：${sessionId}`);
+        }
         const existing = this.sessions.get(sessionId);
         if (existing !== null) {
             if (existing.userId !== userId) {
                 throw new Error(`HarnessSession 归属不匹配：${sessionId}`);
             }
+            if (existing.workspaceId !== workspaceId) {
+                throw new Error(`HarnessSession Workspace 绑定不匹配：${sessionId}`);
+            }
             return existing;
         }
-        const created = createHarnessSession({
-            id: sessionId,
-            userId,
-            createdAt: new Date().toISOString(),
-        });
-        this.sessions.create(created);
-        return created;
+        throw new Error(`受管 HarnessSession 不存在：${sessionId}`);
     }
 
     private policyLayers(run: NonNullable<ReturnType<RunStore["get"]>>) {

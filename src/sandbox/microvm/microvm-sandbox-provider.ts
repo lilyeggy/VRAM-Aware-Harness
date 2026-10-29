@@ -1,4 +1,7 @@
 import { existsSync } from "node:fs";
+import { copyFile, cp, lstat, mkdir, open } from "node:fs/promises";
+import { join } from "node:path";
+import { WorkspaceCommitCoordinator } from "../../workspaces/workspace-commit-coordinator.ts";
 import type { EffectivePolicySnapshot } from "../../policies/effective-policy.ts";
 import {
     freezeRuntimeEvidence,
@@ -28,6 +31,8 @@ export interface MicrovmSandboxProviderConfig {
      */
     readonly workspaceDiskTemplatePath?: string;
     readonly vmRuntimeRoot?: string;
+    /** Private durable capture directory; enables managed Workspace commits. */
+    readonly workspaceCommitRoot?: string;
 }
 
 export class MicrovmSandboxProvider implements SandboxProvider, SandboxCommandExecutor {
@@ -42,6 +47,9 @@ export class MicrovmSandboxProvider implements SandboxProvider, SandboxCommandEx
     private readonly workspaceDisks = new Map<string, string>();
     /** sandboxId → 驱动层 vmId（预热命中时两者不同：vmId 为预热分配） */
     private readonly instanceIds = new Map<string, string>();
+    private readonly commitCoordinator: WorkspaceCommitCoordinator | undefined;
+    private readonly commitRoot: string | undefined;
+    private readonly commitInputs = new Map<string, { userId: string; workspaceId: string; attemptId: string; sourcePath: string }>();
 
     constructor(
         private readonly store: SandboxStore,
@@ -51,6 +59,8 @@ export class MicrovmSandboxProvider implements SandboxProvider, SandboxCommandEx
         this.driver = config.driver;
         this.workspaceDiskTemplatePath = config.workspaceDiskTemplatePath;
         this.runDirManager = new VmRunDirectoryManager({ runtimeRoot: config.vmRuntimeRoot });
+        this.commitRoot = config.workspaceCommitRoot;
+        this.commitCoordinator = config.workspaceCommitRoot === undefined ? undefined : new WorkspaceCommitCoordinator(config.workspaceCommitRoot);
     }
 
     async create(input: {
@@ -181,13 +191,20 @@ export class MicrovmSandboxProvider implements SandboxProvider, SandboxCommandEx
         let warmHit = false;
 
         try {
+            const captureInput = {
+                userId: input.policy.userId, workspaceId: input.workspacePath,
+                attemptId: input.id, sourcePath: input.workspacePath,
+            };
+            const baseline = hardwareIsolated && this.commitCoordinator
+                ? await this.commitCoordinator.baseline(captureInput) : undefined;
+            if (baseline) this.commitInputs.set(input.id, captureInput);
             const cpuCores = input.policy.resourceLimits.cpuCores ?? 2;
             const memoryMb = input.policy.resourceLimits.memoryMiB ?? 256;
             const instance = await this.driver.create({
                 id: input.id,
                 runId: input.runId,
                 workspacePath: input.workspacePath,
-                workspaceSeedPath: input.workspacePath,
+                workspaceSeedPath: baseline?.filesPath ?? input.workspacePath,
                 cpuCount: cpuCores,
                 memoryMb,
                 allowNetwork: input.policy.allowNetwork,
@@ -221,6 +238,7 @@ export class MicrovmSandboxProvider implements SandboxProvider, SandboxCommandEx
             await this.runDirManager.dispose(input.id);
             this.workspacePaths.delete(input.id);
             this.workspaceDisks.delete(input.id);
+            this.commitInputs.delete(input.id);
             this.secretValues.delete(input.id);
             this.store.update({
                 ...record,
@@ -277,7 +295,17 @@ export class MicrovmSandboxProvider implements SandboxProvider, SandboxCommandEx
         });
     }
 
+    async getCommitReceipt(sandboxId: string, userId: string, workspacePath: string) {
+        if (!this.commitCoordinator) throw new Error("Workspace 提交回执未启用");
+        return this.commitCoordinator.getReceipt({ userId, workspaceId: workspacePath, attemptId: sandboxId, sourcePath: workspacePath });
+    }
+
     async terminate(sandboxId: string): Promise<void> {
+        const commitInput = this.commitInputs.get(sandboxId);
+        if (commitInput && this.commitCoordinator && this.commitRoot) {
+            await this.terminateWithCommit(sandboxId, commitInput, this.commitCoordinator, this.commitRoot);
+            return;
+        }
         this.activeSandboxes.delete(sandboxId);
         this.secretValues.delete(sandboxId);
         const vmId = this.instanceIds.get(sandboxId) ?? sandboxId;
@@ -339,6 +367,54 @@ export class MicrovmSandboxProvider implements SandboxProvider, SandboxCommandEx
                 updatedAt: new Date().toISOString(),
             }, "ACTIVE");
         }
+    }
+
+    private async terminateWithCommit(
+        sandboxId: string,
+        input: { userId: string; workspaceId: string; attemptId: string; sourcePath: string },
+        coordinator: WorkspaceCommitCoordinator,
+        captureRoot: string,
+    ): Promise<void> {
+        const vmId = this.instanceIds.get(sandboxId) ?? sandboxId;
+        const disk = this.workspaceDisks.get(sandboxId);
+        if (!disk || !existsSync(disk)) throw new Error("找不到 VM 工作区磁盘，拒绝销毁");
+        if (typeof this.driver.stopVm !== "function") throw new Error("无法确认 VM 已停止，拒绝导出或销毁");
+        if (typeof this.driver.flushFilesystem === "function") await this.driver.flushFilesystem(vmId);
+        await this.driver.stopVm(vmId);
+
+        let error: unknown;
+        try {
+            const result = await this.diskExporter.withStoppedDiskContents(disk, (sourcePath) => coordinator.result({ ...input, sourcePath }));
+            const outcome = await coordinator.commit(input);
+            if (outcome.conflicts.length) throw new Error(`Workspace 提交冲突: ${outcome.conflicts.join(", ")}；成果保留于 ${result.filesPath}`);
+        } catch (cause) {
+            // If extraction failed, retain the stopped raw disk before driver
+            // cleanup; a failed copy leaves the original VM directory intact.
+            const rawRoot = join(captureRoot, "raw-disks");
+            await mkdir(rawRoot, { recursive: true, mode: 0o700 });
+            const raw = join(rawRoot, `${sandboxId}.ext4`);
+            if ((await lstat(disk)).isDirectory()) await cp(disk, raw, { recursive: true, errorOnExist: true });
+            else {
+                await copyFile(disk, raw);
+                const savedDisk = await open(raw, "r");
+                try { await savedDisk.sync(); } finally { await savedDisk.close(); }
+            }
+            error = new Error(`${cause instanceof Error ? cause.message : String(cause)}；VM 工作区磁盘保留于 ${raw}`);
+        }
+        await this.driver.terminate(vmId);
+        await this.runDirManager.dispose(sandboxId);
+        this.activeSandboxes.delete(sandboxId);
+        this.secretValues.delete(sandboxId);
+        this.instanceIds.delete(sandboxId);
+        this.workspacePaths.delete(sandboxId);
+        this.workspaceDisks.delete(sandboxId);
+        this.commitInputs.delete(sandboxId);
+        const record = this.store.get(sandboxId);
+        if (record && record.status === "ACTIVE") this.store.update({
+            ...record, status: error ? "FAILED" : "TERMINATED",
+            failureReason: error instanceof Error ? error.message : null, updatedAt: new Date().toISOString(),
+        }, "ACTIVE");
+        if (error) throw error;
     }
 
 

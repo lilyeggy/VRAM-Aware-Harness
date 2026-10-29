@@ -61,6 +61,7 @@ import {
 } from "../sandbox/managed-local-sandbox.ts";
 import { ContainerSandboxProvider } from "../sandbox/container-sandbox-provider.ts";
 import { BrokerSandboxProvider } from "../sandbox/broker/broker-sandbox-provider.ts";
+import { reconcileWorkspaceCommits } from "./workspace-commit-startup.ts";
 import { RunService } from "../runs/run-service.ts";
 import { RunStore } from "../runs/runstore.ts";
 import { RunAttemptStore } from "../runs/run-attempt-store.ts";
@@ -296,9 +297,12 @@ export async function createHarnessApplication(
         await mcpRegistry.start();
     }
 
+    const sandboxAcquirers = dependencies.runtime === undefined
+        ? new Map<string, () => Promise<import("../sandbox/sandbox-provider.ts").SandboxHandle>>() : undefined;
     const baseRuntime = dependencies.runtime
         ?? (config.workerIsolation !== "in-process"
             ? new WorkerProcessAgentRuntime({
+                sandboxAcquirers,
                 workerScriptPath: config.workerScriptPath,
                 bunCommand: "bun",
                 cwd: process.cwd(),
@@ -343,6 +347,7 @@ export async function createHarnessApplication(
                 runStore,
                 sandboxProvider as Partial<SandboxCommandExecutor>,
                 mcpRegistry,
+                sandboxAcquirers,
             ));
     const supervisedRuntime = new SupervisedAgentRuntime(
         baseRuntime,
@@ -368,6 +373,7 @@ export async function createHarnessApplication(
         },
         config.sandboxProfile,
         leaseManager,
+        sandboxAcquirers,
     );
     const runService = new RunService(
         runStore, runtime, undefined, runOutputStore,
@@ -489,6 +495,11 @@ export async function createHarnessApplication(
     const vmRunDirManager = new VmRunDirectoryManager({ runtimeRoot: config.vmRuntimeRoot });
     const sandboxReconciler = {
         async reconcile() {
+            // Reconcile committed filesystem effects before generic startup
+            // recovery can turn active Runs into resume candidates.
+            if (sandboxProvider instanceof BrokerSandboxProvider) {
+                await reconcileWorkspaceCommits(runStore, attemptStore, (id) => sandboxProvider.getCommitReceipt(id));
+            }
             await rawSandboxReconciler.reconcile();
             const orphanDirs = vmRunDirManager.listOrphans();
             if (orphanDirs.length > 0) {
@@ -521,6 +532,8 @@ export async function createHarnessApplication(
         effectivePolicyStore,
         // N16：UNKNOWN_EFFECT 人工消解需要读写 tool_executions。
         toolExecutionStore,
+        true,
+        workspaceService,
     );
     // 支柱 2：LLM 网关（仅当配置了后端时启用）。
     // - 双卡负载均衡：策略来自 config.llmGatewayStrategy（默认 round-robin）；
@@ -775,6 +788,7 @@ async function createPiRuntime(
     runStore:RunStore,
     sandboxProvider?: Partial<SandboxCommandExecutor>,
     mcpRegistry?: McpToolRegistry,
+    sandboxAcquirers?: Map<string, () => Promise<import("../sandbox/sandbox-provider.ts").SandboxHandle>>,
 ):Promise<PiAdapter> {
     const modelRuntime = injectedModelRuntime
         ?? await ModelRuntime.create({
@@ -810,6 +824,13 @@ async function createPiRuntime(
             }),
     }, {
         gateway:toolGateway,
+        ...(sandboxAcquirers === undefined ? {} : { acquireSandbox: async (runId: string) => {
+            const acquire = sandboxAcquirers.get(runId);
+            if (!acquire) throw new Error("Run 未授权申请 Sandbox");
+            const handle = await acquire();
+            return { sandboxId: handle.id, enforcement: handle.enforcement, mountRoot: handle.mountRoot,
+                workdir: handle.containerWorkdir, executor: sandboxProvider?.execute === undefined ? undefined : sandboxProvider as SandboxCommandExecutor };
+        } }),
         getLastEventSequence(runId) {
             return runStore.getLastEventSequence(runId);
         },

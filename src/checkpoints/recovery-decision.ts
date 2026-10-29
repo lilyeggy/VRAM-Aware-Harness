@@ -26,7 +26,8 @@ export type RecoveryReason =
      * 此时"恢复"只会静默变成"开一个没有历史的新会话"，用户以为续上了上下文
      * 其实没有 —— 因此拒绝自动恢复，确定性转人工。
      */
-    | "SESSION_REF_UNREACHABLE";
+    | "SESSION_REF_UNREACHABLE"
+    | "WORKSPACE_COMMIT_UNCERTAIN";
 
 export interface RecoveryDecision {
     action:RecoveryAction;

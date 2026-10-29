@@ -1,5 +1,6 @@
 import { existsSync, lstatSync, readdirSync, mkdirSync, statSync } from "node:fs";
-import { copyFile } from "node:fs/promises";
+import { chmod, copyFile, lstat, mkdir, mkdtemp, readdir, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { resolve, relative, isAbsolute, join, dirname } from "node:path";
 
 export interface ExportResult {
@@ -14,6 +15,42 @@ export function isWithin(parent: string, target: string): boolean {
 }
 
 export class WorkspaceDiskExporter {
+    /**
+     * Expose a stopped disk's complete contents to a capture callback. Unlike
+     * exportToHost this never writes into the shared Workspace or skips entries.
+     * The caller is responsible for stopping the VM before invoking this method.
+     */
+    async withStoppedDiskContents<T>(diskPath: string, capture: (directory: string) => Promise<T>): Promise<T> {
+        const info = await lstat(diskPath);
+        if (info.isSymbolicLink()) throw new Error("工作区磁盘不能是符号链接");
+        if (info.isDirectory()) return capture(diskPath);
+        if (!info.isFile()) throw new Error("工作区磁盘不是普通文件");
+        if (Bun.which("debugfs") === null) throw new Error("完整导出需要 debugfs");
+
+        const scratch = await mkdtemp(join(tmpdir(), "harness-disk-capture-"));
+        try {
+            const dump = join(scratch, "dump");
+            await mkdir(dump, { mode: 0o700 });
+            // debugfs command parsing uses quotes rather than shell escaping.
+            if (/["\n\r]/.test(dump)) throw new Error("临时目录路径无法安全传递给 debugfs");
+            await runDebugfsDump(diskPath, dump);
+            // ext4 creates this directory itself. A nonempty one could contain
+            // user data and must never be silently omitted.
+            const reserved = join(dump, "lost+found");
+            try {
+                const reservedInfo = await lstat(reserved);
+                if (!reservedInfo.isDirectory() || (await readdir(reserved)).length !== 0) {
+                    throw new Error("ext4 lost+found 包含内容，拒绝不完整导出");
+                }
+                await rm(reserved, { recursive: true });
+            } catch (error) {
+                if (!isMissing(error)) throw error;
+            }
+            return await capture(dump);
+        } finally {
+            await removePrivateTree(scratch);
+        }
+    }
     /**
      * 从 per-run workspace.ext4 (或工作区临时源) 抽取全部文件写入宿主 workspacePath。
      * 实现：优先 debugfs（无需 root）；备选 loop mount。
@@ -68,11 +105,7 @@ export class WorkspaceDiskExporter {
 
         try {
             // debugfs -R "rdump / <tempDumpDir>" <diskPath>
-            const proc = Bun.spawn(["debugfs", "-R", `rdump / ${tempDumpDir}`, diskPath], {
-                stdout: "pipe",
-                stderr: "pipe",
-            });
-            await proc.exited;
+            await runDebugfsDump(diskPath, tempDumpDir);
 
             // 真机验证修复：必须 await——此前 `return this.exportFromDirectory(...)`
             // 不等待 Promise 结算，finally 的 rmSync 会在异步扫描进行中
@@ -164,4 +197,34 @@ export class WorkspaceDiskExporter {
         await scan(srcDir, "");
         return { filesWritten, bytesWritten, skipped };
     }
+}
+
+async function runDebugfsDump(diskPath: string, destination: string): Promise<void> {
+    if (/["\n\r]/.test(destination)) throw new Error("临时目录路径无法安全传递给 debugfs");
+    const proc = Bun.spawn(["debugfs", "-R", `rdump / "${destination}"`, diskPath], {
+        stdout: "pipe", stderr: "pipe",
+    });
+    const [exitCode, stdout, stderr] = await Promise.all([
+        proc.exited, new Response(proc.stdout).text(), new Response(proc.stderr).text(),
+    ]);
+    const diagnostics = stderr.split("\n")
+        .filter((line) => line.trim() !== "" && !/^debugfs \d/.test(line.trim()));
+    if (exitCode !== 0 || diagnostics.length > 0) {
+        throw new Error(`debugfs 工作区导出失败: ${diagnostics.join("; ") || stdout || `exit ${exitCode}`}`);
+    }
+}
+
+async function removePrivateTree(path: string): Promise<void> {
+    let info;
+    try { info = await lstat(path); }
+    catch (error) { if (isMissing(error)) return; throw error; }
+    if (info.isDirectory()) {
+        await chmod(path, 0o700);
+        for (const entry of await readdir(path)) await removePrivateTree(join(path, entry));
+    }
+    await rm(path, { recursive: true, force: true });
+}
+
+function isMissing(error: unknown): boolean {
+    return typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT";
 }

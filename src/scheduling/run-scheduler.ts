@@ -347,6 +347,7 @@ export class RunScheduler  {
                 input.idempotencyKey,
             );
             if (existing !== null) {
+                this.runService.assertIdempotentBinding(existing, input);
                 return existing;
             }
         }

@@ -72,7 +72,7 @@ test("Run 执行期间备份：WAL 下 VACUUM INTO 不与写入冲突，备份�
                 )
                 .all()
                 .map((row) => row.version);
-            expect(migrations).toEqual([1, 2, 3, 4, 5]);
+            expect(migrations).toEqual([1, 2, 3, 4, 5, 6]);
 
             const auditCount = backup
                 .query<{ count: number }, []>(

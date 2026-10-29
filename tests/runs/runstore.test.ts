@@ -69,6 +69,20 @@ test("create 会原子地保存 Run 和第一条事件", () => {
     }
 });
 
+test("创建 Run 失败时同时回滚首次创建的 Session 绑定", () => {
+    const db = openHarnessDatabase(":memory:");
+    const store = new RunStore(db);
+    try {
+        db.query("INSERT INTO workspaces (id, user_id, name, root_path, created_at) VALUES (?, ?, ?, ?, ?)")
+            .run("workspace-1", "user-1", "one", "/tmp/workspace", createdAt);
+        const existing = createQueuedRun();
+        store.create(existing, createEvent(existing.id, 1, "RUN_CREATED"));
+        const duplicate = { ...existing, harnessSessionId: "new-session", workspaceId: "workspace-1" };
+        expect(() => store.create(duplicate, createEvent(duplicate.id, 1, "RUN_CREATED"))).toThrow();
+        expect(db.query("SELECT id FROM harness_sessions WHERE id = ?").get("new-session")).toBeNull();
+    } finally { db.close(); }
+});
+
 test("appendEvent 保存 JSON payload，listEvents 按 sequence 排序", () => {
     const db = openHarnessDatabase(":memory:");
     const store = new RunStore(db);

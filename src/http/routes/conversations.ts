@@ -175,10 +175,12 @@ async function sendConversationMessage(
     const run = ctx.application.submitRun({
         userId: principal.userId,
         harnessSessionId: conversation.id,
+        sessionIdExplicit: true,
         userInput: requireUserInput(body, ctx.limits?.maxUserInputChars),
         thinkingLevel: parseThinkingLevel(body),
         ...(idempotencyKey === null ? {} : { idempotencyKey }),
         workspacePath: workspace.rootPath,
+        workspaceId: workspace.id,
     });
     ctx.application.touchConversation?.(conversation.id, principal.userId);
     return jsonResponse({ run: runForResponse(run) }, 202);

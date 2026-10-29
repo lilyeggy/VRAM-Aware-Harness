@@ -34,6 +34,7 @@
 ### 多用户任务
 - API Key → Principal → User
 - Workspace / Session / Run / Attempt 生命周期
+- 受管 Session 必须属于用户的 Workspace；新 Run 在入队前固定该绑定，旧记录仅在归属可唯一验证时回填。无法确认的旧绑定不会自动执行。
 - Run 状态机 + 追加式 RunEvent 时间线
 - 最终回答、Workspace Diff、Artifact 交付
 

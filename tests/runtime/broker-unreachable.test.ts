@@ -44,6 +44,7 @@ test("Broker 不可达时 Run fail-closed 为 INTERRUPTED，且不留下孤儿 s
             harnessSessionId: "session-broker-down",
             userInput: "验证 Broker 不可达",
             workspacePath: workspace.rootPath,
+            workspaceId: workspace.id,
         });
 
         for (let i = 0; i < 200; i += 1) {

@@ -186,3 +186,44 @@ test("Pi ToolDefinition 的真实 execute 会经过 Gateway", async () => {
         lastEventSequence: 4,
     });
 });
+
+test("按需工具在首次执行时申请 Sandbox，申请失败时不执行宿主工具", async () => {
+    let attempts = 0, commands = 0, governed = 0;
+    const tools = createGatewayPiTools(["bash"], "/srv/workspace",
+        { async execute(input, invoke) { governed++; expect(input.sandboxEnforcement).toEqual(sandboxEnforcement); return invoke(); } },
+        { runId: "lazy", workspacePath: "/srv/workspace", getRuntimeSessionRef: () => "session", getLastEventSequence: () => 0 },
+        undefined, undefined, undefined,
+        async () => {
+            attempts++;
+            if (attempts === 1) throw new Error("sandbox unavailable");
+            return { sandboxId: "vm", enforcement: sandboxEnforcement, mountRoot: "/srv/workspace", workdir: "/workspace",
+                executor: { async execute() { commands++; return { exitCode: 0, stdout: "ok", stderr: "" }; } } };
+        });
+    expect(attempts).toBe(0);
+    await expect(tools[0]!.execute("1", { command: "echo ok" }, undefined, undefined, {} as never)).rejects.toThrow("sandbox unavailable");
+    expect(governed).toBe(0);
+    await tools[0]!.execute("2", { command: "echo ok" }, undefined, undefined, {} as never);
+    expect(governed).toBe(1);
+    expect(commands).toBe(1);
+});
+
+test("沙箱写入不探测受限宿主工作区，路径仍映射到 VM", async () => {
+    const { mkdtempSync, mkdirSync, chmodSync, rmSync } = await import("node:fs");
+    const { tmpdir } = await import("node:os");
+    const { join } = await import("node:path");
+    const root = mkdtempSync(join(tmpdir(), "pi-virtual-workspace-"));
+    const workspace = join(root, "private");
+    mkdirSync(workspace);
+    chmodSync(workspace, 0);
+    const commands: string[] = [];
+    try {
+        const [write] = createGatewayPiTools(["write"], workspace,
+            { async execute(_input, invoke) { return invoke(); } },
+            { runId: "private", getRuntimeSessionRef: () => "session", getLastEventSequence: () => 0,
+                getSandboxId: () => "private-sandbox", getSandboxEnforcement: () => sandboxEnforcement },
+            { async execute(_id, cmd) { commands.push(cmd[2]!); return { exitCode: 0, stdout: "", stderr: "" }; } });
+        await write!.execute("write", { path: "nested/file.txt", content: "hello" }, undefined, undefined, {} as never);
+        expect(commands[0]).toContain("'/workspace/nested'");
+        expect(commands[1]).toContain("'/workspace/nested/file.txt'");
+    } finally { chmodSync(workspace, 0o700); rmSync(root, { recursive: true, force: true }); }
+});

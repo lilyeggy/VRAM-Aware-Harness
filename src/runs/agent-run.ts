@@ -29,6 +29,8 @@ export interface AgentRun{
     id :string;
     userId : string;
     harnessSessionId : string;
+    /** Managed Workspace identity; absent for legacy/unmanaged runs. */
+    workspaceId?: string;
     status : AgentRunStatus;
     userInput : string;
     workspacePath : string;
@@ -74,6 +76,7 @@ export type RunEventType =
     | "RUN_INTERRUPTED"
     | "RUN_COMPLETED"
     | "RUN_FAILED"
+    | "WORKSPACE_COMMIT_STARTED"
     // §9.8 v1.4 Phase 3：终态后 artifacts 落盘完成，消除读取一致性窗口。
     | "RUN_ARTIFACTS_READY"
     | "MODEL_STARTED"

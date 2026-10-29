@@ -1,3 +1,4 @@
+import { WorkerSandboxRequester } from "./worker-sandbox-requester.ts";
 /**
  * Subprocess Worker Entrypoint.
  *
@@ -91,6 +92,7 @@ class EphemeralSandboxStore {
     }
 }
 
+let sandboxRequester: WorkerSandboxRequester | undefined;
 let activeRunId: string | null = null;
 let currentPiAdapter: PiAdapter | null = null;
 let isTerminating = false;
@@ -138,6 +140,7 @@ async function setupRuntime(
     thinkingLevel?: "off" | "minimal" | "low" | "medium" | "high",
     userId?: string,
     capabilityToken?: string,
+    lazySandbox = false,
 ) {
     let containerProvider: ContainerSandboxProvider | undefined;
     let brokerProvider: BrokerSandboxProvider | undefined;
@@ -209,6 +212,21 @@ async function setupRuntime(
         },
         {
             gateway: toolGateway,
+            ...(lazySandbox ? { acquireSandbox: async () => {
+                if (!sandboxRequester) throw new Error("Sandbox 申请通道不可用");
+                const grant = await sandboxRequester.getOrRequest();
+                let executor = containerProvider;
+                if (config.sandboxBrokerSocketPath) {
+                    const broker = new BrokerSandboxProvider({ socketPath: config.sandboxBrokerSocketPath,
+                        ...(userId === undefined ? {} : { userId }), ...(grant.token === undefined ? {} : { capabilityToken: grant.token }) });
+                    return { ...grant, executor: broker };
+                }
+                if (executor && grant.enforcement.toolExecutionBoundary === "SANDBOX") {
+                    const containerMap = (executor as unknown as { containerBySandboxId?: Map<string, string> }).containerBySandboxId;
+                    containerMap?.set(grant.sandboxId, `agent-harness-${grant.sandboxId}`);
+                }
+                return { ...grant, executor };
+            } } : {}),
             getLastEventSequence: (runId: string) => toolGateway.getLastEventSequence(runId),
             ...(containerProvider ? { sandboxExecutor: containerProvider } : {}),
             ...(brokerProvider ? { sandboxExecutor: brokerProvider } : {}),
@@ -279,12 +297,14 @@ async function executeRunMessage(msg: RunRequestMessage): Promise<void> {
     let mcpRegistry: McpToolRegistry | undefined;
     try {
         const config = msg.workerConfig ?? defaultWorkerConfig();
+        if (msg.request.execution?.lazySandbox) sandboxRequester = new WorkerSandboxRequester(runId, (message) => { void sendToMaster(message); });
         const setup = await setupRuntime(
             config,
             msg.request.execution?.sandboxId,
             msg.request.run.thinkingLevel,
             msg.request.run.userId,
             msg.request.execution?.sandboxToken,
+            msg.request.execution?.lazySandbox,
         );
         const piAdapter = setup.piAdapter;
         mcpRegistry = setup.mcpRegistry;
@@ -324,6 +344,8 @@ async function executeRunMessage(msg: RunRequestMessage): Promise<void> {
             await sendToMaster(createRunFailedMessage(runId, err));
         }
     } finally {
+        sandboxRequester?.close();
+        sandboxRequester = undefined;
         activeRunId = null;
         currentPiAdapter = null;
         if (mcpRegistry !== undefined) {
@@ -382,6 +404,10 @@ async function handleMasterMessage(msg: MasterToWorkerMessage): Promise<void> {
             process.exit(0);
         }
 
+        case "SANDBOX_ACQUIRE_RESPONSE":
+            sandboxRequester?.handle(msg);
+            break;
+
         case "TOOL_PREPARE_RESPONSE":
         case "TOOL_COMPLETE_RESPONSE": {
             toolGateway.handleMasterMessage(msg);
@@ -403,6 +429,7 @@ process.stdin.on("data", (chunk: Buffer | string) => {
 
 process.stdin.on("end", () => {
     // Master 断连时 fail-closed：拒绝所有在途工具裁决，不放过任何未受治执行。
+    sandboxRequester?.close();
     toolGateway.failAllPending("Master IPC 已关闭，工具治理裁决不可用");
     for (const msg of parser.flush()) {
         handleMasterMessage(msg).catch((err) => {

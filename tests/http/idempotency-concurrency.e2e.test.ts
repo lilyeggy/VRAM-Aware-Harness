@@ -1,7 +1,4 @@
 import { expect, test } from "bun:test";
-import { mkdtempSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 
 import { createHarnessApplication } from "../../src/app/create-harness-application.ts";
 import { loadHarnessConfig } from "../../src/app/harness-config.ts";
@@ -30,14 +27,15 @@ test("同 idempotencyKey 并发提交只创建一个 Run 且都返回同一 id",
 
     try {
         await composition.application.start();
-        const workspacePath = mkdtempSync(join(tmpdir(), "harness-idem-ws-"));
+        const workspace = composition.workspaceService.create("user-idempotency", "idem");
         const submitted = await Promise.all(
             Array.from({ length: 8 }, () => Promise.resolve().then(() =>
                 composition.application.submitRun({
                     userId: "user-idempotency",
                     harnessSessionId: "session-idempotency",
                     userInput: "并发幂等提交",
-                    workspacePath,
+                    workspacePath: workspace.rootPath,
+                    workspaceId: workspace.id,
                     idempotencyKey: "phase5-idempotency-key",
                 }),
             )),
