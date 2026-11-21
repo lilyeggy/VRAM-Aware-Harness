@@ -16,6 +16,8 @@ _.log
 report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 
 # dotenv environment variable files
+# 真实部署 env 文件不入库,只保留 *.env.example 模板
+deploy/*.env
 .env
 .env.development.local
 .env.test.local
